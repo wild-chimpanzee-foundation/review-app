@@ -1,0 +1,3 @@
+video_uid,blank_non_blank,probability,t_start_sec,t_end_sec
+VIDEO_001,blank,0.97,0,
+VIDEO_002,non_blank,0.89,0,

@@ -2,9 +2,37 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 import pandas as pd
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+
+load_dotenv()
+
+
+CSV_TEMPLATES: dict[str, str] = {
+    "blank_non_blank": (
+        "video_uid,blank_non_blank,probability,t_start_sec,t_end_sec\n"
+        "VIDEO_001,blank,0.97,0,\n"
+        "VIDEO_002,non_blank,0.89,0,\n"
+    ),
+    "species": (
+        "video_uid,species_code,probability,t_start_sec,t_end_sec\n"
+        "VIDEO_001,deer,0.92,0,\n"
+        "VIDEO_002,fox,0.81,0,\n"
+    ),
+    "behavior": (
+        "video_uid,behavior_code,probability,t_start_sec,t_end_sec\n"
+        "VIDEO_001,reacts_to_camera,0.87,12.5,15.0\n"
+        "VIDEO_002,does_not_react,0.91,0,\n"
+    ),
+    "distance": (
+        "video_uid,value_num,probability,t_start_sec,t_end_sec\n"
+        "VIDEO_001,3.45,0.95,2.0,\n"
+        "VIDEO_001,4.10,0.93,4.0,\n"
+    ),
+}
 
 
 @dataclass
@@ -504,6 +532,286 @@ class DataProvider:
             ORDER BY vh.created_at ASC
         """)
         return pd.read_sql_query(sql, self.engine, params={"video_uid": video_id})
+
+    def get_csv_templates(self) -> dict[str, str]:
+        return CSV_TEMPLATES.copy()
+
+    @staticmethod
+    def _normalize_annotation_type(annotation_type: str) -> str:
+        supported = {"blank_non_blank", "species", "behavior", "distance"}
+        normalized = (annotation_type or "").strip().lower()
+        if normalized not in supported:
+            raise ValueError(
+                f"Unsupported annotation_type `{annotation_type}`. Use one of {sorted(supported)}"
+            )
+        return normalized
+
+    @staticmethod
+    def _pick_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+        for col in candidates:
+            if col in df.columns:
+                return col
+        return None
+
+    def validate_model_csv(
+        self, df: pd.DataFrame, annotation_type: str
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        annotation_type = self._normalize_annotation_type(annotation_type)
+        source_df = df.copy()
+        source_df.columns = [str(c).strip() for c in source_df.columns]
+
+        if "video_uid" not in source_df.columns:
+            raise ValueError("CSV must include a `video_uid` column.")
+
+        with self.engine.begin() as conn:
+            video_rows = conn.execute(text("SELECT id, video_uid FROM videos")).mappings().all()
+            species_rows = conn.execute(text("SELECT id, code FROM species")).mappings().all()
+            behavior_rows = conn.execute(text("SELECT id, code FROM behaviors")).mappings().all()
+
+        video_map = {str(r["video_uid"]): str(r["id"]) for r in video_rows}
+        species_map = {str(r["code"]): str(r["id"]) for r in species_rows if r["code"] is not None}
+        behavior_map = {
+            str(r["code"]): str(r["id"]) for r in behavior_rows if r["code"] is not None
+        }
+
+        prob_col = self._pick_column(source_df, ["probability", "score", "confidence"])
+        start_col = self._pick_column(source_df, ["t_start_sec", "timestamp_sec", "timestamp"])
+        end_col = self._pick_column(source_df, ["t_end_sec", "end_sec"])
+
+        value_col = None
+        if annotation_type == "blank_non_blank":
+            value_col = self._pick_column(
+                source_df, ["blank_non_blank", "prediction", "value_text"]
+            )
+            if not value_col:
+                raise ValueError(
+                    "Blank/non-blank CSV must include one of: blank_non_blank, prediction, value_text."
+                )
+        elif annotation_type == "species":
+            value_col = self._pick_column(source_df, ["species_code", "prediction", "value_text"])
+            if not value_col:
+                raise ValueError(
+                    "Species CSV must include one of: species_code, prediction, value_text."
+                )
+        elif annotation_type == "behavior":
+            value_col = self._pick_column(
+                source_df, ["behavior_code", "behavior", "prediction", "value_text"]
+            )
+            if not value_col:
+                raise ValueError(
+                    "Behavior CSV must include one of: behavior_code, behavior, prediction, value_text."
+                )
+        elif annotation_type == "distance":
+            value_col = self._pick_column(source_df, ["value_num", "distance", "distance_m"])
+            if not value_col:
+                raise ValueError(
+                    "Distance CSV must include one of: value_num, distance, distance_m."
+                )
+
+        prepared_rows: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+
+        for idx, row in source_df.iterrows():
+            row_num = int(idx) + 2
+            video_uid = str(row.get("video_uid", "")).strip()
+            if not video_uid:
+                errors.append({"row_number": row_num, "error": "Missing video_uid"})
+                continue
+
+            video_id = video_map.get(video_uid)
+            if not video_id:
+                errors.append(
+                    {"row_number": row_num, "video_uid": video_uid, "error": "Unknown video_uid"}
+                )
+                continue
+
+            t_start_raw = row.get(start_col) if start_col else 0
+            t_end_raw = row.get(end_col) if end_col else None
+            probability_raw = row.get(prob_col) if prob_col else None
+
+            t_start_sec = pd.to_numeric(pd.Series([t_start_raw]), errors="coerce").iloc[0]
+            if pd.isna(t_start_sec):
+                errors.append(
+                    {"row_number": row_num, "video_uid": video_uid, "error": "Invalid t_start_sec"}
+                )
+                continue
+
+            t_end_sec = pd.to_numeric(pd.Series([t_end_raw]), errors="coerce").iloc[0]
+            if pd.isna(t_end_sec):
+                t_end_sec = None
+
+            probability = pd.to_numeric(pd.Series([probability_raw]), errors="coerce").iloc[0]
+            if pd.isna(probability):
+                probability = None
+            if probability is not None and (float(probability) < 0 or float(probability) > 1):
+                errors.append(
+                    {
+                        "row_number": row_num,
+                        "video_uid": video_uid,
+                        "error": "probability must be in [0, 1]",
+                    }
+                )
+                continue
+
+            prepared = {
+                "video_uid": video_uid,
+                "video_id": video_id,
+                "annotation_type": annotation_type,
+                "species_id": None,
+                "behavior_id": None,
+                "value_num": None,
+                "value_text": None,
+                "probability": probability,
+                "t_start_sec": float(t_start_sec),
+                "t_end_sec": float(t_end_sec) if t_end_sec is not None else None,
+            }
+
+            raw_value = row.get(value_col)
+            if annotation_type == "blank_non_blank":
+                state_raw = str(raw_value or "").strip().lower().replace("-", "_")
+                state_map = {
+                    "blank": "blank",
+                    "non_blank": "non_blank",
+                    "nonblank": "non_blank",
+                }
+                normalized_state = state_map.get(state_raw)
+                if not normalized_state:
+                    errors.append(
+                        {
+                            "row_number": row_num,
+                            "video_uid": video_uid,
+                            "error": "blank_non_blank must be one of: blank, non_blank",
+                        }
+                    )
+                    continue
+                prepared["value_text"] = normalized_state
+
+            elif annotation_type == "species":
+                species_code = str(raw_value or "").strip()
+                if not species_code:
+                    errors.append(
+                        {
+                            "row_number": row_num,
+                            "video_uid": video_uid,
+                            "error": "Missing species code",
+                        }
+                    )
+                    continue
+                species_id = species_map.get(species_code)
+                if not species_id:
+                    errors.append(
+                        {
+                            "row_number": row_num,
+                            "video_uid": video_uid,
+                            "error": f"Unknown species_code `{species_code}`",
+                        }
+                    )
+                    continue
+                prepared["species_id"] = species_id
+                prepared["value_text"] = species_code
+
+            elif annotation_type == "behavior":
+                behavior_code = str(raw_value or "").strip()
+                if not behavior_code:
+                    errors.append(
+                        {
+                            "row_number": row_num,
+                            "video_uid": video_uid,
+                            "error": "Missing behavior code",
+                        }
+                    )
+                    continue
+                behavior_id = behavior_map.get(behavior_code)
+                if behavior_id:
+                    prepared["behavior_id"] = behavior_id
+                prepared["value_text"] = behavior_code
+
+            else:  # distance
+                value_num = pd.to_numeric(pd.Series([raw_value]), errors="coerce").iloc[0]
+                if pd.isna(value_num):
+                    errors.append(
+                        {
+                            "row_number": row_num,
+                            "video_uid": video_uid,
+                            "error": "Invalid distance value",
+                        }
+                    )
+                    continue
+                prepared["value_num"] = float(value_num)
+
+            prepared_rows.append(prepared)
+
+        cleaned_df = pd.DataFrame(prepared_rows)
+        errors_df = pd.DataFrame(errors)
+        return cleaned_df, errors_df
+
+    def import_model_csv(
+        self,
+        cleaned_df: pd.DataFrame,
+        model_name: str,
+        model_version: str,
+        config_version: str | None = None,
+    ) -> dict[str, Any]:
+        if cleaned_df.empty:
+            return {"inserted_rows": 0, "model_run_id": None}
+
+        required = {"video_id", "annotation_type", "t_start_sec", "t_end_sec"}
+        missing = required - set(cleaned_df.columns)
+        if missing:
+            raise ValueError(f"cleaned_df missing required columns: {sorted(missing)}")
+
+        with self.engine.begin() as conn:
+            model_run_id = conn.execute(
+                text(
+                    """
+                    INSERT INTO model_runs (
+                        model_name, model_version, config_version, started_at, finished_at, status
+                    ) VALUES (
+                        :model_name, :model_version, :config_version, now(), now(), 'completed'
+                    )
+                    RETURNING id
+                    """
+                ),
+                {
+                    "model_name": model_name.strip(),
+                    "model_version": model_version.strip(),
+                    "config_version": (config_version or "").strip() or None,
+                },
+            ).scalar_one()
+
+            insert_rows: list[dict[str, Any]] = []
+            for row in cleaned_df.to_dict(orient="records"):
+                insert_rows.append(
+                    {
+                        "video_id": row["video_id"],
+                        "model_run_id": str(model_run_id),
+                        "annotation_type": row["annotation_type"],
+                        "species_id": row.get("species_id"),
+                        "behavior_id": row.get("behavior_id"),
+                        "value_num": row.get("value_num"),
+                        "value_text": row.get("value_text"),
+                        "probability": row.get("probability"),
+                        "t_start_sec": row["t_start_sec"],
+                        "t_end_sec": row.get("t_end_sec"),
+                    }
+                )
+
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO model_annotations (
+                        video_id, model_run_id, annotation_type, species_id, behavior_id,
+                        value_num, value_text, probability, t_start_sec, t_end_sec
+                    ) VALUES (
+                        :video_id, :model_run_id, :annotation_type, :species_id, :behavior_id,
+                        :value_num, :value_text, :probability, :t_start_sec, :t_end_sec
+                    )
+                    """
+                ),
+                insert_rows,
+            )
+
+        return {"inserted_rows": len(insert_rows), "model_run_id": str(model_run_id)}
 
     def get_flow_data(self):
         # Lightweight fallback until dedicated V2 flow model is implemented.

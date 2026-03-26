@@ -68,3 +68,20 @@ def get_config_cached():
 @st.cache_data(ttl=3600)
 def get_overrides_cached():
     return data_provider.get_overrides()
+
+
+def get_csv_templates():
+    return data_provider.get_csv_templates()
+
+
+def validate_model_csv(df, annotation_type: str):
+    return data_provider.validate_model_csv(df=df, annotation_type=annotation_type)
+
+
+def import_model_csv(cleaned_df, model_name: str, model_version: str, config_version: str | None):
+    return data_provider.import_model_csv(
+        cleaned_df=cleaned_df,
+        model_name=model_name,
+        model_version=model_version,
+        config_version=config_version,
+    )
