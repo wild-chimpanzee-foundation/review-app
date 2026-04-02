@@ -56,6 +56,11 @@ def get_video_by_id_cached(video_id):
 
 
 @st.cache_data(ttl=3600)
+def get_video_annotations_cached(video_id):
+    return data_provider.get_video_annotations(video_id)
+
+
+@st.cache_data(ttl=3600)
 def get_video_history_cached(video_id):
     return data_provider.get_video_history(video_id)
 

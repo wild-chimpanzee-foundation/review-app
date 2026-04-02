@@ -11,6 +11,6 @@ def display_history_expander(video_id: str) -> None:
             history_df["timestamp"] = pd.to_datetime(history_df["timestamp"]).dt.strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
-            st.table(history_df[["timestamp", "stage", "status", "details"]])
+            st.table(history_df[["timestamp", "stage", "status", "details", "payload_json"]])
         else:
             st.write("No history records found for this video.")
