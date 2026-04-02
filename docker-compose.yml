@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  review-app:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+      - ./_local_db:/app/_local_db
+      # Mount your videos here
+      - /home/jonas/Documents/input_videos/:/input_videos
+    environment:
+      - LOCAL_CONFIG_YAML=/app/config.docker.yaml
+      - DATABASE_URL=${DATABASE_URL:-postgres://admin:password@localhost:5432/video_db}
+      - REVIEW_APP_USER_EMAIL=${REVIEW_APP_USER_EMAIL:-reviewer@local}
+    # Override paths in config.yaml using environment variables if supported,
+    # or ensure config.yaml matches these paths.
+    restart: unless-stopped

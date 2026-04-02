@@ -1,0 +1,22 @@
+# Docker specific config.
+# Mount your video directory to /input_videos in docker-compose.yml
+video_dir: /input_videos/
+
+# This directory will be volume-mounted for persistence.
+db_dir: /app/_local_db/
+
+# Valid species codes.
+species:
+  - blank
+  - unknown
+  - deer
+  - fox
+  - rabbit
+  - badger
+  - boar
+  - bird
+
+# Valid behavior codes.
+behaviors:
+  - reacts_to_camera
+  - does_not_react

@@ -28,7 +28,7 @@ def display_manual_review_section() -> None:
     filter_options = get_filter_options_cached()
     with st.sidebar.expander("Filter & Search", expanded=True):
         filters = render_video_filters(
-            filter_options, key_prefix="manual_review", default_review="Needs Review", sidebar=True
+            filter_options, key_prefix="manual_review", default_review="All", sidebar=True
         )
 
     videos_for_review = get_filtered_videos_cached(filters=filters.to_query_params())
@@ -52,6 +52,20 @@ def display_manual_review_section() -> None:
     if "review_undo_stack" not in st.session_state:
         st.session_state.review_undo_stack = []
 
+    def go_previous():
+        st.session_state.review_queue_idx = max(0, st.session_state.review_queue_idx - 1)
+        clear_cached_queries()
+
+    def go_next():
+        st.session_state.review_queue_idx = min(
+            len(queue_ids) - 1, st.session_state.review_queue_idx + 1
+        )
+        clear_cached_queries()
+
+    def on_select_change():
+        st.session_state.review_queue_idx = queue_ids.index(st.session_state.review_queue_select)
+        clear_cached_queries()
+
     def snapshot_video_state(video_state):
         return {
             "video_id": video_state["video_id"],
@@ -69,7 +83,7 @@ def display_manual_review_section() -> None:
         if len(st.session_state.review_undo_stack) > 50:
             st.session_state.review_undo_stack = st.session_state.review_undo_stack[-50:]
         data_provider.update_manual_review(selected_video_id, prediction)
-        clear_cached_queries()
+        go_next()
         st.rerun()
 
     st.info(f"Queue: {st.session_state.review_queue_idx + 1}/{len(queue_ids)} currently selected.")
@@ -153,22 +167,6 @@ def display_manual_review_section() -> None:
                         data_provider.restore_video_snapshot(snapshot)
                         clear_cached_queries()
                         st.rerun()
-
-    def go_previous():
-        st.info("Previous Video")
-        st.session_state.review_queue_idx = max(0, st.session_state.review_queue_idx - 1)
-        clear_cached_queries()
-
-    def go_next():
-        st.info("Skipped Video")
-        st.session_state.review_queue_idx = min(
-            len(queue_ids) - 1, st.session_state.review_queue_idx + 1
-        )
-        clear_cached_queries()
-
-    def on_select_change():
-        st.session_state.review_queue_idx = queue_ids.index(st.session_state.review_queue_select)
-        clear_cached_queries()
 
     if "review_queue_idx" not in st.session_state:
         st.session_state.review_queue_idx = 0

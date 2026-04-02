@@ -14,7 +14,7 @@ st.set_page_config(layout="wide")
 def _render_template_downloads() -> None:
     st.subheader("CSV Templates")
     templates = get_csv_templates()
-    template_types = ["blank_non_blank", "species", "behavior", "distance"]
+    template_types = ["blank_non_blank", "species", "behavior"]
     cols = st.columns(len(template_types))
     for idx, annotation_type in enumerate(template_types):
         with cols[idx]:

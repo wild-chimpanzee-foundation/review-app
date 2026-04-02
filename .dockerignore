@@ -1,0 +1,27 @@
+# Git related
+.git
+.gitignore
+
+# Python related
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.ruff_cache/
+.pytest_cache/
+
+# Local databases
+_local_db/
+
+# Data
+input_videos/
+
+# Build and environment files
+.env
+uv.lock
+pyproject.toml
+!uv.lock
+!pyproject.toml
+
+# OS files
+.DS_Store

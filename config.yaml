@@ -1,0 +1,23 @@
+# Directory that will be scanned (recursively) for video files.
+# Sub-folders are used as camera IDs — e.g. videos/CAM01/clip.mp4 → camera_id = CAM01
+video_dir: ../../input_videos/
+
+# Where annotation CSVs and config are written.
+# Created automatically on first run.
+db_dir: ./_local_db
+
+# Valid species codes.  "blank" and "unknown" should always be present.
+species:
+  - blank
+  - unknown
+  - deer
+  - fox
+  - rabbit
+  - badger
+  - boar
+  - bird
+
+# Valid behavior codes.
+behaviors:
+  - reacts_to_camera
+  - does_not_react

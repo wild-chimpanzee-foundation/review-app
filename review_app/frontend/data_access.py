@@ -1,11 +1,11 @@
 import streamlit as st
 
-from review_app.backend.data_provider import DataProvider
+from review_app.backend.local_data_provider import LocalDataProvider
 
 
 @st.cache_resource
-def get_data_provider() -> DataProvider:
-    return DataProvider()
+def get_data_provider() -> LocalDataProvider:
+    return LocalDataProvider()
 
 
 data_provider = get_data_provider()
