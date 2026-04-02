@@ -55,14 +55,8 @@ def get_video_by_id_cached(video_id):
     return data_provider.get_video_by_id(video_id)
 
 
-@st.cache_data(ttl=3600)
 def get_video_annotations_cached(video_id):
     return data_provider.get_video_annotations(video_id)
-
-
-@st.cache_data(ttl=3600)
-def get_video_history_cached(video_id):
-    return data_provider.get_video_history(video_id)
 
 
 @st.cache_data(ttl=3600)
@@ -79,14 +73,9 @@ def get_csv_templates():
     return data_provider.get_csv_templates()
 
 
-def validate_model_csv(df, annotation_type: str):
-    return data_provider.validate_model_csv(df=df, annotation_type=annotation_type)
+def validate_model_csv(df):
+    return data_provider.validate_model_csv(df=df)
 
 
-def import_model_csv(cleaned_df, model_name: str, model_version: str, config_version: str | None):
-    return data_provider.import_model_csv(
-        cleaned_df=cleaned_df,
-        model_name=model_name,
-        model_version=model_version,
-        config_version=config_version,
-    )
+def import_model_csv(cleaned_df):
+    return data_provider.import_model_csv(cleaned_df=cleaned_df)

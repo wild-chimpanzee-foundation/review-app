@@ -1,3 +1,0 @@
-video_uid,behavior_code,probability,t_start_sec,t_end_sec
-VIDEO_001,reacts_to_camera,0.87,12.5,15.0
-VIDEO_002,does_not_react,0.91,0,

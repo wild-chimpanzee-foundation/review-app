@@ -4,7 +4,6 @@ from review_app.frontend.components.filters import (
     render_video_filters,
 )
 from review_app.frontend.components.formatting import format_probability
-from review_app.frontend.components.history import display_history_expander
 from review_app.frontend.components.video_player import (
     apply_video_playback_rate,
     render_video_player,
@@ -51,56 +50,55 @@ def display_manual_review_section() -> None:
         valid_species = ["unknown"]
 
     # --- Initialize current review selections in session state ---
-    if "review_selections" not in st.session_state or st.session_state.get("review_active_id") != selected_video_id:
+    if (
+        "review_selections" not in st.session_state
+        or st.session_state.get("review_active_id") != selected_video_id
+    ):
         st.session_state.review_active_id = selected_video_id
         # Load existing if available
         if video.get("species_behavior_json"):
             import json
+
             try:
                 st.session_state.review_selections = json.loads(video["species_behavior_json"])
             except:
                 st.session_state.review_selections = []
         else:
             # Default to consensus if valid
-            default_species = video["classification_consensus"] if video.get("classification_consensus") in valid_species else valid_species[0]
-            st.session_state.review_selections = [{"species": default_species, "behavior": "unlabeled", "timestamp": 0.0}]
+            default_species = (
+                video["classification_consensus"]
+                if video.get("classification_consensus") in valid_species
+                else valid_species[0]
+            )
+            st.session_state.review_selections = [
+                {"species": default_species, "behavior": "unlabeled", "timestamp": 0.0}
+            ]
 
     if "review_undo_stack" not in st.session_state:
         st.session_state.review_undo_stack = []
 
     def go_previous():
         st.session_state.review_queue_idx = max(0, st.session_state.review_queue_idx - 1)
-        if "review_active_id" in st.session_state: del st.session_state.review_active_id
+        if "review_active_id" in st.session_state:
+            del st.session_state.review_active_id
         clear_cached_queries()
 
     def go_next():
         st.session_state.review_queue_idx = min(
             len(queue_ids) - 1, st.session_state.review_queue_idx + 1
         )
-        if "review_active_id" in st.session_state: del st.session_state.review_active_id
+        if "review_active_id" in st.session_state:
+            del st.session_state.review_active_id
         clear_cached_queries()
 
     def on_select_change():
         st.session_state.review_queue_idx = queue_ids.index(st.session_state.review_queue_select)
-        if "review_active_id" in st.session_state: del st.session_state.review_active_id
+        if "review_active_id" in st.session_state:
+            del st.session_state.review_active_id
         clear_cached_queries()
 
-    def snapshot_video_state(video_state):
-        return {
-            "video_id": video_state["video_id"],
-            "current_stage": video_state["current_stage"],
-            "status": video_state["status"],
-            "species_behavior_json": video_state.get("species_behavior_json"),
-            "needs_manual_review": video_state.get("needs_manual_review"),
-        }
-
     def submit_review(selections: list[dict]) -> None:
-        st.session_state.review_undo_stack.append(snapshot_video_state(video))
-        if len(st.session_state.review_undo_stack) > 50:
-            st.session_state.review_undo_stack = st.session_state.review_undo_stack[-50:]
         data_provider.update_manual_review(selected_video_id, selections)
-        go_next()
-        st.rerun()
 
     st.info(f"Queue: {st.session_state.review_queue_idx + 1}/{len(queue_ids)} currently selected.")
     with st.container(border=True):
@@ -119,27 +117,9 @@ def display_manual_review_section() -> None:
             st.caption(
                 f"Playback speed: {float(st.session_state.get('video_playback_speed', 1.0)):.1f}x"
             )
-            display_history_expander(selected_video_id)
 
         with col2:
-            st.subheader("All Current Annotations")
-            all_ann = get_video_annotations_cached(selected_video_id)
-            if not all_ann.empty:
-                # Format for display
-                display_df = all_ann[[
-                    "model_name", "annotation_type", "value_text", "probability", "created_at"
-                ]].copy()
-                display_df["probability"] = display_df["probability"].apply(format_probability)
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
-            else:
-                st.info("No model annotations found for this video.")
-
-            st.markdown(f"**Current Label:** `{video['manual_review_prediction'] or 'None'}`")
-            st.markdown(f"**Consensus:** `{video['classification_consensus']}`")
-
-            st.markdown("---")
             st.subheader("Manual Review")
-
 
             # --- Render Dynamic Species-Behavior Rows ---
             new_selections = []
@@ -147,32 +127,50 @@ def display_manual_review_section() -> None:
                 with st.container(border=True):
                     rcol1, rcol2, rcol3, rcol4 = st.columns([2, 2, 1.5, 0.5])
                     with rcol1:
-                        s_idx = valid_species.index(sel["species"]) if sel["species"] in valid_species else 0
-                        species = st.selectbox(f"Species", options=valid_species, index=s_idx, key=f"species_{i}")
+                        s_idx = (
+                            valid_species.index(sel["species"])
+                            if sel["species"] in valid_species
+                            else 0
+                        )
+                        species = st.selectbox(
+                            f"Species", options=valid_species, index=s_idx, key=f"species_{i}"
+                        )
                     with rcol2:
                         behaviors = data_provider.get_behaviors_for_species(species)
-                        b_idx = behaviors.index(sel["behavior"]) if sel["behavior"] in behaviors else 0
-                        behavior = st.selectbox(f"Behavior", options=behaviors, index=b_idx, key=f"behavior_{i}")
+                        b_idx = (
+                            behaviors.index(sel["behavior"]) if sel["behavior"] in behaviors else 0
+                        )
+                        behavior = st.selectbox(
+                            f"Behavior", options=behaviors, index=b_idx, key=f"behavior_{i}"
+                        )
                     with rcol3:
-                        timestamp = st.number_input(f"Time (s)", value=float(sel["timestamp"]), step=0.1, key=f"ts_{i}")
+                        timestamp = st.number_input(
+                            f"Time (s)", value=float(sel["timestamp"]), step=0.1, key=f"ts_{i}"
+                        )
                     with rcol4:
-                        st.write("") # spacing
+                        st.write("")  # spacing
                         if st.button("🗑️", key=f"del_{i}"):
                             st.session_state.review_selections.pop(i)
                             st.rerun()
-                    new_selections.append({"species": species, "behavior": behavior, "timestamp": timestamp})
-            
+                    new_selections.append(
+                        {"species": species, "behavior": behavior, "timestamp": timestamp}
+                    )
+
             st.session_state.review_selections = new_selections
 
             if st.button("➕ Add Species"):
-                last_species = st.session_state.review_selections[-1]["species"] if st.session_state.review_selections else valid_species[0]
-                st.session_state.review_selections.append({"species": last_species, "behavior": "unlabeled", "timestamp": 0.0})
+                last_species = (
+                    st.session_state.review_selections[-1]["species"]
+                    if st.session_state.review_selections
+                    else valid_species[0]
+                )
+                st.session_state.review_selections.append(
+                    {"species": last_species, "behavior": "unlabeled", "timestamp": 0.0}
+                )
                 st.rerun()
 
             st.markdown("---")
-            st.caption(
-                "Shortcuts: Enter submit, N next, P previous, B blank, Z undo"
-            )
+            st.caption("Shortcuts: Enter submit, N next, P previous, B blank")
 
             action_col1, action_col2 = st.columns(2)
             with action_col1:
@@ -184,16 +182,38 @@ def display_manual_review_section() -> None:
                     shortcut="Enter",
                 ):
                     submit_review(st.session_state.review_selections)
+                    go_next()
+                    st.rerun()
+                if st.button(
+                    "Submit",
+                    type="secondary",
+                    width="stretch",
+                    key="submit",
+                ):
+                    submit_review(st.session_state.review_selections)
+                    st.rerun()
             with action_col2:
                 if st.button("Mark Blank", width="stretch", key="mark_blank", shortcut="B"):
-                    submit_review([{"species": "blank", "behavior": "unlabeled", "timestamp": 0.0}])
-                if st.button("Undo Last", width="stretch", key="undo_last", shortcut="Z"):
-                    if st.session_state.review_undo_stack:
-                        snapshot = st.session_state.review_undo_stack.pop()
-                        data_provider.restore_video_snapshot(snapshot)
-                        if "review_active_id" in st.session_state: del st.session_state.review_active_id
-                        clear_cached_queries()
-                        st.rerun()
+                    submit_review(
+                        [{"species": "blank", "behavior": "unlabeled", "timestamp": 0.0}]
+                    )
+                    go_next()
+                    st.rerun()
+
+            st.subheader("All Current Annotations")
+            all_ann = get_video_annotations_cached(selected_video_id)
+            if not all_ann.empty:
+                # Format for display
+                display_df = all_ann[
+                    ["model_name", "annotation_type", "value_text", "probability", "created_at"]
+                ].copy()
+                display_df["probability"] = display_df["probability"].apply(format_probability)
+                st.dataframe(display_df, width="stretch", hide_index=True)
+            else:
+                st.info("No model annotations found for this video.")
+
+            st.markdown(f"**Current Label:** `{video['manual_review_prediction'] or 'None'}`")
+            st.markdown(f"**Consensus:** `{video['classification_consensus']}`")
 
     if "review_queue_idx" not in st.session_state:
         st.session_state.review_queue_idx = 0
