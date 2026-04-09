@@ -396,9 +396,7 @@ class LocalDataProvider:
             for video_id, session_rows in latest_manual.groupby("video_uid", sort=False):
                 selections: list[dict[str, Any]] = []
                 for _, individual_rows in session_rows.groupby("individual_id", sort=False):
-                    species_row = individual_rows[
-                        individual_rows["annotation_type"] == "species"
-                    ]
+                    species_row = individual_rows[individual_rows["annotation_type"] == "species"]
                     behavior_row = individual_rows[
                         individual_rows["annotation_type"] == "behavior"
                     ]
@@ -407,9 +405,7 @@ class LocalDataProvider:
                     ]
 
                     if not species_row.empty:
-                        species_val = str(
-                            species_row.iloc[-1].get("value_text") or "unknown"
-                        )
+                        species_val = str(species_row.iloc[-1].get("value_text") or "unknown")
                         timestamp = (
                             species_row.iloc[-1].get("t_start_sec")
                             or species_row.iloc[-1].get("value_num")
