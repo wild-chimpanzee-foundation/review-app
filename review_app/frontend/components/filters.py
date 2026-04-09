@@ -12,9 +12,6 @@ class VideoFilters:
     selected_possible_species: str
     selected_blank_non_blank: str
     selected_behavior: str
-    selected_validity: str
-    distance_min: float | None
-    distance_max: float | None
 
     def to_query_params(self) -> dict:
         return {
@@ -25,9 +22,6 @@ class VideoFilters:
             "selected_possible_species": self.selected_possible_species,
             "selected_blank_non_blank": self.selected_blank_non_blank,
             "selected_behavior": self.selected_behavior,
-            "selected_validity": self.selected_validity,
-            "distance_min": self.distance_min,
-            "distance_max": self.distance_max,
         }
 
 
@@ -91,11 +85,7 @@ def render_video_filters(
         )
 
     with f7:
-        selected_validity = st.selectbox(
-            "Filter by Validation",
-            options=["All", "Valid Only", "Invalid Only", "Unknown"],
-            key=f"{key_prefix}_selected_validity",
-        )
+        st.empty()
 
     with f8:
         selected_review = st.selectbox(
@@ -107,41 +97,6 @@ def render_video_filters(
             key=f"{key_prefix}_selected_review",
         )
 
-    d1, d2 = st.columns(2)
-    with d1:
-        distance_min_enabled = st.checkbox(
-            "Min Distance",
-            value=False,
-            key=f"{key_prefix}_distance_min_enabled",
-        )
-        distance_min = (
-            st.number_input(
-                "Distance Min",
-                value=0.0,
-                step=0.1,
-                key=f"{key_prefix}_distance_min",
-            )
-            if distance_min_enabled
-            else None
-        )
-
-    with d2:
-        distance_max_enabled = st.checkbox(
-            "Max Distance",
-            value=False,
-            key=f"{key_prefix}_distance_max_enabled",
-        )
-        distance_max = (
-            st.number_input(
-                "Distance Max",
-                value=100.0,
-                step=0.1,
-                key=f"{key_prefix}_distance_max",
-            )
-            if distance_max_enabled
-            else None
-        )
-
     return VideoFilters(
         search_query=search_query,
         selected_species=selected_species,
@@ -150,7 +105,4 @@ def render_video_filters(
         selected_possible_species=selected_possible_species,
         selected_blank_non_blank=selected_blank_non_blank,
         selected_behavior=selected_behavior,
-        selected_validity=selected_validity,
-        distance_min=distance_min,
-        distance_max=distance_max,
     )

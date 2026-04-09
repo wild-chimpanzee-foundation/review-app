@@ -6,18 +6,23 @@ video_dir: ../../input_videos/
 # Created automatically on first run.
 db_dir: ./_local_db
 
-# Valid species codes.  "blank" and "unknown" should always be present.
-species:
-  - blank
-  - unknown
-  - deer
-  - fox
-  - rabbit
-  - badger
-  - boar
-  - bird
+# Optional sqlite filename under db_dir.
+db_filename: review_data.db
+
+# Optional: destructive reset of sqlite file on startup.
+recreate_db_on_start: false
+
+# Valid species codes.
+species_csv_path: ./docs/species.csv
+species_column: Nom_commun_anglais
 
 # Valid behavior codes.
-behaviors:
+behaviors_csv_path: ./docs/species_behaviors.csv
+behavior_defaults:
   - reacts_to_camera
   - does_not_react
+
+# Optional queue ranking CSV. Columns:
+# - video_id
+# - annotation_importance_score
+# priority_csv_path: ./docs/annotation_priority.csv

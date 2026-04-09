@@ -1,17 +1,18 @@
 # Review App
 
-Standalone Streamlit review dashboard that reads/writes to the Postgres V2 schema.
+Standalone Streamlit review dashboard that runs in local-only mode with sqlite.
 
 ## Requirements
 
-- A running Postgres instance with the V2 tables
-- `DATABASE_URL` set for SQLAlchemy/psycopg
+- Python 3.12+
+- `uv` installed
+- A valid `config.yaml` at repo root, or set `LOCAL_CONFIG_YAML` to an alternate config file
 
-create .env file with database url
+Optional `.env` values:
 
 ```bash
-DATABASE_URL="postgres://admin:password@localhost:5432/video_db?sslmode=disable"
 REVIEW_APP_USER_EMAIL="reviewer@local"
+LOCAL_CONFIG_YAML="./config.docker.yaml"
 ```
 
 ## Run
@@ -20,7 +21,31 @@ REVIEW_APP_USER_EMAIL="reviewer@local"
 uv run streamlit run review_app/frontend/1_Pipeline_Overview.py
 ```
 
+## Run with Docker (recommended)
+
+```bash
+docker compose up --build
+```
+
+- App URL: `http://localhost:8501`
+- Docker uses `config.docker.yaml` (`LOCAL_CONFIG_YAML=/app/config.docker.yaml`).
+- Persisted sqlite data is stored in `./_local_db` on the host.
+
+## Database & Migrations
+
+- Sqlite DB path is `db_dir/<db_filename>` from config (`db_filename` defaults to `review_data.db`).
+- The schema is created from scratch using SQLAlchemy table creation for:
+  - `videos`
+  - `video_labels`
+  - `individual_observations`
+  - `model_annotations`
+- Optional destructive reset: set `recreate_db_on_start: true` in config or `REVIEW_APP_RECREATE_DB=1`.
+- Model imports are upserts keyed by `(video_id, model_name, annotation_type)`; model versions are not stored.
+
 ## Notes
 
-- Videos remain local. The app resolves local files from `user_video_locations.local_path`.
-- If a video has no local mapping for the current user, the player shows metadata only.
+- Videos remain local and are discovered by recursively scanning `video_dir`.
+- Keep config explicit while schema evolves: set `video_dir`, `db_dir`, `species`, `behaviors`.
+- Optional queue ranking CSV can be configured with `priority_csv_path` and columns:
+  - `video_id`
+  - `annotation_importance_score`

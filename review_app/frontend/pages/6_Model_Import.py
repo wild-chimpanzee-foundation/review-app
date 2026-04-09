@@ -14,7 +14,7 @@ st.set_page_config(layout="wide")
 def _render_template_downloads() -> None:
     st.subheader("CSV Template")
     templates = get_csv_templates()
-    csv_content = templates["annotations"]
+    csv_content = templates["model_annotations"]
     st.download_button(
         label="Download Unified Annotation Template",
         data=csv_content,

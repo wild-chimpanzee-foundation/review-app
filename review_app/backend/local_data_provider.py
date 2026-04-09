@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import sqlite3
+import subprocess
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,217 +15,575 @@ import pandas as pd
 import yaml
 from dotenv import load_dotenv
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Float,
+    ForeignKey,
+    Index,
     String,
+    UniqueConstraint,
     create_engine,
-    delete,
     func,
     select,
+    text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Database Schema
-# ---------------------------------------------------------------------------
-
 Base = declarative_base()
 
-
-class Annotation(Base):
-    __tablename__ = "annotations"
-
-    id = Column(String, default=lambda: str(uuid.uuid4()), primary_key=True)
-    video_uid = Column(String, index=True)
-    annotation_type = Column(String)
-    value_text = Column(String)
-    value_num = Column(Float)
-    probability = Column(Float)
-    t_start_sec = Column(Float)
-    t_end_sec = Column(Float)
-    model_name = Column(String)
-    model_version = Column(String)
-    created_at = Column(DateTime, default=func.now())
-    session_id = Column(String, index=True)
-    individual_id = Column(String)
-
-
 # ---------------------------------------------------------------------------
-# Constants
+# Maximum threads for parallel ffprobe calls.  Tune to your I/O concurrency.
 # ---------------------------------------------------------------------------
+_FFPROBE_MAX_WORKERS: int = int(os.getenv("FFPROBE_MAX_WORKERS", "16"))
+_FFPROBE_TIMEOUT_SEC: int = int(os.getenv("FFPROBE_TIMEOUT_SEC", "10"))
+
+
+class Video(Base):
+    __tablename__ = "videos"
+
+    video_id = Column(String, primary_key=True)
+    video_path = Column(String, nullable=False)
+    camera_id = Column(String, index=True)
+    created_at = Column(DateTime, nullable=True)
+    duration_sec = Column(Float, nullable=True)
+    last_seen_at = Column(DateTime, nullable=False, default=func.now())
+    # Populated by ffprobe on first ingest; never overwritten for existing rows.
+    is_valid = Column(Boolean, nullable=True)
+    validation_error = Column(String, nullable=True)
+
+
+class VideoLabel(Base):
+    __tablename__ = "video_labels"
+
+    video_id = Column(String, ForeignKey("videos.video_id"), primary_key=True)
+    is_blank = Column(Boolean, nullable=True)
+    labeled_by = Column(String, nullable=True)
+    labeled_at = Column(DateTime, nullable=False, default=func.now())
+
+
+class IndividualObservation(Base):
+    __tablename__ = "individual_observations"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    video_id = Column(String, ForeignKey("videos.video_id"), nullable=False, index=True)
+    session_id = Column(String, nullable=False, index=True)
+    species = Column(String, nullable=False)
+    behavior = Column(String, nullable=False)
+    start_sec = Column(Float, nullable=False, default=0.0)
+    end_sec = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+
+class ModelAnnotation(Base):
+    __tablename__ = "model_annotations"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    video_id = Column(String, ForeignKey("videos.video_id"), nullable=False, index=True)
+    annotation_type = Column(String, nullable=False, index=True)
+    model_name = Column(String, nullable=False, index=True)
+    value_text = Column(String, nullable=True)
+    value_num = Column(Float, nullable=True)
+    probability = Column(Float, nullable=True)
+    t_start_sec = Column(Float, nullable=True)
+    t_end_sec = Column(Float, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "video_id", "model_name", "annotation_type", name="uq_model_ann_identity"
+        ),
+    )
+
+
+class VideoPriority(Base):
+    __tablename__ = "video_priority"
+
+    video_id = Column(String, ForeignKey("videos.video_id"), primary_key=True)
+    annotation_importance_score = Column(Float, nullable=False, index=True)
+
+
+Index(
+    "idx_individual_video_species", IndividualObservation.video_id, IndividualObservation.species
+)
+Index(
+    "idx_individual_video_behavior", IndividualObservation.video_id, IndividualObservation.behavior
+)
+Index("idx_individual_video_time", IndividualObservation.video_id, IndividualObservation.start_sec)
+
 
 VIDEO_EXTENSIONS: frozenset[str] = frozenset(
     {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm", ".m4v"}
 )
 
 CSV_TEMPLATES: dict[str, str] = {
-    "annotations": (
-        "video_uid,annotation_type,value_text,value_num,probability,t_start_sec,t_end_sec,"
-        "model_name,model_version,session_id,individual_id,created_at\n"
-        "VIDEO_001,species,deer,0,0.92,0,,species_slowfast_disjoint,v1,,sess-1,\n"
-        "VIDEO_002,blank_non_blank,blank,0,0.98,0,,blank_model,v1,,sess-2,\n"
-        "VIDEO_003,behavior,reacts_to_camera,0,0.87,12.5,15.0,behavior_model,v1,,sess-3,\n"
-    ),
+    "model_annotations": (
+        "video_uid,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec\n"
+        "CAM01/VIDEO_001.mp4,species,species_model_a,deer,,0.92,0,12.0\n"
+        "CAM01/VIDEO_001.mp4,behavior,behavior_model_a,reacts_to_camera,,0.83,0,12.0\n"
+        "CAM01/VIDEO_002.mp4,blank_non_blank,blank_model,blank,,0.98,0,\n"
+    )
 }
 
-DEFAULT_CONFIG: dict[str, Any] = {
-    "video_dir": "./videos",
-    "db_dir": "./_local_db",
-    "species_csv_path": "docs/species.csv",
-    "species_column": "Nom_commun_anglais",
-    "behaviors": ["reacts_to_camera", "does_not_react", "feeding", "moving", "stationary"],
-}
+REPO_ROOT = Path(__file__).parents[2]
+DEFAULT_CONFIG_PATH = REPO_ROOT / "config.yaml"
+DEFAULT_DB_FILENAME = "review_data.db"
 
 
 # ---------------------------------------------------------------------------
-# Provider
+# ffprobe helpers
+# ---------------------------------------------------------------------------
+
+
+def _find_ffprobe() -> str | None:
+    """Return the ffprobe executable path, or None if not installed."""
+    return shutil.which("ffprobe")
+
+
+def _probe_video(path: Path) -> tuple[float | None, bool, str | None]:
+    """
+    Run ffprobe on *path* and return ``(duration_sec, is_valid, error_message)``.
+
+    Uses a single fast JSON query on the *format* section only – no stream
+    decoding, so it completes in milliseconds even for large files.
+
+    Returns:
+        duration_sec   – float seconds, or None if not parseable
+        is_valid       – True when the container is readable by ffprobe
+        error_message  – human-readable string when is_valid is False, else None
+    """
+    ffprobe = _find_ffprobe()
+    if ffprobe is None:
+        # ffprobe not installed: treat all videos as valid with unknown duration.
+        return None, True, None
+
+    cmd = [
+        ffprobe,
+        "-v",
+        "error",  # suppress all non-error output
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "json",
+        str(path),
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=_FFPROBE_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired:
+        return None, False, f"ffprobe timed out after {_FFPROBE_TIMEOUT_SEC}s"
+    except OSError as exc:
+        return None, False, f"ffprobe OS error: {exc}"
+
+    if result.returncode != 0:
+        stderr_text = result.stderr.decode(errors="replace").strip()
+        # Keep only the first 200 chars to avoid bloating the DB.
+        return None, False, stderr_text[:200] or "ffprobe returned non-zero exit code"
+
+    try:
+        data = json.loads(result.stdout)
+        raw_duration = data.get("format", {}).get("duration")
+        duration = float(raw_duration) if raw_duration is not None else None
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return None, False, "ffprobe returned unparseable JSON"
+
+    return duration, True, None
+
+
+def _probe_many(
+    paths: list[Path],
+    max_workers: int = _FFPROBE_MAX_WORKERS,
+) -> dict[Path, tuple[float | None, bool, str | None]]:
+    """
+    Probe *paths* in parallel and return a mapping of
+    ``path -> (duration_sec, is_valid, error_message)``.
+
+    Falls back gracefully when ffprobe is absent.
+    """
+    if not paths:
+        return {}
+
+    results: dict[Path, tuple[float | None, bool, str | None]] = {}
+
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(paths))) as pool:
+        future_to_path = {pool.submit(_probe_video, p): p for p in paths}
+        for future in as_completed(future_to_path):
+            path = future_to_path[future]
+            try:
+                results[path] = future.result()
+            except Exception as exc:  # pragma: no cover – safety net
+                results[path] = (None, False, str(exc))
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 
 
 class LocalDataProvider:
-    """SQLite-backed local data provider; mirrors the DataProvider public API."""
+    """SQLite-backed local data provider for manual review + constrained model imports."""
 
     def __init__(self, config_path: str | Path | None = None) -> None:
-        cfg = self._load_yaml_config(os.getenv("LOCAL_CONFIG_YAML"))
-        self.video_dir = (
-            Path(cfg.get("video_dir", DEFAULT_CONFIG["video_dir"])).expanduser().resolve()
-        )
-        self.db_dir = Path(cfg.get("db_dir", DEFAULT_CONFIG["db_dir"])).expanduser().resolve()
+        cfg = self._load_yaml_config(config_path)
+        self.video_dir = self._required_path(cfg, "video_dir")
+        self.db_dir = self._required_path(cfg, "db_dir")
         self.db_dir.mkdir(parents=True, exist_ok=True)
 
         self._species: list[str] = self._load_species(cfg)
         self._species_behaviors: dict[str, list[str]] = self._load_species_behaviors(cfg)
-        self._behaviors: list[str] = cfg.get("behaviors", DEFAULT_CONFIG["behaviors"])
+        behavior_defaults = cfg.get("behavior_defaults")
+        self._behavior_defaults: list[str] = self._normalize_string_list(
+            behavior_defaults, "behaviors"
+        )
+        self._priority_csv_path: Path | None = self._optional_path(cfg.get("priority_csv_path"))
+        self._consensus_min_probability: float = float(cfg.get("consensus_min_probability", 0.0))
 
-        # Database setup
-        db_path = self.db_dir / "review_data.db"
-        self.engine = create_engine(f"sqlite:///{db_path}")
+        db_filename = str(cfg.get("db_filename") or DEFAULT_DB_FILENAME).strip()
+        if not db_filename:
+            raise ValueError("`db_filename` cannot be empty.")
+
+        self._db_path = self.db_dir / db_filename
+        recreate_on_start = bool(cfg.get("recreate_db_on_start", False)) or (
+            str(os.getenv("REVIEW_APP_RECREATE_DB", "")).lower() in {"1", "true", "yes"}
+        )
+        if recreate_on_start and self._db_path.exists():
+            try:
+                self._db_path.unlink()
+            except PermissionError as exc:
+                raise RuntimeError(
+                    f"Cannot recreate sqlite DB at `{self._db_path}` due to permissions: {exc}"
+                ) from exc
+
+        self.engine = create_engine(f"sqlite:///{self._db_path}")
+        if self._needs_schema_reset():
+            self.engine.dispose()
+            if self._db_path.exists():
+                try:
+                    self._db_path.unlink()
+                except PermissionError as exc:
+                    raise RuntimeError(
+                        f"Cannot reset incompatible sqlite DB at `{self._db_path}` due to permissions: {exc}"
+                    ) from exc
+            self.engine = create_engine(f"sqlite:///{self._db_path}")
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+
+        self._sync_videos_table()
+        self._sync_priority_table()
+
+    def _needs_schema_reset(self) -> bool:
+        """
+        Detect incompatible legacy schemas and trigger full DB recreation.
+        """
+        if not self._db_path.exists():
+            return False
+
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                rows = conn.execute("PRAGMA table_info(videos)").fetchall()
+                if not rows:
+                    return False
+                columns = {str(r[1]) for r in rows}
+        except Exception:
+            return True
+
+        required = {"is_valid", "validation_error"}
+        return not required.issubset(columns)
 
     @property
     def _app_config_path(self) -> Path:
         return self.db_dir / "config.json"
 
-    def _query_to_df(self, query) -> pd.DataFrame:
-        with self.engine.connect() as conn:
-            return pd.read_sql(query, conn)
-
-    # --------------------------------------------------------- internal helpers
+    @staticmethod
+    def _resolve_path(raw_path: str | Path) -> Path:
+        p = Path(raw_path).expanduser()
+        if p.is_absolute():
+            return p
+        return (REPO_ROOT / p).resolve()
 
     @staticmethod
-    def _load_yaml_config(config_path: str | Path | None) -> dict:
+    def _optional_path(raw_path: Any) -> Path | None:
+        if raw_path is None:
+            return None
+        txt = str(raw_path).strip()
+        if not txt:
+            return None
+        return LocalDataProvider._resolve_path(txt)
+
+    @staticmethod
+    def _load_yaml_config(config_path: str | Path | None) -> dict[str, Any]:
         if config_path is None:
-            config_path = Path(__file__).parent / "config.yaml"
-        p = Path(config_path)
-        print(p)
-        if p.exists():
-            with open(p) as f:
-                return yaml.safe_load(f) or {}
-        return {}
-
-    @staticmethod
-    def _load_species(cfg: dict) -> list[str]:
-        path = cfg.get("species_csv_path", DEFAULT_CONFIG["species_csv_path"])
-        column = cfg.get("species_column", DEFAULT_CONFIG["species_column"])
-
-        p = Path(path)
-        if not p.exists():
-            # Try relative to the app root if not found
-            p = Path(__file__).parents[2] / path
-
+            env_path = os.getenv("LOCAL_CONFIG_YAML")
+            config_path = env_path if env_path else DEFAULT_CONFIG_PATH
+        p = LocalDataProvider._resolve_path(config_path)
         if not p.exists():
             raise FileNotFoundError(
-                f"Species CSV file not found at `{path}`. "
-                "Species list is mandatory. Please check your config."
+                f"Config file not found: `{p}`. "
+                "Set LOCAL_CONFIG_YAML or pass config_path to LocalDataProvider."
             )
-
-        try:
-            df = pd.read_csv(p, sep=";")
-            if column not in df.columns:
-                available_cols = ", ".join(df.columns)
-                raise ValueError(
-                    f"Column `{column}` not found in species CSV. Available: {available_cols}"
-                )
-
-            # Extract species, ensure they are strings, and sort
-            species_list = sorted({str(s).strip() for s in df[column].dropna() if str(s).strip()})
-            if not species_list:
-                raise ValueError(f"No species names found in column `{column}` of `{path}`.")
-
-            return species_list
-        except Exception as e:
-            if isinstance(e, (FileNotFoundError, ValueError)):
-                raise
-            raise RuntimeError(f"Failed to load species from CSV: {e}") from e
+        with open(p) as f:
+            loaded = yaml.safe_load(f) or {}
+        if not isinstance(loaded, dict):
+            raise ValueError(f"Config file `{p}` must be a YAML mapping.")
+        return loaded
 
     @staticmethod
-    def _load_species_behaviors(cfg: dict) -> dict[str, list[str]]:
-        path = cfg.get("species_behaviors_csv_path", "docs/species_behaviors.csv")
-        p = Path(path)
-        if not p.exists():
-            p = Path(__file__).parents[2] / path
+    def _required_path(cfg: dict[str, Any], key: str) -> Path:
+        raw = cfg.get(key)
+        if not raw:
+            raise ValueError(f"Missing required config key `{key}`.")
+        return LocalDataProvider._resolve_path(raw)
 
-        mapping: dict[str, list[str]] = {}
+    @staticmethod
+    def _normalize_string_list(values: Any, key_name: str) -> list[str]:
+        if not isinstance(values, list):
+            raise ValueError(f"`{key_name}` must be a list of strings.")
+        normalized = [str(v).strip() for v in values if str(v).strip()]
+        if not normalized:
+            raise ValueError(f"`{key_name}` must contain at least one non-empty value.")
+        return normalized
+
+    @staticmethod
+    def _load_species(cfg: dict[str, Any]) -> list[str]:
+        path = cfg.get("species_csv_path")
+        column = cfg.get("species_column")
+        if not path or not column:
+            raise ValueError(
+                "Config must define either `species` or both `species_csv_path` and `species_column`."
+            )
+
+        p = LocalDataProvider._resolve_path(path)
         if not p.exists():
-            return mapping
+            raise FileNotFoundError(f"Species CSV file not found at `{path}`.")
+
+        df = pd.read_csv(p, sep=";")
+        if column not in df.columns:
+            available_cols = ", ".join(df.columns)
+            raise ValueError(
+                f"Column `{column}` not found in species CSV. Available: {available_cols}"
+            )
+
+        species_list = sorted({str(s).strip() for s in df[column].dropna() if str(s).strip()})
+        if not species_list:
+            raise ValueError(f"No species names found in column `{column}` of `{path}`.")
+        return species_list
+
+    @staticmethod
+    def _load_species_behaviors(cfg: dict[str, Any]) -> dict[str, list[str]]:
+        path = cfg.get("species_behaviors_csv_path")
+        if not path:
+            return {}
+
+        p = LocalDataProvider._resolve_path(path)
+        if not p.exists():
+            return {}
 
         try:
             df = pd.read_csv(p, sep=";")
             if "Species" not in df.columns or "Behavior" not in df.columns:
-                return mapping
+                return {}
 
+            mapping: dict[str, list[str]] = {}
             for _, row in df.iterrows():
                 species = str(row["Species"]).strip()
                 behavior = str(row["Behavior"]).strip()
                 if species and behavior:
-                    if species not in mapping:
-                        mapping[species] = []
-                    mapping[species].append(behavior)
+                    mapping.setdefault(species, []).append(behavior)
             return mapping
-        except Exception as e:
-            print(f"Error loading species behaviors from CSV: {e}")
-            return mapping
+        except Exception:
+            return {}
 
-    def get_behaviors_for_species(self, species_name: str) -> list[str]:
-        # Defaults for all species
-        defaults = ["unlabeled", "reacts_to_camera", "does_not_react"]
-        extras = self._species_behaviors.get(species_name, [])
-        # Return unique combined list, preserving order
-        seen = set()
-        result = []
-        for b in defaults + extras:
-            if b not in seen:
-                result.append(b)
-                seen.add(b)
-        return result
+    @staticmethod
+    def _utcnow_dt() -> datetime:
+        return datetime.now(timezone.utc)
+
+    def _video_id_from_path(self, path: Path) -> str:
+        try:
+            return str(path.relative_to(self.video_dir))
+        except ValueError:
+            return str(path.name)
 
     def _scan_videos(self) -> pd.DataFrame:
-        """Walk video_dir and return one row per video file found."""
         if not self.video_dir.exists():
-            return pd.DataFrame(columns=["video_id", "video_path", "camera_id", "created_at"])
-        rows = []
+            return pd.DataFrame(
+                columns=["video_id", "video_path", "camera_id", "created_at", "duration_sec"]
+            )
+
+        rows: list[dict[str, Any]] = []
         for p in sorted(self.video_dir.rglob("*")):
             if p.suffix.lower() not in VIDEO_EXTENSIONS:
                 continue
-            # Use parent-folder name as camera_id (common camera-trap layout).
             camera_id = p.parent.name if p.parent != self.video_dir else "default"
+            created_at = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
             rows.append(
                 {
-                    "video_id": p.stem,
+                    "video_id": self._video_id_from_path(p),
                     "video_path": str(p),
                     "camera_id": camera_id,
-                    "created_at": datetime.fromtimestamp(
-                        p.stat().st_mtime, tz=timezone.utc
-                    ).isoformat(),
+                    "created_at": created_at,
+                    # duration/validity filled in by _sync_videos_table for new rows
+                    "duration_sec": None,
                 }
             )
         return pd.DataFrame(rows)
 
-    # --------------------------------------------------- config / overrides
+    def _sync_videos_table(self) -> None:
+        """
+        Sync the filesystem scan into the ``videos`` table.
+
+        New videos are probed with ffprobe **in parallel** before the DB write.
+        Existing rows are updated (path/camera/timestamp) but their
+        ``duration_sec``, ``is_valid``, and ``validation_error`` are preserved
+        so we never re-probe files that are already known.
+        """
+        scanned = self._scan_videos()
+        now = self._utcnow_dt()
+
+        with self.Session() as session:
+            if scanned.empty:
+                session.commit()
+                return
+
+            # ----------------------------------------------------------------
+            # Determine which video_ids are genuinely new (not in DB yet).
+            # ----------------------------------------------------------------
+            all_existing_ids: set[str] = {
+                row[0] for row in session.execute(select(Video.video_id)).fetchall()
+            }
+            new_rows = scanned[~scanned["video_id"].isin(all_existing_ids)]
+
+            # ----------------------------------------------------------------
+            # Probe only the new videos – in parallel for speed.
+            # ----------------------------------------------------------------
+            probe_results: dict[str, tuple[float | None, bool, str | None]] = {}
+            if not new_rows.empty:
+                path_map: dict[Path, str] = {
+                    Path(row["video_path"]): row["video_id"] for _, row in new_rows.iterrows()
+                }
+                raw = _probe_many(list(path_map.keys()))
+                probe_results = {path_map[p]: result for p, result in raw.items()}
+
+            # ----------------------------------------------------------------
+            # Upsert all scanned rows.
+            # ----------------------------------------------------------------
+            for _, row in scanned.iterrows():
+                vid_id: str = row["video_id"]
+                existing = session.get(Video, vid_id)
+
+                if existing is None:
+                    # Brand-new video – attach probe result.
+                    duration, is_valid, validation_error = probe_results.get(
+                        vid_id, (None, None, None)
+                    )
+                    session.add(
+                        Video(
+                            video_id=vid_id,
+                            video_path=row["video_path"],
+                            camera_id=row["camera_id"],
+                            created_at=row["created_at"],
+                            duration_sec=duration,
+                            last_seen_at=now,
+                            is_valid=is_valid,
+                            validation_error=validation_error,
+                        )
+                    )
+                else:
+                    # Existing video – refresh filesystem metadata only.
+                    existing.video_path = row["video_path"]
+                    existing.camera_id = row["camera_id"]
+                    existing.created_at = row["created_at"]
+                    existing.last_seen_at = now
+                    # duration / is_valid / validation_error are intentionally
+                    # NOT overwritten so we don't re-probe on every startup.
+
+            session.commit()
+
+    def reprobe_video(self, video_id: str) -> None:
+        """
+        Force a fresh ffprobe run for a single video and persist the result.
+        Useful after a file is replaced or repaired.
+        """
+        with self.Session() as session:
+            video = session.get(Video, video_id)
+            if video is None:
+                raise ValueError(f"Unknown video_id: {video_id!r}")
+            duration, is_valid, validation_error = _probe_video(Path(video.video_path))
+            video.duration_sec = duration
+            video.is_valid = is_valid
+            video.validation_error = validation_error
+            session.commit()
+
+    def reprobe_invalid_videos(self) -> dict[str, Any]:
+        """
+        Re-probe all videos currently marked as invalid (e.g. after a bulk
+        file repair).  Returns a summary dict.
+        """
+        with self.Session() as session:
+            invalid_videos = (
+                session.query(Video)
+                .filter((Video.is_valid == False) | (Video.is_valid.is_(None)))  # noqa: E712
+                .all()
+            )
+            if not invalid_videos:
+                return {"re_probed": 0, "now_valid": 0, "still_invalid": 0}
+
+            path_map: dict[Path, str] = {Path(v.video_path): v.video_id for v in invalid_videos}
+            probe_results = _probe_many(list(path_map.keys()))
+
+            now_valid = 0
+            still_invalid = 0
+            for path, (duration, is_valid, validation_error) in probe_results.items():
+                vid_id = path_map[path]
+                video = session.get(Video, vid_id)
+                if video is None:
+                    continue
+                video.duration_sec = duration
+                video.is_valid = is_valid
+                video.validation_error = validation_error
+                if is_valid:
+                    now_valid += 1
+                else:
+                    still_invalid += 1
+            session.commit()
+
+        return {
+            "re_probed": len(invalid_videos),
+            "now_valid": now_valid,
+            "still_invalid": still_invalid,
+        }
+
+    def _sync_priority_table(self) -> None:
+        with self.Session() as session:
+            session.query(VideoPriority).delete(synchronize_session=False)
+            if self._priority_csv_path and self._priority_csv_path.exists():
+                try:
+                    df = pd.read_csv(self._priority_csv_path)
+                    required = {"video_id", "annotation_importance_score"}
+                    if required.issubset(set(df.columns)):
+                        for _, row in df.iterrows():
+                            vid = str(row.get("video_id") or "").strip()
+                            score = pd.to_numeric(
+                                row.get("annotation_importance_score"), errors="coerce"
+                            )
+                            if not vid or pd.isna(score):
+                                continue
+                            session.add(
+                                VideoPriority(
+                                    video_id=vid,
+                                    annotation_importance_score=float(score),
+                                )
+                            )
+                except Exception:
+                    pass
+            session.commit()
 
     def check_db_exists(self) -> bool:
         return self.video_dir.exists() and any(
@@ -230,9 +592,6 @@ class LocalDataProvider:
 
     def get_valid_species(self) -> list[str]:
         return list(self._species)
-
-    def get_valid_behaviors(self) -> list[str]:
-        return list(self._behaviors)
 
     def get_config(self) -> dict:
         if self._app_config_path.exists():
@@ -250,447 +609,520 @@ class LocalDataProvider:
     def get_csv_templates(self) -> dict[str, str]:
         return CSV_TEMPLATES.copy()
 
-    # --------------------------------------------------------- video queries
+    def get_behaviors_for_species(self, species_name: str) -> list[str]:
+        defaults = ["unlabeled"] + self._behavior_defaults
+        extras = self._species_behaviors.get(species_name, [])
+        seen = set()
+        result = []
+        for b in defaults + extras:
+            if b not in seen:
+                result.append(b)
+                seen.add(b)
+        return result
 
-    def get_all_videos(self) -> pd.DataFrame:
-        videos = self._scan_videos()
-        if videos.empty:
-            return pd.DataFrame()
-
+    def _get_model_annotations_df(self) -> pd.DataFrame:
         with self.engine.connect() as conn:
-            annotations = pd.read_sql(select(Annotation), conn)
+            return pd.read_sql(select(ModelAnnotation), conn)
 
-        df = videos.copy()
+    def _get_individuals_df(self) -> pd.DataFrame:
+        with self.engine.connect() as conn:
+            return pd.read_sql(select(IndividualObservation), conn)
 
-        # --- helper: pick the latest annotation per video for a given type/model ---
-        def _latest(ann_type: str, model_name: str | None = None) -> pd.DataFrame:
-            if annotations.empty or "annotation_type" not in annotations.columns:
-                return pd.DataFrame(columns=["video_uid"])
-            mask = annotations["annotation_type"] == ann_type
-            if model_name:
-                mask &= annotations.get("model_name", pd.Series(dtype=str)) == model_name
-            sub = annotations[mask].copy()
-            if sub.empty:
-                return pd.DataFrame(columns=["video_uid"])
-            sub["_ts"] = pd.to_datetime(sub["created_at"], errors="coerce")
-            return sub.sort_values("_ts", ascending=False).drop_duplicates(
-                "video_uid", keep="first"
+    def _get_labels_df(self) -> pd.DataFrame:
+        with self.engine.connect() as conn:
+            return pd.read_sql(select(VideoLabel), conn)
+
+    def get_queue_filter_options(self) -> dict[str, list[str]]:
+        self._sync_videos_table()
+        self._sync_priority_table()
+        with self.engine.connect() as conn:
+            camera_values = (
+                pd.read_sql(
+                    text(
+                        "SELECT DISTINCT camera_id FROM videos WHERE camera_id IS NOT NULL ORDER BY camera_id"
+                    ),
+                    conn,
+                )["camera_id"]
+                .astype(str)
+                .tolist()
             )
-
-        def _merge_pred(
-            ann_df: pd.DataFrame,
-            base: pd.DataFrame,
-            pred_col: str,
-            prob_col: str,
-        ) -> pd.DataFrame:
-            if ann_df.empty or "value_text" not in ann_df.columns:
-                return base
-            sub = ann_df[["video_uid", "value_text", "probability"]].rename(
-                columns={"value_text": pred_col, "probability": prob_col}
+            species_values = (
+                pd.read_sql(
+                    text(
+                        "SELECT DISTINCT species FROM individual_observations "
+                        "WHERE species IS NOT NULL AND TRIM(species) <> '' ORDER BY species"
+                    ),
+                    conn,
+                )["species"]
+                .astype(str)
+                .tolist()
             )
-            return base.merge(sub, left_on="video_id", right_on="video_uid", how="left").drop(
-                columns=["video_uid"], errors="ignore"
+            behavior_values = (
+                pd.read_sql(
+                    text(
+                        "SELECT DISTINCT behavior FROM individual_observations "
+                        "WHERE behavior IS NOT NULL AND TRIM(behavior) <> '' ORDER BY behavior"
+                    ),
+                    conn,
+                )["behavior"]
+                .astype(str)
+                .tolist()
             )
-
-        # Species model predictions
-        df = _merge_pred(
-            _latest("species", "species_slowfast_disjoint"),
-            df,
-            "species_slowfast_disjoint_prediction",
-            "species_slowfast_disjoint_prediction_probability",
-        )
-        df = _merge_pred(
-            _latest("species", "species_slowfast_overlapping"),
-            df,
-            "species_slowfast_overlapping_prediction",
-            "species_slowfast_overlapping_prediction_probability",
-        )
-        df = _merge_pred(
-            _latest("species", "species_zamba"),
-            df,
-            "species_zamba_prediction",
-            "species_zamba_prediction_probability",
-        )
-
-        # Blank / non-blank
-        bnb = _latest("blank_non_blank")
-        df = _merge_pred(bnb, df, "blank_non_blank_final_result", "blank_non_blank_probability")
-        if "blank_non_blank_final_result" not in df.columns:
-            df["blank_non_blank_final_result"] = None
-            df["blank_non_blank_probability"] = None
-
-        # Behavior
-        beh = _latest("behavior")
-        if not beh.empty and "value_text" in beh.columns:
-            beh_sub = beh[["video_uid", "value_text"]].rename(
-                columns={"value_text": "behavior_prediction"}
+            possible_species_values = (
+                pd.read_sql(
+                    text(
+                        "SELECT DISTINCT value_text FROM model_annotations "
+                        "WHERE annotation_type='species' AND value_text IS NOT NULL "
+                        "AND TRIM(value_text) <> '' ORDER BY value_text"
+                    ),
+                    conn,
+                )["value_text"]
+                .astype(str)
+                .tolist()
             )
-            df = df.merge(beh_sub, left_on="video_id", right_on="video_uid", how="left").drop(
-                columns=["video_uid"], errors="ignore"
-            )
-        else:
-            df["behavior_prediction"] = None
-
-        # Ensure prediction columns exist even if no annotations imported yet
-        for col in [
-            "species_slowfast_disjoint_prediction",
-            "species_slowfast_overlapping_prediction",
-            "species_zamba_prediction",
-        ]:
-            if col not in df.columns:
-                df[col] = None
-
-        # Consensus: all three models must agree
-        def _consensus(row: pd.Series) -> str:
-            preds = [
-                row.get("species_slowfast_disjoint_prediction"),
-                row.get("species_slowfast_overlapping_prediction"),
-                row.get("species_zamba_prediction"),
-            ]
-            valid = [str(p) for p in preds if pd.notna(p) and str(p).strip()]
-            if len(valid) == 3 and len(set(valid)) == 1:
-                return valid[0]
-            return "UNKNOWN"
-
-        df["classification_consensus"] = df.apply(_consensus, axis=1)
-
-        def _latest_manual_reviews(ann_df: pd.DataFrame) -> pd.DataFrame:
-            manual = ann_df[
-                (ann_df["model_name"] == "manual_review")
-                & ann_df["annotation_type"].isin({"species", "behavior", "blank_non_blank"})
-            ].copy()
-            if manual.empty:
-                return pd.DataFrame(
-                    columns=[
-                        "video_uid",
-                        "species_behavior_json",
-                        "is_blank",
-                        "needs_manual_review",
-                    ]
-                )
-
-            manual["created_at_ts"] = pd.to_datetime(manual["created_at"], errors="coerce")
-            manual["session_id"] = manual["session_id"].fillna("")
-            manual["individual_id"] = manual["individual_id"].fillna("")
-
-            session_meta = (
-                manual.groupby(["video_uid", "session_id"], dropna=False)["created_at_ts"]
-                .max()
-                .reset_index()
-            )
-
-            latest_sessions = (
-                session_meta.sort_values("created_at_ts")
-                .groupby("video_uid", sort=False)
-                .last()
-                .reset_index()
-            )
-
-            latest_manual = manual.merge(
-                latest_sessions[["video_uid", "session_id"]],
-                on=["video_uid", "session_id"],
-                how="inner",
-            )
-
-            session_groups: list[dict[str, Any]] = []
-            for video_id, session_rows in latest_manual.groupby("video_uid", sort=False):
-                selections: list[dict[str, Any]] = []
-                for _, individual_rows in session_rows.groupby("individual_id", sort=False):
-                    species_row = individual_rows[individual_rows["annotation_type"] == "species"]
-                    behavior_row = individual_rows[
-                        individual_rows["annotation_type"] == "behavior"
-                    ]
-                    blank_row = individual_rows[
-                        individual_rows["annotation_type"] == "blank_non_blank"
-                    ]
-
-                    if not species_row.empty:
-                        species_val = str(species_row.iloc[-1].get("value_text") or "unknown")
-                        timestamp = (
-                            species_row.iloc[-1].get("t_start_sec")
-                            or species_row.iloc[-1].get("value_num")
-                            or 0.0
-                        )
-                    elif not blank_row.empty:
-                        species_val = "blank"
-                        timestamp = (
-                            blank_row.iloc[-1].get("t_start_sec")
-                            or blank_row.iloc[-1].get("value_num")
-                            or 0.0
-                        )
-                    else:
-                        species_val = "unknown"
-                        timestamp = 0.0
-
-                    try:
-                        timestamp = float(timestamp)
-                    except Exception:
-                        timestamp = 0.0
-
-                    if not behavior_row.empty:
-                        behavior_val = str(behavior_row.iloc[-1].get("value_text") or "unlabeled")
-                    else:
-                        behavior_val = "unlabeled"
-
-                    selections.append(
-                        {
-                            "species": species_val,
-                            "behavior": behavior_val,
-                            "timestamp": timestamp,
-                        }
-                    )
-
-                if not selections:
-                    continue
-
-                session_groups.append(
-                    {
-                        "video_uid": video_id,
-                        "species_behavior_json": json.dumps(selections),
-                        "is_blank": any(s["species"] == "blank" for s in selections),
-                        "needs_manual_review": False,
-                    }
-                )
-
-            return pd.DataFrame(session_groups)
-
-        manual_reviews = _latest_manual_reviews(annotations)
-        if not manual_reviews.empty:
-            df = df.merge(
-                manual_reviews, left_on="video_id", right_on="video_uid", how="left"
-            ).drop(columns=["video_uid"], errors="ignore")
-        else:
-            df["species_behavior_json"] = None
-            df["is_blank"] = None
-            df["needs_manual_review"] = None
-
-        # Coerce needs_manual_review to bool
-        df["needs_manual_review"] = df["needs_manual_review"].map(
-            lambda x: bool(x) if pd.notna(x) else False
-        )
-
-        def _format_selections(val: Any) -> str | None:
-            if not val or pd.isna(val):
-                return None
-            try:
-                data = json.loads(val) if isinstance(val, str) else val
-                if not isinstance(data, list):
-                    return str(data)
-                parts = []
-                for s in data:
-                    species = s.get("species", "unknown")
-                    behavior = s.get("behavior", "unlabeled")
-                    ts = s.get("timestamp", 0.0)
-                    parts.append(f"{species} ({behavior}) @ {ts}s")
-                return ", ".join(parts)
-            except Exception:
-                return str(val)
-
-        # Derived columns expected by the frontend
-        df["manual_review_prediction"] = df["species_behavior_json"].apply(_format_selections)
-        df["final_species_prediction"] = df["manual_review_prediction"]
-        df["current_stage"] = df["needs_manual_review"].map(
-            lambda x: "manual_review" if x else "completed"
-        )
-        df["status"] = df["needs_manual_review"].map(lambda x: "NEEDS_REVIEW" if x else "success")
-        df["is_video_valid"] = True
-        df["video_validation_details"] = None
-        df["depth_estimation_data"] = None
-        df["last_updated"] = df["created_at"]
-
-        return df.sort_values("last_updated", ascending=False, na_position="last")
-
-    def get_filtered_videos(self, filters: dict) -> pd.DataFrame:
-        df = self.get_all_videos()
-        if df.empty:
-            return df
-
-        q = (filters.get("search_query") or "").strip().lower()
-        if q:
-            df = df[
-                df["video_id"].fillna("").str.lower().str.contains(q)
-                | df["video_path"].fillna("").str.lower().str.contains(q)
-            ]
-
-        cam = filters.get("selected_camera", "All")
-        if cam != "All":
-            df = df[df["camera_id"] == cam]
-
-        sp = filters.get("selected_species", "All")
-        if sp != "All":
-            df = df[df["final_species_prediction"] == sp]
-
-        poss = filters.get("selected_possible_species", "All")
-        if poss != "All":
-            cols = [
-                c
-                for c in [
-                    "species_slowfast_overlapping_prediction",
-                    "species_slowfast_disjoint_prediction",
-                    "species_zamba_prediction",
-                ]
-                if c in df.columns
-            ]
-            if cols:
-                df = df[df[cols].eq(poss).any(axis=1)]
-
-        rev = filters.get("selected_review", "All")
-        if rev == "Needs Review":
-            df = df[df["needs_manual_review"] == True]  # noqa: E712
-        elif rev == "No Review":
-            df = df[df["needs_manual_review"] != True]  # noqa: E712
-
-        bnb = filters.get("selected_blank_non_blank", "All")
-        if bnb == "Blank":
-            df = df[df["blank_non_blank_final_result"] == "blank"]
-        elif bnb == "Non-Blank":
-            df = df[df["blank_non_blank_final_result"] == "non_blank"]
-        elif bnb == "Unknown":
-            df = df[df["blank_non_blank_final_result"].isnull()]
-
-        beh = filters.get("selected_behavior", "All")
-        if beh == "Has Behavior":
-            df = df[df["behavior_prediction"].fillna("").str.strip() != ""]
-        elif beh == "No Behavior":
-            df = df[df["behavior_prediction"].fillna("").str.strip() == ""]
-        elif beh != "All":
-            df = df[df["behavior_prediction"] == beh]
-
-        return df
-
-    def get_videos_for_review(self) -> pd.DataFrame:
-        return self.get_filtered_videos({"selected_review": "Needs Review"})
-
-    def get_video_by_id(self, video_id: str) -> dict | None:
-        df = self.get_all_videos()
-        row = df[df["video_id"] == video_id]
-        return row.iloc[0].to_dict() if not row.empty else None
-
-    def get_video_annotations(self, video_id: str) -> pd.DataFrame:
-        """Return all model annotations for this video."""
-        query = (
-            select(Annotation)
-            .where(Annotation.video_uid == video_id)
-            .order_by(Annotation.created_at.desc())
-        )
-        return self._query_to_df(query)
-
-    def get_filter_options(self) -> dict:
-        df = self.get_all_videos()
-        if df.empty:
-            return {
-                "camera_values": [],
-                "species_values": [],
-                "possible_species_values": [],
-                "behavior_values": [],
-            }
-
-        sp_cols = [
-            "species_slowfast_overlapping_prediction",
-            "species_slowfast_disjoint_prediction",
-            "species_zamba_prediction",
-        ]
-        all_possible: list[str] = []
-        for col in sp_cols:
-            if col in df.columns:
-                all_possible.extend(df[col].dropna().astype(str).tolist())
-
-        def _vals(col: str) -> list[str]:
-            if col not in df.columns:
-                return []
-            return sorted({str(v) for v in df[col].dropna() if str(v).strip()})
 
         return {
-            "camera_values": _vals("camera_id"),
-            "species_values": _vals("final_species_prediction"),
-            "possible_species_values": sorted({v for v in all_possible if v.strip()}),
-            "behavior_values": _vals("behavior_prediction"),
+            "camera_values": camera_values,
+            "species_values": species_values,
+            "possible_species_values": possible_species_values,
+            "behavior_values": behavior_values,
         }
 
-    # --------------------------------------------------------- write operations
+    def get_video_queue(self, filters: dict) -> list[str]:
+        self._sync_videos_table()
+        self._sync_priority_table()
 
-    def _utcnow_dt(self) -> datetime:
-        return datetime.now(timezone.utc)
+        params: dict[str, Any] = {
+            "search_query": f"%{(filters.get('search_query') or '').strip().lower()}%",
+            "selected_camera": filters.get("selected_camera", "All"),
+            "selected_species": filters.get("selected_species", "All"),
+            "selected_possible_species": filters.get("selected_possible_species", "All"),
+            "selected_blank_non_blank": filters.get("selected_blank_non_blank", "All"),
+            "selected_behavior": filters.get("selected_behavior", "All"),
+            "selected_review": filters.get("selected_review", "All"),
+            "include_unranked": 1 if bool(filters.get("include_unranked", False)) else 0,
+        }
+
+        sql = text(
+            """
+            WITH model_blank AS (
+                SELECT
+                    ma.video_id,
+                    ma.value_text AS blank_non_blank_model_result,
+                    ma.probability,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY ma.video_id
+                        ORDER BY COALESCE(ma.probability, -1.0) DESC, ma.updated_at DESC
+                    ) AS rn
+                FROM model_annotations ma
+                WHERE ma.annotation_type = 'blank_non_blank'
+            ),
+            effective_blank AS (
+                SELECT
+                    v.video_id,
+                    CASE
+                        WHEN vl.is_blank IS NOT NULL THEN CASE WHEN vl.is_blank = 1 THEN 'blank' ELSE 'non_blank' END
+                        WHEN mb.rn = 1 AND LOWER(TRIM(mb.blank_non_blank_model_result)) IN ('blank', 'non_blank')
+                            THEN LOWER(TRIM(mb.blank_non_blank_model_result))
+                        ELSE NULL
+                    END AS blank_non_blank_final_result
+                FROM videos v
+                LEFT JOIN video_labels vl ON vl.video_id = v.video_id
+                LEFT JOIN model_blank mb ON mb.video_id = v.video_id
+            ),
+            review_state AS (
+                SELECT
+                    v.video_id,
+                    CASE
+                        WHEN vl.is_blank IS NULL
+                             AND NOT EXISTS (
+                                 SELECT 1 FROM individual_observations io WHERE io.video_id = v.video_id
+                             )
+                        THEN 1 ELSE 0
+                    END AS needs_manual_review
+                FROM videos v
+                LEFT JOIN video_labels vl ON vl.video_id = v.video_id
+            ),
+            priority_counts AS (
+                SELECT COUNT(*) AS cnt FROM video_priority
+            )
+            SELECT v.video_id
+            FROM videos v
+            LEFT JOIN video_priority vp ON vp.video_id = v.video_id
+            LEFT JOIN effective_blank eb ON eb.video_id = v.video_id
+            LEFT JOIN review_state rs ON rs.video_id = v.video_id
+            CROSS JOIN priority_counts pc
+            WHERE
+                (
+                    :search_query = '%%'
+                    OR LOWER(v.video_id) LIKE :search_query
+                    OR LOWER(v.video_path) LIKE :search_query
+                )
+                AND (:selected_camera = 'All' OR v.camera_id = :selected_camera)
+                AND (
+                    :selected_species = 'All'
+                    OR EXISTS (
+                        SELECT 1
+                        FROM individual_observations io
+                        WHERE io.video_id = v.video_id AND io.species = :selected_species
+                    )
+                )
+                AND (
+                    :selected_possible_species = 'All'
+                    OR EXISTS (
+                        SELECT 1
+                        FROM model_annotations ma
+                        WHERE ma.video_id = v.video_id
+                          AND ma.annotation_type = 'species'
+                          AND ma.value_text = :selected_possible_species
+                    )
+                )
+                AND (
+                    :selected_blank_non_blank = 'All'
+                    OR (:selected_blank_non_blank = 'Blank' AND eb.blank_non_blank_final_result = 'blank')
+                    OR (:selected_blank_non_blank = 'Non-Blank' AND eb.blank_non_blank_final_result = 'non_blank')
+                    OR (:selected_blank_non_blank = 'Unknown' AND eb.blank_non_blank_final_result IS NULL)
+                )
+                AND (
+                    :selected_behavior = 'All'
+                    OR (
+                        :selected_behavior = 'Has Behavior'
+                        AND EXISTS (
+                            SELECT 1 FROM individual_observations io
+                            WHERE io.video_id = v.video_id
+                              AND io.behavior IS NOT NULL
+                              AND TRIM(io.behavior) <> ''
+                        )
+                    )
+                    OR (
+                        :selected_behavior = 'No Behavior'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM individual_observations io
+                            WHERE io.video_id = v.video_id
+                              AND io.behavior IS NOT NULL
+                              AND TRIM(io.behavior) <> ''
+                        )
+                    )
+                    OR (
+                        :selected_behavior NOT IN ('All', 'Has Behavior', 'No Behavior')
+                        AND EXISTS (
+                            SELECT 1 FROM individual_observations io
+                            WHERE io.video_id = v.video_id
+                              AND io.behavior = :selected_behavior
+                        )
+                    )
+                )
+                AND (
+                    :selected_review = 'All'
+                    OR (:selected_review = 'Needs Review' AND rs.needs_manual_review = 1)
+                    OR (:selected_review = 'No Review' AND rs.needs_manual_review = 0)
+                )
+                AND (
+                    :include_unranked = 1
+                    OR pc.cnt = 0
+                    OR vp.video_id IS NOT NULL
+                )
+            ORDER BY
+                CASE
+                    WHEN pc.cnt > 0 THEN CASE WHEN vp.video_id IS NULL THEN 1 ELSE 0 END
+                    ELSE 0
+                END,
+                CASE WHEN pc.cnt > 0 THEN vp.annotation_importance_score END DESC,
+                v.created_at DESC,
+                v.video_id ASC
+            """
+        )
+
+        with self.engine.connect() as conn:
+            rows = pd.read_sql(sql, conn, params=params)
+        if rows.empty:
+            return []
+        return rows["video_id"].astype(str).tolist()
+
+    def get_video_detail(self, video_id: str) -> dict | None:
+        self._sync_videos_table()
+        with self.engine.connect() as conn:
+            detail_df = pd.read_sql(
+                text(
+                    """
+                    WITH model_blank AS (
+                        SELECT
+                            ma.video_id,
+                            ma.value_text AS blank_non_blank_model_result,
+                            ma.probability,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY ma.video_id
+                                ORDER BY COALESCE(ma.probability, -1.0) DESC, ma.updated_at DESC
+                            ) AS rn
+                        FROM model_annotations ma
+                        WHERE ma.annotation_type = 'blank_non_blank'
+                    ),
+                    model_species_consensus AS (
+                        SELECT
+                            ma.video_id,
+                            CASE
+                                WHEN COUNT(DISTINCT ma.value_text) = 1 THEN MAX(ma.value_text)
+                                ELSE 'UNKNOWN'
+                            END AS classification_consensus
+                        FROM model_annotations ma
+                        WHERE ma.annotation_type = 'species'
+                          AND COALESCE(ma.probability, 0.0) >= :min_prob
+                          AND ma.value_text IS NOT NULL
+                          AND TRIM(ma.value_text) <> ''
+                        GROUP BY ma.video_id
+                    ),
+                    manual_summary AS (
+                        SELECT
+                            io.video_id,
+                            GROUP_CONCAT(DISTINCT io.behavior) AS behavior_prediction,
+                            COUNT(*) AS individual_count
+                        FROM individual_observations io
+                        GROUP BY io.video_id
+                    ),
+                    review_state AS (
+                        SELECT
+                            v.video_id,
+                            CASE
+                                WHEN vl.is_blank IS NULL
+                                     AND NOT EXISTS (
+                                         SELECT 1 FROM individual_observations io2
+                                         WHERE io2.video_id = v.video_id
+                                     )
+                                THEN 1 ELSE 0
+                            END AS needs_manual_review
+                        FROM videos v
+                        LEFT JOIN video_labels vl ON vl.video_id = v.video_id
+                    )
+                    SELECT
+                        v.video_id,
+                        v.video_path,
+                        v.camera_id,
+                        v.duration_sec,
+                        v.created_at,
+                        v.is_valid AS is_video_valid,
+                        v.validation_error AS video_validation_details,
+                        vl.is_blank,
+                        vl.labeled_at,
+                        ms.behavior_prediction,
+                        ms.individual_count,
+                        COALESCE(mcs.classification_consensus, 'UNKNOWN') AS classification_consensus,
+                        CASE
+                            WHEN vl.is_blank IS NOT NULL THEN CASE WHEN vl.is_blank = 1 THEN 'blank' ELSE 'non_blank' END
+                            WHEN mb.rn = 1 AND LOWER(TRIM(mb.blank_non_blank_model_result)) IN ('blank', 'non_blank')
+                                THEN LOWER(TRIM(mb.blank_non_blank_model_result))
+                            ELSE NULL
+                        END AS blank_non_blank_final_result,
+                        rs.needs_manual_review
+                    FROM videos v
+                    LEFT JOIN video_labels vl ON vl.video_id = v.video_id
+                    LEFT JOIN model_blank mb ON mb.video_id = v.video_id
+                    LEFT JOIN manual_summary ms ON ms.video_id = v.video_id
+                    LEFT JOIN review_state rs ON rs.video_id = v.video_id
+                    WHERE v.video_id = :video_id
+                    """
+                ),
+                conn,
+                params={"video_id": video_id, "min_prob": self._consensus_min_probability},
+            )
+
+            manual_rows = pd.read_sql(
+                text(
+                    """
+                    SELECT species, behavior, start_sec, end_sec
+                    FROM individual_observations
+                    WHERE video_id = :video_id
+                    ORDER BY COALESCE(start_sec, 0.0), species
+                    """
+                ),
+                conn,
+                params={"video_id": video_id},
+            )
+
+        if detail_df.empty:
+            return None
+
+        row = detail_df.iloc[0].to_dict()
+        selections = []
+        for _, manual in manual_rows.iterrows():
+            selections.append(
+                {
+                    "species": str(manual.get("species") or "unknown"),
+                    "behavior": str(manual.get("behavior") or "unlabeled"),
+                    "start_sec": float(manual.get("start_sec") or 0.0),
+                    "end_sec": None
+                    if pd.isna(manual.get("end_sec"))
+                    else float(manual.get("end_sec")),
+                }
+            )
+        row["manual_selections"] = selections
+        row["species_behavior_json"] = json.dumps(selections) if selections else None
+        row["manual_review_prediction"] = (
+            ", ".join(
+                [
+                    (
+                        f"{s['species']} ({s['behavior']}) @ {s['start_sec']}s"
+                        if s["end_sec"] is None
+                        else f"{s['species']} ({s['behavior']}) {s['start_sec']}s-{s['end_sec']}s"
+                    )
+                    for s in selections
+                ]
+            )
+            if selections
+            else None
+        )
+        row["final_species_prediction"] = row["manual_review_prediction"]
+        row["current_stage"] = (
+            "manual_review" if bool(row.get("needs_manual_review")) else "completed"
+        )
+        row["status"] = "NEEDS_REVIEW" if bool(row.get("needs_manual_review")) else "success"
+        row["is_video_valid"] = (
+            True if row.get("is_video_valid") is None else bool(row.get("is_video_valid"))
+        )
+        return row
+
+    def get_model_annotations(self, video_id: str) -> pd.DataFrame:
+        with self.engine.connect() as conn:
+            model_df = pd.read_sql(
+                text(
+                    """
+                    SELECT
+                        model_name,
+                        annotation_type,
+                        value_text,
+                        probability,
+                        updated_at AS created_at
+                    FROM model_annotations
+                    WHERE video_id = :video_id
+                    ORDER BY updated_at DESC
+                    """
+                ),
+                conn,
+                params={"video_id": video_id},
+            )
+        if model_df.empty:
+            return pd.DataFrame(
+                columns=[
+                    "model_name",
+                    "annotation_type",
+                    "value_text",
+                    "probability",
+                    "created_at",
+                ]
+            )
+        model_df["created_at"] = pd.to_datetime(model_df["created_at"], errors="coerce")
+        return model_df
 
     def update_manual_review(
         self,
         video_id: str,
-        selections: list[dict],
+        selections: list[dict] | None,
         annotator: str = "local",
     ) -> None:
-        if not selections:
+        if selections is None:
             return
-        print("Selections")
-        print(selections)
 
         now = self._utcnow_dt()
         session_id = str(uuid.uuid4())
 
-        with self.Session() as session:
-            session.execute(
-                delete(Annotation).where(
-                    Annotation.video_uid == video_id,
-                    Annotation.model_name == "manual_review",
-                )
-            )
-            individual_counter = 0
-            for selection in selections:
-                species = str(selection.get("species") or "").strip() or "unknown"
-                behavior = str(selection.get("behavior") or "").strip() or "unlabeled"
-                timestamp = float(selection.get("timestamp") or 0.0)
-                individual_id = f"{session_id}-{individual_counter}"
-                individual_counter += 1
+        normalized: list[dict[str, Any]] = []
+        for selection in selections:
+            species = str(selection.get("species") or "").strip() or "unknown"
+            behavior = str(selection.get("behavior") or "").strip() or "unlabeled"
+            if "start_sec" in selection:
+                start_sec = pd.to_numeric(selection.get("start_sec"), errors="coerce")
+            else:
+                start_sec = pd.to_numeric(selection.get("timestamp"), errors="coerce")
+            if pd.isna(start_sec):
+                start_sec = 0.0
 
-                def insert_annotation(annotation_type: str, value_text: str | None) -> None:
+            end_sec_raw = selection.get("end_sec")
+            end_sec = pd.to_numeric(end_sec_raw, errors="coerce")
+            end_sec_val: float | None = None if pd.isna(end_sec) else float(end_sec)
+
+            normalized.append(
+                {
+                    "species": species,
+                    "behavior": behavior,
+                    "start_sec": float(start_sec),
+                    "end_sec": end_sec_val,
+                }
+            )
+
+        if not normalized:
+            is_blank = None
+        else:
+            is_blank = len(normalized) == 1 and normalized[0]["species"].lower() == "blank"
+
+        with self.Session() as session:
+            label = session.get(VideoLabel, video_id)
+            if label is None:
+                label = VideoLabel(video_id=video_id)
+                session.add(label)
+            label.is_blank = is_blank
+            label.labeled_by = annotator
+            label.labeled_at = now
+
+            session.query(IndividualObservation).filter(
+                IndividualObservation.video_id == video_id
+            ).delete(synchronize_session=False)
+
+            if is_blank is False:
+                for row in normalized:
                     session.add(
-                        Annotation(
-                            video_uid=video_id,
-                            annotation_type=annotation_type,
-                            value_text=value_text,
-                            value_num=timestamp,
-                            probability=None,
-                            t_start_sec=timestamp,
-                            t_end_sec=None,
-                            model_name="manual_review",
-                            model_version=annotator,
-                            created_at=now,
+                        IndividualObservation(
+                            video_id=video_id,
                             session_id=session_id,
-                            individual_id=individual_id,
+                            species=row["species"],
+                            behavior=row["behavior"],
+                            start_sec=row["start_sec"],
+                            end_sec=row["end_sec"],
+                            created_at=now,
+                            updated_at=now,
                         )
                     )
-
-                if species.lower() == "blank":
-                    insert_annotation("blank_non_blank", "blank")
-                    continue
-
-                insert_annotation("species", species)
-                insert_annotation("behavior", behavior)
             session.commit()
 
     def restore_video_snapshot(self, snapshot: dict) -> None:
         if not snapshot or "video_id" not in snapshot:
             return
 
-        selections = []
-        if "species_behavior_json" in snapshot and snapshot["species_behavior_json"]:
+        selections: list[dict[str, Any]] = []
+        raw = snapshot.get("species_behavior_json")
+        if raw:
             try:
-                selections = json.loads(snapshot["species_behavior_json"])
+                data = json.loads(raw)
+                if isinstance(data, list):
+                    for item in data:
+                        start = item.get("start_sec", item.get("timestamp", 0.0))
+                        selections.append(
+                            {
+                                "species": item.get("species", "unknown"),
+                                "behavior": item.get("behavior", "unlabeled"),
+                                "start_sec": start,
+                                "end_sec": item.get("end_sec"),
+                            }
+                        )
             except Exception:
-                pass
+                selections = []
 
-        if not selections and "final_species_prediction" in snapshot:
-            # Fallback for old snapshots
+        if not selections and snapshot.get("blank_non_blank_final_result") == "blank":
+            selections = [
+                {"species": "blank", "behavior": "unlabeled", "start_sec": 0.0, "end_sec": None}
+            ]
+
+        if not selections and snapshot.get("final_species_prediction"):
             selections = [
                 {
-                    "species": snapshot["final_species_prediction"] or "unknown",
+                    "species": snapshot["final_species_prediction"],
                     "behavior": "unlabeled",
-                    "timestamp": 0.0,
+                    "start_sec": 0.0,
+                    "end_sec": snapshot.get("duration_sec"),
                 }
             ]
 
-        self.update_manual_review(snapshot["video_id"], selections)
+        if selections:
+            self.update_manual_review(snapshot["video_id"], selections)
 
-    # --------------------------------------------------------- stats
     def get_pipeline_progress_summary(self) -> pd.DataFrame:
         df = self.get_all_videos()
         if df.empty:
@@ -712,8 +1144,6 @@ class LocalDataProvider:
             ]
         )
 
-    # ------------------------------------------------- CSV import / validation
-
     @staticmethod
     def _normalize_annotation_type(annotation_type: str) -> str:
         supported = {"blank_non_blank", "species", "behavior"}
@@ -724,30 +1154,24 @@ class LocalDataProvider:
             )
         return normalized
 
-    @staticmethod
-    def _pick_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
-        for col in candidates:
-            if col in df.columns:
-                return col
-        return None
-
     def validate_model_csv(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
         src = df.copy()
         src.columns = [str(c).strip() for c in src.columns]
 
-        required = {"video_uid", "annotation_type"}
+        required = {"video_uid", "annotation_type", "model_name"}
         missing = required - set(src.columns)
         if missing:
             raise ValueError(f"CSV must include columns: {', '.join(sorted(missing))}")
 
-        known_videos = set(self._scan_videos()["video_id"].astype(str))
-        prepared_rows: list[dict] = []
-        errors: list[dict] = []
+        known_videos = set(self.get_all_videos()["video_id"].astype(str))
+        prepared_rows: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
 
         for idx, row in src.iterrows():
             row_num = int(idx) + 2
             video_uid = str(row.get("video_uid", "")).strip()
-            annotation_type = str(row.get("annotation_type", "")).strip()
+            model_name = str(row.get("model_name", "")).strip()
+            raw_type = str(row.get("annotation_type", "")).strip()
 
             if not video_uid:
                 errors.append({"row_number": row_num, "error": "Missing video_uid"})
@@ -757,22 +1181,17 @@ class LocalDataProvider:
                     {"row_number": row_num, "video_uid": video_uid, "error": "Unknown video_uid"}
                 )
                 continue
-            if not annotation_type:
+            if not model_name:
                 errors.append(
-                    {
-                        "row_number": row_num,
-                        "video_uid": video_uid,
-                        "error": "Missing annotation_type",
-                    }
+                    {"row_number": row_num, "video_uid": video_uid, "error": "Missing model_name"}
                 )
                 continue
 
-            t_start = pd.to_numeric(row.get("t_start_sec"), errors="coerce")
-            if pd.isna(t_start):
-                t_start = 0.0
-
-            t_end = pd.to_numeric(row.get("t_end_sec"), errors="coerce")
-            t_end = None if pd.isna(t_end) else float(t_end)
+            try:
+                annotation_type = self._normalize_annotation_type(raw_type)
+            except ValueError as exc:
+                errors.append({"row_number": row_num, "video_uid": video_uid, "error": str(exc)})
+                continue
 
             probability = pd.to_numeric(row.get("probability"), errors="coerce")
             probability = None if pd.isna(probability) else float(probability)
@@ -786,89 +1205,64 @@ class LocalDataProvider:
                 )
                 continue
 
-            value_text = row.get("value_text")
-            if pd.isna(value_text):
-                value_text = None
-            elif isinstance(value_text, float):
-                value_text = None if pd.isna(value_text) else str(value_text)
-            else:
-                value_text = str(value_text).strip() or None
+            t_start = pd.to_numeric(row.get("t_start_sec"), errors="coerce")
+            t_start = None if pd.isna(t_start) else float(t_start)
+            t_end = pd.to_numeric(row.get("t_end_sec"), errors="coerce")
+            t_end = None if pd.isna(t_end) else float(t_end)
 
+            value_text = row.get("value_text")
+            value_text = None if pd.isna(value_text) else (str(value_text).strip() or None)
             value_num = pd.to_numeric(row.get("value_num"), errors="coerce")
             value_num = None if pd.isna(value_num) else float(value_num)
 
-            model_name = str(row.get("model_name") or "").strip() or None
-            model_version = str(row.get("model_version") or "").strip() or None
-            session_id = str(row.get("session_id") or "").strip()
-            if not session_id:
-                session_id = str(uuid.uuid4())
-            individual_id = str(row.get("individual_id") or "").strip()
-            if not individual_id:
-                individual_id = str(uuid.uuid4())
-
-            created_at_raw = row.get("created_at")
-            if pd.isna(created_at_raw) or created_at_raw is None or created_at_raw == "":
-                created_at = self._utcnow_dt()
-            else:
-                try:
-                    created_at = pd.to_datetime(created_at_raw, errors="coerce")
-                    if pd.isna(created_at):
-                        created_at = self._utcnow_dt()
-                    else:
-                        created_at = created_at.to_pydatetime()
-                except Exception:
-                    created_at = self._utcnow_dt()
-
-            prepared = {
-                "video_uid": video_uid,
-                "annotation_type": annotation_type,
-                "value_text": value_text,
-                "value_num": value_num,
-                "probability": probability,
-                "t_start_sec": float(t_start),
-                "t_end_sec": t_end,
-                "model_name": model_name,
-                "model_version": model_version,
-                "session_id": session_id,
-                "individual_id": individual_id,
-                "created_at": created_at,
-            }
-            prepared_rows.append(prepared)
+            prepared_rows.append(
+                {
+                    "video_id": video_uid,
+                    "annotation_type": annotation_type,
+                    "model_name": model_name,
+                    "value_text": value_text,
+                    "value_num": value_num,
+                    "probability": probability,
+                    "t_start_sec": t_start,
+                    "t_end_sec": t_end,
+                }
+            )
 
         return pd.DataFrame(prepared_rows), pd.DataFrame(errors)
 
-    def import_model_csv(
-        self,
-        cleaned_df: pd.DataFrame,
-        model_name: str,
-        model_version: str,
-        config_version: str | None = None,
-    ) -> dict[str, Any]:
+    def import_model_csv(self, cleaned_df: pd.DataFrame) -> dict[str, Any]:
         if cleaned_df.empty:
-            return {"inserted_rows": 0, "model_run_id": None}
+            return {"inserted_rows": 0, "upserted_rows": 0}
 
-        now = self._utcnow_dt()
-        run_name = model_name or "annotations"
-        run_version = model_version or "import"
-        model_run_id = f"{run_name}__{run_version}__{now.isoformat()}"
-
+        upserted = 0
         with self.Session() as session:
             for _, row in cleaned_df.iterrows():
-                ann = Annotation(
-                    video_uid=row["video_uid"],
-                    annotation_type=row["annotation_type"],
-                    value_text=row.get("value_text"),
-                    value_num=row.get("value_num"),
-                    probability=row.get("probability"),
-                    t_start_sec=row.get("t_start_sec"),
-                    t_end_sec=row.get("t_end_sec"),
-                    model_name=row.get("model_name") or model_name,
-                    model_version=row.get("model_version") or model_version,
-                    created_at=row.get("created_at") or now,
-                    session_id=row.get("session_id") or str(uuid.uuid4()),
-                    individual_id=row.get("individual_id"),
+                existing = (
+                    session.query(ModelAnnotation)
+                    .filter(
+                        ModelAnnotation.video_id == row["video_id"],
+                        ModelAnnotation.model_name == row["model_name"],
+                        ModelAnnotation.annotation_type == row["annotation_type"],
+                    )
+                    .one_or_none()
                 )
-                session.add(ann)
+
+                if existing is None:
+                    existing = ModelAnnotation(
+                        video_id=row["video_id"],
+                        model_name=row["model_name"],
+                        annotation_type=row["annotation_type"],
+                    )
+                    session.add(existing)
+
+                existing.value_text = row.get("value_text")
+                existing.value_num = row.get("value_num")
+                existing.probability = row.get("probability")
+                existing.t_start_sec = row.get("t_start_sec")
+                existing.t_end_sec = row.get("t_end_sec")
+                existing.updated_at = self._utcnow_dt()
+                upserted += 1
+
             session.commit()
 
-        return {"inserted_rows": len(cleaned_df), "model_run_id": model_run_id}
+        return {"inserted_rows": int(len(cleaned_df)), "upserted_rows": int(upserted)}

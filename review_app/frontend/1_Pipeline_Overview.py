@@ -212,3 +212,4 @@ uv run streamlit run review_app/frontend/1_Pipeline_Overview.py
 
 
 display_pipeline_progress_section()
+
