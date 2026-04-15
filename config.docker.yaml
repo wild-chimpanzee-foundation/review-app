@@ -4,7 +4,7 @@ video_dir: /input_videos/
 
 # This directory will be volume-mounted for persistence.
 db_dir: /app/_local_db/
-db_filename: review_data.db
+db_filename: all_videos.db
 recreate_db_on_start: false
 
 # Valid species codes.
@@ -20,3 +20,4 @@ behavior_defaults:
 
 # Optional queue ranking CSV inside container path.
 # priority_csv_path: /app/docs/annotation_priority.csv
+

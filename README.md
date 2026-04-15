@@ -8,13 +8,6 @@ Standalone Streamlit review dashboard that runs in local-only mode with sqlite.
 - `uv` installed
 - A valid `config.yaml` at repo root, or set `LOCAL_CONFIG_YAML` to an alternate config file
 
-Optional `.env` values:
-
-```bash
-REVIEW_APP_USER_EMAIL="reviewer@local"
-LOCAL_CONFIG_YAML="./config.docker.yaml"
-```
-
 ## Run
 
 ```bash

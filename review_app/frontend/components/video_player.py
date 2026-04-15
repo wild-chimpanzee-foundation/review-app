@@ -12,7 +12,7 @@ def render_video_sidebar_settings() -> None:
     if "video_autoplay" not in st.session_state:
         st.session_state.video_autoplay = True
     if "video_muted" not in st.session_state:
-        st.session_state.video_muted = False
+        st.session_state.video_muted = True
     if "video_playback_speed" not in st.session_state:
         st.session_state.video_playback_speed = 1.0
 
@@ -29,7 +29,7 @@ def render_video_sidebar_settings() -> None:
         )
         st.session_state.video_playback_speed = st.select_slider(
             "Playback Speed",
-            options=[0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0],
+            options=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0],
             value=float(st.session_state.video_playback_speed),
             key="video_playback_speed_toggle",
         )
@@ -282,10 +282,7 @@ def apply_video_playback_rate(rate: float) -> None:
             applyRate();
           }}
 
-          const timer = setInterval(function() {{
-            tries += 1;
-            const video = hostDocument.querySelector("video");
-            if (video) {{
+          const timer = setInterval(function() {{ tries += 1; const video = hostDocument.querySelector("video"); if (video) {{
               video.controls = true;
               ensurePersistentRate(video);
               ensurePersistentProgress(video);

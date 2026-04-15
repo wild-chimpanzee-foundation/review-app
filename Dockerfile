@@ -4,6 +4,10 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 # Set the working directory
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # Enable bytecode compilation
 ENV UV_COMPILE_BYTECODE=1
 
@@ -25,8 +29,7 @@ EXPOSE 8501
 # Set environment variables
 ENV STREAMLIT_SERVER_PORT=8501
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
-# Point to the config in the root
 ENV LOCAL_CONFIG_YAML=/app/config.docker.yaml
 
 # Run the application
-CMD ["uv", "run", "streamlit", "run", "review_app/frontend/1_Pipeline_Overview.py"]
+CMD ["uv", "run", "streamlit", "run", "review_app/frontend/Overview.py"]

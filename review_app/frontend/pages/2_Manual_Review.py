@@ -10,7 +10,6 @@ from review_app.frontend.components.video_player import (
     render_video_sidebar_settings,
 )
 from review_app.frontend.data_access import (
-    clear_cached_queries,
     data_provider,
     get_queue_filter_options_cached,
     get_valid_species_cached,
@@ -35,6 +34,9 @@ def display_manual_review_section() -> None:
             value=False,
             key="manual_review_include_unranked",
         )
+    annotator_name = st.sidebar.text_input(
+        label="Annotator Name", value="default", key="annotator_name"
+    )
 
     query_filters = filters.to_query_params()
     query_filters["include_unranked"] = include_unranked
@@ -65,19 +67,23 @@ def display_manual_review_section() -> None:
     ):
         st.session_state.review_active_id = selected_video_id
         existing = video.get("manual_selections") or []
+        species_consensus = video.get("classification_consensus")
+        behavior = video.get("model_behavior_prediction", "unlabeled")
         if existing:
             st.session_state.review_selections = existing
         else:
-            default_species = valid_species[0]
-            default_end = video.get("duration_sec")
-            st.session_state.review_selections = [
-                {
-                    "species": default_species,
-                    "behavior": "unlabeled",
-                    "start_sec": 0.0,
-                    "end_sec": default_end,
-                }
-            ]
+            if not species_consensus or species_consensus == "UNKNOWN":
+                st.session_state.review_selections = []
+            else:
+                default_end = video.get("duration_sec")
+                st.session_state.review_selections = [
+                    {
+                        "species": species_consensus,
+                        "behavior": behavior,
+                        "start_sec": 0.0,
+                        "end_sec": default_end,
+                    }
+                ]
 
     if "review_undo_stack" not in st.session_state:
         st.session_state.review_undo_stack = []
@@ -86,7 +92,6 @@ def display_manual_review_section() -> None:
         st.session_state.review_queue_idx = max(0, st.session_state.review_queue_idx - 1)
         if "review_active_id" in st.session_state:
             del st.session_state.review_active_id
-        clear_cached_queries()
 
     def go_next():
         st.session_state.review_queue_idx = min(
@@ -94,16 +99,9 @@ def display_manual_review_section() -> None:
         )
         if "review_active_id" in st.session_state:
             del st.session_state.review_active_id
-        clear_cached_queries()
-
-    def on_select_change():
-        st.session_state.review_queue_idx = queue_ids.index(st.session_state.review_queue_select)
-        if "review_active_id" in st.session_state:
-            del st.session_state.review_active_id
-        clear_cached_queries()
 
     def submit_review(selections: list[dict]) -> None:
-        data_provider.update_manual_review(selected_video_id, selections)
+        data_provider.update_manual_review(selected_video_id, selections, annotator=annotator_name)
 
     st.info(f"Queue: {st.session_state.review_queue_idx + 1}/{len(queue_ids)} currently selected.")
     with st.container(border=True):
@@ -119,7 +117,9 @@ def display_manual_review_section() -> None:
                     "No local video path mapped for this video/user in `user_video_locations`."
                 )
             if not bool(video.get("is_video_valid", True)):
-                details = video.get("video_validation_details") or "ffprobe failed to open this video."
+                details = (
+                    video.get("video_validation_details") or "ffprobe failed to open this video."
+                )
                 st.error(f"Video validation failed: {details}")
             apply_video_playback_rate(float(st.session_state.get("video_playback_speed", 1.0)))
             st.caption(
@@ -133,7 +133,7 @@ def display_manual_review_section() -> None:
             new_selections = []
             for i, sel in enumerate(st.session_state.review_selections):
                 with st.container(border=True):
-                    rcol1, rcol2, rcol3, rcol4, rcol5 = st.columns([2, 2, 1.3, 1.3, 0.5])
+                    rcol1, rcol2, rcol3, rcol4, rcol5 = st.columns([2, 2, 1.3, 1.3, 1.0])
                     with rcol1:
                         s_idx = (
                             valid_species.index(sel["species"])
@@ -164,7 +164,7 @@ def display_manual_review_section() -> None:
                         end_sec_text = st.text_input("End (s)", value=end_text, key=f"end_{i}")
                     with rcol5:
                         st.write("")  # spacing
-                        if st.button("🗑️", key=f"del_{i}"):
+                        if st.button("DELETE", key=f"del_{i}", type="primary"):
                             st.session_state.review_selections.pop(i)
                             st.rerun()
                     end_sec = None
@@ -307,13 +307,13 @@ def display_manual_review_section() -> None:
             idx = queue_ids.index(qid)
             return f"({idx + 1})  {qid}"
 
-        st.selectbox(
-            "Select Video to Review",
-            options=queue_ids,
-            format_func=format_qid,
-            key="review_queue_select",
-            on_change=on_select_change,
-        )
+        # st.selectbox(
+        #     "Select Video to Review",
+        #     options=queue_ids,
+        #     format_func=format_qid,
+        #     key="review_queue_select",
+        #     on_change=on_select_change,
+        # )
 
     with nav_col3:
         st.button("Next", key="nav_next", on_click=go_next, shortcut="N")

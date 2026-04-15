@@ -43,7 +43,7 @@ def display_model_import_section() -> None:
         return
 
     st.subheader("Preview")
-    st.dataframe(source_df.head(20), use_container_width=True)
+    st.dataframe(source_df.head(20), width="stretch")
     st.caption(f"Rows in file: {len(source_df)}")
 
     try:
@@ -58,7 +58,7 @@ def display_model_import_section() -> None:
 
     if not errors_df.empty:
         st.warning("Some rows are invalid. Fix the CSV and re-upload.")
-        st.dataframe(errors_df, use_container_width=True)
+        st.dataframe(errors_df, width="stretch")
         return
 
     if cleaned_df.empty:

@@ -27,6 +27,7 @@ from sqlalchemy import (
     func,
     select,
     text,
+    event,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -158,14 +159,14 @@ def _probe_video(path: Path) -> tuple[float | None, bool, str | None]:
     ffprobe = _find_ffprobe()
     if ffprobe is None:
         # ffprobe not installed: treat all videos as valid with unknown duration.
-        return None, True, None
+        return None, False, "ffprobe executable not found"
 
     cmd = [
         ffprobe,
         "-v",
-        "error",  # suppress all non-error output
+        "error",
         "-show_entries",
-        "format=duration",
+        "format=duration:stream=duration",
         "-of",
         "json",
         str(path),
@@ -190,17 +191,21 @@ def _probe_video(path: Path) -> tuple[float | None, bool, str | None]:
 
     try:
         data = json.loads(result.stdout)
+        # Try format first, then fallback to the first stream
         raw_duration = data.get("format", {}).get("duration")
-        duration = float(raw_duration) if raw_duration is not None else None
+
+        if raw_duration is None:
+            streams = data.get("streams", [])
+            if streams:
+                raw_duration = streams[0].get("duration")
     except (json.JSONDecodeError, ValueError, TypeError):
         return None, False, "ffprobe returned unparseable JSON"
 
-    return duration, True, None
+    return raw_duration, True, None
 
 
 def _probe_many(
-    paths: list[Path],
-    max_workers: int = _FFPROBE_MAX_WORKERS,
+    paths: list[Path], max_workers: int = _FFPROBE_MAX_WORKERS, progress_callback: callable = None
 ) -> dict[Path, tuple[float | None, bool, str | None]]:
     """
     Probe *paths* in parallel and return a mapping of
@@ -213,14 +218,18 @@ def _probe_many(
 
     results: dict[Path, tuple[float | None, bool, str | None]] = {}
 
+    total = len(paths)
+
     with ThreadPoolExecutor(max_workers=min(max_workers, len(paths))) as pool:
         future_to_path = {pool.submit(_probe_video, p): p for p in paths}
-        for future in as_completed(future_to_path):
+        for i, future in enumerate(as_completed(future_to_path)):
             path = future_to_path[future]
             try:
                 results[path] = future.result()
             except Exception as exc:  # pragma: no cover – safety net
                 results[path] = (None, False, str(exc))
+            if progress_callback:
+                progress_callback(i + 1, total, path.name)
 
     return results
 
@@ -263,6 +272,7 @@ class LocalDataProvider:
                 ) from exc
 
         self.engine = create_engine(f"sqlite:///{self._db_path}")
+
         if self._needs_schema_reset():
             self.engine.dispose()
             if self._db_path.exists():
@@ -273,10 +283,21 @@ class LocalDataProvider:
                         f"Cannot reset incompatible sqlite DB at `{self._db_path}` due to permissions: {exc}"
                     ) from exc
             self.engine = create_engine(f"sqlite:///{self._db_path}")
+        from sqlalchemy import event
+
+        @event.listens_for(self.engine, "connect")
+        def set_sqlite_pragma(conn, _):
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")  # safe with WAL
+            conn.execute("PRAGMA cache_size=-64000")  # 64 MB page cache
+            conn.execute("PRAGMA temp_store=MEMORY")
+            conn.execute("PRAGMA mmap_size=268435456")  # 256 MB memory-mapped I/O
+
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
 
-        self._sync_videos_table()
+    def sync_videos(self, progress_callback):
+        self._sync_videos_table(progress_callback)
         self._sync_priority_table()
 
     def _needs_schema_reset(self) -> bool:
@@ -435,7 +456,7 @@ class LocalDataProvider:
             )
         return pd.DataFrame(rows)
 
-    def _sync_videos_table(self) -> None:
+    def _sync_videos_table(self, progress_callback=None) -> None:
         """
         Sync the filesystem scan into the ``videos`` table.
 
@@ -452,57 +473,77 @@ class LocalDataProvider:
                 session.commit()
                 return
 
-            # ----------------------------------------------------------------
-            # Determine which video_ids are genuinely new (not in DB yet).
-            # ----------------------------------------------------------------
-            all_existing_ids: set[str] = {
-                row[0] for row in session.execute(select(Video.video_id)).fetchall()
+            # Single query for all existing IDs + their probe status
+            existing_rows = {
+                row[0]: row
+                for row in session.execute(
+                    select(
+                        Video.video_id, Video.is_valid, Video.duration_sec, Video.validation_error
+                    )
+                ).fetchall()
             }
-            new_rows = scanned[~scanned["video_id"].isin(all_existing_ids)]
 
-            # ----------------------------------------------------------------
-            # Probe only the new videos – in parallel for speed.
-            # ----------------------------------------------------------------
-            probe_results: dict[str, tuple[float | None, bool, str | None]] = {}
+            new_video_ids = [r for r in scanned["video_id"] if r not in existing_rows]
+            new_rows = scanned[scanned["video_id"].isin(new_video_ids)]
+
+            # Probe only new videos
+            probe_results: dict[str, tuple] = {}
             if not new_rows.empty:
-                path_map: dict[Path, str] = {
+                path_map = {
                     Path(row["video_path"]): row["video_id"] for _, row in new_rows.iterrows()
                 }
-                raw = _probe_many(list(path_map.keys()))
-                probe_results = {path_map[p]: result for p, result in raw.items()}
+                probe_results = {
+                    path_map[p]: result
+                    for p, result in _probe_many(
+                        list(path_map), progress_callback=progress_callback
+                    ).items()
+                }
 
-            # ----------------------------------------------------------------
-            # Upsert all scanned rows.
-            # ----------------------------------------------------------------
-            for _, row in scanned.iterrows():
-                vid_id: str = row["video_id"]
-                existing = session.get(Video, vid_id)
+            # Bulk-insert new videos
+            if new_video_ids:
+                session.execute(
+                    Video.__table__.insert(),
+                    [
+                        {
+                            "video_id": row["video_id"],
+                            "video_path": row["video_path"],
+                            "camera_id": row["camera_id"],
+                            "created_at": row["created_at"].to_pydatetime(),
+                            "last_seen_at": now,
+                            **dict(
+                                zip(
+                                    ("duration_sec", "is_valid", "validation_error"),
+                                    probe_results.get(row["video_id"], (None, None, None)),
+                                )
+                            ),
+                        }
+                        for _, row in new_rows.iterrows()
+                    ],
+                )
 
-                if existing is None:
-                    # Brand-new video – attach probe result.
-                    duration, is_valid, validation_error = probe_results.get(
-                        vid_id, (None, None, None)
-                    )
-                    session.add(
-                        Video(
-                            video_id=vid_id,
-                            video_path=row["video_path"],
-                            camera_id=row["camera_id"],
-                            created_at=row["created_at"],
-                            duration_sec=duration,
-                            last_seen_at=now,
-                            is_valid=is_valid,
-                            validation_error=validation_error,
-                        )
-                    )
-                else:
-                    # Existing video – refresh filesystem metadata only.
-                    existing.video_path = row["video_path"]
-                    existing.camera_id = row["camera_id"]
-                    existing.created_at = row["created_at"]
-                    existing.last_seen_at = now
-                    # duration / is_valid / validation_error are intentionally
-                    # NOT overwritten so we don't re-probe on every startup.
+            # Bulk-update existing rows (path/camera/timestamp only)
+            existing_df = scanned[scanned["video_id"].isin(existing_rows)]
+            if not existing_df.empty:
+                session.execute(
+                    text("""
+                        UPDATE videos
+                        SET video_path = :video_path,
+                            camera_id  = :camera_id,
+                            created_at = :created_at,
+                            last_seen_at = :last_seen_at
+                        WHERE video_id = :video_id
+                    """),
+                    [
+                        {
+                            "video_id": row["video_id"],
+                            "video_path": row["video_path"],
+                            "camera_id": row["camera_id"],
+                            "created_at": row["created_at"].to_pydatetime(),
+                            "last_seen_at": now,
+                        }
+                        for _, row in existing_df.iterrows()
+                    ],
+                )
 
             session.commit()
 
@@ -633,8 +674,6 @@ class LocalDataProvider:
             return pd.read_sql(select(VideoLabel), conn)
 
     def get_queue_filter_options(self) -> dict[str, list[str]]:
-        self._sync_videos_table()
-        self._sync_priority_table()
         with self.engine.connect() as conn:
             camera_values = (
                 pd.read_sql(
@@ -689,9 +728,6 @@ class LocalDataProvider:
         }
 
     def get_video_queue(self, filters: dict) -> list[str]:
-        self._sync_videos_table()
-        self._sync_priority_table()
-
         params: dict[str, Any] = {
             "search_query": f"%{(filters.get('search_query') or '').strip().lower()}%",
             "selected_camera": filters.get("selected_camera", "All"),
@@ -840,7 +876,6 @@ class LocalDataProvider:
         return rows["video_id"].astype(str).tolist()
 
     def get_video_detail(self, video_id: str) -> dict | None:
-        self._sync_videos_table()
         with self.engine.connect() as conn:
             detail_df = pd.read_sql(
                 text(
@@ -870,6 +905,25 @@ class LocalDataProvider:
                           AND ma.value_text IS NOT NULL
                           AND TRIM(ma.value_text) <> ''
                         GROUP BY ma.video_id
+                    ),
+                    model_behavior AS (
+                        SELECT video_id, value_text AS behavior_prediction
+                        FROM (
+                            SELECT
+                                ma.video_id,
+                                ma.value_text,
+                                ma.probability,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY ma.video_id
+                                    ORDER BY COALESCE(ma.probability, 0.0) DESC
+                                ) AS rn
+                            FROM model_annotations ma
+                            WHERE ma.annotation_type = 'behavior'
+                                AND COALESCE(ma.probability, 0.0) >= :min_prob
+                                AND ma.value_text IS NOT NULL
+                                AND TRIM(ma.value_text) <> ''
+                        ) ranked
+                        WHERE rn = 1
                     ),
                     manual_summary AS (
                         SELECT
@@ -905,7 +959,8 @@ class LocalDataProvider:
                         vl.labeled_at,
                         ms.behavior_prediction,
                         ms.individual_count,
-                        COALESCE(mcs.classification_consensus, 'UNKNOWN') AS classification_consensus,
+                        COALESCE(msc.classification_consensus, 'UNKNOWN') AS classification_consensus,
+                        COALESCE(mbe.behavior_prediction, 'unlabeled') AS model_behavior_prediction,
                         CASE
                             WHEN vl.is_blank IS NOT NULL THEN CASE WHEN vl.is_blank = 1 THEN 'blank' ELSE 'non_blank' END
                             WHEN mb.rn = 1 AND LOWER(TRIM(mb.blank_non_blank_model_result)) IN ('blank', 'non_blank')
@@ -917,6 +972,8 @@ class LocalDataProvider:
                     LEFT JOIN video_labels vl ON vl.video_id = v.video_id
                     LEFT JOIN model_blank mb ON mb.video_id = v.video_id
                     LEFT JOIN manual_summary ms ON ms.video_id = v.video_id
+                    LEFT JOIN model_species_consensus msc ON msc.video_id = v.video_id
+                    LEFT JOIN model_behavior mbe ON mbe.video_id = v.video_id
                     LEFT JOIN review_state rs ON rs.video_id = v.video_id
                     WHERE v.video_id = :video_id
                     """
@@ -1123,27 +1180,6 @@ class LocalDataProvider:
         if selections:
             self.update_manual_review(snapshot["video_id"], selections)
 
-    def get_pipeline_progress_summary(self) -> pd.DataFrame:
-        df = self.get_all_videos()
-        if df.empty:
-            return pd.DataFrame(columns=["current_stage", "status", "count"])
-        return (
-            df.groupby(["current_stage", "status"], dropna=False).size().reset_index(name="count")
-        )
-
-    def get_flow_data(self) -> pd.DataFrame:
-        df = self.get_all_videos()
-        if df.empty:
-            return pd.DataFrame(columns=["source", "target", "value"])
-        needs = int((df["needs_manual_review"] == True).sum())  # noqa: E712
-        done = len(df) - needs
-        return pd.DataFrame(
-            [
-                {"source": "All Videos", "target": "Needs Review", "value": needs},
-                {"source": "All Videos", "target": "Completed", "value": done},
-            ]
-        )
-
     @staticmethod
     def _normalize_annotation_type(annotation_type: str) -> str:
         supported = {"blank_non_blank", "species", "behavior"}
@@ -1163,7 +1199,7 @@ class LocalDataProvider:
         if missing:
             raise ValueError(f"CSV must include columns: {', '.join(sorted(missing))}")
 
-        known_videos = set(self.get_all_videos()["video_id"].astype(str))
+        known_videos = self.get_video_queue(filters={})
         prepared_rows: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
 
@@ -1266,3 +1302,176 @@ class LocalDataProvider:
             session.commit()
 
         return {"inserted_rows": int(len(cleaned_df)), "upserted_rows": int(upserted)}
+
+    def get_overview_stats(self) -> dict[str, Any]:
+        """
+        Single-query overview for dashboards. All counts in one round-trip.
+        """
+        with self.engine.connect() as conn:
+            stats = {}
+
+            # ── Videos ──────────────────────────────────────────────────────
+            stats["videos"] = (
+                pd.read_sql(
+                    text("""
+                SELECT
+                    COUNT(*)                                            AS total,
+                    SUM(CASE WHEN is_valid = 1  THEN 1 ELSE 0 END)    AS valid,
+                    SUM(CASE WHEN is_valid = 0  THEN 1 ELSE 0 END)    AS invalid,
+                    SUM(CASE WHEN is_valid IS NULL THEN 1 ELSE 0 END)  AS unprobed,
+                    COUNT(DISTINCT camera_id)                          AS cameras,
+                    ROUND(SUM(COALESCE(duration_sec, 0)) / 3600.0, 2) AS total_hours
+                FROM videos
+            """),
+                    conn,
+                )
+                .iloc[0]
+                .to_dict()
+            )
+
+            stats["failed_videos"] = pd.read_sql(
+                text("""
+                    SELECT * FROM videos
+                    WHERE is_valid = 0
+                    """),
+                conn,
+            )
+
+            # ── Label / review progress ──────────────────────────────────────
+            stats["labeling"] = (
+                pd.read_sql(
+                    text("""
+                SELECT
+                    COUNT(DISTINCT v.video_id)                                         AS total_videos,
+                    COUNT(DISTINCT vl.video_id)                                        AS labeled,
+                    COUNT(DISTINCT v.video_id) - COUNT(DISTINCT vl.video_id)           AS unlabeled,
+                    SUM(CASE WHEN vl.is_blank = 1 THEN 1 ELSE 0 END)                  AS blank,
+                    SUM(CASE WHEN vl.is_blank = 0 THEN 1 ELSE 0 END)                  AS non_blank,
+                    COUNT(DISTINCT io.video_id)                                        AS has_observations
+                FROM videos v
+                LEFT JOIN video_labels     vl ON vl.video_id = v.video_id
+                LEFT JOIN individual_observations io ON io.video_id = v.video_id
+            """),
+                    conn,
+                )
+                .iloc[0]
+                .to_dict()
+            )
+
+            # ── Manual observations: species breakdown ───────────────────────
+            stats["species_counts"] = pd.read_sql(
+                text("""
+                SELECT
+                    species,
+                    COUNT(*)              AS observations,
+                    COUNT(DISTINCT video_id) AS videos
+                FROM individual_observations
+                GROUP BY species
+                ORDER BY observations DESC
+            """),
+                conn,
+            ).to_dict(orient="records")
+
+            # ── Manual observations: behavior breakdown ──────────────────────
+            stats["behavior_counts"] = pd.read_sql(
+                text("""
+                SELECT
+                    behavior,
+                    COUNT(*)              AS observations,
+                    COUNT(DISTINCT video_id) AS videos
+                FROM individual_observations
+                GROUP BY behavior
+                ORDER BY observations DESC
+            """),
+                conn,
+            ).to_dict(orient="records")
+
+            # ── Model annotation coverage ────────────────────────────────────
+            stats["model_coverage"] = pd.read_sql(
+                text("""
+                SELECT
+                    model_name,
+                    annotation_type,
+                    COUNT(DISTINCT video_id)              AS videos_covered,
+                    ROUND(AVG(probability), 3)            AS avg_probability,
+                    ROUND(MIN(probability), 3)            AS min_probability,
+                    ROUND(MAX(probability), 3)            AS max_probability
+                FROM model_annotations
+                GROUP BY model_name, annotation_type
+                ORDER BY model_name, annotation_type
+            """),
+                conn,
+            ).to_dict(orient="records")
+
+            # ── Model species predictions ────────────────────────────────────
+            stats["model_species_dist"] = pd.read_sql(
+                text("""
+                SELECT
+                    model_name,
+                    value_text           AS predicted_species,
+                    COUNT(*)             AS predictions,
+                    ROUND(AVG(probability), 3) AS avg_confidence
+                FROM model_annotations
+                WHERE annotation_type = 'species'
+                AND value_text IS NOT NULL
+                GROUP BY model_name, value_text
+                ORDER BY model_name, predictions DESC
+            """),
+                conn,
+            ).to_dict(orient="records")
+
+            # ── Agreement: model vs manual ───────────────────────────────────
+            # Where a manual label exists, how often does the top model agree?
+            stats["model_human_agreement"] = pd.read_sql(
+                text("""
+                WITH top_model AS (
+                    SELECT
+                        video_id,
+                        model_name,
+                        value_text AS predicted_species,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY video_id, model_name
+                            ORDER BY COALESCE(probability, 0) DESC
+                        ) AS rn
+                    FROM model_annotations
+                    WHERE annotation_type = 'species'
+                ),
+                manual AS (
+                    SELECT DISTINCT video_id, species AS manual_species
+                    FROM individual_observations
+                )
+                SELECT
+                    tm.model_name,
+                    COUNT(*)                                              AS compared,
+                    SUM(CASE WHEN tm.predicted_species = m.manual_species
+                            THEN 1 ELSE 0 END)                         AS agreed,
+                    ROUND(
+                        100.0 * SUM(CASE WHEN tm.predicted_species = m.manual_species
+                                        THEN 1 ELSE 0 END) / COUNT(*), 1
+                    )                                                     AS agreement_pct
+                FROM top_model tm
+                JOIN manual m ON m.video_id = tm.video_id
+                WHERE tm.rn = 1
+                GROUP BY tm.model_name
+            """),
+                conn,
+            ).to_dict(orient="records")
+
+            # ── Per-camera breakdown ─────────────────────────────────────────
+            stats["camera_summary"] = pd.read_sql(
+                text("""
+                SELECT
+                    v.camera_id,
+                    COUNT(*)                                               AS total_videos,
+                    SUM(CASE WHEN vl.video_id IS NOT NULL THEN 1 ELSE 0 END) AS labeled,
+                    SUM(CASE WHEN vl.is_blank = 1 THEN 1 ELSE 0 END)         AS blank,
+                    ROUND(SUM(COALESCE(v.duration_sec,0))/3600.0, 2)         AS hours
+                FROM videos v
+                LEFT JOIN video_labels vl ON vl.video_id = v.video_id
+                GROUP BY v.camera_id
+                ORDER BY total_videos DESC
+            """),
+                conn,
+            ).to_dict(orient="records")
+
+        return stats
