@@ -2,60 +2,44 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from review_app.frontend.data_access import get_overview_stats, get_queue_filter_options_cached
-from review_app.frontend.data_access import data_provider
+from review_app.frontend.data_access import (
+    data_provider,
+    get_overview_stats,
+    get_queue_filter_options_cached,
+)
 
 st.set_page_config(page_title="Overview", layout="wide")
 
 
 st.title("Overview")
 
-# Use a session_state flag so we don't ask to sync every time they change pages
-if "synced" not in st.session_state:
-    st.session_state.synced = False
+db_exists = data_provider.db_path.exists()
+has_videos = data_provider.has_videos_in_db() if db_exists else False
+needs_sync = not db_exists or not has_videos
 
-if not st.session_state.synced:
+
+def run_sync():
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    def update_ui(current, total, filename):
+        progress = current / total
+        progress_bar.progress(progress)
+
+        status_text.text(f"Processing {current}/{total}: {filename}")
+
+    data_provider.sync_videos(progress_callback=update_ui)
+
+    st.success("Sync complete!")
+    status_text.empty()
+    progress_bar.empty()
+    st.rerun()
+
+
+if needs_sync:
     st.info("New videos detected or first run initialization required.")
-
     if st.button("Start System Sync"):
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-
-        def update_ui(current, total, filename):
-            progress = current / total
-            progress_bar.progress(progress)
-            status_text.text(f"Processing {current}/{total}: {filename}")
-
-        # Call the method we moved out of __init__
-        data_provider.sync_videos(progress_callback=update_ui)
-
-        st.session_state.synced = True
-        st.success("Sync complete!")
-        status_text.empty()
-        progress_bar.empty()
-        st.rerun()  # Refresh to show the newly loaded data
-else:
-    st.success("Database is in sync with local storage.")
-
-
-with st.sidebar:
-    st.header("Filters")
-
-    min_confidence = st.slider(
-        "Min model confidence",
-        0.0,
-        1.0,
-        0.0,
-        0.05,
-        help="Hide model predictions below this threshold",
-    )
-    selected_cameras = st.multiselect(
-        "Cameras",
-        options=["All"] + get_queue_filter_options_cached()["camera_values"],
-        default=["All"],
-    )
-    date_range = st.date_input("Date range", value=[], help="Filter videos by creation date")
-    show_invalid = st.toggle("Include invalid videos", value=False)
+        run_sync()
 
 
 # ── Load data ────────────────────────────────────────────────────────────────
@@ -64,7 +48,31 @@ def load_stats():
     return get_overview_stats()
 
 
-if st.session_state.synced:
+if not needs_sync:
+    with st.sidebar:
+        st.header("Filters")
+
+        min_confidence = st.slider(
+            "Min model confidence",
+            0.0,
+            1.0,
+            0.0,
+            0.05,
+            help="Hide model predictions below this threshold",
+        )
+        selected_cameras = st.multiselect(
+            "Cameras",
+            options=["All"] + get_queue_filter_options_cached()["camera_values"],
+            default=["All"],
+        )
+        date_range = st.date_input("Date range", value=[], help="Filter videos by creation date")
+        show_invalid = st.toggle("Include invalid videos", value=False)
+
+        st.divider()
+        st.info("Run this if new videos were added to the video directory.")
+        if st.button("Re-run Videos Sync", help="Re-scan video directory and sync database"):
+            run_sync()
+
     stats = load_stats()
     # ── Top-level KPIs ────────────────────────────────────────────────────────────
     v = stats["videos"]

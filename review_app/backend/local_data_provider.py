@@ -24,10 +24,10 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     create_engine,
+    event,
     func,
     select,
     text,
-    event,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -283,7 +283,6 @@ class LocalDataProvider:
                         f"Cannot reset incompatible sqlite DB at `{self._db_path}` due to permissions: {exc}"
                     ) from exc
             self.engine = create_engine(f"sqlite:///{self._db_path}")
-        from sqlalchemy import event
 
         @event.listens_for(self.engine, "connect")
         def set_sqlite_pragma(conn, _):
@@ -630,6 +629,17 @@ class LocalDataProvider:
         return self.video_dir.exists() and any(
             p.suffix.lower() in VIDEO_EXTENSIONS for p in self.video_dir.rglob("*")
         )
+
+    @property
+    def db_path(self) -> Path:
+        return self._db_path
+
+    def has_videos_in_db(self) -> bool:
+        if not self._db_path.exists():
+            return False
+        with self.engine.connect() as conn:
+            result = conn.execute(text("SELECT COUNT(*) FROM videos")).fetchone()
+            return result[0] > 0 if result else False
 
     def get_valid_species(self) -> list[str]:
         return list(self._species)
@@ -1200,11 +1210,12 @@ class LocalDataProvider:
             raise ValueError(f"CSV must include columns: {', '.join(sorted(missing))}")
 
         known_videos = self.get_video_queue(filters={})
+        known_videos = [v.split(".")[0] for v in known_videos]
         prepared_rows: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
 
         for idx, row in src.iterrows():
-            row_num = int(idx) + 2
+            row_num = int(idx) + 1
             video_uid = str(row.get("video_uid", "")).strip()
             model_name = str(row.get("model_name", "")).strip()
             raw_type = str(row.get("annotation_type", "")).strip()
