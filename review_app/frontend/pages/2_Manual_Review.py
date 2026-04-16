@@ -126,6 +126,17 @@ def display_manual_review_section() -> None:
                 f"Playback speed: {float(st.session_state.get('video_playback_speed', 1.0)):.1f}x"
             )
 
+            st.subheader("All Current Annotations")
+            all_ann = get_video_annotations_cached(selected_video_id)
+            if not all_ann.empty:
+                # Format for display
+                display_df = all_ann[
+                    ["model_name", "annotation_type", "value_text", "probability", "created_at"]
+                ].copy()
+                display_df["probability"] = display_df["probability"].apply(format_probability)
+                st.dataframe(display_df, width="stretch", hide_index=True)
+            else:
+                st.info("No model annotations found for this video.")
         with col2:
             st.subheader("Manual Review")
 
@@ -265,18 +276,6 @@ def display_manual_review_section() -> None:
                     if st.button("Cancel", width="stretch"):
                         st.session_state.pending_blank_confirm = False
                         st.rerun()
-
-            st.subheader("All Current Annotations")
-            all_ann = get_video_annotations_cached(selected_video_id)
-            if not all_ann.empty:
-                # Format for display
-                display_df = all_ann[
-                    ["model_name", "annotation_type", "value_text", "probability", "created_at"]
-                ].copy()
-                display_df["probability"] = display_df["probability"].apply(format_probability)
-                st.dataframe(display_df, width="stretch", hide_index=True)
-            else:
-                st.info("No model annotations found for this video.")
 
             st.markdown(f"**Current Label:** `{video['manual_review_prediction'] or 'None'}`")
             st.markdown(f"**Consensus:** `{video['classification_consensus']}`")

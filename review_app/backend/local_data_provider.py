@@ -254,6 +254,7 @@ class LocalDataProvider:
         )
         self._priority_csv_path: Path | None = self._optional_path(cfg.get("priority_csv_path"))
         self._consensus_min_probability: float = float(cfg.get("consensus_min_probability", 0.0))
+        self._fuzzy_match_threshold: int = int(cfg.get("fuzzy_match_threshold", 80))
 
         db_filename = str(cfg.get("db_filename") or DEFAULT_DB_FILENAME).strip()
         if not db_filename:
@@ -421,13 +422,43 @@ class LocalDataProvider:
         except Exception:
             return {}
 
+    def _validate_species_fuzzy(
+        self, value_text: str
+    ) -> tuple[bool, str | None]:
+        """
+        Validate a species name against the known species list using fuzzy matching.
+
+        Args:
+            value_text: The species name to validate.
+
+        Returns:
+            A tuple of (is_valid, best_match). If is_valid is True, best_match is
+            the validated species name. If is_valid is False, best_match is the
+            closest match or None.
+        """
+        from thefuzz import process
+
+        if not value_text:
+            return False, None
+
+        value_text = str(value_text).strip()
+
+        if value_text in self._species:
+            return True, value_text
+
+        match, score = process.extractOne(value_text, self._species)
+        if score >= self._fuzzy_match_threshold:
+            return True, match
+
+        return False, None
+
     @staticmethod
     def _utcnow_dt() -> datetime:
         return datetime.now(timezone.utc)
 
     def _video_id_from_path(self, path: Path) -> str:
         try:
-            return str(path.relative_to(self.video_dir))
+            return str(path.relative_to(self.video_dir)).split(".")[0]
         except ValueError:
             return str(path.name)
 
@@ -1200,7 +1231,7 @@ class LocalDataProvider:
             )
         return normalized
 
-    def validate_model_csv(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def validate_model_csv(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[dict], list[dict]]:
         src = df.copy()
         src.columns = [str(c).strip() for c in src.columns]
 
@@ -1210,9 +1241,19 @@ class LocalDataProvider:
             raise ValueError(f"CSV must include columns: {', '.join(sorted(missing))}")
 
         known_videos = self.get_video_queue(filters={})
-        known_videos = [v.split(".")[0] for v in known_videos]
+
+        species_mask = (src["annotation_type"].str.strip().str.lower() == "species")
+        unique_species = src.loc[species_mask, "value_text"].dropna().str.strip().unique()
+        unique_species = {str(s) for s in unique_species if str(s).strip()}
+
+        species_fuzzy_cache: dict[str, tuple[bool, str | None]] = {}
+        for species_val in unique_species:
+            species_fuzzy_cache[species_val] = self._validate_species_fuzzy(species_val)
+
         prepared_rows: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
+        species_mappings: list[dict[str, str]] = []
+        unmapped_species: set[str] = set()
 
         for idx, row in src.iterrows():
             row_num = int(idx) + 1
@@ -1262,6 +1303,16 @@ class LocalDataProvider:
             value_num = pd.to_numeric(row.get("value_num"), errors="coerce")
             value_num = None if pd.isna(value_num) else float(value_num)
 
+            if annotation_type == "species" and value_text:
+                original_value = value_text
+                is_valid, best_match = species_fuzzy_cache.get(original_value, (False, None))
+                if not is_valid:
+                    unmapped_species.add(original_value)
+                    continue
+                if best_match != original_value:
+                    species_mappings.append({"original": original_value, "mapped_to": best_match})
+                value_text = best_match
+
             prepared_rows.append(
                 {
                     "video_id": video_uid,
@@ -1275,7 +1326,8 @@ class LocalDataProvider:
                 }
             )
 
-        return pd.DataFrame(prepared_rows), pd.DataFrame(errors)
+        unmapped_species_list = [{"original": s} for s in sorted(unmapped_species)]
+        return pd.DataFrame(prepared_rows), pd.DataFrame(errors), species_mappings, unmapped_species_list
 
     def import_model_csv(self, cleaned_df: pd.DataFrame) -> dict[str, Any]:
         if cleaned_df.empty:
