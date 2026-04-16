@@ -26,12 +26,10 @@ def display_manual_review_section() -> None:
 
     filter_options = get_queue_filter_options_cached()
     with st.sidebar.expander("Filter & Search", expanded=True):
-        filters = render_video_filters(
-            filter_options, key_prefix="manual_review", default_review="All", sidebar=True
-        )
+        filters = render_video_filters(filter_options, key_prefix="manual_review", sidebar=True)
         include_unranked = st.checkbox(
             "Include videos not listed in priority CSV",
-            value=False,
+            value=True,
             key="manual_review_include_unranked",
         )
     annotator_name = st.sidebar.text_input(

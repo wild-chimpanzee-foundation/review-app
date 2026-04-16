@@ -115,6 +115,31 @@ Index(
 )
 Index("idx_individual_video_time", IndividualObservation.video_id, IndividualObservation.start_sec)
 
+Index("idx_videos_is_valid", Video.is_valid)
+Index("idx_model_ann_type_value", ModelAnnotation.annotation_type, ModelAnnotation.value_text)
+# Covers: WHERE annotation_type='species' AND value_text=:ps  (possible_species filter)
+Index(
+    "idx_model_ann_type_text_video",
+    ModelAnnotation.annotation_type,
+    ModelAnnotation.value_text,
+    ModelAnnotation.video_id,
+)
+
+# Covers: WHERE annotation_type='blank_non_blank' inside effective_blank CTE
+Index(
+    "idx_model_ann_blank_probe",
+    ModelAnnotation.annotation_type,
+    ModelAnnotation.video_id,
+    ModelAnnotation.probability,
+)
+
+# Covers: WHERE video_id=? AND behavior=?  (behavior filter EXISTS)
+# (video_id + species already exists; behavior composite is missing)
+Index(
+    "idx_individual_behavior_video",
+    IndividualObservation.behavior,
+    IndividualObservation.video_id,
+)
 
 VIDEO_EXTENSIONS: frozenset[str] = frozenset(
     {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm", ".m4v"}
@@ -422,9 +447,7 @@ class LocalDataProvider:
         except Exception:
             return {}
 
-    def _validate_species_fuzzy(
-        self, value_text: str
-    ) -> tuple[bool, str | None]:
+    def _validate_species_fuzzy(self, value_text: str) -> tuple[bool, str | None]:
         """
         Validate a species name against the known species list using fuzzy matching.
 
@@ -716,205 +739,199 @@ class LocalDataProvider:
 
     def get_queue_filter_options(self) -> dict[str, list[str]]:
         with self.engine.connect() as conn:
-            camera_values = (
-                pd.read_sql(
-                    text(
-                        "SELECT DISTINCT camera_id FROM videos WHERE camera_id IS NOT NULL ORDER BY camera_id"
-                    ),
-                    conn,
-                )["camera_id"]
-                .astype(str)
-                .tolist()
-            )
-            species_values = (
-                pd.read_sql(
-                    text(
-                        "SELECT DISTINCT species FROM individual_observations "
-                        "WHERE species IS NOT NULL AND TRIM(species) <> '' ORDER BY species"
-                    ),
-                    conn,
-                )["species"]
-                .astype(str)
-                .tolist()
-            )
-            behavior_values = (
-                pd.read_sql(
-                    text(
-                        "SELECT DISTINCT behavior FROM individual_observations "
-                        "WHERE behavior IS NOT NULL AND TRIM(behavior) <> '' ORDER BY behavior"
-                    ),
-                    conn,
-                )["behavior"]
-                .astype(str)
-                .tolist()
-            )
-            possible_species_values = (
-                pd.read_sql(
-                    text(
-                        "SELECT DISTINCT value_text FROM model_annotations "
-                        "WHERE annotation_type='species' AND value_text IS NOT NULL "
-                        "AND TRIM(value_text) <> '' ORDER BY value_text"
-                    ),
-                    conn,
-                )["value_text"]
-                .astype(str)
-                .tolist()
+            df = pd.read_sql(
+                text(
+                    """
+                    SELECT 'camera' AS source, camera_id AS val FROM videos WHERE camera_id IS NOT NULL GROUP BY camera_id
+                    UNION ALL
+                    SELECT 'species', species FROM individual_observations WHERE species IS NOT NULL AND TRIM(species) <> '' GROUP BY species
+                    UNION ALL
+                    SELECT 'behavior', behavior FROM individual_observations WHERE behavior IS NOT NULL AND TRIM(behavior) <> '' GROUP BY behavior
+                    UNION ALL
+                    SELECT 'possible_species', value_text FROM model_annotations
+                    WHERE annotation_type = 'species' AND value_text IS NOT NULL AND TRIM(value_text) <> '' GROUP BY value_text
+                    """
+                ),
+                conn,
             )
 
-        return {
-            "camera_values": camera_values,
-            "species_values": species_values,
-            "possible_species_values": possible_species_values,
-            "behavior_values": behavior_values,
+        result: dict[str, list[str]] = {
+            "camera_values": [],
+            "species_values": [],
+            "behavior_values": [],
+            "possible_species_values": [],
         }
+        for _, row in df.iterrows():
+            source = str(row["source"])
+            val = str(row["val"])
+            if source == "camera":
+                result["camera_values"].append(val)
+            elif source == "species":
+                result["species_values"].append(val)
+            elif source == "behavior":
+                result["behavior_values"].append(val)
+            elif source == "possible_species":
+                result["possible_species_values"].append(val)
+
+        result["camera_values"].sort()
+        result["species_values"].sort()
+        result["behavior_values"].sort()
+        result["possible_species_values"].sort()
+
+        return result
 
     def get_video_queue(self, filters: dict) -> list[str]:
-        params: dict[str, Any] = {
-            "search_query": f"%{(filters.get('search_query') or '').strip().lower()}%",
-            "selected_camera": filters.get("selected_camera", "All"),
-            "selected_species": filters.get("selected_species", "All"),
-            "selected_possible_species": filters.get("selected_possible_species", "All"),
-            "selected_blank_non_blank": filters.get("selected_blank_non_blank", "All"),
-            "selected_behavior": filters.get("selected_behavior", "All"),
-            "selected_review": filters.get("selected_review", "All"),
-            "include_unranked": 1 if bool(filters.get("include_unranked", False)) else 0,
-        }
+        search_raw = (filters.get("search_query") or "").strip().lower()
+        selected_camera = filters.get("selected_camera", "All")
+        selected_species = filters.get("selected_species", "All")
+        selected_possible_species = filters.get("selected_possible_species", "All")
+        selected_blank_non_blank = filters.get("selected_blank_non_blank", "All")
+        selected_behavior = filters.get("selected_behavior", "All")
+        include_unranked = bool(filters.get("include_unranked", False))
 
-        sql = text(
-            """
-            WITH model_blank AS (
-                SELECT
-                    ma.video_id,
-                    ma.value_text AS blank_non_blank_model_result,
-                    ma.probability,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY ma.video_id
-                        ORDER BY COALESCE(ma.probability, -1.0) DESC, ma.updated_at DESC
-                    ) AS rn
-                FROM model_annotations ma
-                WHERE ma.annotation_type = 'blank_non_blank'
-            ),
+        params: dict[str, Any] = {}
+
+        # ── 1. Resolve priority count once in Python, not inside every result row ──
+        with self.engine.connect() as conn:
+            priority_count: int = (
+                conn.execute(text("SELECT COUNT(*) FROM video_priority")).scalar() or 0
+            )
+        has_priority = priority_count > 0
+
+        # ── 2. CTEs — only emit effective_blank when the filter is actually used ──
+        ctes: list[str] = []
+        need_blank_filter = selected_blank_non_blank not in ("All",)
+        if need_blank_filter:
+            ctes.append("""
             effective_blank AS (
                 SELECT
                     v.video_id,
                     CASE
-                        WHEN vl.is_blank IS NOT NULL THEN CASE WHEN vl.is_blank = 1 THEN 'blank' ELSE 'non_blank' END
-                        WHEN mb.rn = 1 AND LOWER(TRIM(mb.blank_non_blank_model_result)) IN ('blank', 'non_blank')
-                            THEN LOWER(TRIM(mb.blank_non_blank_model_result))
+                        WHEN vl.is_blank IS NOT NULL
+                            THEN CASE WHEN vl.is_blank = 1 THEN 'blank' ELSE 'non_blank' END
+                        WHEN mb.value_text IS NOT NULL
+                        AND LOWER(TRIM(mb.value_text)) IN ('blank', 'non_blank')
+                            THEN LOWER(TRIM(mb.value_text))
                         ELSE NULL
                     END AS blank_non_blank_final_result
                 FROM videos v
                 LEFT JOIN video_labels vl ON vl.video_id = v.video_id
-                LEFT JOIN model_blank mb ON mb.video_id = v.video_id
-            ),
-            review_state AS (
-                SELECT
-                    v.video_id,
-                    CASE
-                        WHEN vl.is_blank IS NULL
-                             AND NOT EXISTS (
-                                 SELECT 1 FROM individual_observations io WHERE io.video_id = v.video_id
-                             )
-                        THEN 1 ELSE 0
-                    END AS needs_manual_review
-                FROM videos v
-                LEFT JOIN video_labels vl ON vl.video_id = v.video_id
-            ),
-            priority_counts AS (
-                SELECT COUNT(*) AS cnt FROM video_priority
-            )
+                LEFT JOIN (
+                    SELECT video_id, value_text,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY video_id
+                            ORDER BY COALESCE(probability, -1.0) DESC, updated_at DESC
+                        ) AS rn
+                    FROM model_annotations
+                    WHERE annotation_type = 'blank_non_blank'
+                ) mb ON mb.video_id = v.video_id AND mb.rn = 1
+            )""")
+
+        # ── 3. JOINs — use INNER JOIN when include_unranked=False to let SQLite prune early ──
+        joins: list[str] = []
+        if has_priority:
+            if include_unranked:
+                joins.append("LEFT JOIN video_priority vp ON vp.video_id = v.video_id")
+            else:
+                joins.append("JOIN video_priority vp ON vp.video_id = v.video_id")
+        if need_blank_filter:
+            joins.append("LEFT JOIN effective_blank eb ON eb.video_id = v.video_id")
+
+        # ── 4. WHERE clauses — only emit conditions for active filters ──
+        where: list[str] = []
+
+        if search_raw:
+            params["sq"] = f"%{search_raw}%"
+            where.append("(LOWER(v.video_id) LIKE :sq OR LOWER(v.video_path) LIKE :sq)")
+
+        if selected_camera != "All":
+            params["camera"] = selected_camera
+            where.append("v.camera_id = :camera")
+
+        if selected_species != "All":
+            params["species"] = selected_species
+            where.append("""
+                EXISTS (
+                    SELECT 1 FROM individual_observations io
+                    WHERE io.video_id = v.video_id AND io.species = :species
+                )""")
+
+        if selected_possible_species != "All":
+            params["ps"] = selected_possible_species
+            where.append("""
+                EXISTS (
+                    SELECT 1 FROM model_annotations ma
+                    WHERE ma.video_id = v.video_id
+                    AND ma.annotation_type = 'species'
+                    AND ma.value_text = :ps
+                )""")
+
+        if selected_blank_non_blank == "Blank":
+            where.append("eb.blank_non_blank_final_result = 'blank'")
+        elif selected_blank_non_blank == "Non-Blank":
+            where.append("eb.blank_non_blank_final_result = 'non_blank'")
+        elif selected_blank_non_blank == "Unknown":
+            where.append("eb.blank_non_blank_final_result IS NULL")
+
+        if selected_behavior == "Has Behavior":
+            where.append("""
+                EXISTS (
+                    SELECT 1 FROM individual_observations io
+                    WHERE io.video_id = v.video_id
+                    AND io.behavior IS NOT NULL AND TRIM(io.behavior) <> ''
+                )""")
+        elif selected_behavior == "No Behavior":
+            where.append("""
+                NOT EXISTS (
+                    SELECT 1 FROM individual_observations io
+                    WHERE io.video_id = v.video_id
+                    AND io.behavior IS NOT NULL AND TRIM(io.behavior) <> ''
+                )""")
+        elif selected_behavior not in ("All", "Has Behavior", "No Behavior"):
+            params["behavior"] = selected_behavior
+            where.append("""
+                EXISTS (
+                    SELECT 1 FROM individual_observations io
+                    WHERE io.video_id = v.video_id AND io.behavior = :behavior
+                )""")
+
+        # ── 5. ORDER BY — simplified, no nested CASE, no pc.cnt ──
+        if has_priority and include_unranked:
+            # ranked videos first, then unranked, then by date
+            order_by = """
+                ORDER BY
+                    CASE WHEN vp.video_id IS NULL THEN 1 ELSE 0 END,
+                    vp.annotation_importance_score DESC,
+                    v.created_at DESC,
+                    v.video_id ASC"""
+        elif has_priority:
+            # INNER JOIN already filtered out unranked; just sort by score
+            order_by = """
+                ORDER BY
+                    vp.annotation_importance_score DESC,
+                    v.created_at DESC,
+                    v.video_id ASC"""
+        else:
+            order_by = "ORDER BY v.created_at DESC, v.video_id ASC"
+
+        # ── Assemble ──
+        cte_sql = ("WITH " + ",\n".join(ctes)) if ctes else ""
+        join_sql = "\n".join(joins)
+        where_sql = ("WHERE " + "\nAND ".join(where)) if where else ""
+
+        sql = text(f"""
+            {cte_sql}
             SELECT v.video_id
             FROM videos v
-            LEFT JOIN video_priority vp ON vp.video_id = v.video_id
-            LEFT JOIN effective_blank eb ON eb.video_id = v.video_id
-            LEFT JOIN review_state rs ON rs.video_id = v.video_id
-            CROSS JOIN priority_counts pc
-            WHERE
-                (
-                    :search_query = '%%'
-                    OR LOWER(v.video_id) LIKE :search_query
-                    OR LOWER(v.video_path) LIKE :search_query
-                )
-                AND (:selected_camera = 'All' OR v.camera_id = :selected_camera)
-                AND (
-                    :selected_species = 'All'
-                    OR EXISTS (
-                        SELECT 1
-                        FROM individual_observations io
-                        WHERE io.video_id = v.video_id AND io.species = :selected_species
-                    )
-                )
-                AND (
-                    :selected_possible_species = 'All'
-                    OR EXISTS (
-                        SELECT 1
-                        FROM model_annotations ma
-                        WHERE ma.video_id = v.video_id
-                          AND ma.annotation_type = 'species'
-                          AND ma.value_text = :selected_possible_species
-                    )
-                )
-                AND (
-                    :selected_blank_non_blank = 'All'
-                    OR (:selected_blank_non_blank = 'Blank' AND eb.blank_non_blank_final_result = 'blank')
-                    OR (:selected_blank_non_blank = 'Non-Blank' AND eb.blank_non_blank_final_result = 'non_blank')
-                    OR (:selected_blank_non_blank = 'Unknown' AND eb.blank_non_blank_final_result IS NULL)
-                )
-                AND (
-                    :selected_behavior = 'All'
-                    OR (
-                        :selected_behavior = 'Has Behavior'
-                        AND EXISTS (
-                            SELECT 1 FROM individual_observations io
-                            WHERE io.video_id = v.video_id
-                              AND io.behavior IS NOT NULL
-                              AND TRIM(io.behavior) <> ''
-                        )
-                    )
-                    OR (
-                        :selected_behavior = 'No Behavior'
-                        AND NOT EXISTS (
-                            SELECT 1 FROM individual_observations io
-                            WHERE io.video_id = v.video_id
-                              AND io.behavior IS NOT NULL
-                              AND TRIM(io.behavior) <> ''
-                        )
-                    )
-                    OR (
-                        :selected_behavior NOT IN ('All', 'Has Behavior', 'No Behavior')
-                        AND EXISTS (
-                            SELECT 1 FROM individual_observations io
-                            WHERE io.video_id = v.video_id
-                              AND io.behavior = :selected_behavior
-                        )
-                    )
-                )
-                AND (
-                    :selected_review = 'All'
-                    OR (:selected_review = 'Needs Review' AND rs.needs_manual_review = 1)
-                    OR (:selected_review = 'No Review' AND rs.needs_manual_review = 0)
-                )
-                AND (
-                    :include_unranked = 1
-                    OR pc.cnt = 0
-                    OR vp.video_id IS NOT NULL
-                )
-            ORDER BY
-                CASE
-                    WHEN pc.cnt > 0 THEN CASE WHEN vp.video_id IS NULL THEN 1 ELSE 0 END
-                    ELSE 0
-                END,
-                CASE WHEN pc.cnt > 0 THEN vp.annotation_importance_score END DESC,
-                v.created_at DESC,
-                v.video_id ASC
-            """
-        )
+            {join_sql}
+            {where_sql}
+            {order_by}
+        """)
 
         with self.engine.connect() as conn:
             rows = pd.read_sql(sql, conn, params=params)
-        if rows.empty:
-            return []
-        return rows["video_id"].astype(str).tolist()
+
+        return [] if rows.empty else rows["video_id"].astype(str).tolist()
 
     def get_video_detail(self, video_id: str) -> dict | None:
         with self.engine.connect() as conn:
@@ -1231,7 +1248,9 @@ class LocalDataProvider:
             )
         return normalized
 
-    def validate_model_csv(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[dict], list[dict]]:
+    def validate_model_csv(
+        self, df: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.DataFrame, list[dict], list[dict]]:
         src = df.copy()
         src.columns = [str(c).strip() for c in src.columns]
 
@@ -1240,9 +1259,9 @@ class LocalDataProvider:
         if missing:
             raise ValueError(f"CSV must include columns: {', '.join(sorted(missing))}")
 
-        known_videos = self.get_video_queue(filters={})
+        known_videos = set(self.get_video_queue(filters={}))
 
-        species_mask = (src["annotation_type"].str.strip().str.lower() == "species")
+        species_mask = src["annotation_type"].str.strip().str.lower() == "species"
         unique_species = src.loc[species_mask, "value_text"].dropna().str.strip().unique()
         unique_species = {str(s) for s in unique_species if str(s).strip()}
 
@@ -1327,7 +1346,12 @@ class LocalDataProvider:
             )
 
         unmapped_species_list = [{"original": s} for s in sorted(unmapped_species)]
-        return pd.DataFrame(prepared_rows), pd.DataFrame(errors), species_mappings, unmapped_species_list
+        return (
+            pd.DataFrame(prepared_rows),
+            pd.DataFrame(errors),
+            species_mappings,
+            unmapped_species_list,
+        )
 
     def import_model_csv(self, cleaned_df: pd.DataFrame) -> dict[str, Any]:
         if cleaned_df.empty:

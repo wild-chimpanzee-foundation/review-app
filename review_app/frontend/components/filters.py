@@ -8,7 +8,6 @@ class VideoFilters:
     search_query: str
     selected_species: str
     selected_camera: str
-    selected_review: str
     selected_possible_species: str
     selected_blank_non_blank: str
     selected_behavior: str
@@ -18,7 +17,6 @@ class VideoFilters:
             "search_query": self.search_query,
             "selected_species": self.selected_species,
             "selected_camera": self.selected_camera,
-            "selected_review": self.selected_review,
             "selected_possible_species": self.selected_possible_species,
             "selected_blank_non_blank": self.selected_blank_non_blank,
             "selected_behavior": self.selected_behavior,
@@ -26,16 +24,15 @@ class VideoFilters:
 
 
 def render_video_filters(
-    filter_options: dict, key_prefix: str, default_review: str = "All", sidebar=False
+    filter_options: dict, key_prefix: str, sidebar=False
 ) -> VideoFilters:
     if sidebar:
         f1, f2 = st.columns([1, 1])
         f3, f4 = st.columns([1, 1])
         f5, f6 = st.columns([1, 1])
-        f7, f8 = st.columns([1, 1])
     else:
         f1, f2, f3, f4 = st.columns([1, 1, 1, 1])
-        f5, f6, f7, f8 = st.columns([1, 1, 1, 1])
+        f5, f6 = st.columns([1, 1])
 
     camera_values = filter_options.get("camera_values", [])
     species_values = filter_options.get("species_values", [])
@@ -84,24 +81,10 @@ def render_video_filters(
             key=f"{key_prefix}_selected_behavior",
         )
 
-    with f7:
-        st.empty()
-
-    with f8:
-        selected_review = st.selectbox(
-            "Filter by Review Flag",
-            options=["All", "Needs Review", "No Review"],
-            index=["All", "Needs Review", "No Review"].index(default_review)
-            if default_review in ["All", "Needs Review", "No Review"]
-            else 0,
-            key=f"{key_prefix}_selected_review",
-        )
-
     return VideoFilters(
         search_query=search_query,
         selected_species=selected_species,
         selected_camera=selected_camera,
-        selected_review=selected_review,
         selected_possible_species=selected_possible_species,
         selected_blank_non_blank=selected_blank_non_blank,
         selected_behavior=selected_behavior,
