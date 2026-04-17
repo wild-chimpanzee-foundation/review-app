@@ -1,32 +1,11 @@
-# Directory that will be scanned (recursively) for video files.
-# Sub-folders are used as camera IDs — e.g. videos/CAM01/clip.mp4 → camera_id = CAM01
-video_dir: ../../input_videos/
-
-# Where annotation CSVs and config are written.
-# Created automatically on first run.
-db_dir: ./_local_db
-
-# Optional sqlite filename under db_dir.
+video_dir: /home/jonas/Downloads/input_videos
+db_dir: /home/jonas/.local/share/video_review_app
 db_filename: review_data.db
-
-# Optional: destructive reset of sqlite file on startup.
 recreate_db_on_start: false
-
-# Valid species codes.
-species_csv_path: ./docs/species.csv
+species_csv_path: /home/jonas/Documents/projects/review-app/docs/species.csv
 species_column: Nom_commun_anglais
-
-# Fuzzy matching threshold for species validation (0-100).
-# Species names with similarity below this threshold will be rejected.
 fuzzy_match_threshold: 80
-
-# Valid behavior codes.
-behaviors_csv_path: ./docs/species_behaviors.csv
 behavior_defaults:
-  - reacts_to_camera
-  - does_not_react
-
-# Optional queue ranking CSV. Columns:
-# - video_id
-# - annotation_importance_score
-# priority_csv_path: ./docs/annotation_priority.csv
+- reacts_to_camera
+- does_not_react
+behaviors_csv_path: /home/jonas/Documents/projects/review-app/docs/species_behaviors.csv

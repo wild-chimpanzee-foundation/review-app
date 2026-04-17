@@ -11,12 +11,6 @@ def setup_overview():
 
     stats = dp.get_overview_stats()
 
-    with ui.navigation_bar().classes("bg-primary text-white"):
-        ui.label("Video Annotation").classes("text-xl font-bold")
-        ui.space()
-        ui.button("Overview", on_click=lambda: ui.navigate.to("/overview"))
-        ui.button("Review", on_click=lambda: ui.navigate.to("/review"))
-
     with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-6"):
         ui.label("Overview").classes("text-2xl font-bold")
 
@@ -72,10 +66,12 @@ def setup_overview():
                     pct = 100 * b["observations"] / max(total_obs, 1)
                     with ui.row().classes("w-full items-center"):
                         ui.label(b["behavior"]).classes("flex-grow")
-                        ui.label(f"{b['observations']} ({pct:.1f}%)").classes("text-sm text-gray-600")
-                        ui.linear_progress(
-                            value=pct / 100, show_value=False
-                        ).props("color=primary")
+                        ui.label(f"{b['observations']} ({pct:.1f}%)").classes(
+                            "text-sm text-gray-600"
+                        )
+                        ui.linear_progress(value=pct / 100, show_value=False).props(
+                            "color=primary"
+                        )
             else:
                 ui.label("No behavior data yet").classes("text-gray-500")
 
