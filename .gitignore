@@ -1,8 +1,41 @@
+# Virtual environment
 .venv/
+
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Testing
 .pytest_cache/
 .ruff_cache/
-*.pyc
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 .DS_Store
+
+# Environment
 .env
+.env.local
+
+# App data
 _local_db/
+config.yaml
+*.db
+
+# Downloaded/bundled tools
+ffmpeg/
+
+# NiceGUI
+.nicegui/
