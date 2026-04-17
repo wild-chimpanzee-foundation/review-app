@@ -5,6 +5,7 @@ import pandas as pd
 from nicegui import run, ui
 
 from review_app.app.state import get_data_provider, get_state_val, set_data_provider, set_state_val
+from review_app.backend.local_data_provider import LocalDataProvider
 
 
 def _make_serializable(val):
@@ -20,9 +21,6 @@ def _df_to_records(df: pd.DataFrame) -> list[dict]:
     for _, row in df.head(500).iterrows():
         records.append({k: _make_serializable(v) for k, v in row.items()})
     return records
-
-
-from review_app.backend.local_data_provider import LocalDataProvider
 
 
 async def setup_model_import():
@@ -211,7 +209,9 @@ async def setup_model_import():
                                     species_mask, "value_text"
                                 ].replace(mappings)
 
-                            result = await run.io_bound(dp.import_model_csv, cleaned_df=df_to_import)
+                            result = await run.io_bound(
+                                dp.import_model_csv, cleaned_df=df_to_import
+                            )
                             ui.notify(
                                 f"Imported {result.get('inserted_rows', 0)} rows!", type="positive"
                             )

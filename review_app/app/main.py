@@ -1,18 +1,28 @@
+import mimetypes
 import sys
 import threading
 import webbrowser
 from pathlib import Path
 
 import webview
+from nicegui import app, run, ui
 from nicegui import core as nicegui_core
-from nicegui import run, ui
+
+# Ensure common video mimetypes are registered correctly for reliable serving
+mimetypes.add_type("video/mp4", ".mp4")
+mimetypes.add_type("video/x-msvideo", ".avi")
+mimetypes.add_type("video/quicktime", ".mov")
+mimetypes.add_type("video/x-matroska", ".mkv")
+mimetypes.add_type("video/webm", ".webm")
+mimetypes.add_type("video/x-ms-wmv", ".wmv")
+mimetypes.add_type("video/x-flv", ".flv")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from review_app.app.setup_wizard import setup_wizard
-from review_app.app.state import set_data_provider
-from review_app.app.theme import apply_theme
-from review_app.backend.local_data_provider import LocalDataProvider
+from review_app.app.setup_wizard import setup_wizard  # noqa: E402
+from review_app.app.state import set_data_provider  # noqa: E402
+from review_app.app.theme import apply_theme  # noqa: E402
+from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
 
 CONFIG_PATH = Path("config.yaml")
 
@@ -29,7 +39,13 @@ def create_window():
 
 
 def start_nicegui():
-    ui.run(host="localhost", port=8080, show=False, reload=False, storage_secret="video_annotation_secret_key")
+    ui.run(
+        host="localhost",
+        port=8080,
+        show=False,
+        reload=False,
+        storage_secret="video_annotation_secret_key",
+    )
 
 
 async def main_page_content():
@@ -43,6 +59,9 @@ async def main_page_content():
             dp = LocalDataProvider(str(CONFIG_PATH))
             set_data_provider(dp)
 
+            # Serve videos through NiceGUI's media server to ensure correct headers/streaming
+            app.add_media_files("/media", dp.video_dir)
+
             with ui.header().classes("bg-primary text-white items-center"):
                 ui.label("Video Annotation").classes("text-xl font-bold")
                 ui.space()
@@ -54,7 +73,7 @@ async def main_page_content():
                     ui.label("Welcome to Video Annotation").classes("text-2xl")
                     ui.label(f"Database: {dp.db_path}").classes("text-sm text-gray-600")
                     ui.label(f"Video directory: {dp.video_dir}").classes("text-sm text-gray-600")
-                    
+
                     has_videos = await run.io_bound(dp.has_videos_in_db)
                     ui.label(f"Videos in DB: {'Yes' if has_videos else 'No'}").classes(
                         "text-sm text-gray-600"
@@ -100,12 +119,14 @@ async def main_page_content():
 async def overview_page_content():
     apply_theme()
     from review_app.app.pages.overview import setup_overview
+
     await setup_overview()
 
 
 async def review_page_content():
     apply_theme()
     from review_app.app.pages.review import setup_review
+
     await setup_review()
 
 
@@ -133,7 +154,13 @@ def run_app(browser_only=False):
 
     if browser_only:
         webbrowser.open("http://localhost:8080")
-        ui.run(host="localhost", port=8080, show=True, reload=False, storage_secret="video_annotation_secret_key")
+        ui.run(
+            host="localhost",
+            port=8080,
+            show=True,
+            reload=False,
+            storage_secret="video_annotation_secret_key",
+        )
     else:
         threading.Thread(target=start_nicegui, daemon=True).start()
         create_window()

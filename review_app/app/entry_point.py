@@ -28,10 +28,10 @@ def _get_config_path() -> Path:
     return app_dir / "config.yaml"
 
 
-from review_app.app.setup_wizard import setup_wizard
-from review_app.app.state import is_dark_mode, set_data_provider, set_dark_mode
-from review_app.app.theme import apply_theme
-from review_app.backend.local_data_provider import LocalDataProvider
+from review_app.app.setup_wizard import setup_wizard  # noqa: E402
+from review_app.app.state import is_dark_mode, set_dark_mode, set_data_provider  # noqa: E402
+from review_app.app.theme import apply_theme  # noqa: E402
+from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
 
 CONFIG_PATH = _get_config_path()
 
@@ -62,6 +62,9 @@ def shared_header():
                     "flat color=white"
                 )
                 ui.button("Import", on_click=lambda: ui.navigate.to("/model-import")).props(
+                    "flat color=white"
+                )
+                ui.button("Settings", on_click=lambda: ui.navigate.to("/settings")).props(
                     "flat color=white"
                 )
 
@@ -114,9 +117,7 @@ class GUI:
                             ui.label(str(dp.video_dir)).classes("text-body2")
                         with ui.card().classes("col"):
                             ui.label("Videos in DB").classes("text-caption text-grey-6")
-                            ui.label("Yes" if has_videos else "No").classes(
-                                "text-body2"
-                            )
+                            ui.label("Yes" if has_videos else "No").classes("text-body2")
 
                     if not has_videos:
                         with ui.card().classes("full-width"):
@@ -188,6 +189,12 @@ class GUI:
 
         setup_wizard(on_complete_callback=on_setup_complete, config_path=CONFIG_PATH)
 
+    async def settings_page(self):
+        from review_app.app.pages.settings import setup_settings
+
+        shared_header()
+        await setup_settings()
+
     def _sync_videos(self, data_provider):
         from nicegui import run, ui
 
@@ -206,7 +213,7 @@ class GUI:
             progress.value = 1.0
             status.text = "Sync complete!"
             ui.notify("Video sync complete!", type="positive")
-        
+
         ui.timer(0.1, do_sync, once=True)
 
     def start(self, dev_mode=False):
@@ -228,6 +235,7 @@ class GUI:
         ui.page("/overview")(self.overview_page)
         ui.page("/review")(self.review_page)
         ui.page("/setup")(self.setup_page)
+        ui.page("/settings")(self.settings_page)
         ui.page("/model-import")(self.model_import_page)
 
         ui.add_body_html(
@@ -243,6 +251,8 @@ class GUI:
                         window.location.href = '/review';
                     } else if (e.key === 'm' || e.key === 'M') {
                         window.location.href = '/model-import';
+                    } else if (e.key === 's' || e.key === 'S') {
+                        window.location.href = '/settings';
                     }
                 });
             </script>

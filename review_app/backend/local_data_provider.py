@@ -54,6 +54,7 @@ class Video(Base):
     last_seen_at = Column(DateTime, nullable=False, default=func.now())
     # Populated by ffprobe on first ingest; never overwritten for existing rows.
     is_valid = Column(Boolean, nullable=True)
+    is_web_safe = Column(Boolean, nullable=True)
     validation_error = Column(String, nullable=True)
 
 
@@ -184,9 +185,9 @@ def _find_ffprobe() -> str | None:
     return shutil.which("ffprobe")
 
 
-def _probe_video(path: Path) -> tuple[float | None, bool, str | None]:
+def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
     """
-    Run ffprobe on *path* and return ``(duration_sec, is_valid, error_message)``.
+    Run ffprobe on *path* and return ``(duration_sec, is_valid, is_web_safe, error_message)``.
 
     Uses a single fast JSON query on the *format* section only – no stream
     decoding, so it completes in milliseconds even for large files.
@@ -194,19 +195,20 @@ def _probe_video(path: Path) -> tuple[float | None, bool, str | None]:
     Returns:
         duration_sec   – float seconds, or None if not parseable
         is_valid       – True when the container is readable by ffprobe
+        is_web_safe    – True if codec/container are known to work in browsers
         error_message  – human-readable string when is_valid is False, else None
     """
     ffprobe = _find_ffprobe()
     if ffprobe is None:
         # ffprobe not installed: treat all videos as valid with unknown duration.
-        return None, False, "ffprobe executable not found"
+        return None, False, False, "ffprobe executable not found"
 
     cmd = [
         ffprobe,
         "-v",
         "error",
         "-show_entries",
-        "format=duration:stream=duration",
+        "format=duration,format_name:stream=duration,codec_name,codec_type",
         "-of",
         "json",
         str(path),
@@ -220,14 +222,14 @@ def _probe_video(path: Path) -> tuple[float | None, bool, str | None]:
             timeout=_FFPROBE_TIMEOUT_SEC,
         )
     except subprocess.TimeoutExpired:
-        return None, False, f"ffprobe timed out after {_FFPROBE_TIMEOUT_SEC}s"
+        return None, False, False, f"ffprobe timed out after {_FFPROBE_TIMEOUT_SEC}s"
     except OSError as exc:
-        return None, False, f"ffprobe OS error: {exc}"
+        return None, False, False, f"ffprobe OS error: {exc}"
 
     if result.returncode != 0:
         stderr_text = result.stderr.decode(errors="replace").strip()
         # Keep only the first 200 chars to avoid bloating the DB.
-        return None, False, stderr_text[:200] or "ffprobe returned non-zero exit code"
+        return None, False, False, stderr_text[:200] or "ffprobe returned non-zero exit code"
 
     try:
         data = json.loads(result.stdout)
@@ -238,25 +240,39 @@ def _probe_video(path: Path) -> tuple[float | None, bool, str | None]:
             streams = data.get("streams", [])
             if streams:
                 raw_duration = streams[0].get("duration")
-    except (json.JSONDecodeError, ValueError, TypeError):
-        return None, False, "ffprobe returned unparseable JSON"
 
-    return raw_duration, True, None
+        # Web safe check
+        format_name = data.get("format", {}).get("format_name", "").lower()
+        streams = data.get("streams", [])
+        video_codec = next(
+            (s.get("codec_name", "") for s in streams if s.get("codec_type") == "video"), ""
+        ).lower()
+
+        # Simple web-safe logic: MP4/MOV/WebM with H.264/VP8/VP9/AV1
+        safe_formats = {"mp4", "mov", "webm", "ogg"}
+        safe_codecs = {"h264", "vp8", "vp9", "av1", "theora"}
+
+        is_web_safe = any(f in format_name for f in safe_formats) and video_codec in safe_codecs
+
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return None, False, False, "ffprobe returned unparseable JSON"
+
+    return raw_duration, True, is_web_safe, None
 
 
 def _probe_many(
     paths: list[Path], max_workers: int = _FFPROBE_MAX_WORKERS, progress_callback: callable = None
-) -> dict[Path, tuple[float | None, bool, str | None]]:
+) -> dict[Path, tuple[float | None, bool, bool, str | None]]:
     """
     Probe *paths* in parallel and return a mapping of
-    ``path -> (duration_sec, is_valid, error_message)``.
+    ``path -> (duration_sec, is_valid, is_web_safe, error_message)``.
 
     Falls back gracefully when ffprobe is absent.
     """
     if not paths:
         return {}
 
-    results: dict[Path, tuple[float | None, bool, str | None]] = {}
+    results: dict[Path, tuple[float | None, bool, bool, str | None]] = {}
 
     total = len(paths)
 
@@ -267,7 +283,7 @@ def _probe_many(
             try:
                 results[path] = future.result()
             except Exception as exc:  # pragma: no cover – safety net
-                results[path] = (None, False, str(exc))
+                results[path] = (None, False, False, str(exc))
             if progress_callback:
                 progress_callback(i + 1, total, path.name)
 
@@ -496,9 +512,9 @@ class LocalDataProvider:
 
     def _video_id_from_path(self, path: Path) -> str:
         try:
-            return str(path.relative_to(self.video_dir)).split(".")[0]
+            return path.relative_to(self.video_dir).stem
         except ValueError:
-            return str(path.name)
+            return str(path.stem)
 
     def _scan_videos(self) -> pd.DataFrame:
         if not self.video_dir.exists():
@@ -580,8 +596,13 @@ class LocalDataProvider:
                             "last_seen_at": now,
                             **dict(
                                 zip(
-                                    ("duration_sec", "is_valid", "validation_error"),
-                                    probe_results.get(row["video_id"], (None, None, None)),
+                                    (
+                                        "duration_sec",
+                                        "is_valid",
+                                        "is_web_safe",
+                                        "validation_error",
+                                    ),
+                                    probe_results.get(row["video_id"], (None, None, None, None)),
                                 )
                             ),
                         }
@@ -624,9 +645,12 @@ class LocalDataProvider:
             video = session.get(Video, video_id)
             if video is None:
                 raise ValueError(f"Unknown video_id: {video_id!r}")
-            duration, is_valid, validation_error = _probe_video(Path(video.video_path))
+            duration, is_valid, is_web_safe, validation_error = _probe_video(
+                Path(video.video_path)
+            )
             video.duration_sec = duration
             video.is_valid = is_valid
+            video.is_web_safe = is_web_safe
             video.validation_error = validation_error
             session.commit()
 
@@ -649,13 +673,14 @@ class LocalDataProvider:
 
             now_valid = 0
             still_invalid = 0
-            for path, (duration, is_valid, validation_error) in probe_results.items():
+            for path, (duration, is_valid, is_web_safe, validation_error) in probe_results.items():
                 vid_id = path_map[path]
                 video = session.get(Video, vid_id)
                 if video is None:
                     continue
                 video.duration_sec = duration
                 video.is_valid = is_valid
+                video.is_web_safe = is_web_safe
                 video.validation_error = validation_error
                 if is_valid:
                     now_valid += 1
@@ -693,6 +718,79 @@ class LocalDataProvider:
                 except Exception:
                     pass
             session.commit()
+
+    def transcode_video(self, video_id: str) -> dict[str, Any]:
+        """
+        Transcode a video to web-safe H.264 MP4 using ffmpeg.
+        The original file is renamed to .orig and the new file takes the original name.
+        """
+        with self.Session() as session:
+            video = session.get(Video, video_id)
+            if video is None:
+                raise ValueError(f"Unknown video_id: {video_id!r}")
+
+            input_path = Path(video.video_path)
+            if not input_path.exists():
+                raise FileNotFoundError(f"Video file not found: {input_path}")
+
+            # Create a temporary output path
+            output_path = input_path.with_suffix(".temp.mp4")
+
+            # ffmpeg command for web-safe H.264 MP4
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(input_path),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "23",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+
+            try:
+                subprocess.run(cmd, capture_output=True, text=True, check=True)
+            except subprocess.CalledProcessError as exc:
+                if output_path.exists():
+                    output_path.unlink()
+                return {"success": False, "error": f"ffmpeg failed: {exc.stderr}"}
+
+            # Swap files: original -> .orig, temp -> original extension (but it's now mp4)
+            # Actually, better to keep .mp4 suffix for clarity and mimetype detection
+            final_path = input_path.with_suffix(".mp4")
+
+            if input_path != final_path:
+                # If original was AVI, rename original to .avi.orig
+                orig_backup = input_path.with_suffix(input_path.suffix + ".orig")
+                input_path.rename(orig_backup)
+            else:
+                # If original was MP4 but not web-safe (e.g. HEVC), rename to .mp4.orig
+                orig_backup = input_path.with_suffix(".mp4.orig")
+                input_path.rename(orig_backup)
+
+            output_path.rename(final_path)
+
+            # Update database
+            video.video_path = str(final_path)
+            video.is_web_safe = True
+            # Re-probe to get correct duration and metadata
+            duration, is_valid, is_web_safe, error = _probe_video(final_path)
+            video.duration_sec = duration
+            video.is_valid = is_valid
+            video.is_web_safe = is_web_safe
+
+            session.commit()
+
+            return {"success": True, "new_path": str(final_path)}
 
     def check_db_exists(self) -> bool:
         return self.video_dir.exists() and any(
@@ -1049,6 +1147,7 @@ class LocalDataProvider:
                         v.duration_sec,
                         v.created_at,
                         v.is_valid AS is_video_valid,
+                        v.is_web_safe,
                         v.validation_error AS video_validation_details,
                         vl.is_blank,
                         vl.labeled_at,
