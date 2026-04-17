@@ -123,7 +123,7 @@ def run_app():
         ui.navigate.to("/setup")
 
     threading.Thread(target=start_nicegui, daemon=True).start()
-    webbrowser.open("http://localhost:8080/setup")
+    create_window()
     webview.start()
 
 
