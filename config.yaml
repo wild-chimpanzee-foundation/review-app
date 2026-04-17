@@ -1,6 +1,6 @@
-video_dir: /home/jonas/Downloads/input_videos
+video_dir: /mnt/EA59000358FFCBF7/ML/compressed_videos/GKNP_2025_videos_resized/
 db_dir: /home/jonas/.local/share/video_review_app
-db_filename: review_data.db
+db_filename: review_data2.db
 recreate_db_on_start: false
 species_csv_path: /home/jonas/Documents/projects/review-app/review_app/data/species.csv
 species_column: Nom_commun_anglais

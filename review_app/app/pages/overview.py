@@ -1,15 +1,17 @@
-from pathlib import Path
+import asyncio
 
 from nicegui import run, ui
 
+from review_app.app.setup_wizard import get_config_path
 from review_app.app.state import get_data_provider, set_data_provider
+from review_app.app.utils import sync_with_progress
 from review_app.backend.local_data_provider import LocalDataProvider
 
 
 async def setup_overview():
     dp = get_data_provider()
     if not dp:
-        config_path = Path("config.yaml")
+        config_path = get_config_path()
         if config_path.exists():
             dp = LocalDataProvider(str(config_path))
             set_data_provider(dp)
@@ -20,27 +22,26 @@ async def setup_overview():
             return
 
     if not await run.io_bound(dp.has_videos_in_db):
-        sync_container = ui.column().classes("w-full q-pa-lg items-center")
+        with ui.column().classes("w-full q-pa-lg items-center"):
+            ui.label("No videos in database").classes("text-h5 q-mb-sm")
+            ui.label("Sync videos when you're ready.").classes("text-body2 text-grey-7 q-mb-md")
 
-        with sync_container:
-            ui.label("Syncing videos...").classes("text-h5 q-mb-md")
-            progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
-            status = ui.label("Starting...")
+            sync_dialog = ui.dialog()
 
-        def update_progress(current, total, filename):
-            if total > 0:
-                progress.value = current / total
-                status.text = f"Processing {current}/{total}: {filename}"
-            else:
-                status.text = f"Scanning: {filename}"
+            async def run_sync():
+                sync_dialog.clear()
+                with sync_dialog, ui.card().classes("q-pa-lg"):
+                    ui.label("Syncing videos...").classes("text-h6 q-mb-md")
+                    progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
+                    status = ui.label("Starting...")
 
-        await run.io_bound(dp.sync_videos, progress_callback=update_progress)
-        progress.value = 1.0
-        ui.notify("Videos synced!", type="positive")
-        sync_container.clear()
-        with sync_container:
-            ui.label("Videos synced! Loading overview...").classes("text-h5")
-        ui.timer(0.5, lambda: ui.navigate.to("/overview"), once=True)
+                sync_dialog.open()
+                await sync_with_progress(dp, progress=progress, status=status)
+                ui.notify("Videos synced!", type="positive")
+                sync_dialog.close()
+                ui.navigate.to("/overview")
+
+            ui.button("Sync Videos", icon="sync", color="primary", on_click=run_sync)
         return
 
     stats = await run.io_bound(dp.get_overview_stats)

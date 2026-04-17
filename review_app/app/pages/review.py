@@ -3,6 +3,7 @@ from pathlib import Path
 
 from nicegui import run, ui
 
+from review_app.app.setup_wizard import get_config_path
 from review_app.app.state import (
     get_annotator_name,
     get_current_idx,
@@ -39,8 +40,42 @@ def _df_to_records(df, limit=10):
     return records
 
 
+def _needs_browser_transcode(video: dict) -> bool:
+    video_path = str(video.get("video_path") or "")
+    suffix = Path(video_path).suffix.lower()
+    browser_suffixes = {".mp4", ".webm", ".ogg"}
+    return bool(video.get("is_web_safe") is False or suffix not in browser_suffixes)
+
+
+def _default_species_from_annotations(model_ann, valid_species, fallback_species: str) -> str:
+    if model_ann is None or model_ann.empty:
+        return fallback_species
+    if "annotation_type" not in model_ann.columns or "value_text" not in model_ann.columns:
+        return fallback_species
+
+    species_rows = model_ann[
+        (model_ann["annotation_type"] == "species")
+        & model_ann["value_text"].notna()
+        & (model_ann["value_text"].astype(str).str.strip() != "")
+    ].copy()
+    if species_rows.empty:
+        return fallback_species
+
+    if "probability" not in species_rows.columns:
+        return fallback_species
+
+    species_rows["probability"] = species_rows["probability"].fillna(0.0).astype(float)
+    probs = species_rows.groupby("value_text", as_index=False)["probability"].sum()
+    probs = probs.sort_values("probability", ascending=False)
+    if probs.empty:
+        return fallback_species
+
+    candidate = str(probs.iloc[0]["value_text"]).strip()
+    return candidate if candidate in valid_species else fallback_species
+
+
 @ui.refreshable
-def render_annotation_section(video, valid_species, dp):
+def render_annotation_section(video, valid_species, dp, default_species):
     selections = get_selections()
     user_cleared_all = get_state_val("user_cleared_all", False)
 
@@ -50,8 +85,8 @@ def render_annotation_section(video, valid_species, dp):
             set_selections(list(existing))
             selections = existing
         else:
-            species = video.get("classification_consensus", "unknown")
-            behavior = video.get("model_behavior_prediction", "unlabeled")
+            species = default_species or video.get("classification_consensus", "unknown")
+            behavior = "does_not_react"
             if species and species != "UNKNOWN":
                 selections = [
                     {
@@ -127,7 +162,7 @@ def render_annotation_section(video, valid_species, dp):
         new_sels.append(
             {
                 "species": last,
-                "behavior": "unlabeled",
+                "behavior": "does_not_react",
                 "start_sec": 0.0,
                 "end_sec": video.get("duration_sec"),
             }
@@ -225,6 +260,14 @@ async def render_video_section(dp, valid_species):
     video, model_ann = await asyncio.gather(video_task, model_ann_task)
 
     if not video:
+        # Queue can become stale after DB reset/re-sync or ID format changes.
+        filters = get_filters()
+        fresh_queue = await run.io_bound(dp.get_video_queue, filters)
+        if fresh_queue and fresh_queue != queue:
+            set_queue(fresh_queue)
+            set_current_idx(max(0, min(current_idx, len(fresh_queue) - 1)))
+            render_video_section.refresh()
+            return
         ui.label("Could not load video").classes("text-h6 text-negative")
         return
 
@@ -253,7 +296,41 @@ async def render_video_section(dp, valid_species):
         with ui.column().classes("col"):
             with ui.card().classes("full-width q-mb-md"):
                 video_id = f"video-{selected_video_id}"
-                if video.get("video_path"):
+                if _needs_browser_transcode(video):
+                    attempted = set(get_state_val("transcode_attempted_ids", []))
+                    if selected_video_id not in attempted:
+                        attempted.add(selected_video_id)
+                        set_state_val("transcode_attempted_ids", list(attempted))
+                        ui.label("Transcoding video for browser playback...").classes(
+                            "text-body2 text-grey-7 q-mb-sm"
+                        )
+                        result = await run.io_bound(dp.transcode_video, selected_video_id)
+                        if result.get("success"):
+                            ui.notify("Video transcoded for web playback", type="positive")
+                            render_video_section.refresh()
+                            return
+                        ui.label(
+                            f"Auto-transcode failed: {result.get('error', 'unknown error')}"
+                        ).classes("text-negative text-caption q-mb-sm")
+
+                    async def retry_transcode():
+                        result = await run.io_bound(dp.transcode_video, selected_video_id)
+                        if result.get("success"):
+                            ui.notify("Video transcoded for web playback", type="positive")
+                            render_video_section.refresh()
+                        else:
+                            ui.notify(
+                                f"Transcode failed: {result.get('error', 'unknown error')}",
+                                type="negative",
+                            )
+
+                    ui.button(
+                        "Transcode for Playback",
+                        icon="movie",
+                        color="primary",
+                        on_click=retry_transcode,
+                    )
+                elif video.get("video_path"):
                     video_path = Path(video["video_path"])
                     if video_path.exists():
                         ui.video(str(video_path), controls=True, autoplay=True, muted=True).props(
@@ -290,13 +367,34 @@ async def render_video_section(dp, valid_species):
         with ui.column().classes("col"):
             with ui.card().classes("full-width q-mb-md"):
                 ui.label("Manual Review").classes("text-subtitle1 font-weight-medium q-mb-sm")
-                render_annotation_section(video, valid_species, dp)
+                fallback_species = video.get("classification_consensus", "unknown")
+                if not fallback_species or fallback_species == "UNKNOWN":
+                    fallback_species = valid_species[0]
+                default_species = _default_species_from_annotations(
+                    model_ann,
+                    valid_species,
+                    fallback_species,
+                )
+                render_annotation_section(video, valid_species, dp, default_species)
 
     current_speed = get_playback_speed().replace("x", "")
     ui.run_javascript(f"""
         (function() {{
-            const v = document.getElementById('{video_id}');
-            if (v) v.playbackRate = {current_speed};
+            const rate = {current_speed};
+            const applyRate = () => {{
+                document.querySelectorAll('video').forEach(v => {{
+                    v.playbackRate = rate;
+                    if (!v.dataset.speedBound) {{
+                        v.addEventListener('loadedmetadata', () => {{
+                            v.playbackRate = rate;
+                        }});
+                        v.dataset.speedBound = '1';
+                    }}
+                }});
+            }};
+            applyRate();
+            requestAnimationFrame(applyRate);
+            setTimeout(applyRate, 120);
         }})();
     """)
 
@@ -304,7 +402,7 @@ async def render_video_section(dp, valid_species):
 async def setup_review():
     dp = get_data_provider()
     if not dp:
-        config_path = Path("config.yaml")
+        config_path = get_config_path()
         if config_path.exists():
             dp = LocalDataProvider(str(config_path))
             set_data_provider(dp)
@@ -320,15 +418,15 @@ async def setup_review():
 
     filters = get_filters()
     queue = get_queue()
-    
-    # Parallelize setup data fetching
-    if not queue:
-        filter_options_task = run.io_bound(dp.get_queue_filter_options)
-        queue_ids_task = run.io_bound(dp.get_video_queue, filters)
-        filter_options, queue_ids = await asyncio.gather(filter_options_task, queue_ids_task)
-        set_queue(queue_ids)
-    else:
-        filter_options = await run.io_bound(dp.get_queue_filter_options)
+
+    # Always refresh queue from DB to avoid stale IDs in session state.
+    filter_options_task = run.io_bound(dp.get_queue_filter_options)
+    queue_ids_task = run.io_bound(dp.get_video_queue, filters)
+    filter_options, queue_ids = await asyncio.gather(filter_options_task, queue_ids_task)
+    set_queue(queue_ids)
+    if queue != queue_ids:
+        set_current_idx(0)
+        set_selections([])
 
     # Move CSS to a single injection
     ui.add_head_html(
@@ -411,6 +509,9 @@ async def setup_review():
                 include_unranked_cb = ui.checkbox(
                     "Include unranked", value=get_state_val("include_unranked", True)
                 )
+                web_safe_only_cb = ui.checkbox(
+                    "Web-safe only", value=bool(filters.get("web_safe_only", False))
+                )
 
                 async def apply_filters():
                     new_filters = {
@@ -418,6 +519,7 @@ async def setup_review():
                         "selected_camera": camera_select.value,
                         "selected_species": species_filter.value,
                         "include_unranked": include_unranked_cb.value,
+                        "web_safe_only": web_safe_only_cb.value,
                     }
                     set_state_val("include_unranked", include_unranked_cb.value)
                     update_filters(**new_filters)

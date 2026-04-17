@@ -512,9 +512,12 @@ class LocalDataProvider:
 
     def _video_id_from_path(self, path: Path) -> str:
         try:
-            return path.relative_to(self.video_dir).stem
+            rel = path.relative_to(self.video_dir)
+            parent = rel.parent.name if rel.parent != Path(".") else "default"
+            return f"{parent}/{path.stem}"
         except ValueError:
-            return str(path.stem)
+            parent = path.parent.name if path.parent.name else "default"
+            return f"{parent}/{path.stem}"
 
     def _scan_videos(self) -> pd.DataFrame:
         if not self.video_dir.exists():
@@ -923,6 +926,7 @@ class LocalDataProvider:
         selected_blank_non_blank = filters.get("selected_blank_non_blank", "All")
         selected_behavior = filters.get("selected_behavior", "All")
         include_unranked = bool(filters.get("include_unranked", False))
+        web_safe_only = bool(filters.get("web_safe_only", False))
 
         params: dict[str, Any] = {}
 
@@ -1029,6 +1033,9 @@ class LocalDataProvider:
                     SELECT 1 FROM individual_observations io
                     WHERE io.video_id = v.video_id AND io.behavior = :behavior
                 )""")
+
+        if web_safe_only:
+            where.append("v.is_web_safe = 1")
 
         # ── 5. ORDER BY — simplified, no nested CASE, no pc.cnt ──
         if has_priority and include_unranked:

@@ -26,6 +26,7 @@ def _get_user_state() -> dict[str, Any]:
             "selected_blank_non_blank": "All",
             "selected_behavior": "All",
             "include_unranked": True,
+            "web_safe_only": False,
         }
     if "video_queue" not in app.storage.user:
         app.storage.user["video_queue"] = []

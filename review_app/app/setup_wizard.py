@@ -1,3 +1,4 @@
+import asyncio
 import os
 import platform
 import shutil
@@ -5,7 +6,9 @@ import subprocess
 from pathlib import Path
 
 import yaml
-from nicegui import ui
+from nicegui import run, ui
+
+from review_app.app.utils import sync_with_progress
 
 FFMPEG_INSTALL_MAC = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && brew install ffmpeg'
 FFMPEG_INSTALL_WINDOWS = "winget install ffmpeg"
@@ -175,9 +178,47 @@ class SetupWizard:
                 return
 
             config = generate_config(video_dir, db_path, bundled_species, bundled_behaviors)
-            save_config(config)
+            save_config(config, self.config_path)
             ui.notify("Configuration saved!", type="positive")
-            self.on_complete_callback()
+
+            from review_app.backend.local_data_provider import LocalDataProvider
+            from review_app.app.state import set_data_provider
+
+            dp = LocalDataProvider(str(self.config_path))
+            set_data_provider(dp)
+
+            has_videos = await run.io_bound(dp.has_videos_in_db)
+
+            if not has_videos:
+                wizard_container = ui.column().classes("w-full max-w-2xl mx-auto q-pa-lg")
+                start_button_holder: list = [None]
+
+                with wizard_container:
+                    with ui.card().classes("full-width q-mb-lg"):
+                        ui.label("Setup Complete!").classes("text-h5 text-primary font-weight-bold")
+                        ui.label("Your workspace is configured. Let's sync your videos.").classes(
+                            "text-body1 text-grey-7"
+                        )
+
+                    with ui.card().classes("full-width q-mb-lg"):
+                        ui.label("Syncing Videos...").classes("text-h6 q-mb-md")
+                        progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
+                        status = ui.label("Starting...")
+
+                    start_button_holder[0] = ui.button(
+                        "Start Annotating",
+                        icon="play_arrow",
+                        color="primary",
+                        on_click=lambda: self.on_complete_callback(),
+                    )
+                    start_button_holder[0].visible = False
+
+                await sync_with_progress(dp, progress=progress, status=status)
+                ui.notify("Videos synced!", type="positive")
+                status.text = "Sync complete!"
+                start_button_holder[0].visible = True
+            else:
+                self.on_complete_callback()
 
         with ui.column().classes("w-full max-w-2xl mx-auto q-pa-lg"):
             with ui.card().classes("full-width q-mb-lg"):
@@ -255,6 +296,6 @@ class SetupWizard:
             update_submit_button()
 
 
-def setup_wizard(on_complete_callback, config_path: Path | str = "config.yaml"):
+def setup_wizard(on_complete_callback, config_path: Path | str | None = None):
     wizard = SetupWizard(on_complete_callback, config_path=config_path)
     wizard.build()

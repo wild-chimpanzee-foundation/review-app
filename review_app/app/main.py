@@ -19,12 +19,12 @@ mimetypes.add_type("video/x-flv", ".flv")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from review_app.app.setup_wizard import setup_wizard  # noqa: E402
+from review_app.app.setup_wizard import get_config_path, setup_wizard  # noqa: E402
 from review_app.app.state import set_data_provider  # noqa: E402
 from review_app.app.theme import apply_theme  # noqa: E402
 from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
 
-CONFIG_PATH = Path("config.yaml")
+CONFIG_PATH = get_config_path()
 
 
 def create_window():
