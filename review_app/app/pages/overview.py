@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import run, ui
 
 from review_app.app.state import get_data_provider, set_data_provider
 from review_app.backend.local_data_provider import LocalDataProvider
 
 
-def setup_overview():
+async def setup_overview():
     dp = get_data_provider()
     if not dp:
         config_path = Path("config.yaml")
@@ -19,7 +19,7 @@ def setup_overview():
                 ui.button("Set up", on_click=lambda: ui.navigate.to("/setup"), icon="settings")
             return
 
-    if not dp.has_videos_in_db():
+    if not await run.io_bound(dp.has_videos_in_db):
         sync_container = ui.column().classes("w-full q-pa-lg items-center")
 
         with sync_container:
@@ -34,7 +34,7 @@ def setup_overview():
             else:
                 status.text = f"Scanning: {filename}"
 
-        dp.sync_videos(progress_callback=update_progress)
+        await run.io_bound(dp.sync_videos, progress_callback=update_progress)
         progress.value = 1.0
         ui.notify("Videos synced!", type="positive")
         sync_container.clear()
@@ -43,12 +43,10 @@ def setup_overview():
         ui.timer(0.5, lambda: ui.navigate.to("/overview"), once=True)
         return
 
-    stats = dp.get_overview_stats()
+    stats = await run.io_bound(dp.get_overview_stats)
 
     with ui.column().classes("w-full q-pa-lg"):
         with ui.row().classes("items-center q-mb-lg"):
-            icon = ui.icon("dashboard", size="md")
-            icon.classes("text-primary q-mr-md")
             ui.label("Overview").classes("text-h5 text-primary font-weight-bold")
 
         v = stats.get("videos", {})
@@ -56,30 +54,25 @@ def setup_overview():
 
         with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
             stat_cards = [
-                ("video_library", "Total Videos", int(v.get("total", 0))),
-                ("videocam", "Cameras", int(v.get("cameras", 0))),
-                ("schedule", "Hours", f"{v.get('total_hours', 0):.1f}h"),
+                ("Total Videos", int(v.get("total", 0))),
+                ("Cameras", int(v.get("cameras", 0))),
+                ("Hours", f"{v.get('total_hours', 0):.1f}h"),
                 (
-                    "check_circle",
                     "Labeled",
                     f"{int(lb.get('labeled', 0))} ({100 * int(lb.get('labeled', 0)) / max(int(lb.get('total_videos', 1)), 1):.0f}%)",
                 ),
-                ("block", "Blank", int(lb.get("blank", 0))),
-                ("error", "Invalid", int(v.get("invalid", 0)), "text-negative"),
+                ("Blank", int(lb.get("blank", 0))),
+                ("Invalid", int(v.get("invalid", 0)), "text-negative"),
             ]
             for i, card_data in enumerate(stat_cards):
-                icon_name, label, value = card_data[0], card_data[1], card_data[2]
-                extra_class = card_data[3] if len(card_data) > 3 else ""
-                with ui.card().classes("col text-center"):
-                    icon = ui.icon(icon_name, size="lg")
-                    icon.classes("text-grey-6 q-mb-sm")
+                label, value = card_data[0], card_data[1]
+                extra_class = card_data[2] if len(card_data) > 2 else ""
+                with ui.card().classes("col text-center q-pa-md"):
                     ui.label(str(value)).classes(f"text-h5 font-weight-bold {extra_class}")
                     ui.label(label).classes("text-caption text-grey-6")
 
         with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("items-center q-mb-md"):
-                icon = ui.icon("bar_chart", size="sm")
-                icon.classes("text-primary q-mr-sm")
                 ui.label("Species Observations").classes("text-subtitle1 font-weight-medium")
             species_counts = stats.get("species_counts", [])
             if species_counts:
@@ -92,8 +85,6 @@ def setup_overview():
 
         with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("items-center q-mb-md"):
-                icon = ui.icon("psychology", size="sm")
-                icon.classes("text-primary q-mr-sm")
                 ui.label("Behavior Distribution").classes("text-subtitle1 font-weight-medium")
             behavior_counts = stats.get("behavior_counts", [])
             if behavior_counts:
@@ -113,8 +104,6 @@ def setup_overview():
 
         with ui.card().classes("full-width"):
             with ui.row().classes("items-center q-mb-md"):
-                icon = ui.icon("videocam", size="sm")
-                icon.classes("text-primary q-mr-sm")
                 ui.label("Per-Camera Summary").classes("text-subtitle1 font-weight-medium")
             camera_summary = stats.get("camera_summary", [])
             if camera_summary:

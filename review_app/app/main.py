@@ -5,12 +5,13 @@ from pathlib import Path
 
 import webview
 from nicegui import core as nicegui_core
-from nicegui import ui
+from nicegui import run, ui
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from review_app.app.setup_wizard import setup_wizard
 from review_app.app.state import set_data_provider
+from review_app.app.theme import apply_theme
 from review_app.backend.local_data_provider import LocalDataProvider
 
 CONFIG_PATH = Path("config.yaml")
@@ -28,10 +29,11 @@ def create_window():
 
 
 def start_nicegui():
-    ui.run(host="localhost", port=8080, show=False, reload=False)
+    ui.run(host="localhost", port=8080, show=False, reload=False, storage_secret="video_annotation_secret_key")
 
 
-def main_page_content():
+async def main_page_content():
+    apply_theme()
     if not CONFIG_PATH.exists():
         with ui.column().classes("w-full items-center justify-center min-h-screen"):
             ui.label("No configuration found").classes("text-xl")
@@ -52,11 +54,13 @@ def main_page_content():
                     ui.label("Welcome to Video Annotation").classes("text-2xl")
                     ui.label(f"Database: {dp.db_path}").classes("text-sm text-gray-600")
                     ui.label(f"Video directory: {dp.video_dir}").classes("text-sm text-gray-600")
-                    ui.label(f"Videos in DB: {'Yes' if dp.has_videos_in_db() else 'No'}").classes(
+                    
+                    has_videos = await run.io_bound(dp.has_videos_in_db)
+                    ui.label(f"Videos in DB: {'Yes' if has_videos else 'No'}").classes(
                         "text-sm text-gray-600"
                     )
 
-                    if not dp.has_videos_in_db():
+                    if not has_videos:
                         ui.button(
                             "Sync Videos",
                             icon="sync",
@@ -69,7 +73,7 @@ def main_page_content():
                             on_click=lambda: ui.navigate.to("/overview"),
                         )
 
-            def sync_videos(data_provider):
+            async def sync_videos(data_provider):
                 progress = ui.linear_progress(value=0, show_value=False)
                 status = ui.label("Starting sync...")
 
@@ -80,7 +84,7 @@ def main_page_content():
                     else:
                         status.text = "Scanning..."
 
-                data_provider.sync_videos(progress_callback=update_progress)
+                await run.io_bound(data_provider.sync_videos, progress_callback=update_progress)
                 progress.value = 1.0
                 status.text = "Sync complete!"
                 ui.notify("Video sync complete!", type="positive")
@@ -93,19 +97,20 @@ def main_page_content():
             )
 
 
-def overview_page_content():
+async def overview_page_content():
+    apply_theme()
     from review_app.app.pages.overview import setup_overview
+    await setup_overview()
 
-    setup_overview()
 
-
-def review_page_content():
+async def review_page_content():
+    apply_theme()
     from review_app.app.pages.review import setup_review
+    await setup_review()
 
-    setup_review()
 
-
-def setup_page_content():
+async def setup_page_content():
+    apply_theme()
     setup_wizard(on_complete_callback=lambda: ui.navigate.to("/"))
 
 
@@ -128,7 +133,7 @@ def run_app(browser_only=False):
 
     if browser_only:
         webbrowser.open("http://localhost:8080")
-        ui.run(host="localhost", port=8080, show=True, reload=False)
+        ui.run(host="localhost", port=8080, show=True, reload=False, storage_secret="video_annotation_secret_key")
     else:
         threading.Thread(target=start_nicegui, daemon=True).start()
         create_window()

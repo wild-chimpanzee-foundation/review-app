@@ -29,21 +29,25 @@ def _get_config_path() -> Path:
 
 
 from review_app.app.setup_wizard import setup_wizard
-from review_app.app.state import set_data_provider
+from review_app.app.state import is_dark_mode, set_data_provider, set_dark_mode
+from review_app.app.theme import apply_theme
 from review_app.backend.local_data_provider import LocalDataProvider
 
 CONFIG_PATH = _get_config_path()
-_dark_mode_value = [False]
 
 
 def shared_header():
     from nicegui import ui
 
-    dark = ui.dark_mode(value=_dark_mode_value[0])
+    apply_theme()
+
+    # Dark mode is now session-safe via state functions (app.storage.user)
+    dark = ui.dark_mode(value=is_dark_mode())
 
     def toggle_dark():
-        _dark_mode_value[0] = not _dark_mode_value[0]
-        dark.value = _dark_mode_value[0]
+        new_val = not dark.value
+        set_dark_mode(new_val)
+        dark.value = new_val
 
     with ui.header().classes("bg-primary"):
         with ui.row().classes("w-full items-center q-px-md"):
@@ -66,8 +70,8 @@ class GUI:
     def __init__(self):
         self.dp = None
 
-    def main_page(self):
-        from nicegui import ui
+    async def main_page(self):
+        from nicegui import run, ui
 
         shared_header()
 
@@ -99,6 +103,8 @@ class GUI:
                             "text-body1 text-grey-7"
                         )
 
+                    has_videos = await run.io_bound(dp.has_videos_in_db)
+
                     with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
                         with ui.card().classes("col"):
                             ui.label("Database").classes("text-caption text-grey-6")
@@ -108,11 +114,11 @@ class GUI:
                             ui.label(str(dp.video_dir)).classes("text-body2")
                         with ui.card().classes("col"):
                             ui.label("Videos in DB").classes("text-caption text-grey-6")
-                            ui.label("Yes" if dp.has_videos_in_db() else "No").classes(
+                            ui.label("Yes" if has_videos else "No").classes(
                                 "text-body2"
                             )
 
-                    if not dp.has_videos_in_db():
+                    if not has_videos:
                         with ui.card().classes("full-width"):
                             ui.label("Sync your videos to get started").classes(
                                 "text-body1 q-mb-md"
@@ -153,23 +159,23 @@ class GUI:
                         color="negative",
                     )
 
-    def overview_page(self):
+    async def overview_page(self):
         from review_app.app.pages.overview import setup_overview
 
         shared_header()
-        setup_overview()
+        await setup_overview()
 
-    def review_page(self):
+    async def review_page(self):
         from review_app.app.pages.review import setup_review
 
         shared_header()
-        setup_review()
+        await setup_review()
 
-    def model_import_page(self):
+    async def model_import_page(self):
         from review_app.app.pages.model_import import setup_model_import
 
         shared_header()
-        setup_model_import()
+        await setup_model_import()
 
     def setup_page(self):
         from nicegui import ui
@@ -183,7 +189,7 @@ class GUI:
         setup_wizard(on_complete_callback=on_setup_complete, config_path=CONFIG_PATH)
 
     def _sync_videos(self, data_provider):
-        from nicegui import ui
+        from nicegui import run, ui
 
         progress = ui.linear_progress(value=0, show_value=False)
         status = ui.label("Starting sync...")
@@ -195,10 +201,13 @@ class GUI:
             else:
                 status.text = "Scanning..."
 
-        data_provider.sync_videos(progress_callback=update_progress)
-        progress.value = 1.0
-        status.text = "Sync complete!"
-        ui.notify("Video sync complete!", type="positive")
+        async def do_sync():
+            await run.io_bound(data_provider.sync_videos, progress_callback=update_progress)
+            progress.value = 1.0
+            status.text = "Sync complete!"
+            ui.notify("Video sync complete!", type="positive")
+        
+        ui.timer(0.1, do_sync, once=True)
 
     def start(self, dev_mode=False):
         from nicegui import app, ui
@@ -249,6 +258,15 @@ class GUI:
             reload=dev_mode,
             storage_secret="video_annotation_secret_key",
         )
+
+
+if __name__ in ("__main__", "__mp_main__"):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dev", action="store_true", help="Enable dev mode with auto-reload")
+    args = parser.parse_args()
+
+    gui = GUI()
+    gui.start(dev_mode=args.dev)
 
 
 if __name__ in ("__main__", "__mp_main__"):

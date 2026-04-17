@@ -190,7 +190,6 @@ class SetupWizard:
 
             with ui.card().classes("full-width q-mb-md"):
                 with ui.row().classes("items-center q-mb-sm"):
-                    ui.icon("folder_open", size="sm").classes("text-primary q-mr-sm")
                     ui.label("Video Directory").classes("text-subtitle1 font-weight-medium")
                 ui.label("Path to folder containing your video files").classes(
                     "text-caption text-grey-6 q-mb-md"
@@ -202,13 +201,12 @@ class SetupWizard:
 
             with ui.card().classes("full-width q-mb-md"):
                 with ui.row().classes("items-center q-mb-sm"):
-                    ui.icon("movie", size="sm").classes("text-primary q-mr-sm")
                     ui.label("ffmpeg").classes("text-subtitle1 font-weight-medium")
                 ui.label("Required for video processing").classes(
                     "text-caption text-grey-6 q-mb-sm"
                 )
                 ui.button(
-                    "Check ffmpeg", icon="refresh", on_click=do_check_ffmpeg, color="primary"
+                    "Check ffmpeg", on_click=do_check_ffmpeg, color="primary"
                 )
                 ffmpeg_status_holder[0] = ui.label("Not checked").classes(
                     "text-caption text-grey-6 q-ml-md"
@@ -216,7 +214,6 @@ class SetupWizard:
 
             with ui.card().classes("full-width q-mb-md"):
                 with ui.row().classes("items-center q-mb-sm"):
-                    ui.icon("check_circle", size="sm").classes("text-positive q-mr-sm")
                     ui.label("Bundled Data").classes("text-subtitle1 font-weight-medium")
                 if bundled_species:
                     ui.label(f"Species list: {Path(bundled_species).name} (bundled)").classes(

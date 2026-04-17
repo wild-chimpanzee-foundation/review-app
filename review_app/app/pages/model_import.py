@@ -2,9 +2,9 @@ import io
 from pathlib import Path
 
 import pandas as pd
-from nicegui import ui
+from nicegui import run, ui
 
-from review_app.app.state import get_data_provider, set_data_provider, state
+from review_app.app.state import get_data_provider, get_state_val, set_data_provider, set_state_val
 
 
 def _make_serializable(val):
@@ -25,7 +25,7 @@ def _df_to_records(df: pd.DataFrame) -> list[dict]:
 from review_app.backend.local_data_provider import LocalDataProvider
 
 
-def setup_model_import():
+async def setup_model_import():
     dp = get_data_provider()
     if not dp:
         config_path = Path("config.yaml")
@@ -38,19 +38,17 @@ def setup_model_import():
                 ui.button("Set up", on_click=lambda: ui.navigate.to("/setup"), icon="settings")
             return
 
-    state["uploaded_df"] = None
-    state["cleaned_df"] = None
-    state["errors_df"] = None
-    state["species_mappings"] = {}
-    state["unmapped_species"] = []
+    set_state_val("uploaded_df", None)
+    set_state_val("cleaned_df", None)
+    set_state_val("errors_df", None)
+    set_state_val("species_mappings", {})
+    set_state_val("unmapped_species", [])
 
     import_button_holder: list = [None]
     pending_warning_holder: list = [None]
 
     with ui.column().classes("w-full q-pa-md"):
         with ui.row().classes("items-center q-mb-md"):
-            icon = ui.icon("upload_file", size="md")
-            icon.classes("text-primary q-mr-sm")
             ui.label("Model Output Import").classes("text-h5 text-primary font-weight-bold")
 
         ui.label("Upload model outputs as CSV and import them into model_annotations.").classes(
@@ -59,10 +57,10 @@ def setup_model_import():
 
         with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("items-center"):
-                ui.icon("download", size="sm").classes("text-primary q-mr-sm")
                 ui.label("CSV Template").classes("text-subtitle1 font-weight-medium")
 
-            csv_content = dp.get_csv_templates()["model_annotations"]
+            templates = await run.io_bound(dp.get_csv_templates)
+            csv_content = templates["model_annotations"]
 
             def download_template():
                 ui.download(csv_content.encode("utf-8"), "model_annotations_template.csv")
@@ -82,11 +80,11 @@ def setup_model_import():
                 try:
                     content = await e.file.read()
                     df = pd.read_csv(io.BytesIO(content))
-                    state["uploaded_df"] = df
+                    set_state_val("uploaded_df", df)
                     upload_result.text = f"Loaded {len(df)} rows"
 
-                    cleaned_df, errors_df, species_mappings, unmapped_species = (
-                        dp.validate_model_csv(df)
+                    cleaned_df, errors_df, species_mappings, unmapped_species = await run.io_bound(
+                        dp.validate_model_csv, df
                     )
 
                     # Debug: show what we got
@@ -94,12 +92,13 @@ def setup_model_import():
                         f"Debug: {len(species_mappings)} mappings, {len(unmapped_species)} unmapped"
                     )
 
-                    state["cleaned_df"] = cleaned_df
-                    state["errors_df"] = errors_df
-                    state["species_mappings"] = {
-                        m["original"]: m.get("mapped_to", "") for m in species_mappings
-                    }
-                    state["unmapped_species"] = unmapped_species
+                    set_state_val("cleaned_df", cleaned_df)
+                    set_state_val("errors_df", errors_df)
+                    set_state_val(
+                        "species_mappings",
+                        {m["original"]: m.get("mapped_to", "") for m in species_mappings},
+                    )
+                    set_state_val("unmapped_species", unmapped_species)
 
                     ui.notify("CSV validated!", type="positive")
                     refresh_results()
@@ -112,16 +111,18 @@ def setup_model_import():
         mappings_container = ui.card().classes("full-width q-mb-lg")
 
         def update_import_button():
+            cleaned_df = get_state_val("cleaned_df")
+            species_mappings = get_state_val("species_mappings", {})
             can_import = (
-                state.get("cleaned_df") is not None
-                and not state["cleaned_df"].empty
-                and all(v for v in state["species_mappings"].values())
+                cleaned_df is not None
+                and not cleaned_df.empty
+                and all(v for v in species_mappings.values())
             )
             btn = import_button_holder[0]
             if btn:
                 btn.props(f"wide {'disabled' if not can_import else ''}")
 
-            pending = [k for k, v in state["species_mappings"].items() if not v]
+            pending = [k for k, v in species_mappings.items() if not v]
             warning = pending_warning_holder[0]
             if warning:
                 if pending:
@@ -137,13 +138,10 @@ def setup_model_import():
             with results_container:
                 ui.label("Validation Result").classes("text-subtitle1 font-weight-medium q-mb-md")
 
-                valid_count = (
-                    len(state.get("cleaned_df", pd.DataFrame()))
-                    if state.get("cleaned_df") is not None
-                    else 0
-                )
-                errors_df = state.get("errors_df")
-                unmapped = state.get("unmapped_species", [])
+                cleaned_df = get_state_val("cleaned_df")
+                valid_count = len(cleaned_df) if cleaned_df is not None else 0
+                errors_df = get_state_val("errors_df")
+                unmapped = get_state_val("unmapped_species", [])
                 invalid_count = (
                     len(errors_df) if errors_df is not None and not errors_df.empty else 0
                 ) + len(unmapped)
@@ -161,7 +159,8 @@ def setup_model_import():
                         ui.label("Invalid Rows").classes("text-caption text-grey-6")
 
             with mappings_container:
-                all_mappings = dict(state.get("species_mappings", {}))
+                all_mappings = dict(get_state_val("species_mappings", {}))
+                unmapped = get_state_val("unmapped_species", [])
                 unmapped_origs = {u["original"] for u in unmapped}
                 all_species = set(all_mappings.keys()) | unmapped_origs
 
@@ -177,6 +176,7 @@ def setup_model_import():
                         "text-caption text-grey-6 q-mb-md"
                     )
 
+                    valid_species = dp.get_valid_species()
                     for orig in sorted(all_species):
                         current_mapping = all_mappings.get(orig, "")
                         is_unmapped = orig in unmapped_origs
@@ -184,27 +184,26 @@ def setup_model_import():
                             ui.label(orig).classes(f"col {'text-negative' if is_unmapped else ''}")
                             select = ui.select(
                                 label="Mapped To",
-                                options=[""] + dp.get_valid_species(),
+                                options=[""] + valid_species,
                                 value=current_mapping,
                             ).props("outlined dense class=col-4")
 
                             def make_update_fn(o, sel):
                                 def update_mapping():
-                                    state["species_mappings"][o] = sel.value
+                                    mappings = get_state_val("species_mappings", {})
+                                    mappings[o] = sel.value
+                                    set_state_val("species_mappings", mappings)
                                     update_import_button()
 
                                 return update_mapping
 
                             select.on_value_change(make_update_fn(orig, select))
 
-                    def apply_mappings():
-                        update_import_button()
-                        ui.notify("Mappings updated", type="info")
-
-                    def apply_and_import():
+                    async def apply_and_import():
                         try:
-                            df_to_import = state["cleaned_df"].copy()
-                            mappings = state["species_mappings"]
+                            cleaned_df = get_state_val("cleaned_df")
+                            df_to_import = cleaned_df.copy()
+                            mappings = get_state_val("species_mappings", {})
 
                             if mappings:
                                 species_mask = df_to_import["annotation_type"] == "species"
@@ -212,15 +211,15 @@ def setup_model_import():
                                     species_mask, "value_text"
                                 ].replace(mappings)
 
-                            result = dp.import_model_csv(cleaned_df=df_to_import)
+                            result = await run.io_bound(dp.import_model_csv, cleaned_df=df_to_import)
                             ui.notify(
                                 f"Imported {result.get('inserted_rows', 0)} rows!", type="positive"
                             )
-                            state["uploaded_df"] = None
-                            state["cleaned_df"] = None
-                            state["errors_df"] = None
-                            state["species_mappings"] = {}
-                            state["unmapped_species"] = []
+                            set_state_val("uploaded_df", None)
+                            set_state_val("cleaned_df", None)
+                            set_state_val("errors_df", None)
+                            set_state_val("species_mappings", {})
+                            set_state_val("unmapped_species", [])
                             results_container.clear()
                             mappings_container.clear()
                             with results_container:
@@ -230,11 +229,11 @@ def setup_model_import():
                         except Exception as exc:
                             ui.notify(f"Import failed: {exc}", type="negative")
 
-                    pending_unmapped = [k for k, v in state["species_mappings"].items() if not v]
+                    species_mappings = get_state_val("species_mappings", {})
+                    pending_unmapped = [k for k, v in species_mappings.items() if not v]
+                    cleaned_df = get_state_val("cleaned_df")
                     can_apply_and_import = (
-                        state.get("cleaned_df") is not None
-                        and not state["cleaned_df"].empty
-                        and not pending_unmapped
+                        cleaned_df is not None and not cleaned_df.empty and not pending_unmapped
                     )
 
                     ui.button(
@@ -249,7 +248,7 @@ def setup_model_import():
                             f"Map all species to import: {', '.join(pending_unmapped)}"
                         ).classes("text-warning text-caption q-mt-sm")
 
-            errors_df = state.get("errors_df")
+            errors_df = get_state_val("errors_df")
             if errors_df is not None and not errors_df.empty:
                 with results_container:
                     ui.label(f"{len(errors_df)} rows have validation errors.").classes(
@@ -277,17 +276,19 @@ def setup_model_import():
                             }
                         ).classes("h-64")
 
-            unmapped = state.get("unmapped_species", [])
+            unmapped = get_state_val("unmapped_species", [])
             if unmapped:
                 with results_container:
                     ui.label(f"{len(unmapped)} species without fuzzy match.").classes(
                         "text-warning q-mb-sm"
                     )
 
+            cleaned_df = get_state_val("cleaned_df")
+            species_mappings = get_state_val("species_mappings", {})
             can_import = (
-                state.get("cleaned_df") is not None
-                and not state["cleaned_df"].empty
-                and all(v for v in state["species_mappings"].values())
+                cleaned_df is not None
+                and not cleaned_df.empty
+                and all(v for v in species_mappings.values())
             )
 
             with results_container:
@@ -295,10 +296,11 @@ def setup_model_import():
                 pending_warning_holder[0].visible = False
                 update_import_button()
 
-            def do_import():
+            async def do_import():
                 try:
-                    df_to_import = state["cleaned_df"].copy()
-                    mappings = state["species_mappings"]
+                    cleaned_df = get_state_val("cleaned_df")
+                    df_to_import = cleaned_df.copy()
+                    mappings = get_state_val("species_mappings", {})
 
                     if mappings:
                         species_mask = df_to_import["annotation_type"] == "species"
@@ -306,13 +308,13 @@ def setup_model_import():
                             species_mask, "value_text"
                         ].replace(mappings)
 
-                    result = dp.import_model_csv(cleaned_df=df_to_import)
+                    result = await run.io_bound(dp.import_model_csv, cleaned_df=df_to_import)
                     ui.notify(f"Imported {result.get('inserted_rows', 0)} rows!", type="positive")
-                    state["uploaded_df"] = None
-                    state["cleaned_df"] = None
-                    state["errors_df"] = None
-                    state["species_mappings"] = {}
-                    state["unmapped_species"] = []
+                    set_state_val("uploaded_df", None)
+                    set_state_val("cleaned_df", None)
+                    set_state_val("errors_df", None)
+                    set_state_val("species_mappings", {})
+                    set_state_val("unmapped_species", [])
                     results_container.clear()
                     mappings_container.clear()
                     with results_container:
