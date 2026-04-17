@@ -4,8 +4,8 @@ import webbrowser
 from pathlib import Path
 
 import webview
-from nicegui import app, ui
 from nicegui import core as nicegui_core
+from nicegui import ui
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -40,8 +40,6 @@ def main_page_content():
         try:
             dp = LocalDataProvider(str(CONFIG_PATH))
             set_data_provider(dp)
-            from review_app.app.pages.overview import setup_overview
-            from review_app.app.pages.review import setup_review
 
             with ui.header().classes("bg-primary text-white items-center"):
                 ui.label("Video Annotation").classes("text-xl font-bold")

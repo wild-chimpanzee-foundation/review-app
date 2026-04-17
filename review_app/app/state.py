@@ -1,5 +1,3 @@
-import os
-from pathlib import Path
 from typing import Any
 
 state: dict[str, Any] = {
@@ -9,6 +7,7 @@ state: dict[str, Any] = {
     "current_video_idx": 0,
     "review_selections": [],
     "annotator_name": "default",
+    "video_playback_time": 0.0,
     "filters": {
         "search_query": "",
         "selected_camera": "All",
@@ -19,6 +18,14 @@ state: dict[str, Any] = {
         "include_unranked": True,
     },
 }
+
+
+def get_video_playback_time():
+    return state.get("video_playback_time", 0.0)
+
+
+def set_video_playback_time(time: float):
+    state["video_playback_time"] = time
 
 
 def get_data_provider():
@@ -47,11 +54,11 @@ def set_current_idx(idx: int):
 
 
 def get_selections():
-    return state.get("review_selections", [])
+    return list(state.get("review_selections", []))
 
 
 def set_selections(selections: list):
-    state["review_selections"] = selections
+    state["review_selections"] = list(selections)
 
 
 def get_filters():

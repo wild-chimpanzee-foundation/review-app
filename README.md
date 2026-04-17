@@ -1,28 +1,66 @@
 # Review App
 
-Standalone Streamlit review dashboard that runs in local-only mode with sqlite.
+Video annotation review dashboard for manual classification of camera trap footage.
 
 ## Requirements
 
 - Python 3.12+
 - `uv` installed
-- A valid `config.yaml` at repo root, or set `LOCAL_CONFIG_YAML` to an alternate config file
+- ffmpeg (for video processing)
 
 ## Run
 
 ```bash
-uv run streamlit run review_app/frontend/1_Pipeline_Overview.py
+uv run python review_app/app/entry_point.py
 ```
 
-## Run with Docker (recommended)
+## Building
+
+### Local Build
 
 ```bash
-docker compose up --build
+# Clean previous builds
+rm -rf dist build
+
+# Build single-file executable
+uv run pyinstaller video_annotation.spec
 ```
 
-- App URL: `http://localhost:8501`
-- Docker uses `config.docker.yaml` (`LOCAL_CONFIG_YAML=/app/config.docker.yaml`).
-- Persisted sqlite data is stored in `./_local_db` on the host.
+The executable will be at `dist/VideoAnnotation/VideoAnnotation`.
+
+### GitHub Actions Release
+
+Builds are automatically created when you push a version tag:
+
+```bash
+# Create a release
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This triggers builds for:
+
+- Linux
+- Windows
+- macOS
+
+After ~5-10 minutes, executables are available in the **Releases** page.
+
+**View releases:** Repository → Releases
+
+## Configuration
+
+Config is stored in platform-specific directories:
+
+- **Linux:** `~/.config/video_review_app/config.yaml`
+- **macOS:** `~/Library/Application Support/video_review_app/config.yaml`
+- **Windows:** `%APPDATA%\video_review_app\config.yaml`
+
+Database is stored at:
+
+- **Linux:** `~/.local/share/video_review_app/review_data.db`
+- **macOS:** `~/Library/Application Support/video_review_app/review_data.db`
+- **Windows:** `%LOCALAPPDATA%\video_review_app\review_data.db`
 
 ## Database & Migrations
 

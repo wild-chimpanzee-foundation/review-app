@@ -5,6 +5,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -155,7 +156,21 @@ CSV_TEMPLATES: dict[str, str] = {
 }
 
 REPO_ROOT = Path(__file__).parents[2]
-DEFAULT_CONFIG_PATH = REPO_ROOT / "config.yaml"
+
+
+def _get_default_config_path() -> Path:
+    if getattr(sys, "frozen", False):
+        if sys.platform == "darwin":
+            base = Path.home() / "Library" / "Application Support"
+        elif sys.platform == "win32":
+            base = Path(os.environ.get("APPDATA", Path.home()))
+        else:
+            base = Path.home() / ".config"
+        return base / "video_review_app" / "config.yaml"
+    return REPO_ROOT / "config.yaml"
+
+
+DEFAULT_CONFIG_PATH = _get_default_config_path()
 DEFAULT_DB_FILENAME = "review_data.db"
 
 
@@ -712,7 +727,29 @@ class LocalDataProvider:
         return self.get_config()
 
     def get_csv_templates(self) -> dict[str, str]:
-        return CSV_TEMPLATES.copy()
+        with self.engine.connect() as conn:
+            videos_df = pd.read_sql(
+                text("SELECT video_id FROM videos LIMIT 10"),
+                conn,
+            )
+
+        if not videos_df.empty:
+            sample_video_ids = videos_df["video_id"].tolist()
+            rows = [
+                f"{vid},species,species_model_a,deer,,0.92,0,12.0" for vid in sample_video_ids[:3]
+            ]
+            rows.append(
+                f"{sample_video_ids[0] if sample_video_ids else 'VIDEO_001'},behavior,behavior_model_a,reacts_to_camera,,0.83,0,12.0"
+            )
+            rows.append(
+                f"{sample_video_ids[1] if len(sample_video_ids) > 1 else 'VIDEO_002'},blank_non_blank,blank_model,blank,,0.98,0,"
+            )
+            template = "video_uid,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec\n"
+            template += "\n".join(rows)
+        else:
+            template = CSV_TEMPLATES["model_annotations"]
+
+        return {"model_annotations": template}
 
     def get_behaviors_for_species(self, species_name: str) -> list[str]:
         defaults = ["unlabeled"] + self._behavior_defaults
