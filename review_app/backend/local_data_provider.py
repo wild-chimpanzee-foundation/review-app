@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
+import tempfile
 import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,6 +15,11 @@ from typing import Any
 import pandas as pd
 import yaml
 from dotenv import load_dotenv
+
+from review_app.backend.utils import (
+    get_default_species_from_annotations,
+    needs_browser_transcode,
+)
 from sqlalchemy import (
     Boolean,
     Column,
@@ -27,6 +32,7 @@ from sqlalchemy import (
     create_engine,
     event,
     func,
+    inspect as sa_inspect,
     select,
     text,
 )
@@ -157,19 +163,24 @@ CSV_TEMPLATES: dict[str, str] = {
     )
 }
 
-REPO_ROOT = Path(__file__).parents[2]
+if getattr(sys, "frozen", False):
+    REPO_ROOT = Path(sys._MEIPASS).parent
+else:
+    REPO_ROOT = Path(__file__).parents[2]
 
 
 def _get_default_config_path() -> Path:
-    if getattr(sys, "frozen", False):
-        if sys.platform == "darwin":
-            base = Path.home() / "Library" / "Application Support"
-        elif sys.platform == "win32":
-            base = Path(os.environ.get("APPDATA", Path.home()))
-        else:
-            base = Path.home() / ".config"
-        return base / "video_review_app" / "config.yaml"
-    return REPO_ROOT / "config.yaml"
+    import platform
+
+    if platform.system() == "Windows":
+        base = Path(os.environ.get("APPDATA", Path.home()))
+    elif platform.system() == "Darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path.home() / ".config"
+    app_dir = base / "video_review_app"
+    app_dir.mkdir(parents=True, exist_ok=True)
+    return app_dir / "config.yaml"
 
 
 DEFAULT_CONFIG_PATH = _get_default_config_path()
@@ -218,8 +229,8 @@ def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
     try:
         result = subprocess.run(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
+            text=True,
             timeout=_FFPROBE_TIMEOUT_SEC,
         )
     except subprocess.TimeoutExpired:
@@ -228,7 +239,7 @@ def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
         return None, False, False, f"ffprobe OS error: {exc}"
 
     if result.returncode != 0:
-        stderr_text = result.stderr.decode(errors="replace").strip()
+        stderr_text = result.stderr.strip()
         # Keep only the first 200 chars to avoid bloating the DB.
         return None, False, False, stderr_text[:200] or "ffprobe returned non-zero exit code"
 
@@ -253,7 +264,8 @@ def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
         safe_formats = {"mp4", "mov", "webm", "ogg"}
         safe_codecs = {"h264", "vp8", "vp9", "av1", "theora"}
 
-        is_web_safe = any(f in format_name for f in safe_formats) and video_codec in safe_codecs
+        formats = {f.strip() for f in format_name.split(",")}
+        is_web_safe = bool(formats & safe_formats) and video_codec in safe_codecs
 
     except (json.JSONDecodeError, ValueError, TypeError):
         return None, False, False, "ffprobe returned unparseable JSON"
@@ -359,30 +371,27 @@ class LocalDataProvider:
         self._sync_priority_table()
 
     def _needs_schema_reset(self) -> bool:
-        """
-        Detect incompatible legacy schemas and trigger full DB recreation.
-        """
+        """Detect incompatible legacy schemas and trigger full DB recreation."""
         if not self._db_path.exists():
             return False
-
         try:
-            with sqlite3.connect(self._db_path) as conn:
-                rows = conn.execute("PRAGMA table_info(videos)").fetchall()
-                if not rows:
-                    return False
-                columns = {str(r[1]) for r in rows}
+            inspector = sa_inspect(self.engine)
+            if not inspector.has_table("videos"):
+                return False
+            columns = {col["name"] for col in inspector.get_columns("videos")}
         except Exception:
             return True
-
         required = {"is_valid", "validation_error"}
         return not required.issubset(columns)
 
     def _migrate_schema(self) -> None:
         """Add new nullable columns to existing databases without dropping data."""
-        with sqlite3.connect(self._db_path) as conn:
-            cols = {r[1] for r in conn.execute("PRAGMA table_info(videos)").fetchall()}
-            if "transcoded_path" not in cols:
-                conn.execute("ALTER TABLE videos ADD COLUMN transcoded_path TEXT")
+        inspector = sa_inspect(self.engine)
+        cols = {col["name"] for col in inspector.get_columns("videos")}
+        if "transcoded_path" not in cols:
+            with self.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE videos ADD COLUMN transcoded_path TEXT"))
+                conn.commit()
 
     @property
     def _app_config_path(self) -> Path:
@@ -749,25 +758,33 @@ class LocalDataProvider:
             if not input_path.exists():
                 raise FileNotFoundError(f"Video file not found: {input_path}")
 
-            # Compute sidecar path, mirroring the relative structure under _transcoded/
-            try:
-                rel = input_path.relative_to(self.video_dir)
-            except ValueError:
-                rel = Path(input_path.name)
-            sidecar_path = self.video_dir / "_transcoded" / rel.with_suffix(".mp4")
-            sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_dir = Path(tempfile.gettempdir()) / "video_review_transcoded"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = video_id.replace("/", "_").replace("\\", "_").replace(":", "_")
+            sidecar_path = tmp_dir / f"{safe_name}.mp4"
 
-            # Reuse existing sidecar if already transcoded
             if sidecar_path.exists():
                 video.transcoded_path = str(sidecar_path)
                 session.commit()
                 return {"success": True, "new_path": str(sidecar_path)}
 
             cmd = [
-                "ffmpeg", "-y", "-i", str(input_path),
-                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-                "-c:a", "aac", "-b:a", "128k",
-                "-movflags", "+faststart",
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(input_path),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "23",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-movflags",
+                "+faststart",
                 str(sidecar_path),
             ]
 
@@ -779,6 +796,7 @@ class LocalDataProvider:
                 return {"success": False, "error": f"ffmpeg failed: {exc.stderr}"}
 
             video.transcoded_path = str(sidecar_path)
+            video.is_web_safe = True
             session.commit()
 
             return {"success": True, "new_path": str(sidecar_path)}
@@ -1146,6 +1164,7 @@ class LocalDataProvider:
                         v.transcoded_path,
                         v.validation_error AS video_validation_details,
                         vl.is_blank,
+                        vl.labeled_by,
                         vl.labeled_at,
                         ms.behavior_prediction,
                         ms.individual_count,
@@ -1225,6 +1244,14 @@ class LocalDataProvider:
         row["is_video_valid"] = (
             True if row.get("is_video_valid") is None else bool(row.get("is_video_valid"))
         )
+
+        # Pre-calculate fields for the UI to improve separation of concerns
+        row["needs_transcode"] = needs_browser_transcode(row)
+        model_ann = self.get_model_annotations(video_id)
+        row["default_species"] = get_default_species_from_annotations(
+            model_ann, self.get_valid_species(), None
+        )
+
         return row
 
     def get_model_annotations(self, video_id: str) -> pd.DataFrame:
@@ -1381,10 +1408,12 @@ class LocalDataProvider:
         return normalized
 
     def validate_model_csv(
-        self, df: pd.DataFrame
+        self, df: pd.DataFrame, mappings: dict[str, str] | None = None
     ) -> tuple[pd.DataFrame, pd.DataFrame, list[dict], list[dict]]:
         src = df.copy()
         src.columns = [str(c).strip() for c in src.columns]
+
+        mappings = mappings or {}
 
         required = {"video_uid", "annotation_type", "model_name"}
         missing = required - set(src.columns)
@@ -1456,13 +1485,27 @@ class LocalDataProvider:
 
             if annotation_type == "species" and value_text:
                 original_value = value_text
-                is_valid, best_match = species_fuzzy_cache.get(original_value, (False, None))
-                if not is_valid:
-                    unmapped_species.add(original_value)
-                    continue
-                if best_match != original_value:
-                    species_mappings.append({"original": original_value, "mapped_to": best_match})
-                value_text = best_match
+                # First, check if there is an explicit user mapping
+                mapped_to = mappings.get(original_value)
+                if mapped_to:
+                    value_text = mapped_to
+                else:
+                    is_valid, best_match = species_fuzzy_cache.get(original_value, (False, None))
+                    if not is_valid:
+                        unmapped_species.add(original_value)
+                        errors.append(
+                            {
+                                "row_number": row_num,
+                                "video_uid": video_uid,
+                                "error": f"Species name '{original_value}' needs mapping",
+                            }
+                        )
+                        continue
+                    if best_match != original_value:
+                        species_mappings.append(
+                            {"original": original_value, "mapped_to": best_match}
+                        )
+                    value_text = best_match
 
             prepared_rows.append(
                 {

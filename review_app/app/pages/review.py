@@ -3,7 +3,7 @@ from pathlib import Path
 
 from nicegui import run, ui
 
-from review_app.app.setup_wizard import get_config_path
+from review_app.app.config import get_config_path
 from review_app.app.state import (
     get_annotator_name,
     get_current_idx,
@@ -13,9 +13,13 @@ from review_app.app.state import (
     get_queue,
     get_selections,
     get_state_val,
+    is_autoplay,
+    is_muted,
     set_annotator_name,
+    set_autoplay,
     set_current_idx,
     set_data_provider,
+    set_muted,
     set_playback_speed,
     set_queue,
     set_selections,
@@ -23,57 +27,7 @@ from review_app.app.state import (
     update_filters,
 )
 from review_app.backend.local_data_provider import LocalDataProvider
-
-
-def _make_serializable(val):
-    if val is None:
-        return None
-    if hasattr(val, "isoformat"):
-        return val.isoformat()
-    return val
-
-
-def _df_to_records(df, limit=10):
-    records = []
-    for _, row in df.head(limit).iterrows():
-        records.append({k: _make_serializable(v) for k, v in row.items()})
-    return records
-
-
-def _needs_browser_transcode(video: dict) -> bool:
-    if video.get("is_web_safe") is not False:
-        return False
-    transcoded = video.get("transcoded_path")
-    if transcoded and Path(transcoded).exists():
-        return False
-    return True
-
-
-def _default_species_from_annotations(model_ann, valid_species, fallback_species: str) -> str:
-    if model_ann is None or model_ann.empty:
-        return fallback_species
-    if "annotation_type" not in model_ann.columns or "value_text" not in model_ann.columns:
-        return fallback_species
-
-    species_rows = model_ann[
-        (model_ann["annotation_type"] == "species")
-        & model_ann["value_text"].notna()
-        & (model_ann["value_text"].astype(str).str.strip() != "")
-    ].copy()
-    if species_rows.empty:
-        return fallback_species
-
-    if "probability" not in species_rows.columns:
-        return fallback_species
-
-    species_rows["probability"] = species_rows["probability"].fillna(0.0).astype(float)
-    probs = species_rows.groupby("value_text", as_index=False)["probability"].sum()
-    probs = probs.sort_values("probability", ascending=False)
-    if probs.empty:
-        return fallback_species
-
-    candidate = str(probs.iloc[0]["value_text"]).strip()
-    return candidate if candidate in valid_species else fallback_species
+from review_app.backend.utils import df_to_records, get_video_mime
 
 
 @ui.refreshable
@@ -226,9 +180,7 @@ def render_annotation_section(video, valid_species, dp, default_species):
         render_video_section.refresh()
 
     with ui.row().classes("w-full gap-sm q-mt-sm q-mb-md"):
-        submit_next_btn = ui.button(
-            "Submit & Next", on_click=submit_and_next, color="primary"
-        )
+        submit_next_btn = ui.button("Submit & Next", on_click=submit_and_next, color="primary")
         submit_next_btn._props["data-shortcut"] = "submit-next"
         ui.button("Submit", on_click=submit)
         blank_btn = ui.button("Mark Blank", on_click=mark_blank, color="warning")
@@ -240,9 +192,9 @@ def render_annotation_section(video, valid_species, dp, default_species):
 
     with ui.row().classes("w-full q-mt-md gap-md"):
         current_label = video.get("manual_review_prediction") or "None"
-        consensus = video.get("classification_consensus", "UNKNOWN")
+        labeled_by = video.get("labeled_by") or "None"
         ui.label(f"Current: {current_label}").classes("text-body2")
-        ui.label(f"Consensus: {consensus}").classes("text-body2 text-grey-6")
+        ui.label(f"By: {labeled_by}").classes("text-body2 text-grey-6")
 
 
 @ui.refreshable
@@ -298,7 +250,7 @@ async def render_video_section(dp, valid_species):
         with ui.column().classes("col"):
             with ui.card().classes("full-width q-mb-md"):
                 video_id = f"video-{selected_video_id}"
-                if _needs_browser_transcode(video):
+                if video.get("needs_transcode"):
                     attempted = set(get_state_val("transcode_attempted_ids", []))
                     if selected_video_id not in attempted:
                         attempted.add(selected_video_id)
@@ -333,22 +285,40 @@ async def render_video_section(dp, valid_species):
                         on_click=retry_transcode,
                     )
                 elif video.get("video_path"):
-                    # Prefer transcoded sidecar (under video_dir/_transcoded/) when available
-                    serve_path_str = video.get("transcoded_path") or video["video_path"]
-                    serve_path = Path(serve_path_str)
-                    if not serve_path.exists() and serve_path_str != video["video_path"]:
-                        serve_path = Path(video["video_path"])
-                    if serve_path.exists():
-                        try:
-                            rel_path = serve_path.relative_to(dp.video_dir)
-                            video_url = f"/media/{rel_path}"
-                        except ValueError:
-                            video_url = str(serve_path)
-                        ui.video(video_url, controls=True, autoplay=True, muted=True).props(
-                            f'id="{video_id}"'
-                        ).classes("full-width")
+                    # Transcoded sidecars live in the system temp dir, served via /transcoded
+                    transcoded_str = video.get("transcoded_path")
+                    transcoded_path = Path(transcoded_str) if transcoded_str else None
+
+                    if transcoded_path and transcoded_path.exists():
+                        video_url = f"/transcoded/{transcoded_path.name}"
                     else:
-                        ui.label(f"Video file not found: {video['video_path']}").classes("text-negative")
+                        serve_path = Path(video["video_path"])
+                        if serve_path.exists():
+                            try:
+                                rel_path = serve_path.relative_to(dp.video_dir)
+                                video_url = f"/media/{rel_path}"
+                            except ValueError:
+                                ui.label(
+                                    "Video file is outside the media directory and cannot be served."
+                                ).classes("text-negative")
+                                video_url = None
+                        else:
+                            ui.label(f"Video file not found: {video['video_path']}").classes(
+                                "text-negative"
+                            )
+                            video_url = None
+
+                    if video_url:
+                        mime = get_video_mime(video_url)
+                        autoplay = "autoplay" if is_autoplay() else ""
+                        muted = "muted" if is_muted() else ""
+                        ui.html(
+                            f'<video id="{video_id}" controls {autoplay} {muted}'
+                            f' style="width:100%">'
+                            f'<source src="{video_url}" type="{mime}">'
+                            f"</video>"
+                        )
+
                 else:
                     ui.label("No video path available").classes("text-grey-5")
 
@@ -371,21 +341,20 @@ async def render_video_section(dp, valid_species):
                         {"name": "value_text", "label": "Value", "field": "value_text"},
                         {"name": "probability", "label": "Prob", "field": "probability"},
                     ]
-                    ui.table(columns=columns, rows=_df_to_records(model_ann, 10))
+                    ui.table(columns=columns, rows=df_to_records(model_ann, 10))
                 else:
                     ui.label("No model annotations found").classes("text-grey-5")
 
         with ui.column().classes("col"):
             with ui.card().classes("full-width q-mb-md"):
                 ui.label("Manual Review").classes("text-subtitle1 font-weight-medium q-mb-sm")
-                fallback_species = video.get("classification_consensus", "unknown")
-                if not fallback_species or fallback_species == "UNKNOWN":
-                    fallback_species = valid_species[0]
-                default_species = _default_species_from_annotations(
-                    model_ann,
-                    valid_species,
-                    fallback_species,
-                )
+                default_species = video.get("default_species")
+                if not default_species:
+                    fallback_species = video.get("classification_consensus", "unknown")
+                    if not fallback_species or fallback_species == "UNKNOWN":
+                        fallback_species = valid_species[0]
+                    default_species = fallback_species
+
                 render_annotation_section(video, valid_species, dp, default_species)
 
     current_speed = get_playback_speed().replace("x", "")
@@ -455,8 +424,12 @@ async def setup_review():
     )
 
     with ui.row().classes("w-full items-start"):
-        with ui.column().classes("review-sidebar").style(
-            "width: 280px; min-width: 280px; min-height: calc(100vh - 50px); padding: 16px;"
+        with (
+            ui.column()
+            .classes("review-sidebar")
+            .style(
+                "width: 280px; min-width: 280px; min-height: calc(100vh - 50px); padding: 16px;"
+            )
         ):
             with ui.card().classes("full-width q-mb-md"):
                 ui.label("Annotator").classes("text-subtitle2 text-grey-7")
@@ -470,28 +443,43 @@ async def setup_review():
             current_speed = float(current_speed_str.replace("x", ""))
 
             with ui.card().classes("full-width q-mb-md"):
-                ui.label("Playback Speed").classes("text-subtitle2 text-grey-7")
-
-                speed_label = ui.label(f"{current_speed}x").classes("text-body2 q-my-sm")
+                with ui.row().classes("w-full items-center"):
+                    ui.label("Playback Speed").classes("text-subtitle2 text-grey-7")
+                    ui.space()
+                    ui.button(
+                        icon="restart_alt", on_click=lambda: setattr(speed_slider, "value", 1.0)
+                    ).props("flat round dense size=sm").classes("text-grey-7")
 
                 def update_playback_speed(val):
                     speed = round(val, 2)
                     speed_str = f"{speed}x"
                     set_playback_speed(speed_str)
-                    speed_label.text = f"{speed}x"
                     ui.run_javascript(f"""
                         document.querySelectorAll('video').forEach(v => {{
                             v.playbackRate = {speed};
                         }});
                     """)
 
-                ui.slider(
+                speed_slider = ui.slider(
                     min=0.25,
                     max=10,
                     step=0.25,
                     value=current_speed,
                     on_change=lambda e: update_playback_speed(e.value),
-                ).props("label-always class=q-mx-sm")
+                ).props("label-always switch-label-side class=q-mx-sm")
+
+            with ui.card().classes("full-width q-mb-md"):
+                ui.label("Playback Settings").classes("text-subtitle2 text-grey-7")
+                ui.checkbox(
+                    "Autoplay",
+                    value=is_autoplay(),
+                    on_change=lambda e: (set_autoplay(e.value), render_video_section.refresh()),
+                )
+                ui.checkbox(
+                    "Muted",
+                    value=is_muted(),
+                    on_change=lambda e: (set_muted(e.value), render_video_section.refresh()),
+                )
 
             with ui.card().classes("full-width"):
                 ui.label("Filters").classes("text-subtitle1 font-weight-medium")
@@ -540,7 +528,9 @@ async def setup_review():
                     set_selections([])
                     render_video_section.refresh()
 
-                ui.button("Apply Filters", on_click=apply_filters, color="primary").props("full-width")
+                ui.button("Apply Filters", on_click=apply_filters, color="primary").props(
+                    "full-width"
+                )
 
         with ui.column().classes("col q-pa-md"):
             await render_video_section(dp, valid_species)

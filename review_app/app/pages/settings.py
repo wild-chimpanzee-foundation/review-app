@@ -4,10 +4,10 @@ from pathlib import Path
 import yaml
 from nicegui import ui
 
+from review_app.app.config import get_config_path
 from review_app.app.setup_wizard import (
     get_bundled_behaviors_csv,
     get_bundled_species_csv,
-    get_config_path,
 )
 from review_app.app.state import (
     get_data_provider,
@@ -100,6 +100,16 @@ def _build_settings_content(container: ui.column):
             inputs["video_dir"] = ui.input(
                 placeholder="/path/to/videos",
                 value=current_video_dir,
+            ).props("outlined dense class=w-full")
+
+        with ui.card().classes("full-width q-mb-lg"):
+            with ui.row().classes("items-center q-mb-sm"):
+                ui.icon("storage", size="sm").classes("text-primary q-mr-sm")
+                ui.label("Database File").classes("text-subtitle1 font-weight-medium")
+            ui.label("Path to the SQLite database file").classes("text-caption text-grey-6 q-mb-md")
+            inputs["db_path"] = ui.input(
+                placeholder="/path/to/review_data.db",
+                value=str(current_db_path) if current_db_path else "",
             ).props("outlined dense class=w-full")
 
         with ui.card().classes("full-width q-mb-lg"):
@@ -212,45 +222,107 @@ def _build_settings_content(container: ui.column):
                 ui.label("Reset Database").classes("text-body2")
                 ui.space()
 
-                reset_dialog = ui.dialog()
-                with reset_dialog:
-                    with ui.card().classes("q-pa-lg"):
-                        ui.label("Reset Database?").classes("text-h6 q-mb-md")
+                reset_dialog = ui.dialog().props("persistent")
+                reset_card = [None]
+
+                def build_confirm_step():
+                    reset_dialog.clear()
+                    with reset_dialog, ui.card().classes("q-pa-lg") as card:
+                        reset_card[0] = card
+                        ui.label("Reset database?").classes("text-h6 q-mb-sm")
                         ui.label(
-                            "This will delete all videos, annotations, and model data from the database. "
-                            "Your video files will not be affected."
-                        ).classes("text-body2 q-mb-md text-negative")
-                        with ui.row().classes("w-full justify-end gap-md"):
+                            "This permanently deletes all videos, annotations, and model data. "
+                            "Your video files are not affected."
+                        ).classes("text-body2 text-negative q-mb-lg")
+                        with ui.row().classes("w-full justify-end gap-sm"):
                             ui.button("Cancel", on_click=reset_dialog.close).props("flat")
+                            ui.button("Yes, reset", icon="delete_forever", color="negative",
+                                      on_click=do_reset)
 
-                            async def on_reset_click():
-                                await _do_reset(reset_dialog)
+                async def do_reset():
+                    old_dp = get_data_provider()
+                    if old_dp:
+                        old_dp.engine.dispose()
+                    if current_db_path and current_db_path.exists():
+                        current_db_path.unlink()
+                    new_dp = LocalDataProvider(str(CONFIG_PATH))
+                    set_data_provider(new_dp)
+                    set_queue([])
+                    set_current_idx(0)
+                    set_selections([])
 
-                            ui.button(
-                                "Reset",
-                                color="negative",
-                                on_click=on_reset_click,
-                            )
+                    reset_dialog.clear()
+                    with reset_dialog, ui.card().classes("q-pa-lg"):
+                        ui.icon("check_circle", size="lg").classes("text-positive q-mb-sm")
+                        ui.label("Database reset").classes("text-h6 q-mb-sm")
+                        ui.label(
+                            "All data has been cleared. Sync your videos to get started again."
+                        ).classes("text-body2 text-grey-7 q-mb-lg")
+
+                        sync_progress_col = ui.column().classes("w-full q-mb-md")
+                        sync_progress_col.visible = False
+                        with sync_progress_col:
+                            progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
+                            status = ui.label("Starting...")
+
+                        async def start_sync():
+                            sync_progress_col.visible = True
+                            sync_btn.visible = False
+                            await sync_with_progress(new_dp, progress=progress, status=status)
+                            ui.notify("Sync complete!", type="positive")
+                            reset_dialog.close()
+                            ui.navigate.to("/overview")
+
+                        sync_btn = ui.button(
+                            "Sync videos now", icon="sync", color="primary", on_click=start_sync
+                        ).classes("full-width q-mb-sm")
+                        ui.button("Do it later", on_click=reset_dialog.close).props(
+                            "flat class=full-width"
+                        )
 
                 ui.button(
                     "Reset Database",
                     icon="delete_forever",
                     color="negative",
-                    on_click=reset_dialog.open,
+                    on_click=lambda: (build_confirm_step(), reset_dialog.open()),
                 )
 
-        async def _do_reset(dialog):
-            dialog.close()
-            if current_db_path and current_db_path.exists():
-                current_db_path.unlink()
-            set_queue([])
-            set_current_idx(0)
-            set_selections([])
-            ui.notify("Database reset. Sync videos manually when ready.", type="positive")
-            ui.navigate.to("/overview")
+        async def _confirm_existing_db(db_path: str):
+            """Returns True to keep, False to delete, None to cancel."""
+            result: list = [None]
+            done: list = [False]
+            dialog = ui.dialog().props("persistent")
+            with dialog, ui.card().classes("q-pa-lg"):
+                ui.label("Database already exists").classes("text-h6 q-mb-sm")
+                ui.label(db_path).classes("text-caption text-grey-6 q-mb-md")
+                ui.label(
+                    "A database already exists at this path. "
+                    "Keep it to continue with existing data, or delete it and start fresh."
+                ).classes("text-body2 q-mb-lg")
+                with ui.row().classes("w-full justify-end gap-sm"):
+                    def on_cancel():
+                        result[0] = None
+                        done[0] = True
+                        dialog.close()
+                    def on_keep():
+                        result[0] = True
+                        done[0] = True
+                        dialog.close()
+                    def on_delete():
+                        result[0] = False
+                        done[0] = True
+                        dialog.close()
+                    ui.button("Cancel", on_click=on_cancel).props("flat")
+                    ui.button("Keep existing", icon="storage", color="primary", on_click=on_keep)
+                    ui.button("Delete & start fresh", icon="delete_forever", color="negative", on_click=on_delete)
+            dialog.open()
+            while not done[0]:
+                await asyncio.sleep(0.05)
+            return result[0]
 
         async def apply_settings():
             video_dir = inputs["video_dir"].value.strip()
+            new_db_path = inputs["db_path"].value.strip()
             species_mode = species_mode_holder[0]
             behaviors_mode = behaviors_mode_holder[0]
 
@@ -260,8 +332,24 @@ def _build_settings_content(container: ui.column):
             if not Path(video_dir).exists():
                 ui.notify("Video directory does not exist", type="negative")
                 return
+            if not new_db_path:
+                ui.notify("Database path is required", type="warning")
+                return
+
+            db_path_changed = new_db_path != str(current_db_path) if current_db_path else True
+            if db_path_changed and Path(new_db_path).exists():
+                confirmed = await _confirm_existing_db(new_db_path)
+                if confirmed is None:
+                    return
+                if confirmed is False:
+                    old_dp = get_data_provider()
+                    if old_dp:
+                        old_dp.engine.dispose()
+                    Path(new_db_path).unlink()
 
             new_config = dict(config)
+            new_config["db_dir"] = str(Path(new_db_path).parent)
+            new_config["db_filename"] = Path(new_db_path).name
             new_config["video_dir"] = video_dir
 
             if species_mode == "bundled":

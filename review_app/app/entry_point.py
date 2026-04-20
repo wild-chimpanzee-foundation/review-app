@@ -1,7 +1,6 @@
 import argparse
 import mimetypes
 import os
-import platform
 import secrets
 import sys
 from pathlib import Path
@@ -14,14 +13,14 @@ if sys.platform.startswith("linux"):
         os.environ.setdefault("GDK_BACKEND", "x11")
     os.environ.setdefault("QT_QPA_PLATFORM", "xcb;wayland")
 
-# Ensure common video mimetypes are registered correctly for reliable serving
-mimetypes.add_type("video/mp4", ".mp4")
-mimetypes.add_type("video/x-msvideo", ".avi")
-mimetypes.add_type("video/quicktime", ".mov")
-mimetypes.add_type("video/x-matroska", ".mkv")
-mimetypes.add_type("video/webm", ".webm")
-mimetypes.add_type("video/x-ms-wmv", ".wmv")
-mimetypes.add_type("video/x-flv", ".flv")
+# Register video mimetypes for both lower and uppercase extensions (camera traps often use .MP4)
+for _ext, _mime in [
+    (".mp4", "video/mp4"), (".avi", "video/x-msvideo"),
+    (".mov", "video/quicktime"), (".mkv", "video/x-matroska"),
+    (".webm", "video/webm"), (".wmv", "video/x-ms-wmv"), (".flv", "video/x-flv"),
+]:
+    mimetypes.add_type(_mime, _ext)
+    mimetypes.add_type(_mime, _ext.upper())
 
 APP_DIR = (
     Path(sys._MEIPASS).parent
@@ -32,18 +31,7 @@ sys.path.insert(0, str(APP_DIR))
 os.chdir(APP_DIR)
 
 
-def _get_config_path() -> Path:
-    if platform.system() == "Windows":
-        base = Path(os.environ.get("APPDATA", Path.home()))
-    elif platform.system() == "Darwin":
-        base = Path.home() / "Library" / "Application Support"
-    else:
-        base = Path.home() / ".config"
-    app_dir = base / "video_review_app"
-    app_dir.mkdir(parents=True, exist_ok=True)
-    return app_dir / "config.yaml"
-
-
+from review_app.app.config import get_config_path  # noqa: E402
 from review_app.app.setup_wizard import setup_wizard  # noqa: E402
 from review_app.app.state import (  # noqa: E402
     get_data_provider,
@@ -54,7 +42,7 @@ from review_app.app.state import (  # noqa: E402
 from review_app.app.theme import apply_theme  # noqa: E402
 from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
 
-CONFIG_PATH = _get_config_path()
+CONFIG_PATH = get_config_path()
 
 
 def shared_header():
@@ -290,17 +278,16 @@ class GUI:
                 self.dp = dp
                 # Register video directory for media streaming
                 app.add_media_files("/media", dp.video_dir)
+                # Register temp transcoded dir for browser-transcoded sidecars
+                import tempfile
+                transcoded_tmp = Path(tempfile.gettempdir()) / "video_review_transcoded"
+                transcoded_tmp.mkdir(parents=True, exist_ok=True)
+                app.add_media_files("/transcoded", transcoded_tmp)
             except Exception as e:
                 print(f"Warning: Could not load config at startup: {e}")
 
         # Run in native window mode (pywebview) for a desktop-like experience
         # In dev mode, we use the browser for easier debugging and auto-reload
-
-        # Fix for Linux reload + multiprocessing SemLock issue
-        import multiprocessing
-
-        if sys.platform.startswith("linux") and dev_mode:
-            multiprocessing.set_start_method("spawn", force=True)
 
         storage_secret = os.environ.get("VIDEO_REVIEW_SECRET")
         if not storage_secret:

@@ -1,24 +1,17 @@
 
 from nicegui import run, ui
 
-from review_app.app.setup_wizard import get_config_path
-from review_app.app.state import get_data_provider, set_data_provider
+from review_app.app.state import get_data_provider
 from review_app.app.utils import sync_with_progress
-from review_app.backend.local_data_provider import LocalDataProvider
 
 
 async def setup_overview():
     dp = get_data_provider()
     if not dp:
-        config_path = get_config_path()
-        if config_path.exists():
-            dp = LocalDataProvider(str(config_path))
-            set_data_provider(dp)
-        else:
-            with ui.column().classes("w-full q-pa-lg items-center"):
-                ui.label("Error: Data provider not initialized").classes("text-h6 text-red-600")
-                ui.button("Set up", on_click=lambda: ui.navigate.to("/setup"), icon="settings")
-            return
+        with ui.column().classes("w-full q-pa-lg items-center"):
+            ui.label("Error: Data provider not initialized").classes("text-h6 text-red-600")
+            ui.button("Set up", on_click=lambda: ui.navigate.to("/setup"), icon="settings")
+        return
 
     if not await run.io_bound(dp.has_videos_in_db):
         with ui.column().classes("w-full q-pa-lg items-center"):

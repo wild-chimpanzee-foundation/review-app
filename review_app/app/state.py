@@ -40,8 +40,12 @@ def _get_user_state() -> dict[str, Any]:
         app.storage.user["video_playback_time"] = 0.0
     if "playback_speed" not in app.storage.user:
         app.storage.user["playback_speed"] = "1x"
+    if "autoplay" not in app.storage.user:
+        app.storage.user["autoplay"] = True
+    if "muted" not in app.storage.user:
+        app.storage.user["muted"] = True
     if "dark_mode" not in app.storage.user:
-        app.storage.user["dark_mode"] = False
+        app.storage.user["dark_mode"] = True
     return app.storage.user
 
 
@@ -99,6 +103,22 @@ def get_playback_speed():
 
 def set_playback_speed(speed: str):
     _get_user_state()["playback_speed"] = speed
+
+
+def is_autoplay():
+    return _get_user_state().get("autoplay", True)
+
+
+def set_autoplay(enabled: bool):
+    _get_user_state()["autoplay"] = enabled
+
+
+def is_muted():
+    return _get_user_state().get("muted", True)
+
+
+def set_muted(enabled: bool):
+    _get_user_state()["muted"] = enabled
 
 
 def is_dark_mode():

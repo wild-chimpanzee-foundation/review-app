@@ -1,4 +1,4 @@
-import os
+import asyncio
 import platform
 import shutil
 import subprocess
@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 from nicegui import run, ui
 
+from review_app.app.config import get_config_path, get_default_db_path
 from review_app.app.utils import sync_with_progress
 
 FFMPEG_INSTALL_MAC = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && brew install ffmpeg'
@@ -39,30 +40,6 @@ def get_ffmpeg_install_cmd() -> str:
         return FFMPEG_INSTALL_WINDOWS
     else:
         return FFMPEG_INSTALL_LINUX
-
-
-def get_default_db_path() -> Path:
-    if platform.system() == "Windows":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home()))
-    elif platform.system() == "Darwin":
-        base = Path.home() / "Library" / "Application Support"
-    else:
-        base = Path.home() / ".local" / "share"
-    app_dir = base / "video_review_app"
-    app_dir.mkdir(parents=True, exist_ok=True)
-    return app_dir / "review_data.db"
-
-
-def get_config_path() -> Path:
-    if platform.system() == "Windows":
-        base = Path(os.environ.get("APPDATA", Path.home()))
-    elif platform.system() == "Darwin":
-        base = Path.home() / "Library" / "Application Support"
-    else:
-        base = Path.home() / ".config"
-    app_dir = base / "video_review_app"
-    app_dir.mkdir(parents=True, exist_ok=True)
-    return app_dir / "config.yaml"
 
 
 def get_bundled_species_csv() -> str | None:
@@ -162,6 +139,45 @@ class SetupWizard:
         async def on_video_dir_change():
             update_submit_button()
 
+        async def _confirm_existing_db(db_path: str):
+            """Show a dialog asking what to do with an existing DB.
+            Returns True to keep it, False to overwrite, None to cancel."""
+            result: list = [None]
+            done: list = [False]
+
+            dialog = ui.dialog().props("persistent")
+            with dialog, ui.card().classes("q-pa-lg"):
+                ui.label("Database already exists").classes("text-h6 q-mb-sm")
+                ui.label(f"{db_path}").classes("text-caption text-grey-6 q-mb-md")
+                ui.label(
+                    "An existing database was found at this path. "
+                    "You can keep it and continue annotating, or delete it and start fresh."
+                ).classes("text-body2 q-mb-lg")
+                with ui.row().classes("w-full justify-end gap-sm"):
+                    def on_cancel():
+                        result[0] = None
+                        done[0] = True
+                        dialog.close()
+
+                    def on_keep():
+                        result[0] = True
+                        done[0] = True
+                        dialog.close()
+
+                    def on_delete():
+                        result[0] = False
+                        done[0] = True
+                        dialog.close()
+
+                    ui.button("Cancel", on_click=on_cancel).props("flat")
+                    ui.button("Keep existing", icon="storage", color="primary", on_click=on_keep)
+                    ui.button("Delete & start fresh", icon="delete_forever", color="negative", on_click=on_delete)
+
+            dialog.open()
+            while not done[0]:
+                await asyncio.sleep(0.05)
+            return result[0]
+
         async def submit():
             video_dir = self.inputs["video_dir"].value.strip()
             db_path = self.inputs["db"].value.strip()
@@ -175,6 +191,13 @@ class SetupWizard:
             if not self.ffmpeg_ok:
                 ui.notify("ffmpeg is required. Please install it first.", type="negative")
                 return
+
+            if Path(db_path).exists():
+                confirmed = await _confirm_existing_db(db_path)
+                if confirmed is None:
+                    return
+                if confirmed is False:
+                    Path(db_path).unlink()
 
             config = generate_config(video_dir, db_path, bundled_species, bundled_behaviors)
             save_config(config, self.config_path)
