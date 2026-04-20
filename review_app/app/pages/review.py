@@ -333,7 +333,16 @@ async def render_video_section(dp, valid_species):
                 elif video.get("video_path"):
                     video_path = Path(video["video_path"])
                     if video_path.exists():
-                        ui.video(str(video_path), controls=True, autoplay=True, muted=True).props(
+                        # Use /media/ prefix for reliable serving via NiceGUI media server
+                        # We need the path relative to the video directory
+                        try:
+                            rel_path = video_path.relative_to(dp.video_dir)
+                            video_url = f"/media/{rel_path}"
+                        except ValueError:
+                            # Fallback if somehow not under video_dir
+                            video_url = str(video_path)
+                            
+                        ui.video(video_url, controls=True, autoplay=True, muted=True).props(
                             f'id="{video_id}"'
                         ).classes("full-width")
                     else:

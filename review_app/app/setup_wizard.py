@@ -1,4 +1,3 @@
-import asyncio
 import os
 import platform
 import shutil
@@ -181,8 +180,8 @@ class SetupWizard:
             save_config(config, self.config_path)
             ui.notify("Configuration saved!", type="positive")
 
-            from review_app.backend.local_data_provider import LocalDataProvider
             from review_app.app.state import set_data_provider
+            from review_app.backend.local_data_provider import LocalDataProvider
 
             dp = LocalDataProvider(str(self.config_path))
             set_data_provider(dp)

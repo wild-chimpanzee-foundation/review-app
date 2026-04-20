@@ -102,7 +102,7 @@ def set_playback_speed(speed: str):
 
 
 def is_dark_mode():
-    return _get_user_state().get("dark_mode", False)
+    return _get_user_state().get("dark_mode", True)
 
 
 def set_dark_mode(enabled: bool):

@@ -1,11 +1,26 @@
 import argparse
+import mimetypes
 import os
 import platform
+import secrets
 import sys
 from pathlib import Path
 
-os.environ.setdefault("GDK_BACKEND", "x11")
-os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+# Configure display backends for Wayland/Hyprland/X11 compatibility
+if os.environ.get("XDG_SESSION_TYPE") == "wayland":
+    os.environ.setdefault("GDK_BACKEND", "wayland,x11")
+else:
+    os.environ.setdefault("GDK_BACKEND", "x11")
+os.environ.setdefault("QT_QPA_PLATFORM", "xcb;wayland")
+
+# Ensure common video mimetypes are registered correctly for reliable serving
+mimetypes.add_type("video/mp4", ".mp4")
+mimetypes.add_type("video/x-msvideo", ".avi")
+mimetypes.add_type("video/quicktime", ".mov")
+mimetypes.add_type("video/x-matroska", ".mkv")
+mimetypes.add_type("video/webm", ".webm")
+mimetypes.add_type("video/x-ms-wmv", ".wmv")
+mimetypes.add_type("video/x-flv", ".flv")
 
 APP_DIR = (
     Path(sys._MEIPASS).parent
@@ -29,7 +44,12 @@ def _get_config_path() -> Path:
 
 
 from review_app.app.setup_wizard import setup_wizard  # noqa: E402
-from review_app.app.state import is_dark_mode, set_dark_mode, set_data_provider  # noqa: E402
+from review_app.app.state import (  # noqa: E402
+    get_data_provider,
+    is_dark_mode,
+    set_dark_mode,
+    set_data_provider,
+)
 from review_app.app.theme import apply_theme  # noqa: E402
 from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
 
@@ -40,6 +60,12 @@ def shared_header():
     from nicegui import ui
 
     apply_theme()
+
+    # Register navigate handler per-page
+    def handle_navigate(e):
+        ui.navigate.to(e.args)
+
+    ui.on("navigate", handle_navigate)
 
     # Dark mode is now session-safe via state functions (app.storage.user)
     dark = ui.dark_mode(value=is_dark_mode())
@@ -93,9 +119,11 @@ class GUI:
                     ).props("size=lg")
         else:
             try:
-                dp = LocalDataProvider(str(CONFIG_PATH))
-                set_data_provider(dp)
-                self.dp = dp
+                dp = get_data_provider()
+                if not dp:
+                    ui.label("Error: Data provider not initialized").classes("text-negative")
+                    ui.button("Go to Overview", on_click=lambda: ui.navigate.to("/overview"))
+                    return
 
                 with ui.column().classes("w-full q-pa-lg"):
                     with ui.card().classes("full-width q-mb-lg"):
@@ -178,6 +206,12 @@ class GUI:
         shared_header()
         await setup_model_import()
 
+    async def settings_page(self):
+        from review_app.app.pages.settings import setup_settings
+
+        shared_header()
+        await setup_settings()
+
     def setup_page(self):
         from nicegui import ui
 
@@ -188,12 +222,6 @@ class GUI:
             ui.notify("Setup complete! Syncing videos...", type="positive")
 
         setup_wizard(on_complete_callback=on_setup_complete, config_path=CONFIG_PATH)
-
-    async def settings_page(self):
-        from review_app.app.pages.settings import setup_settings
-
-        shared_header()
-        await setup_settings()
 
     def _sync_videos(self, data_provider):
         from nicegui import run, ui
@@ -235,8 +263,8 @@ class GUI:
         ui.page("/overview")(self.overview_page)
         ui.page("/review")(self.review_page)
         ui.page("/setup")(self.setup_page)
-        ui.page("/settings")(self.settings_page)
         ui.page("/model-import")(self.model_import_page)
+        ui.page("/settings")(self.settings_page)
 
         ui.add_body_html(
             """
@@ -244,39 +272,49 @@ class GUI:
                 document.addEventListener('keydown', function(e) {
                     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
                     if (e.ctrlKey || e.metaKey || e.altKey) return;
-                    
-                    if (e.key === 'o' || e.key === 'O') {
-                        window.location.href = '/overview';
-                    } else if (e.key === 'r' || e.key === 'R') {
-                        window.location.href = '/review';
-                    } else if (e.key === 'm' || e.key === 'M') {
-                        window.location.href = '/model-import';
-                    } else if (e.key === 's' || e.key === 'S') {
-                        window.location.href = '/settings';
-                    }
+                    const routes = { o: '/overview', r: '/review', m: '/model-import', s: '/settings' };
+                    const path = routes[e.key.toLowerCase()];
+                    if (path) window.location.href = path;
                 });
             </script>
-        """,
+            """,
             shared=True,
         )
 
+        # Load config and register media files at startup (before ui.run)
+        if CONFIG_PATH.exists():
+            try:
+                dp = LocalDataProvider(str(CONFIG_PATH))
+                set_data_provider(dp)
+                self.dp = dp
+                # Register video directory for media streaming
+                app.add_media_files("/media", dp.video_dir)
+            except Exception as e:
+                print(f"Warning: Could not load config at startup: {e}")
+
+        # Run in native window mode (pywebview) for a desktop-like experience
+        # In dev mode, we use the browser for easier debugging and auto-reload
+
+        # Fix for Linux reload + multiprocessing SemLock issue
+        import multiprocessing
+
+        if sys.platform.startswith("linux") and dev_mode:
+            multiprocessing.set_start_method("spawn", force=True)
+
+        storage_secret = os.environ.get("VIDEO_REVIEW_SECRET")
+        if not storage_secret:
+            storage_secret = secrets.token_hex(32)
+
         ui.run(
+            native=not dev_mode,
+            # window_size=(1400, 900) if not dev_mode else None,
             title="Video Annotation",
             host="127.0.0.1",
             port=8000,
-            show=True,
+            show=True if dev_mode else False,
             reload=dev_mode,
-            storage_secret="video_annotation_secret_key",
+            storage_secret=storage_secret,
         )
-
-
-if __name__ in ("__main__", "__mp_main__"):
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dev", action="store_true", help="Enable dev mode with auto-reload")
-    args = parser.parse_args()
-
-    gui = GUI()
-    gui.start(dev_mode=args.dev)
 
 
 if __name__ in ("__main__", "__mp_main__"):
