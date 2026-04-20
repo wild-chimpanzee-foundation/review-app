@@ -11,7 +11,7 @@ Video annotation review dashboard for manual classification of camera trap foota
 ## Run
 
 ```bash
-uv run python review_app/app/entry_point.py
+uv run python review_app/app/entry_point.py --dev
 ```
 
 ## Building

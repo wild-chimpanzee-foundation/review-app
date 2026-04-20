@@ -68,9 +68,17 @@ jobs:
           uv run pyinstaller video_annotation.spec --clean
 
       - name: Rename artifact
+        shell: bash
         run: |
-          if [ -f dist/VideoAnnotation/VideoAnnotation ]; then
-            mv dist/VideoAnnotation/VideoAnnotation "dist/VideoAnnotation-${{ matrix.name }}-${TAG}${{ matrix.ext }}"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            # Windows/PowerShell logic
+            pwsh -Command 'if (Test-Path "dist/VideoAnnotation/VideoAnnotation.exe") { Rename-Item -Path "dist/VideoAnnotation/VideoAnnotation.exe" -NewName "VideoAnnotation-${{ matrix.name }}-${{ env.TAG }}${{ matrix.ext }}" }'
+            mv "dist/VideoAnnotation/VideoAnnotation-${{ matrix.name }}-${{ env.TAG }}${{ matrix.ext }}" dist/
+          else
+            # Linux/macOS logic
+            if [ -f dist/VideoAnnotation/VideoAnnotation ]; then
+              mv dist/VideoAnnotation/VideoAnnotation "dist/VideoAnnotation-${{ matrix.name }}-${{ env.TAG }}${{ matrix.ext }}"
+            fi
           fi
         env:
           TAG: ${{ steps.vars.outputs.tag || github.event.inputs.tag || 'dev' }}
