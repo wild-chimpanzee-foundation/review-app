@@ -3,11 +3,11 @@ name: Build Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to build'
+        description: "Tag to build"
         required: false
         type: string
 
@@ -18,14 +18,13 @@ jobs:
         include:
           - os: ubuntu-latest
             name: linux
-            ext: ''
+            ext: ""
           - os: windows-latest
             name: windows
-            ext: '.exe'
+            ext: ".exe"
           - os: macos-latest
             name: macos
-            ext: ''
-
+            ext: ""
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -40,7 +39,7 @@ jobs:
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.13"
 
       - name: Install uv
         run: pip install uv
@@ -67,21 +66,27 @@ jobs:
           uv run pip install pyinstaller
           uv run pyinstaller video_annotation.spec --clean
 
-      - name: Rename artifact
+      - name: Rename artifact (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            # Windows/PowerShell logic
-            pwsh -Command 'if (Test-Path "dist/VideoAnnotation/VideoAnnotation.exe") { Rename-Item -Path "dist/VideoAnnotation/VideoAnnotation.exe" -NewName "VideoAnnotation-${{ matrix.name }}-${{ env.TAG }}${{ matrix.ext }}" }'
-            mv "dist/VideoAnnotation/VideoAnnotation-${{ matrix.name }}-${{ env.TAG }}${{ matrix.ext }}" dist/
-          else
-            # Linux/macOS logic
-            if [ -f dist/VideoAnnotation/VideoAnnotation ]; then
-              mv dist/VideoAnnotation/VideoAnnotation "dist/VideoAnnotation-${{ matrix.name }}-${{ env.TAG }}${{ matrix.ext }}"
-            fi
-          fi
         env:
           TAG: ${{ steps.vars.outputs.tag || github.event.inputs.tag || 'dev' }}
+        run: |
+          if [ -f "dist/VideoAnnotation/VideoAnnotation" ]; then
+            mv "dist/VideoAnnotation/VideoAnnotation" "dist/VideoAnnotation-${{ matrix.name }}-${TAG}${{ matrix.ext }}"
+          fi
+
+      - name: Rename artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TAG: ${{ steps.vars.outputs.tag || github.event.inputs.tag || 'dev' }}
+        run: |
+          $src = "dist/VideoAnnotation/VideoAnnotation.exe"
+          $dst = "dist/VideoAnnotation-${{ matrix.name }}-$env:TAG${{ matrix.ext }}"
+          if (Test-Path $src) {
+            Move-Item $src $dst
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -89,7 +94,7 @@ jobs:
           name: VideoAnnotation-${{ matrix.name }}
           path: |
             dist/VideoAnnotation-${{ matrix.name }}*
-            dist/VideoAnnotation/VideoAnnotation*  # fallback
+            dist/VideoAnnotation/VideoAnnotation*
           if-no-files-found: ignore
 
   release:
