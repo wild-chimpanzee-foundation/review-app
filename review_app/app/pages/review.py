@@ -41,10 +41,12 @@ def _df_to_records(df, limit=10):
 
 
 def _needs_browser_transcode(video: dict) -> bool:
-    video_path = str(video.get("video_path") or "")
-    suffix = Path(video_path).suffix.lower()
-    browser_suffixes = {".mp4", ".webm", ".ogg"}
-    return bool(video.get("is_web_safe") is False or suffix not in browser_suffixes)
+    if video.get("is_web_safe") is not False:
+        return False
+    transcoded = video.get("transcoded_path")
+    if transcoded and Path(transcoded).exists():
+        return False
+    return True
 
 
 def _default_species_from_annotations(model_ann, valid_species, fallback_species: str) -> str:
@@ -331,22 +333,22 @@ async def render_video_section(dp, valid_species):
                         on_click=retry_transcode,
                     )
                 elif video.get("video_path"):
-                    video_path = Path(video["video_path"])
-                    if video_path.exists():
-                        # Use /media/ prefix for reliable serving via NiceGUI media server
-                        # We need the path relative to the video directory
+                    # Prefer transcoded sidecar (under video_dir/_transcoded/) when available
+                    serve_path_str = video.get("transcoded_path") or video["video_path"]
+                    serve_path = Path(serve_path_str)
+                    if not serve_path.exists() and serve_path_str != video["video_path"]:
+                        serve_path = Path(video["video_path"])
+                    if serve_path.exists():
                         try:
-                            rel_path = video_path.relative_to(dp.video_dir)
+                            rel_path = serve_path.relative_to(dp.video_dir)
                             video_url = f"/media/{rel_path}"
                         except ValueError:
-                            # Fallback if somehow not under video_dir
-                            video_url = str(video_path)
-                            
+                            video_url = str(serve_path)
                         ui.video(video_url, controls=True, autoplay=True, muted=True).props(
                             f'id="{video_id}"'
                         ).classes("full-width")
                     else:
-                        ui.label(f"Video file not found: {video_path}").classes("text-negative")
+                        ui.label(f"Video file not found: {video['video_path']}").classes("text-negative")
                 else:
                     ui.label("No video path available").classes("text-grey-5")
 

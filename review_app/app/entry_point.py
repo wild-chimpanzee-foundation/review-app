@@ -6,12 +6,13 @@ import secrets
 import sys
 from pathlib import Path
 
-# Configure display backends for Wayland/Hyprland/X11 compatibility
-if os.environ.get("XDG_SESSION_TYPE") == "wayland":
-    os.environ.setdefault("GDK_BACKEND", "wayland,x11")
-else:
-    os.environ.setdefault("GDK_BACKEND", "x11")
-os.environ.setdefault("QT_QPA_PLATFORM", "xcb;wayland")
+# Configure display backends for Wayland/Hyprland/X11 compatibility (Linux only)
+if sys.platform.startswith("linux"):
+    if os.environ.get("XDG_SESSION_TYPE") == "wayland":
+        os.environ.setdefault("GDK_BACKEND", "wayland,x11")
+    else:
+        os.environ.setdefault("GDK_BACKEND", "x11")
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb;wayland")
 
 # Ensure common video mimetypes are registered correctly for reliable serving
 mimetypes.add_type("video/mp4", ".mp4")

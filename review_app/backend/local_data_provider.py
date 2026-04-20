@@ -56,6 +56,7 @@ class Video(Base):
     is_valid = Column(Boolean, nullable=True)
     is_web_safe = Column(Boolean, nullable=True)
     validation_error = Column(String, nullable=True)
+    transcoded_path = Column(String, nullable=True)
 
 
 class VideoLabel(Base):
@@ -350,6 +351,7 @@ class LocalDataProvider:
             conn.execute("PRAGMA mmap_size=268435456")  # 256 MB memory-mapped I/O
 
         Base.metadata.create_all(self.engine)
+        self._migrate_schema()
         self.Session = sessionmaker(bind=self.engine)
 
     def sync_videos(self, progress_callback):
@@ -374,6 +376,13 @@ class LocalDataProvider:
 
         required = {"is_valid", "validation_error"}
         return not required.issubset(columns)
+
+    def _migrate_schema(self) -> None:
+        """Add new nullable columns to existing databases without dropping data."""
+        with sqlite3.connect(self._db_path) as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(videos)").fetchall()}
+            if "transcoded_path" not in cols:
+                conn.execute("ALTER TABLE videos ADD COLUMN transcoded_path TEXT")
 
     @property
     def _app_config_path(self) -> Path:
@@ -725,7 +734,11 @@ class LocalDataProvider:
     def transcode_video(self, video_id: str) -> dict[str, Any]:
         """
         Transcode a video to web-safe H.264 MP4 using ffmpeg.
-        The original file is renamed to .orig and the new file takes the original name.
+
+        Output is written to a sidecar cache under video_dir/_transcoded/ so
+        the original file is never modified.  On success, ``transcoded_path``
+        is set on the DB row and can be used for playback instead of the
+        original.
         """
         with self.Session() as session:
             video = session.get(Video, video_id)
@@ -736,64 +749,39 @@ class LocalDataProvider:
             if not input_path.exists():
                 raise FileNotFoundError(f"Video file not found: {input_path}")
 
-            # Create a temporary output path
-            output_path = input_path.with_suffix(".temp.mp4")
+            # Compute sidecar path, mirroring the relative structure under _transcoded/
+            try:
+                rel = input_path.relative_to(self.video_dir)
+            except ValueError:
+                rel = Path(input_path.name)
+            sidecar_path = self.video_dir / "_transcoded" / rel.with_suffix(".mp4")
+            sidecar_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # ffmpeg command for web-safe H.264 MP4
+            # Reuse existing sidecar if already transcoded
+            if sidecar_path.exists():
+                video.transcoded_path = str(sidecar_path)
+                session.commit()
+                return {"success": True, "new_path": str(sidecar_path)}
+
             cmd = [
-                "ffmpeg",
-                "-y",
-                "-i",
-                str(input_path),
-                "-c:v",
-                "libx264",
-                "-preset",
-                "fast",
-                "-crf",
-                "23",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "128k",
-                "-movflags",
-                "+faststart",
-                str(output_path),
+                "ffmpeg", "-y", "-i", str(input_path),
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart",
+                str(sidecar_path),
             ]
 
             try:
                 subprocess.run(cmd, capture_output=True, text=True, check=True)
             except subprocess.CalledProcessError as exc:
-                if output_path.exists():
-                    output_path.unlink()
+                if sidecar_path.exists():
+                    sidecar_path.unlink()
                 return {"success": False, "error": f"ffmpeg failed: {exc.stderr}"}
 
-            # Swap files: original -> .orig, temp -> original extension (but it's now mp4)
-            # Actually, better to keep .mp4 suffix for clarity and mimetype detection
-            final_path = input_path.with_suffix(".mp4")
-
-            if input_path != final_path:
-                # If original was AVI, rename original to .avi.orig
-                orig_backup = input_path.with_suffix(input_path.suffix + ".orig")
-                input_path.rename(orig_backup)
-            else:
-                # If original was MP4 but not web-safe (e.g. HEVC), rename to .mp4.orig
-                orig_backup = input_path.with_suffix(".mp4.orig")
-                input_path.rename(orig_backup)
-
-            output_path.rename(final_path)
-
-            # Update database
-            video.video_path = str(final_path)
-            video.is_web_safe = True
-            # Re-probe to get correct duration and metadata
-            duration, is_valid, is_web_safe, error = _probe_video(final_path)
-            video.duration_sec = duration
-            video.is_valid = is_valid
-            video.is_web_safe = is_web_safe
-
+            video.transcoded_path = str(sidecar_path)
             session.commit()
 
-            return {"success": True, "new_path": str(final_path)}
+            return {"success": True, "new_path": str(sidecar_path)}
 
     def check_db_exists(self) -> bool:
         return self.video_dir.exists() and any(
@@ -1155,6 +1143,7 @@ class LocalDataProvider:
                         v.created_at,
                         v.is_valid AS is_video_valid,
                         v.is_web_safe,
+                        v.transcoded_path,
                         v.validation_error AS video_validation_details,
                         vl.is_blank,
                         vl.labeled_at,
