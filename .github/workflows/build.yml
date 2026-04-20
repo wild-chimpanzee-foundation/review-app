@@ -66,6 +66,10 @@ jobs:
           uv run pip install pyinstaller
           uv run pyinstaller video_annotation.spec --clean
 
+      - name: List dist output
+        shell: bash
+        run: find dist/ -type f || echo "dist/ is empty or missing"
+
       - name: Rename artifact (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
@@ -74,6 +78,9 @@ jobs:
         run: |
           if [ -f "dist/VideoAnnotation/VideoAnnotation" ]; then
             mv "dist/VideoAnnotation/VideoAnnotation" "dist/VideoAnnotation-${{ matrix.name }}-${TAG}${{ matrix.ext }}"
+          else
+            echo "ERROR: Expected binary not found at dist/VideoAnnotation/VideoAnnotation"
+            exit 1
           fi
 
       - name: Rename artifact (Windows)
@@ -86,16 +93,17 @@ jobs:
           $dst = "dist/VideoAnnotation-${{ matrix.name }}-$env:TAG${{ matrix.ext }}"
           if (Test-Path $src) {
             Move-Item $src $dst
+          } else {
+            Write-Error "ERROR: Expected binary not found at $src"
+            exit 1
           }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: VideoAnnotation-${{ matrix.name }}
-          path: |
-            dist/VideoAnnotation-${{ matrix.name }}*
-            dist/VideoAnnotation/VideoAnnotation*
-          if-no-files-found: ignore
+          path: dist/VideoAnnotation-${{ matrix.name }}*
+          if-no-files-found: error
 
   release:
     needs: build
