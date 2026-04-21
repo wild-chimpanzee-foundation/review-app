@@ -286,20 +286,25 @@ class GUI:
             except Exception as e:
                 print(f"Warning: Could not load config at startup: {e}")
 
-        # Run in native window mode (pywebview) for a desktop-like experience
-        # In dev mode, we use the browser for easier debugging and auto-reload
-
         storage_secret = os.environ.get("VIDEO_REVIEW_SECRET")
         if not storage_secret:
             storage_secret = secrets.token_hex(32)
 
+        use_native = not dev_mode
+        if use_native:
+            try:
+                from webview import guilib
+                guilib.initialize()
+            except Exception as e:
+                print(f"Warning: native window unavailable ({e}), falling back to browser mode.")
+                use_native = False
+
         ui.run(
-            native=not dev_mode,
-            # window_size=(1400, 900) if not dev_mode else None,
+            native=use_native,
             title="Video Annotation",
             host="127.0.0.1",
             port=8000,
-            show=True if dev_mode else False,
+            show=dev_mode or not use_native,
             reload=dev_mode,
             storage_secret=storage_secret,
         )
