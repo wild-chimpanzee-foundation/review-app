@@ -3,42 +3,39 @@ import asyncio
 
 async def sync_with_progress(data_provider, progress=None, status=None):
     """
-    Run sync_videos with real-time progress updates.
+    Run sync_videos in a thread that is independent of NiceGUI client context.
 
-    Args:
-        data_provider: LocalDataProvider instance
-        progress: Optional ui.linear_progress element to update
-        status: Optional ui.label element to update
-
-    Returns:
-        The result of sync_videos()
+    Uses run_in_executor directly instead of run.io_bound so the background
+    thread survives page navigation and new tabs being opened mid-sync.
     """
-    from nicegui import run
-
-    sync_progress = {"current": 0, "total": 0, "filename": "", "done": False}
+    loop = asyncio.get_event_loop()
+    sync_progress = {"current": 0, "total": 0, "filename": ""}
 
     def update_progress(current, total, filename):
         sync_progress["current"] = current
         sync_progress["total"] = total
         sync_progress["filename"] = filename
 
-    async def poll_progress():
-        while not sync_progress["done"]:
-            if progress is not None and status is not None:
-                if sync_progress["total"] > 0:
-                    progress.value = sync_progress["current"] / sync_progress["total"]
-                    status.text = f"Processing {sync_progress['current']}/{sync_progress['total']}: {sync_progress['filename']}"
-                else:
-                    status.text = f"Scanning: {sync_progress['filename']}"
-            await asyncio.sleep(0.1)
+    future = loop.run_in_executor(
+        None,
+        lambda: data_provider.sync_videos(progress_callback=update_progress),
+    )
 
-    async def run_sync():
-        result = await run.io_bound(data_provider.sync_videos, progress_callback=update_progress)
-        sync_progress["done"] = True
-        if progress is not None:
-            progress.value = 1.0
-        if status is not None:
-            status.text = "Sync complete!"
-        return result
+    while not future.done():
+        if progress is not None and status is not None:
+            total = sync_progress["total"]
+            current = sync_progress["current"]
+            filename = sync_progress["filename"]
+            if total > 0:
+                progress.value = current / total
+                status.text = f"Processing {current}/{total}: {filename}"
+            elif filename:
+                status.text = f"Scanning: {filename}"
+        await asyncio.sleep(0.15)
 
-    await asyncio.gather(poll_progress(), run_sync())
+    if progress is not None:
+        progress.value = 1.0
+    if status is not None:
+        status.text = "Sync complete!"
+
+    return future.result()

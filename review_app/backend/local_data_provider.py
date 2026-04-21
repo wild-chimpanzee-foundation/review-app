@@ -188,6 +188,29 @@ DEFAULT_DB_FILENAME = "review_data.db"
 
 
 # ---------------------------------------------------------------------------
+# subprocess helpers
+# ---------------------------------------------------------------------------
+
+
+def _subprocess_env() -> dict:
+    """Return an environment safe for subprocesses when running frozen.
+
+    PyInstaller prepends _internal/ to LD_LIBRARY_PATH so its bundled libs
+    are found by Python. Subprocesses (ffprobe, ffmpeg) inherit this and can
+    crash when the bundled libs conflict with system libs they link against.
+    Restoring the original value fixes that.
+    """
+    env = os.environ.copy()
+    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+        orig = env.get("LD_LIBRARY_PATH_ORIG", "")
+        if orig:
+            env["LD_LIBRARY_PATH"] = orig
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+    return env
+
+
+# ---------------------------------------------------------------------------
 # ffprobe helpers
 # ---------------------------------------------------------------------------
 
@@ -232,6 +255,7 @@ def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
             capture_output=True,
             text=True,
             timeout=_FFPROBE_TIMEOUT_SEC,
+            env=_subprocess_env(),
         )
     except subprocess.TimeoutExpired:
         return None, False, False, f"ffprobe timed out after {_FFPROBE_TIMEOUT_SEC}s"
@@ -789,7 +813,7 @@ class LocalDataProvider:
             ]
 
             try:
-                subprocess.run(cmd, capture_output=True, text=True, check=True)
+                subprocess.run(cmd, capture_output=True, text=True, check=True, env=_subprocess_env())
             except subprocess.CalledProcessError as exc:
                 if sidecar_path.exists():
                     sidecar_path.unlink()
