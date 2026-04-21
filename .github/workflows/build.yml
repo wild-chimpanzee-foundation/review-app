@@ -19,13 +19,10 @@ jobs:
         include:
           - os: ubuntu-latest
             name: linux
-            ext: ""
           - os: windows-latest
             name: windows
-            ext: ".exe"
           - os: macos-latest
             name: macos
-            ext: ""
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -58,34 +55,33 @@ jobs:
         shell: bash
         run: find dist -maxdepth 3 -print || true
 
-      - name: Rename artifact (Linux/macOS)
+      - name: Archive artifact (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
         env:
           TAG: ${{ steps.vars.outputs.tag || github.event.inputs.tag || 'dev' }}
         run: |
           src="dist/VideoAnnotation"
-          dst="dist/VideoAnnotation-${{ matrix.name }}-${TAG}"
-          if [ -f "$src" ]; then
-            mv "$src" "$dst"
-            chmod +x "$dst"
+          archive="dist/VideoAnnotation-${{ matrix.name }}-${TAG}.tar.gz"
+          if [ -d "$src" ]; then
+            tar -czf "$archive" -C dist VideoAnnotation
           else
-            echo "ERROR: Expected binary not found at $src"
+            echo "ERROR: Expected directory not found at $src"
             exit 1
           fi
 
-      - name: Rename artifact (Windows)
+      - name: Archive artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           TAG: ${{ steps.vars.outputs.tag || github.event.inputs.tag || 'dev' }}
         run: |
-          $src = "dist\VideoAnnotation.exe"
-          $dst = "dist\VideoAnnotation-${{ matrix.name }}-$env:TAG.exe"
+          $src = "dist\VideoAnnotation"
+          $archive = "dist\VideoAnnotation-${{ matrix.name }}-$env:TAG.zip"
           if (Test-Path $src) {
-            Move-Item $src $dst
+            Compress-Archive -Path $src -DestinationPath $archive
           } else {
-            Write-Error "ERROR: Expected binary not found at $src"
+            Write-Error "ERROR: Expected directory not found at $src"
             exit 1
           }
 
