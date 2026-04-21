@@ -1,4 +1,5 @@
 import asyncio
+from review_app.app.translations import t
 
 
 async def sync_with_progress(data_provider, progress=None, status=None):
@@ -28,14 +29,14 @@ async def sync_with_progress(data_provider, progress=None, status=None):
             filename = sync_progress["filename"]
             if total > 0:
                 progress.value = current / total
-                status.text = f"Processing {current}/{total}: {filename}"
+                status.text = t("sync_processing", current=current, total=total, filename=filename)
             elif filename:
-                status.text = f"Scanning: {filename}"
+                status.text = t("scanning_file", filename=filename)
         await asyncio.sleep(0.15)
 
     if progress is not None:
         progress.value = 1.0
     if status is not None:
-        status.text = "Sync complete!"
+        status.text = t("sync_complete")
 
     return future.result()

@@ -8,6 +8,7 @@ import yaml
 from nicegui import run, ui
 
 from review_app.app.config import get_config_path, get_default_db_path
+from review_app.app.translations import t
 from review_app.app.utils import sync_with_progress
 
 FFMPEG_INSTALL_MAC = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && brew install ffmpeg'
@@ -121,10 +122,10 @@ class SetupWizard:
             self.ffmpeg_ok = result[0]
             ffmpeg_status_holder[0].visible = True
             if self.ffmpeg_ok:
-                ffmpeg_status_holder[0].text = "Installed"
+                ffmpeg_status_holder[0].text = t("installed")
                 ffmpeg_status_holder[0].classes("text-positive", remove="text-negative")
             else:
-                ffmpeg_status_holder[0].text = "Not found - Please install"
+                ffmpeg_status_holder[0].text = t("not_installed")
                 ffmpeg_status_holder[0].classes("text-negative", remove="text-positive")
             update_submit_button()
 
@@ -147,11 +148,10 @@ class SetupWizard:
 
             dialog = ui.dialog().props("persistent")
             with dialog, ui.card().classes("q-pa-lg"):
-                ui.label("Database already exists").classes("text-h6 q-mb-sm")
+                ui.label(t("database_exists")).classes("text-h6 q-mb-sm")
                 ui.label(f"{db_path}").classes("text-caption text-grey-6 q-mb-md")
                 ui.label(
-                    "An existing database was found at this path. "
-                    "You can keep it and continue annotating, or delete it and start fresh."
+                    t("database_exists_msg")
                 ).classes("text-body2 q-mb-lg")
                 with ui.row().classes("w-full justify-end gap-sm"):
                     def on_cancel():
@@ -169,9 +169,9 @@ class SetupWizard:
                         done[0] = True
                         dialog.close()
 
-                    ui.button("Cancel", on_click=on_cancel).props("flat")
-                    ui.button("Keep existing", icon="storage", color="primary", on_click=on_keep)
-                    ui.button("Delete & start fresh", icon="delete_forever", color="negative", on_click=on_delete)
+                    ui.button(t("cancel"), on_click=on_cancel).props("flat")
+                    ui.button(t("keep_existing"), icon="storage", color="primary", on_click=on_keep)
+                    ui.button(t("delete_fresh"), icon="delete_forever", color="negative", on_click=on_delete)
 
             dialog.open()
             while not done[0]:
@@ -183,13 +183,13 @@ class SetupWizard:
             db_path = self.inputs["db"].value.strip()
 
             if not video_dir:
-                ui.notify("Please enter a video directory path", type="warning")
+                ui.notify(t("enter_video_dir"), type="warning")
                 return
             if not Path(video_dir).exists():
-                ui.notify("Video directory does not exist", type="negative")
+                ui.notify(t("video_dir_not_exist"), type="negative")
                 return
             if not self.ffmpeg_ok:
-                ui.notify("ffmpeg is required. Please install it first.", type="negative")
+                ui.notify(t("ffmpeg_required"), type="negative")
                 return
 
             if Path(db_path).exists():
@@ -201,7 +201,7 @@ class SetupWizard:
 
             config = generate_config(video_dir, db_path, bundled_species, bundled_behaviors)
             save_config(config, self.config_path)
-            ui.notify("Configuration saved!", type="positive")
+            ui.notify(t("config_saved"), type="positive")
 
             from review_app.app.state import set_data_provider
             from review_app.backend.local_data_provider import LocalDataProvider
@@ -217,18 +217,18 @@ class SetupWizard:
 
                 with wizard_container:
                     with ui.card().classes("full-width q-mb-lg"):
-                        ui.label("Setup Complete!").classes("text-h5 text-primary font-weight-bold")
-                        ui.label("Your workspace is configured. Let's sync your videos.").classes(
+                        ui.label(t("setup_complete")).classes("text-h5 text-primary font-weight-bold")
+                        ui.label(t("setup_complete_msg")).classes(
                             "text-body1 text-grey-7"
                         )
 
                     with ui.card().classes("full-width q-mb-lg"):
-                        ui.label("Syncing Videos...").classes("text-h6 q-mb-md")
+                        ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
                         progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
-                        status = ui.label("Starting...")
+                        status = ui.label(t("starting"))
 
                     start_button_holder[0] = ui.button(
-                        "Start Annotating",
+                        t("start_annotating"),
                         icon="play_arrow",
                         color="primary",
                         on_click=lambda: self.on_complete_callback(),
@@ -236,67 +236,67 @@ class SetupWizard:
                     start_button_holder[0].visible = False
 
                 await sync_with_progress(dp, progress=progress, status=status)
-                ui.notify("Videos synced!", type="positive")
-                status.text = "Sync complete!"
+                ui.notify(t("videos_synced_notify"), type="positive")
+                status.text = t("sync_complete")
                 start_button_holder[0].visible = True
             else:
                 self.on_complete_callback()
 
         with ui.column().classes("w-full max-w-2xl mx-auto q-pa-lg"):
             with ui.card().classes("full-width q-mb-lg"):
-                ui.label("Welcome to Video Annotation").classes(
+                ui.label(t("welcome_setup")).classes(
                     "text-h4 text-primary font-weight-bold"
                 )
-                ui.label("Configure your workspace to start annotating videos").classes(
+                ui.label(t("welcome_setup_msg")).classes(
                     "text-body1 text-grey-7"
                 )
 
             with ui.card().classes("full-width q-mb-md"):
                 with ui.row().classes("items-center q-mb-sm"):
-                    ui.label("Video Directory").classes("text-subtitle1 font-weight-medium")
-                ui.label("Path to folder containing your video files").classes(
+                    ui.label(t("video_dir_label")).classes("text-subtitle1 font-weight-medium")
+                ui.label(t("video_dir_desc")).classes(
                     "text-caption text-grey-6 q-mb-md"
                 )
                 self.inputs["video_dir"] = ui.input(
-                    placeholder="/path/to/videos", value=default_video
+                    placeholder=t("video_dir_placeholder"), value=default_video
                 ).props("outlined dense class=w-full")
                 self.inputs["video_dir"].on_value_change(on_video_dir_change)
 
             with ui.card().classes("full-width q-mb-md"):
                 with ui.row().classes("items-center q-mb-sm"):
-                    ui.label("ffmpeg").classes("text-subtitle1 font-weight-medium")
-                ui.label("Required for video processing").classes(
+                    ui.label(t("ffmpeg_label")).classes("text-subtitle1 font-weight-medium")
+                ui.label(t("ffmpeg_desc")).classes(
                     "text-caption text-grey-6 q-mb-sm"
                 )
                 ui.button(
-                    "Check ffmpeg", on_click=do_check_ffmpeg, color="primary"
+                    t("check_ffmpeg"), on_click=do_check_ffmpeg, color="primary"
                 )
-                ffmpeg_status_holder[0] = ui.label("Not checked").classes(
+                ffmpeg_status_holder[0] = ui.label(t("not_checked")).classes(
                     "text-caption text-grey-6 q-ml-md"
                 )
 
             with ui.card().classes("full-width q-mb-md"):
                 with ui.row().classes("items-center q-mb-sm"):
-                    ui.label("Bundled Data").classes("text-subtitle1 font-weight-medium")
+                    ui.label(t("bundled_data")).classes("text-subtitle1 font-weight-medium")
                 if bundled_species:
-                    ui.label(f"Species list: {Path(bundled_species).name} (bundled)").classes(
+                    ui.label(t("species_list", name=Path(bundled_species).name)).classes(
                         "text-caption text-grey-6"
                     )
                 if bundled_behaviors:
-                    ui.label(f"Behaviors: {Path(bundled_behaviors).name} (bundled)").classes(
+                    ui.label(t("behaviors_list", name=Path(bundled_behaviors).name)).classes(
                         "text-caption text-grey-6"
                     )
                 if not bundled_species:
-                    ui.label("No bundled data - configure manually in advanced settings").classes(
+                    ui.label(t("no_bundled_data")).classes(
                         "text-caption text-warning"
                     )
 
-            with ui.expansion("Advanced Settings", icon="settings").classes("full-width q-mb-md"):
+            with ui.expansion(t("advanced_settings"), icon="settings").classes("full-width q-mb-md"):
                 with ui.card().classes("full-width"):
                     with ui.row().classes("items-center q-mb-xs"):
                         ui.icon("storage", size="xs").classes("text-grey-6 q-mr-sm")
-                        ui.label("Database Location").classes("text-body2")
-                    ui.label("Where to store review data").classes(
+                        ui.label(t("database_location")).classes("text-body2")
+                    ui.label(t("database_location_desc")).classes(
                         "text-caption text-grey-6 q-mb-sm"
                     )
                     self.inputs["db"] = ui.input(value=default_db).props(
@@ -304,7 +304,7 @@ class SetupWizard:
                     )
 
             submit_button_holder[0] = ui.button(
-                "Start Annotating", on_click=submit, icon="play_arrow", color="primary"
+                t("start_annotating"), on_click=submit, icon="play_arrow", color="primary"
             ).props("size=lg")
             submit_button_holder[0].classes("full-width")
             submit_button_holder[0].visible = False

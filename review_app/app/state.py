@@ -49,6 +49,8 @@ def _get_user_state() -> dict[str, Any]:
         app.storage.user["muted"] = True
     if "dark_mode" not in app.storage.user:
         app.storage.user["dark_mode"] = True
+    if "language" not in app.storage.user:
+        app.storage.user["language"] = "en"
     return app.storage.user
 
 

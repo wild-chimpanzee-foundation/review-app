@@ -16,6 +16,7 @@ from review_app.app.state import (
     set_queue,
     set_selections,
 )
+from review_app.app.translations import t
 from review_app.app.utils import sync_with_progress
 from review_app.backend.local_data_provider import LocalDataProvider
 
@@ -71,52 +72,52 @@ def _build_settings_content(container: ui.column):
 
     with container:
         with ui.row().classes("items-center q-mb-lg"):
-            ui.label("Settings").classes("text-h5 font-weight-bold")
+            ui.label(t("settings_title")).classes("text-h5 font-weight-bold")
 
         with ui.card().classes("full-width q-mb-lg"):
-            ui.label("Current Status").classes("text-subtitle1 font-weight-medium q-mb-md")
+            ui.label(t("current_status")).classes("text-subtitle1 font-weight-medium q-mb-md")
             with ui.row().classes("w-full gap-md"):
                 with ui.card().classes("col text-center"):
                     ui.label(str(stats["videos"])).classes("text-h5 font-weight-bold")
-                    ui.label("Videos in DB").classes("text-caption text-grey-6")
+                    ui.label(t("videos_in_db")).classes("text-caption text-grey-6")
                 with ui.card().classes("col text-center"):
-                    ui.label(Path(current_video_dir).name if current_video_dir else "Not set").classes(
+                    ui.label(Path(current_video_dir).name if current_video_dir else t("not_available")).classes(
                         "text-h6"
                     )
-                    ui.label("Video Directory").classes("text-caption text-grey-6")
+                    ui.label(t("video_dir_label")).classes("text-caption text-grey-6")
                 with ui.card().classes("col text-center"):
-                    ui.label(str(current_db_path) if current_db_path else "Not set").classes(
+                    ui.label(str(current_db_path) if current_db_path else t("not_available")).classes(
                         "text-body2"
                     )
-                    ui.label("Database").classes("text-caption text-grey-6")
+                    ui.label(t("database")).classes("text-caption text-grey-6")
 
         with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("items-center q-mb-sm"):
                 ui.icon("folder_open", size="sm").classes("text-primary q-mr-sm")
-                ui.label("Video Directory").classes("text-subtitle1 font-weight-medium")
-            ui.label("Path to folder containing your video files").classes(
+                ui.label(t("video_dir_label")).classes("text-subtitle1 font-weight-medium")
+            ui.label(t("video_dir_desc")).classes(
                 "text-caption text-grey-6 q-mb-md"
             )
             inputs["video_dir"] = ui.input(
-                placeholder="/path/to/videos",
+                placeholder=t("video_dir_placeholder"),
                 value=current_video_dir,
             ).props("outlined dense class=w-full")
 
         with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("items-center q-mb-sm"):
                 ui.icon("storage", size="sm").classes("text-primary q-mr-sm")
-                ui.label("Database File").classes("text-subtitle1 font-weight-medium")
-            ui.label("Path to the SQLite database file").classes("text-caption text-grey-6 q-mb-md")
+                ui.label(t("database_file")).classes("text-subtitle1 font-weight-medium")
+            ui.label(t("database_file_desc")).classes("text-caption text-grey-6 q-mb-md")
             inputs["db_path"] = ui.input(
-                placeholder="/path/to/review_data.db",
+                placeholder=t("database_file_placeholder"),
                 value=str(current_db_path) if current_db_path else "",
             ).props("outlined dense class=w-full")
 
         with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("items-center q-mb-sm"):
                 ui.icon("table_chart", size="sm").classes("text-primary q-mr-sm")
-                ui.label("Species CSV").classes("text-subtitle1 font-weight-medium")
-            ui.label("Species list for classification").classes("text-caption text-grey-6 q-mb-md")
+                ui.label(t("species_csv")).classes("text-subtitle1 font-weight-medium")
+            ui.label(t("species_csv_desc")).classes("text-caption text-grey-6 q-mb-md")
 
             species_mode_holder = [species_mode]
 
@@ -126,7 +127,10 @@ def _build_settings_content(container: ui.column):
 
             with ui.row().classes("w-full items-center q-mb-sm"):
                 ui.radio(
-                    ["bundled", "custom"],
+                    {
+                        "bundled": t("mode_bundled"),
+                        "custom": t("mode_custom"),
+                    },
                     value=species_mode,
                     on_change=lambda e: (
                         species_mode_holder.__setitem__(0, e.value),
@@ -134,13 +138,13 @@ def _build_settings_content(container: ui.column):
                     ),
                 ).props("inline")
                 ui.label(
-                    f"Bundled ({Path(bundled_species).name})"
+                    t("bundled_with_name", name=Path(bundled_species).name)
                     if bundled_species
-                    else "Not available"
+                    else t("not_available")
                 ).classes("text-caption text-grey-6")
 
             inputs["species_csv"] = ui.input(
-                label="Custom Species CSV Path",
+                label=t("custom_species_csv"),
                 value=current_species_csv if species_mode == "custom" else "",
             ).props("outlined dense class=w-full")
             inputs["species_csv"].visible = species_mode == "custom"
@@ -148,8 +152,8 @@ def _build_settings_content(container: ui.column):
         with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("items-center q-mb-sm"):
                 ui.icon("list", size="sm").classes("text-primary q-mr-sm")
-                ui.label("Behaviors CSV").classes("text-subtitle1 font-weight-medium")
-            ui.label("Species-behavior mappings (optional)").classes(
+                ui.label(t("behaviors_csv")).classes("text-subtitle1 font-weight-medium")
+            ui.label(t("behaviors_csv_desc")).classes(
                 "text-caption text-grey-6 q-mb-md"
             )
 
@@ -161,7 +165,11 @@ def _build_settings_content(container: ui.column):
 
             with ui.row().classes("w-full items-center q-mb-sm"):
                 ui.radio(
-                    ["none", "bundled", "custom"],
+                    {
+                        "none": t("mode_none"),
+                        "bundled": t("mode_bundled"),
+                        "custom": t("mode_custom"),
+                    },
                     value=behaviors_mode,
                     on_change=lambda e: (
                         behaviors_mode_holder.__setitem__(0, e.value),
@@ -169,13 +177,13 @@ def _build_settings_content(container: ui.column):
                     ),
                 ).props("inline")
                 ui.label(
-                    f"Bundled ({Path(bundled_behaviors).name})"
+                    t("bundled_with_name", name=Path(bundled_behaviors).name)
                     if bundled_behaviors
-                    else "Not available"
+                    else t("not_available")
                 ).classes("text-caption text-grey-6")
 
             inputs["behaviors_csv"] = ui.input(
-                label="Custom Behaviors CSV Path",
+                label=t("custom_behaviors_csv"),
                 value=current_behaviors_csv if behaviors_mode == "custom" else "",
             ).props("outlined dense class=w-full")
             inputs["behaviors_csv"].visible = behaviors_mode == "custom"
@@ -183,10 +191,10 @@ def _build_settings_content(container: ui.column):
         with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("items-center q-mb-sm"):
                 ui.icon("storage", size="sm").classes("text-primary q-mr-sm")
-                ui.label("Database Management").classes("text-subtitle1 font-weight-medium")
+                ui.label(t("database_management")).classes("text-subtitle1 font-weight-medium")
 
             with ui.row().classes("w-full items-center q-mb-md"):
-                ui.label("Sync Videos").classes("text-body2")
+                ui.label(t("sync_videos_label")).classes("text-body2")
                 ui.space()
 
                 sync_dialog = ui.dialog()
@@ -201,25 +209,25 @@ def _build_settings_content(container: ui.column):
                     sync_dialog.clear()
                     with sync_dialog, ui.card().classes("q-pa-lg"):
                         with sync_container:
-                            ui.label("Syncing videos...").classes("text-h6 q-mb-md")
+                            ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
                             progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
-                            status = ui.label("Starting...")
+                            status = ui.label(t("starting"))
 
                     sync_dialog.open()
                     await sync_with_progress(dp, progress=progress, status=status)
-                    ui.notify("Videos synced!", type="positive")
+                    ui.notify(t("videos_synced_notify"), type="positive")
                     await asyncio.sleep(0.5)
                     sync_dialog.close()
 
                 ui.button(
-                    "Sync Videos",
+                    t("sync_videos_label"),
                     icon="sync",
                     color="primary",
                     on_click=open_sync_dialog,
                 )
 
             with ui.row().classes("w-full items-center q-mb-md"):
-                ui.label("Reset Database").classes("text-body2")
+                ui.label(t("reset_database_label")).classes("text-body2")
                 ui.space()
 
                 reset_dialog = ui.dialog().props("persistent")
@@ -229,14 +237,13 @@ def _build_settings_content(container: ui.column):
                     reset_dialog.clear()
                     with reset_dialog, ui.card().classes("q-pa-lg") as card:
                         reset_card[0] = card
-                        ui.label("Reset database?").classes("text-h6 q-mb-sm")
+                        ui.label(t("reset_confirm")).classes("text-h6 q-mb-sm")
                         ui.label(
-                            "This permanently deletes all videos, annotations, and model data. "
-                            "Your video files are not affected."
+                            t("reset_warning")
                         ).classes("text-body2 text-negative q-mb-lg")
                         with ui.row().classes("w-full justify-end gap-sm"):
-                            ui.button("Cancel", on_click=reset_dialog.close).props("flat")
-                            ui.button("Yes, reset", icon="delete_forever", color="negative",
+                            ui.button(t("cancel"), on_click=reset_dialog.close).props("flat")
+                            ui.button(t("yes_reset"), icon="delete_forever", color="negative",
                                       on_click=do_reset)
 
                 async def do_reset():
@@ -254,34 +261,34 @@ def _build_settings_content(container: ui.column):
                     reset_dialog.clear()
                     with reset_dialog, ui.card().classes("q-pa-lg"):
                         ui.icon("check_circle", size="lg").classes("text-positive q-mb-sm")
-                        ui.label("Database reset").classes("text-h6 q-mb-sm")
+                        ui.label(t("database_reset")).classes("text-h6 q-mb-sm")
                         ui.label(
-                            "All data has been cleared. Sync your videos to get started again."
+                            t("reset_success")
                         ).classes("text-body2 text-grey-7 q-mb-lg")
 
                         sync_progress_col = ui.column().classes("w-full q-mb-md")
                         sync_progress_col.visible = False
                         with sync_progress_col:
                             progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
-                            status = ui.label("Starting...")
+                            status = ui.label(t("starting"))
 
                         async def start_sync():
                             sync_progress_col.visible = True
                             sync_btn.visible = False
                             await sync_with_progress(new_dp, progress=progress, status=status)
-                            ui.notify("Sync complete!", type="positive")
+                            ui.notify(t("sync_complete"), type="positive")
                             reset_dialog.close()
                             ui.navigate.to("/overview")
 
                         sync_btn = ui.button(
-                            "Sync videos now", icon="sync", color="primary", on_click=start_sync
+                            t("sync_now"), icon="sync", color="primary", on_click=start_sync
                         ).classes("full-width q-mb-sm")
-                        ui.button("Do it later", on_click=reset_dialog.close).props(
+                        ui.button(t("do_later"), on_click=reset_dialog.close).props(
                             "flat class=full-width"
                         )
 
                 ui.button(
-                    "Reset Database",
+                    t("reset_database_label"),
                     icon="delete_forever",
                     color="negative",
                     on_click=lambda: (build_confirm_step(), reset_dialog.open()),
@@ -293,11 +300,10 @@ def _build_settings_content(container: ui.column):
             done: list = [False]
             dialog = ui.dialog().props("persistent")
             with dialog, ui.card().classes("q-pa-lg"):
-                ui.label("Database already exists").classes("text-h6 q-mb-sm")
+                ui.label(t("database_exists")).classes("text-h6 q-mb-sm")
                 ui.label(db_path).classes("text-caption text-grey-6 q-mb-md")
                 ui.label(
-                    "A database already exists at this path. "
-                    "Keep it to continue with existing data, or delete it and start fresh."
+                    t("database_exists_msg")
                 ).classes("text-body2 q-mb-lg")
                 with ui.row().classes("w-full justify-end gap-sm"):
                     def on_cancel():
@@ -312,9 +318,9 @@ def _build_settings_content(container: ui.column):
                         result[0] = False
                         done[0] = True
                         dialog.close()
-                    ui.button("Cancel", on_click=on_cancel).props("flat")
-                    ui.button("Keep existing", icon="storage", color="primary", on_click=on_keep)
-                    ui.button("Delete & start fresh", icon="delete_forever", color="negative", on_click=on_delete)
+                    ui.button(t("cancel"), on_click=on_cancel).props("flat")
+                    ui.button(t("keep_existing"), icon="storage", color="primary", on_click=on_keep)
+                    ui.button(t("delete_fresh"), icon="delete_forever", color="negative", on_click=on_delete)
             dialog.open()
             while not done[0]:
                 await asyncio.sleep(0.05)
@@ -327,13 +333,13 @@ def _build_settings_content(container: ui.column):
             behaviors_mode = behaviors_mode_holder[0]
 
             if not video_dir:
-                ui.notify("Video directory is required", type="warning")
+                ui.notify(t("video_dir_required"), type="warning")
                 return
             if not Path(video_dir).exists():
-                ui.notify("Video directory does not exist", type="negative")
+                ui.notify(t("video_dir_not_exist"), type="negative")
                 return
             if not new_db_path:
-                ui.notify("Database path is required", type="warning")
+                ui.notify(t("database_path_required"), type="warning")
                 return
 
             db_path_changed = new_db_path != str(current_db_path) if current_db_path else True
@@ -357,10 +363,10 @@ def _build_settings_content(container: ui.column):
             else:
                 species_csv = inputs["species_csv"].value.strip()
                 if not species_csv:
-                    ui.notify("Custom species CSV path is required", type="warning")
+                    ui.notify(t("custom_species_required"), type="warning")
                     return
                 if not Path(species_csv).exists():
-                    ui.notify("Custom species CSV does not exist", type="negative")
+                    ui.notify(t("custom_species_not_exist"), type="negative")
                     return
                 new_config["species_csv_path"] = species_csv
 
@@ -371,10 +377,10 @@ def _build_settings_content(container: ui.column):
             else:
                 behaviors_csv = inputs["behaviors_csv"].value.strip()
                 if not behaviors_csv:
-                    ui.notify("Custom behaviors CSV path is required", type="warning")
+                    ui.notify(t("custom_behaviors_required"), type="warning")
                     return
                 if not Path(behaviors_csv).exists():
-                    ui.notify("Custom behaviors CSV does not exist", type="negative")
+                    ui.notify(t("custom_behaviors_not_exist"), type="negative")
                     return
                 new_config["behaviors_csv_path"] = behaviors_csv
 
@@ -386,12 +392,12 @@ def _build_settings_content(container: ui.column):
             set_current_idx(0)
             set_selections([])
 
-            ui.notify("Settings saved. Sync videos manually if needed.", type="positive")
+            ui.notify(t("settings_saved"), type="positive")
             ui.navigate.to("/overview")
 
         with ui.row().classes("w-full justify-end gap-md"):
-            ui.button("Cancel", on_click=lambda: ui.navigate.to("/overview")).props("flat")
-            ui.button("Apply", icon="check", color="primary", on_click=apply_settings)
+            ui.button(t("cancel"), on_click=lambda: ui.navigate.to("/overview")).props("flat")
+            ui.button(t("apply"), icon="check", color="primary", on_click=apply_settings)
 
 
 async def setup_settings():

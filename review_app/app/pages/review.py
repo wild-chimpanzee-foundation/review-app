@@ -4,6 +4,7 @@ from pathlib import Path
 from nicegui import run, ui
 
 from review_app.app.config import get_config_path
+from review_app.app.translations import t
 from review_app.app.state import (
     get_annotator_name,
     get_current_idx,
@@ -85,13 +86,13 @@ def render_annotation_section(video, valid_species, dp, default_species, default
                 sp_value = sel["species"] if sel["species"] in valid_species else valid_species[0]
                 bp_value = sel["behavior"] if sel["behavior"] in behaviors else behaviors[0]
                 sp = ui.select(
-                    label="Species",
+                    label=t("species_label"),
                     options=valid_species,
                     value=sp_value,
                     with_input=True,
                 ).props("outlined dense class=col")
                 bp = ui.select(
-                    label="Behavior", options=behaviors, value=bp_value, with_input=True
+                    label=t("behavior_label"), options=behaviors, value=bp_value, with_input=True
                 ).props("outlined dense class=col")
 
                 ui.button(icon="delete", on_click=lambda idx=i: delete_selection(idx)).props(
@@ -100,13 +101,13 @@ def render_annotation_section(video, valid_species, dp, default_species, default
 
             with ui.row().classes("w-full gap-sm items-center q-mt-sm") as time_row:
                 start_in = ui.number(
-                    label="Start (s)",
+                    label=t("start_sec"),
                     value=sel.get("start_sec", 0.0),
                     step=0.1,
                     format="%.1f",
                 ).props("outlined dense class=col")
                 end_in = ui.number(
-                    label="End (s)",
+                    label=t("end_sec"),
                     value=sel.get("end_sec"),
                     step=0.1,
                     format="%.1f",
@@ -153,7 +154,7 @@ def render_annotation_section(video, valid_species, dp, default_species, default
         set_selections(new_sels)
         render_annotation_section.refresh()
 
-    ui.button("Add Species", on_click=add_species).props("size=sm")
+    ui.button(t("add_species"), on_click=add_species).props("size=sm")
 
     queue = get_queue()
     current_idx = get_current_idx()
@@ -168,7 +169,7 @@ def render_annotation_section(video, valid_species, dp, default_species, default
                 sels,
                 annotator=get_annotator_name(),
             )
-            ui.notify("Review saved!", type="positive")
+            ui.notify(t("review_saved"), type="positive")
         set_current_idx(get_current_idx() + 1)
         set_state_val("review_active_id", None)
         set_state_val("pending_blank_confirm", False)
@@ -184,7 +185,7 @@ def render_annotation_section(video, valid_species, dp, default_species, default
                 sels,
                 annotator=get_annotator_name(),
             )
-            ui.notify("Review saved!", type="positive")
+            ui.notify(t("review_saved"), type="positive")
 
     async def mark_blank():
         await run.io_bound(
@@ -200,35 +201,35 @@ def render_annotation_section(video, valid_species, dp, default_species, default
             ],
             annotator=get_annotator_name(),
         )
-        ui.notify("Marked as blank!", type="positive")
+        ui.notify(t("marked_blank"), type="positive")
         set_current_idx(get_current_idx() + 1)
         set_state_val("review_active_id", None)
         set_selections([])
         render_video_section.refresh()
 
     with ui.row().classes("w-full gap-sm q-mt-sm q-mb-md"):
-        submit_next_btn = ui.button("Submit & Next", on_click=submit_and_next, color="primary")
+        submit_next_btn = ui.button(t("submit_next"), on_click=submit_and_next, color="primary")
         submit_next_btn._props["data-shortcut"] = "submit-next"
-        ui.button("Submit", on_click=submit)
-        blank_btn = ui.button("Mark Blank", on_click=mark_blank, color="warning")
+        ui.button(t("submit"), on_click=submit)
+        blank_btn = ui.button(t("mark_blank"), on_click=mark_blank, color="warning")
         blank_btn._props["data-shortcut"] = "mark-blank"
 
-    ui.label("Shortcuts: Enter=Submit&Next, N=Next, P=Previous, B=Blank").classes(
+    ui.label(t("shortcuts_help")).classes(
         "text-caption text-grey-5"
     )
 
     with ui.row().classes("w-full q-mt-md gap-md"):
-        current_label = video.get("manual_review_prediction") or "None"
-        labeled_by = video.get("labeled_by") or "None"
-        ui.label(f"Current: {current_label}").classes("text-body2")
-        ui.label(f"By: {labeled_by}").classes("text-body2 text-grey-6")
+        current_label = video.get("manual_review_prediction") or t("unknown")
+        labeled_by = video.get("labeled_by") or t("unknown")
+        ui.label(t("current_label", label=current_label)).classes("text-body2")
+        ui.label(t("labeled_by", name=labeled_by)).classes("text-body2 text-grey-6")
 
 
 @ui.refreshable
 async def render_video_section(dp, valid_species):
     queue = get_queue()
     if not queue:
-        ui.label("No videos match your filters").classes("text-h6 text-grey-5")
+        ui.label(t("no_videos_match")).classes("text-h6 text-grey-5")
         return
 
     current_idx = get_current_idx()
@@ -259,11 +260,11 @@ async def render_video_section(dp, valid_species):
             set_current_idx(max(0, min(current_idx, len(fresh_queue) - 1)))
             render_video_section.refresh()
             return
-        ui.label("Could not load video").classes("text-h6 text-negative")
+        ui.label(t("video_load_error")).classes("text-h6 text-negative")
         return
 
     with ui.row().classes("w-full items-center q-mb-md"):
-        ui.label(f"Queue: {current_idx + 1} / {len(queue)}").classes("text-h6")
+        ui.label(t("queue_label", current=current_idx + 1, total=len(queue))).classes("text-h6")
 
     def navigate(direction):
         new_idx = get_current_idx() + direction
@@ -292,31 +293,31 @@ async def render_video_section(dp, valid_species):
                     if selected_video_id not in attempted:
                         attempted.add(selected_video_id)
                         set_state_val("transcode_attempted_ids", list(attempted))
-                        ui.label("Transcoding video for browser playback...").classes(
+                        ui.label(t("transcoding_video")).classes(
                             "text-body2 text-grey-7 q-mb-sm"
                         )
                         result = await run.io_bound(dp.transcode_video, selected_video_id)
                         if result.get("success"):
-                            ui.notify("Video transcoded for web playback", type="positive")
+                            ui.notify(t("video_transcoded"), type="positive")
                             render_video_section.refresh()
                             return
                         ui.label(
-                            f"Auto-transcode failed: {result.get('error', 'unknown error')}"
+                            t("transcode_failed", error=result.get('error', 'unknown error'))
                         ).classes("text-negative text-caption q-mb-sm")
 
                     async def retry_transcode():
                         result = await run.io_bound(dp.transcode_video, selected_video_id)
                         if result.get("success"):
-                            ui.notify("Video transcoded for web playback", type="positive")
+                            ui.notify(t("video_transcoded"), type="positive")
                             render_video_section.refresh()
                         else:
                             ui.notify(
-                                f"Transcode failed: {result.get('error', 'unknown error')}",
+                                t("transcode_failed", error=result.get('error', 'unknown error')),
                                 type="negative",
                             )
 
                     ui.button(
-                        "Transcode for Playback",
+                        t("transcode_for_playback"),
                         icon="movie",
                         color="primary",
                         on_click=retry_transcode,
@@ -336,11 +337,11 @@ async def render_video_section(dp, valid_species):
                                 video_url = f"/media/{rel_path}"
                             except ValueError:
                                 ui.label(
-                                    "Video file is outside the media directory and cannot be served."
+                                    t("video_outside_media")
                                 ).classes("text-negative")
                                 video_url = None
                         else:
-                            ui.label(f"Video file not found: {video['video_path']}").classes(
+                            ui.label(t("video_not_found", path=video['video_path'])).classes(
                                 "text-negative"
                             )
                             video_url = None
@@ -357,34 +358,34 @@ async def render_video_section(dp, valid_species):
                         )
 
                 else:
-                    ui.label("No video path available").classes("text-grey-5")
+                    ui.label(t("no_video_path")).classes("text-grey-5")
 
                 if not video.get("is_video_valid", True):
                     ui.label(
-                        f"Video validation failed: {video.get('video_validation_details', 'Unknown error')}"
+                        t("video_validation_failed", error=video.get('video_validation_details', 'Unknown error'))
                     ).classes("text-negative text-caption q-mt-sm")
 
             with ui.card().classes("full-width"):
-                ui.label("Model Annotations").classes("text-subtitle1 font-weight-medium q-mb-sm")
+                ui.label(t("model_annotations")).classes("text-subtitle1 font-weight-medium q-mb-sm")
 
                 if model_ann is not None and not model_ann.empty:
                     columns = [
-                        {"name": "model_name", "label": "Model", "field": "model_name"},
+                        {"name": "model_name", "label": t("col_model"), "field": "model_name"},
                         {
                             "name": "annotation_type",
-                            "label": "Type",
+                            "label": t("col_type"),
                             "field": "annotation_type",
                         },
-                        {"name": "value_text", "label": "Value", "field": "value_text"},
-                        {"name": "probability", "label": "Prob", "field": "probability"},
+                        {"name": "value_text", "label": t("col_value"), "field": "value_text"},
+                        {"name": "probability", "label": t("col_prob"), "field": "probability"},
                     ]
                     ui.table(columns=columns, rows=df_to_records(model_ann, 10))
                 else:
-                    ui.label("No model annotations found").classes("text-grey-5")
+                    ui.label(t("no_model_annotations")).classes("text-grey-5")
 
         with ui.column().classes("col"):
             with ui.card().classes("full-width q-mb-md"):
-                ui.label("Manual Review").classes("text-subtitle1 font-weight-medium q-mb-sm")
+                ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium q-mb-sm")
                 default_species = video.get("default_species")
                 if not default_species:
                     fallback_species = video.get("classification_consensus", "unknown")
@@ -425,8 +426,8 @@ async def setup_review():
             set_data_provider(dp)
         else:
             with ui.card().classes("q-pa-xl"):
-                ui.label("Data provider not initialized").classes("text-h6 text-negative")
-                ui.button("Set up", on_click=lambda: ui.navigate.to("/setup"))
+                ui.label(t("error_dp_init")).classes("text-h6 text-negative")
+                ui.button(t("setup_btn"), on_click=lambda: ui.navigate.to("/setup"))
             return
 
     valid_species = await run.io_bound(dp.get_valid_species)
@@ -469,8 +470,8 @@ async def setup_review():
             )
         ):
             with ui.card().classes("full-width q-mb-md"):
-                ui.label("Annotator").classes("text-subtitle2 text-grey-7")
-                annotator_input = ui.input("Name", value=get_annotator_name()).props(
+                ui.label(t("annotator_label")).classes("text-subtitle2 text-grey-7")
+                annotator_input = ui.input(t("annotator_name"), value=get_annotator_name()).props(
                     "outlined dense class=full-width"
                 )
 
@@ -481,7 +482,7 @@ async def setup_review():
 
             with ui.card().classes("full-width q-mb-md"):
                 with ui.row().classes("w-full items-center"):
-                    ui.label("Playback Speed").classes("text-subtitle2 text-grey-7")
+                    ui.label(t("playback_speed")).classes("text-subtitle2 text-grey-7")
                     ui.space()
                     ui.button(
                         icon="restart_alt", on_click=lambda: setattr(speed_slider, "value", 1.0)
@@ -506,28 +507,28 @@ async def setup_review():
                 ).props("label-always switch-label-side class=q-mx-sm")
 
             with ui.card().classes("full-width q-mb-md"):
-                ui.label("Playback Settings").classes("text-subtitle2 text-grey-7")
+                ui.label(t("playback_settings")).classes("text-subtitle2 text-grey-7")
                 ui.checkbox(
-                    "Autoplay",
+                    t("autoplay"),
                     value=is_autoplay(),
                     on_change=lambda e: (set_autoplay(e.value), render_video_section.refresh()),
                 )
                 ui.checkbox(
-                    "Muted",
+                    t("muted"),
                     value=is_muted(),
                     on_change=lambda e: (set_muted(e.value), render_video_section.refresh()),
                 )
 
             with ui.card().classes("full-width q-mb-md"):
-                ui.label("Sort").classes("text-subtitle2 text-grey-7")
+                ui.label(t("sort_label")).classes("text-subtitle2 text-grey-7")
                 with ui.row().classes("w-full items-center gap-sm"):
                     sort_select = ui.select(
                         options={
-                            "priority": "Priority",
-                            "camera": "Camera",
-                            "unreviewed_first": "Unreviewed First",
-                            "species_prob": "Species Probability",
-                            "random": "Random",
+                            "priority": t("sort_priority"),
+                            "camera": t("sort_camera"),
+                            "unreviewed_first": t("sort_unreviewed"),
+                            "species_prob": t("sort_species_prob"),
+                            "random": t("sort_random"),
                         },
                         value=filters.get("selected_sort", "priority"),
                     ).props("outlined dense class=col")
@@ -560,62 +561,79 @@ async def setup_review():
                 sort_select.on_value_change(lambda _: apply_sort())
 
             with ui.card().classes("full-width"):
-                ui.label("Filters").classes("text-subtitle1 font-weight-medium")
+                ui.label(t("filters_label")).classes("text-subtitle1 font-weight-medium")
 
-                search = ui.input("Search", placeholder="Video ID or path...").props(
+                search = ui.input(t("search"), placeholder=t("search_placeholder")).props(
                     "outlined dense class=full-width"
                 )
                 search.value = filters.get("search_query", "")
 
                 camera_values = filter_options.get("camera_values", [])
                 camera_select = ui.select(
-                    label="Camera",
-                    options=["All"] + camera_values,
+                    label=t("camera_filter"),
+                    options={v: v if v != "All" else t("all_option") for v in ["All"] + camera_values},
                     value=filters.get("selected_camera", "All"),
                     with_input=True,
                 ).props("outlined dense class=full-width")
 
                 species_values = filter_options.get("species_values", [])
                 species_filter = ui.select(
-                    label="Species (manual)",
-                    options=["All"] + species_values,
+                    label=t("species_manual_filter"),
+                    options={v: v if v != "All" else t("all_option") for v in ["All"] + species_values},
                     value=filters.get("selected_species", "All"),
                     with_input=True,
                 ).props("outlined dense class=full-width")
 
                 possible_species_values = filter_options.get("possible_species_values", [])
                 possible_species_filter = ui.select(
-                    label="Species (model)",
-                    options=["All"] + possible_species_values,
+                    label=t("species_model_filter"),
+                    options={
+                        v: v if v != "All" else t("all_option")
+                        for v in ["All"] + possible_species_values
+                    },
                     value=filters.get("selected_possible_species", "All"),
                     with_input=True,
                 ).props("outlined dense class=full-width")
 
                 behavior_values = filter_options.get("behavior_values", [])
                 behavior_filter = ui.select(
-                    label="Behavior",
-                    options=["All", "Has Behavior", "No Behavior"] + behavior_values,
+                    label=t("behavior_filter"),
+                    options={
+                        "All": t("all_option"),
+                        "Has Behavior": t("has_behavior"),
+                        "No Behavior": t("no_behavior"),
+                        **{v: v for v in behavior_values},
+                    },
                     value=filters.get("selected_behavior", "All"),
                     with_input=True,
                 ).props("outlined dense class=full-width")
 
                 blank_filter = ui.select(
-                    label="Blank / Non-Blank",
-                    options=["All", "Blank", "Non-Blank", "Unknown"],
+                    label=t("blank_filter"),
+                    options={
+                        "All": t("all_option"),
+                        "Blank": t("blank"),
+                        "Non-Blank": t("non_blank"),
+                        "Unknown": t("unknown"),
+                    },
                     value=filters.get("selected_blank_non_blank", "All"),
                 ).props("outlined dense class=full-width")
 
                 review_status_filter = ui.select(
-                    label="Review Status",
-                    options=["All", "Reviewed", "Unreviewed"],
+                    label=t("review_status_filter"),
+                    options={
+                        "All": t("all_option"),
+                        "Reviewed": t("reviewed"),
+                        "Unreviewed": t("unreviewed"),
+                    },
                     value=filters.get("selected_review_status", "All"),
                 ).props("outlined dense class=full-width")
 
                 include_unranked_cb = ui.checkbox(
-                    "Include unranked", value=get_state_val("include_unranked", True)
+                    t("include_unranked"), value=get_state_val("include_unranked", True)
                 )
                 web_safe_only_cb = ui.checkbox(
-                    "Web-safe only", value=bool(filters.get("web_safe_only", False))
+                    t("web_safe_only"), value=bool(filters.get("web_safe_only", False))
                 )
 
                 async def apply_filters():
@@ -640,7 +658,7 @@ async def setup_review():
                     set_selections([])
                     render_video_section.refresh()
 
-                ui.button("Apply Filters", on_click=apply_filters, color="primary").props(
+                ui.button(t("apply_filters"), on_click=apply_filters, color="primary").props(
                     "full-width"
                 )
 
