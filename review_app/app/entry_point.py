@@ -306,9 +306,12 @@ class GUI:
 
 
 if __name__ in ("__main__", "__mp_main__"):
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--dev", action="store_true", help="Enable dev mode with auto-reload")
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     gui = GUI()
     gui.start(dev_mode=args.dev)
