@@ -126,6 +126,40 @@ async def setup_model_import():
         results_container = ui.card().classes("full-width q-mb-lg")
         mappings_container = ui.card().classes("full-width q-mb-lg")
 
+        async def do_import():
+            loading_dialog.open()
+            try:
+                cleaned_df = _get_df_from_state("cleaned_df")
+                if cleaned_df is None or cleaned_df.empty:
+                    raise ValueError("No data to import")
+
+                df_to_import = cleaned_df.copy()
+                mappings = get_state_val("species_mappings", {})
+
+                if mappings:
+                    species_mask = df_to_import["annotation_type"] == "species"
+                    df_to_import.loc[species_mask, "value_text"] = df_to_import.loc[
+                        species_mask, "value_text"
+                    ].replace(mappings)
+
+                result = await run.io_bound(dp.import_model_csv, cleaned_df=df_to_import)
+                ui.notify(f"Imported {result.get('inserted_rows', 0)} rows!", type="positive")
+                set_state_val("uploaded_df", None)
+                set_state_val("cleaned_df", None)
+                set_state_val("errors_df", None)
+                set_state_val("species_mappings", {})
+                set_state_val("unmapped_species", [])
+                results_container.clear()
+                mappings_container.clear()
+                with results_container:
+                    ui.label("Upload a CSV file to validate and import.").classes(
+                        "text-body2 text-grey-6"
+                    )
+            except Exception as exc:
+                ui.notify(f"Import failed: {exc}", type="negative")
+            finally:
+                loading_dialog.close()
+
         def update_import_button():
             cleaned_df = _get_df_from_state("cleaned_df")
             species_mappings = get_state_val("species_mappings", {})
@@ -247,44 +281,6 @@ async def setup_model_import():
                         finally:
                             loading_dialog.close()
 
-                    async def do_import():
-                        loading_dialog.open()
-                        try:
-                            cleaned_df = _get_df_from_state("cleaned_df")
-                            if cleaned_df is None or cleaned_df.empty:
-                                raise ValueError("No data to import")
-
-                            df_to_import = cleaned_df.copy()
-                            mappings = get_state_val("species_mappings", {})
-
-                            if mappings:
-                                species_mask = df_to_import["annotation_type"] == "species"
-                                df_to_import.loc[species_mask, "value_text"] = df_to_import.loc[
-                                    species_mask, "value_text"
-                                ].replace(mappings)
-
-                            result = await run.io_bound(
-                                dp.import_model_csv, cleaned_df=df_to_import
-                            )
-                            ui.notify(
-                                f"Imported {result.get('inserted_rows', 0)} rows!", type="positive"
-                            )
-                            set_state_val("uploaded_df", None)
-                            set_state_val("cleaned_df", None)
-                            set_state_val("errors_df", None)
-                            set_state_val("species_mappings", {})
-                            set_state_val("unmapped_species", [])
-                            results_container.clear()
-                            mappings_container.clear()
-                            with results_container:
-                                ui.label("Upload a CSV file to validate and import.").classes(
-                                    "text-body2 text-grey-6"
-                                )
-                        except Exception as exc:
-                            ui.notify(f"Import failed: {exc}", type="negative")
-                        finally:
-                            loading_dialog.close()
-
                     species_mappings = get_state_val("species_mappings", {})
                     pending_unmapped = [k for k, v in species_mappings.items() if not v]
                     cleaned_df = _get_df_from_state("cleaned_df")
@@ -340,6 +336,7 @@ async def setup_model_import():
                     )
 
             cleaned_df = _get_df_from_state("cleaned_df")
+            species_mappings = get_state_val("species_mappings", {})
             can_import = (
                 cleaned_df is not None
                 and not cleaned_df.empty

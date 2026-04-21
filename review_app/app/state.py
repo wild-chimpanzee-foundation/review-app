@@ -25,6 +25,9 @@ def _get_user_state() -> dict[str, Any]:
             "selected_possible_species": "All",
             "selected_blank_non_blank": "All",
             "selected_behavior": "All",
+            "selected_review_status": "All",
+            "selected_sort": "priority",
+            "selected_sort_direction": "desc",
             "include_unranked": True,
             "web_safe_only": False,
         }

@@ -955,6 +955,11 @@ class LocalDataProvider:
         selected_possible_species = filters.get("selected_possible_species", "All")
         selected_blank_non_blank = filters.get("selected_blank_non_blank", "All")
         selected_behavior = filters.get("selected_behavior", "All")
+        selected_review_status = filters.get("selected_review_status", "All")
+        selected_sort = filters.get("selected_sort", "priority")
+        selected_sort_direction = filters.get("selected_sort_direction", "desc")
+        sort_dir = "DESC" if selected_sort_direction == "desc" else "ASC"
+        sort_dir_inv = "ASC" if selected_sort_direction == "desc" else "DESC"
         include_unranked = bool(filters.get("include_unranked", False))
         web_safe_only = bool(filters.get("web_safe_only", False))
 
@@ -1067,24 +1072,59 @@ class LocalDataProvider:
         if web_safe_only:
             where.append("v.is_web_safe = 1")
 
-        # ── 5. ORDER BY — simplified, no nested CASE, no pc.cnt ──
-        if has_priority and include_unranked:
-            # ranked videos first, then unranked, then by date
-            order_by = """
-                ORDER BY
+        if selected_review_status == "Reviewed":
+            where.append("""
+                EXISTS (
+                    SELECT 1 FROM video_labels vl2
+                    WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
+                )""")
+        elif selected_review_status == "Unreviewed":
+            where.append("""
+                NOT EXISTS (
+                    SELECT 1 FROM video_labels vl2
+                    WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
+                )""")
+
+        # ── 5. ORDER BY ──
+        if selected_sort == "priority":
+            if has_priority and include_unranked:
+                order_by = f"""ORDER BY
                     CASE WHEN vp.video_id IS NULL THEN 1 ELSE 0 END,
-                    vp.annotation_importance_score DESC,
-                    v.created_at DESC,
+                    vp.annotation_importance_score {sort_dir},
                     v.video_id ASC"""
-        elif has_priority:
-            # INNER JOIN already filtered out unranked; just sort by score
-            order_by = """
-                ORDER BY
-                    vp.annotation_importance_score DESC,
-                    v.created_at DESC,
+            elif has_priority:
+                order_by = f"""ORDER BY
+                    vp.annotation_importance_score {sort_dir},
                     v.video_id ASC"""
+            else:
+                order_by = "ORDER BY v.video_id ASC"
+        elif selected_sort == "camera":
+            order_by = f"ORDER BY v.camera_id {sort_dir}, v.video_id ASC"
+        elif selected_sort == "unreviewed_first":
+            order_by = f"""ORDER BY
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM video_labels vl2
+                    WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
+                ) THEN 1 ELSE 0 END {sort_dir_inv},
+                v.video_id ASC"""
+        elif selected_sort == "species_prob":
+            ctes.append("""
+            species_max_prob AS (
+                SELECT video_id, MAX(prob_sum) AS max_species_prob
+                FROM (
+                    SELECT video_id, SUM(COALESCE(probability, 0)) AS prob_sum
+                    FROM model_annotations
+                    WHERE annotation_type = 'species'
+                    GROUP BY video_id, value_text
+                ) _sp
+                GROUP BY video_id
+            )""")
+            joins.append("LEFT JOIN species_max_prob smp ON smp.video_id = v.video_id")
+            order_by = f"ORDER BY smp.max_species_prob {sort_dir} NULLS LAST, v.video_id ASC"
+        elif selected_sort == "random":
+            order_by = "ORDER BY RANDOM()"
         else:
-            order_by = "ORDER BY v.created_at DESC, v.video_id ASC"
+            order_by = "ORDER BY v.video_id ASC"
 
         # ── Assemble ──
         cte_sql = ("WITH " + ",\n".join(ctes)) if ctes else ""

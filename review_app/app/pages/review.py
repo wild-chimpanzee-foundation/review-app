@@ -31,7 +31,7 @@ from review_app.backend.utils import df_to_records, get_video_mime
 
 
 @ui.refreshable
-def render_annotation_section(video, valid_species, dp, default_species):
+def render_annotation_section(video, valid_species, dp, default_species, default_behavior="does_not_react"):
     selections = get_selections()
     user_cleared_all = get_state_val("user_cleared_all", False)
 
@@ -42,7 +42,7 @@ def render_annotation_section(video, valid_species, dp, default_species):
             selections = existing
         else:
             species = default_species or video.get("classification_consensus", "unknown")
-            behavior = "does_not_react"
+            behavior = default_behavior
             if species and species != "UNKNOWN":
                 selections = [
                     {
@@ -94,23 +94,50 @@ def render_annotation_section(video, valid_species, dp, default_species):
                     label="Behavior", options=behaviors, value=bp_value, with_input=True
                 ).props("outlined dense class=col")
 
-                def update_sel(idx, sp_el, bp_el):
-                    new_sels = get_selections()
-                    if 0 <= idx < len(new_sels):
-                        new_sels[idx] = {
-                            "species": sp_el.value,
-                            "behavior": bp_el.value,
-                            "start_sec": 0.0,
-                            "end_sec": video.get("duration_sec"),
-                        }
-                        set_selections(new_sels)
-
-                sp.on_value_change(lambda _, s=sp, b=bp, idx=i: update_sel(idx, s, b))
-                bp.on_value_change(lambda _, s=sp, b=bp, idx=i: update_sel(idx, s, b))
-
                 ui.button(icon="delete", on_click=lambda idx=i: delete_selection(idx)).props(
                     "flat color=negative"
                 )
+
+            with ui.row().classes("w-full gap-sm items-center q-mt-sm") as time_row:
+                start_in = ui.number(
+                    label="Start (s)",
+                    value=sel.get("start_sec", 0.0),
+                    step=0.1,
+                    format="%.1f",
+                ).props("outlined dense class=col")
+                end_in = ui.number(
+                    label="End (s)",
+                    value=sel.get("end_sec"),
+                    step=0.1,
+                    format="%.1f",
+                ).props("outlined dense class=col")
+
+            time_row.visible = bp_value != "does_not_react"
+
+            def update_sel(idx, sp_el, bp_el, start_el, end_el, tr):
+                new_sels = get_selections()
+                if 0 <= idx < len(new_sels):
+                    new_sels[idx] = {
+                        "species": sp_el.value,
+                        "behavior": bp_el.value,
+                        "start_sec": start_el.value if start_el.value is not None else 0.0,
+                        "end_sec": end_el.value,
+                    }
+                    set_selections(new_sels)
+                tr.visible = bp_el.value != "does_not_react"
+
+            sp.on_value_change(
+                lambda _, s=sp, b=bp, st=start_in, en=end_in, tr=time_row, idx=i: update_sel(idx, s, b, st, en, tr)
+            )
+            bp.on_value_change(
+                lambda _, s=sp, b=bp, st=start_in, en=end_in, tr=time_row, idx=i: update_sel(idx, s, b, st, en, tr)
+            )
+            start_in.on_value_change(
+                lambda _, s=sp, b=bp, st=start_in, en=end_in, tr=time_row, idx=i: update_sel(idx, s, b, st, en, tr)
+            )
+            end_in.on_value_change(
+                lambda _, s=sp, b=bp, st=start_in, en=end_in, tr=time_row, idx=i: update_sel(idx, s, b, st, en, tr)
+            )
 
     def add_species():
         last = selections[-1]["species"] if selections else valid_species[0]
@@ -118,7 +145,7 @@ def render_annotation_section(video, valid_species, dp, default_species):
         new_sels.append(
             {
                 "species": last,
-                "behavior": "does_not_react",
+                "behavior": default_behavior,
                 "start_sec": 0.0,
                 "end_sec": video.get("duration_sec"),
             }
@@ -212,6 +239,16 @@ async def render_video_section(dp, valid_species):
     video_task = run.io_bound(dp.get_video_detail, selected_video_id)
     model_ann_task = run.io_bound(dp.get_model_annotations, selected_video_id)
     video, model_ann = await asyncio.gather(video_task, model_ann_task)
+
+    default_behavior = "does_not_react"
+    if model_ann is not None and not model_ann.empty:
+        behavior_rows = model_ann[
+            (model_ann["annotation_type"] == "behavior")
+            & (model_ann["value_text"].notna())
+            & (model_ann["value_text"].str.lower() != "dummy")
+        ]["value_text"]
+        if not behavior_rows.empty:
+            default_behavior = behavior_rows.mode().iloc[0]
 
     if not video:
         # Queue can become stale after DB reset/re-sync or ID format changes.
@@ -355,7 +392,7 @@ async def render_video_section(dp, valid_species):
                         fallback_species = valid_species[0]
                     default_species = fallback_species
 
-                render_annotation_section(video, valid_species, dp, default_species)
+                render_annotation_section(video, valid_species, dp, default_species, default_behavior)
 
     current_speed = get_playback_speed().replace("x", "")
     ui.run_javascript(f"""
@@ -481,6 +518,47 @@ async def setup_review():
                     on_change=lambda e: (set_muted(e.value), render_video_section.refresh()),
                 )
 
+            with ui.card().classes("full-width q-mb-md"):
+                ui.label("Sort").classes("text-subtitle2 text-grey-7")
+                with ui.row().classes("w-full items-center gap-sm"):
+                    sort_select = ui.select(
+                        options={
+                            "priority": "Priority",
+                            "camera": "Camera",
+                            "unreviewed_first": "Unreviewed First",
+                            "species_prob": "Species Probability",
+                            "random": "Random",
+                        },
+                        value=filters.get("selected_sort", "priority"),
+                    ).props("outlined dense class=col")
+
+                    sort_dir = [filters.get("selected_sort_direction", "desc")]
+
+                    dir_btn = ui.button(
+                        icon="arrow_downward" if sort_dir[0] == "desc" else "arrow_upward"
+                    ).props("outlined dense")
+
+                async def apply_sort():
+                    update_filters(
+                        selected_sort=sort_select.value,
+                        selected_sort_direction=sort_dir[0],
+                    )
+                    new_queue = await run.io_bound(dp.get_video_queue, get_filters())
+                    set_queue(new_queue)
+                    set_current_idx(0)
+                    set_selections([])
+                    render_video_section.refresh()
+
+                async def toggle_dir():
+                    sort_dir[0] = "asc" if sort_dir[0] == "desc" else "desc"
+                    dir_btn.props(
+                        f"outlined dense icon={'arrow_upward' if sort_dir[0] == 'asc' else 'arrow_downward'}"
+                    )
+                    await apply_sort()
+
+                dir_btn.on_click(toggle_dir)
+                sort_select.on_value_change(lambda _: apply_sort())
+
             with ui.card().classes("full-width"):
                 ui.label("Filters").classes("text-subtitle1 font-weight-medium")
 
@@ -499,10 +577,38 @@ async def setup_review():
 
                 species_values = filter_options.get("species_values", [])
                 species_filter = ui.select(
-                    label="Species",
+                    label="Species (manual)",
                     options=["All"] + species_values,
                     value=filters.get("selected_species", "All"),
                     with_input=True,
+                ).props("outlined dense class=full-width")
+
+                possible_species_values = filter_options.get("possible_species_values", [])
+                possible_species_filter = ui.select(
+                    label="Species (model)",
+                    options=["All"] + possible_species_values,
+                    value=filters.get("selected_possible_species", "All"),
+                    with_input=True,
+                ).props("outlined dense class=full-width")
+
+                behavior_values = filter_options.get("behavior_values", [])
+                behavior_filter = ui.select(
+                    label="Behavior",
+                    options=["All", "Has Behavior", "No Behavior"] + behavior_values,
+                    value=filters.get("selected_behavior", "All"),
+                    with_input=True,
+                ).props("outlined dense class=full-width")
+
+                blank_filter = ui.select(
+                    label="Blank / Non-Blank",
+                    options=["All", "Blank", "Non-Blank", "Unknown"],
+                    value=filters.get("selected_blank_non_blank", "All"),
+                ).props("outlined dense class=full-width")
+
+                review_status_filter = ui.select(
+                    label="Review Status",
+                    options=["All", "Reviewed", "Unreviewed"],
+                    value=filters.get("selected_review_status", "All"),
                 ).props("outlined dense class=full-width")
 
                 include_unranked_cb = ui.checkbox(
@@ -516,7 +622,13 @@ async def setup_review():
                     new_filters = {
                         "search_query": search.value,
                         "selected_camera": camera_select.value,
+                        "selected_sort": sort_select.value,
+                        "selected_sort_direction": sort_dir[0],
                         "selected_species": species_filter.value,
+                        "selected_possible_species": possible_species_filter.value,
+                        "selected_behavior": behavior_filter.value,
+                        "selected_blank_non_blank": blank_filter.value,
+                        "selected_review_status": review_status_filter.value,
                         "include_unranked": include_unranked_cb.value,
                         "web_safe_only": web_safe_only_cb.value,
                     }
