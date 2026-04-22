@@ -52,7 +52,7 @@ def _get_user_state() -> dict[str, Any]:
             "selected_blank_non_blank": "All",
             "selected_behavior": "All",
             "selected_annotation_status": "All",
-            "selected_sort": "priority",
+            "selected_sort": "camera",
             "selected_sort_direction": "desc",
             "web_safe_only": False,
             "selected_needs_review": "All",

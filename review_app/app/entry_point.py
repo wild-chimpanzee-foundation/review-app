@@ -379,7 +379,7 @@ if __name__ in ("__main__", "__mp_main__"):
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--dev", action="store_true", help="Enable dev mode with auto-reload")
-    parser.add_argument("--port", action="store_true", help="Change the port for the App")
+    parser.add_argument("--port", type=int, default=8000, help="Port to run the application on")
     args, _ = parser.parse_known_args()
 
     gui = GUI()

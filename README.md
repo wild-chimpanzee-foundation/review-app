@@ -77,6 +77,3 @@ Database is stored at:
 
 - Videos remain local and are discovered by recursively scanning `video_dir`.
 - Keep config explicit while schema evolves: set `video_dir`, `db_dir`, `species`, `behaviors`.
-- Optional queue ranking CSV can be configured with `priority_csv_path` and columns:
-  - `video_id`
-  - `annotation_importance_score`

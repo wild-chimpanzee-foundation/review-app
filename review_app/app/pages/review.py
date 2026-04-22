@@ -39,12 +39,11 @@ def render_annotation_section(
     video, valid_species, dp, default_species, default_behavior="does_not_react"
 ):
     selections = get_selections()
-    user_cleared_all = get_state_val("user_cleared_all", False)
     # Track is_blank as an independent property in the session state
     is_blank = get_state_val("review_is_blank")
 
     # Initial population for a new video
-    if is_blank is None and not selections and not user_cleared_all:
+    if is_blank is None and not selections:
         is_blank = video.get("is_blank")
         selections = video.get("manual_selections") or []
 
@@ -78,13 +77,10 @@ def render_annotation_section(
         if 0 <= idx < len(new_sels):
             new_sels.pop(idx)
             set_selections(new_sels)
-            if not new_sels:
-                set_state_val("user_cleared_all", True)
         render_annotation_section.refresh()
 
     def set_not_blank():
         set_state_val("review_is_blank", False)
-        set_state_val("user_cleared_all", False)
         render_annotation_section.refresh()
 
     # UI Rendering
@@ -217,7 +213,7 @@ def render_annotation_section(
         set_state_val("pending_blank_confirm", False)
         set_state_val("review_is_blank", None)
         set_selections([])
-        render_video_section.refresh()
+        ui.run_javascript("window.location.reload()")
 
     async def submit():
         sels = get_selections()
@@ -230,6 +226,7 @@ def render_annotation_section(
             is_blank=is_b,
         )
         ui.notify(t("review_saved"), type="positive")
+        ui.run_javascript("window.location.reload()")
 
     async def mark_blank():
         await run.io_bound(
@@ -341,7 +338,6 @@ async def render_video_section(dp, valid_species):
             set_current_idx(new_idx)
             set_state_val("review_active_id", None)
             set_state_val("pending_blank_confirm", False)
-            set_state_val("user_cleared_all", False)
             set_state_val("review_is_blank", None)
             set_selections([])
             render_video_section.refresh()
@@ -585,7 +581,6 @@ async def setup_review():
         set_current_idx(0)
         set_selections([])
         set_state_val("review_is_blank", None)
-        set_state_val("user_cleared_all", False)
         set_state_val("review_active_id", None)
         set_state_val("pending_blank_confirm", False)
 
