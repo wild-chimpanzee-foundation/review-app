@@ -67,8 +67,9 @@ def shared_header():
         ui.run_javascript("window.location.reload()")
 
     # Define shortcuts dialog once per page
-    with ui.dialog() as shortcuts_dialog, ui.card().classes("q-pa-lg relative").style(
-        "min-width: 400px"
+    with (
+        ui.dialog() as shortcuts_dialog,
+        ui.card().classes("q-pa-lg relative").style("min-width: 400px"),
     ):
         ui.button(icon="close", on_click=shortcuts_dialog.close).props("flat round").classes(
             "absolute-top-right q-ma-sm"
@@ -80,7 +81,9 @@ def shared_header():
         with ui.column().classes("w-full gap-4"):
             # Navigation
             with ui.column().classes("w-full gap-1"):
-                ui.label(t("shortcuts_global")).classes("text-subtitle2 text-primary font-weight-medium")
+                ui.label(t("shortcuts_global")).classes(
+                    "text-subtitle2 text-primary font-weight-medium"
+                )
                 ui.separator()
                 for key, label in [
                     ("O", t("shortcut_overview")),
@@ -90,11 +93,15 @@ def shared_header():
                 ]:
                     with ui.row().classes("w-full justify-between items-center"):
                         ui.label(label).classes("text-body2")
-                        ui.label(key).classes("q-px-sm q-py-xs bg-grey-8 text-white rounded-borders text-bold text-caption shadow-1")
+                        ui.label(key).classes(
+                            "q-px-sm q-py-xs bg-grey-8 text-white rounded-borders text-bold text-caption shadow-1"
+                        )
 
             # Review Page
             with ui.column().classes("w-full gap-1 q-mt-sm"):
-                ui.label(t("shortcuts_review")).classes("text-subtitle2 text-primary font-weight-medium")
+                ui.label(t("shortcuts_review")).classes(
+                    "text-subtitle2 text-primary font-weight-medium"
+                )
                 ui.separator()
                 for key, label in [
                     ("Enter", t("shortcut_submit_next")),
@@ -104,7 +111,9 @@ def shared_header():
                 ]:
                     with ui.row().classes("w-full justify-between items-center"):
                         ui.label(label).classes("text-body2")
-                        ui.label(key).classes("q-px-sm q-py-xs bg-grey-8 text-white rounded-borders text-bold text-caption shadow-1")
+                        ui.label(key).classes(
+                            "q-px-sm q-py-xs bg-grey-8 text-white rounded-borders text-bold text-caption shadow-1"
+                        )
 
     with ui.header().classes("bg-primary"):
         with ui.row().classes("w-full items-center q-px-md"):
@@ -275,7 +284,7 @@ class GUI:
 
         ui.timer(0.1, do_sync, once=True)
 
-    def start(self, dev_mode=False):
+    def start(self, dev_mode=False, port=8000):
         from nicegui import app, ui
 
         @app.on_page_exception
@@ -356,7 +365,7 @@ class GUI:
             native=use_native,
             title="Video Annotation",
             host="127.0.0.1",
-            port=8000,
+            port=port,
             show=dev_mode or not use_native,
             reload=dev_mode,
             storage_secret=storage_secret,
@@ -370,7 +379,8 @@ if __name__ in ("__main__", "__mp_main__"):
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--dev", action="store_true", help="Enable dev mode with auto-reload")
+    parser.add_argument("--port", action="store_true", help="Change the port for the App")
     args, _ = parser.parse_known_args()
 
     gui = GUI()
-    gui.start(dev_mode=args.dev)
+    gui.start(dev_mode=args.dev, port=args.port)
