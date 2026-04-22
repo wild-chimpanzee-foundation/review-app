@@ -37,7 +37,7 @@ from review_app.app.state import (  # noqa: E402
     set_data_provider,
 )
 from review_app.app.theme import apply_theme  # noqa: E402
-from review_app.app.translations import t, set_language, get_language  # noqa: E402
+from review_app.app.translations import get_language, set_language, t  # noqa: E402
 from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
 
 CONFIG_PATH = get_config_path()
@@ -312,9 +312,6 @@ class GUI:
             shared=True,
         )
 
-        # if dev_mode and CONFIG_PATH.exists():
-        #     CONFIG_PATH.unlink()
-
         # Load config and register media files at startup (before ui.run)
         if CONFIG_PATH.exists():
             try:
@@ -323,6 +320,8 @@ class GUI:
                     dark_mode=cfg.get("dark_mode", True),
                     language=cfg.get("language", "en"),
                     annotator_name=cfg.get("annotator_name", "default"),
+                    blank_threshold=cfg.get("blank_threshold", 0.75),
+                    species_threshold=cfg.get("species_threshold", 0.75),
                 )
 
                 if cfg.get("video_dir"):

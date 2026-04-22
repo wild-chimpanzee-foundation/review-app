@@ -13,3 +13,5 @@ behavior_defaults:
 dark_mode: true
 language: en
 annotator_name: default
+blank_threshold: 0.75
+species_threshold: 0.75

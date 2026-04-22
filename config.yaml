@@ -8,3 +8,6 @@ fuzzy_match_threshold: 80
 behavior_defaults:
 - reacts_to_camera
 - does_not_react
+dark_mode: true
+species_behaviors_csv_path: /home/jonas/Documents/projects/review-app/review_app/data/species_behaviors.csv
+annotator_name: default2

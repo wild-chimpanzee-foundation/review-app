@@ -4,8 +4,8 @@ import json
 import os
 import shutil
 import subprocess
-import tempfile
 import sys
+import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -15,12 +15,6 @@ from typing import Any
 import pandas as pd
 import yaml
 from dotenv import load_dotenv
-
-from review_app.app.config import get_app_dir, get_config_path
-from review_app.backend.utils import (
-    get_default_species_from_annotations,
-    needs_browser_transcode,
-)
 from sqlalchemy import (
     Boolean,
     Column,
@@ -33,11 +27,19 @@ from sqlalchemy import (
     create_engine,
     event,
     func,
-    inspect as sa_inspect,
     select,
     text,
 )
+from sqlalchemy import (
+    inspect as sa_inspect,
+)
 from sqlalchemy.orm import declarative_base, sessionmaker
+
+from review_app.app.config import get_app_dir, get_config_path
+from review_app.backend.utils import (
+    get_default_species_from_annotations,
+    needs_browser_transcode,
+)
 
 load_dotenv()
 
@@ -80,7 +82,6 @@ class IndividualObservation(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     video_id = Column(String, ForeignKey("videos.video_id"), nullable=False, index=True)
-    session_id = Column(String, nullable=False, index=True)
     species = Column(String, nullable=False)
     behavior = Column(String, nullable=False)
     start_sec = Column(Float, nullable=False, default=0.0)
@@ -108,13 +109,6 @@ class ModelAnnotation(Base):
             "video_id", "model_name", "annotation_type", name="uq_model_ann_identity"
         ),
     )
-
-
-class VideoPriority(Base):
-    __tablename__ = "video_priority"
-
-    video_id = Column(String, ForeignKey("videos.video_id"), primary_key=True)
-    annotation_importance_score = Column(Float, nullable=False, index=True)
 
 
 Index(
@@ -341,7 +335,6 @@ class LocalDataProvider:
             behavior_defaults, "behavior_defaults"
         )
 
-        self._priority_csv_path: Path | None = self._optional_path(cfg.get("priority_csv_path"))
         self._consensus_min_probability: float = float(cfg.get("consensus_min_probability", 0.0))
         self._fuzzy_match_threshold: int = int(cfg.get("fuzzy_match_threshold", 80))
 
@@ -389,7 +382,6 @@ class LocalDataProvider:
 
     def sync_videos(self, progress_callback):
         self._sync_videos_table(progress_callback)
-        self._sync_priority_table()
 
     def _needs_schema_reset(self) -> bool:
         """Detect incompatible legacy schemas and trigger full DB recreation."""
@@ -733,31 +725,6 @@ class LocalDataProvider:
             "still_invalid": still_invalid,
         }
 
-    def _sync_priority_table(self) -> None:
-        with self.Session() as session:
-            session.query(VideoPriority).delete(synchronize_session=False)
-            if self._priority_csv_path and self._priority_csv_path.exists():
-                try:
-                    df = pd.read_csv(self._priority_csv_path)
-                    required = {"video_id", "annotation_importance_score"}
-                    if required.issubset(set(df.columns)):
-                        for _, row in df.iterrows():
-                            vid = str(row.get("video_id") or "").strip()
-                            score = pd.to_numeric(
-                                row.get("annotation_importance_score"), errors="coerce"
-                            )
-                            if not vid or pd.isna(score):
-                                continue
-                            session.add(
-                                VideoPriority(
-                                    video_id=vid,
-                                    annotation_importance_score=float(score),
-                                )
-                            )
-                except Exception:
-                    pass
-            session.commit()
-
     def transcode_video(self, video_id: str) -> dict[str, Any]:
         """
         Transcode a video to web-safe H.264 MP4 using ffmpeg.
@@ -952,25 +919,55 @@ class LocalDataProvider:
         selected_possible_species = filters.get("selected_possible_species", "All")
         selected_blank_non_blank = filters.get("selected_blank_non_blank", "All")
         selected_behavior = filters.get("selected_behavior", "All")
-        selected_review_status = filters.get("selected_review_status", "All")
-        selected_sort = filters.get("selected_sort", "priority")
+        selected_annotation_status = filters.get("selected_annotation_status", "All")
+        selected_sort = filters.get("selected_sort", "camera")
         selected_sort_direction = filters.get("selected_sort_direction", "desc")
         sort_dir = "DESC" if selected_sort_direction == "desc" else "ASC"
         sort_dir_inv = "ASC" if selected_sort_direction == "desc" else "DESC"
-        include_unranked = bool(filters.get("include_unranked", False))
         web_safe_only = bool(filters.get("web_safe_only", False))
+        selected_needs_review = filters.get("selected_needs_review", "All")
+        blank_threshold = float(filters.get("blank_threshold", 0.75))
+        species_threshold = float(filters.get("species_threshold", 0.75))
 
         params: dict[str, Any] = {}
 
-        # ── 1. Resolve priority count once in Python, not inside every result row ──
-        with self.engine.connect() as conn:
-            priority_count: int = (
-                conn.execute(text("SELECT COUNT(*) FROM video_priority")).scalar() or 0
-            )
-        has_priority = priority_count > 0
-
-        # ── 2. CTEs — only emit effective_blank when the filter is actually used ──
+        # ── 2. CTEs — only emit when the filter is actually used ──
         ctes: list[str] = []
+        need_needs_review_filter = selected_needs_review != "All"
+        if need_needs_review_filter:
+            params["blank_thr"] = blank_threshold
+            params["species_thr"] = species_threshold
+            ctes.append("""
+            nr_blank AS (
+                SELECT video_id,
+                    MAX(CASE WHEN LOWER(TRIM(value_text)) = 'blank'
+                             THEN COALESCE(probability, 0.0) ELSE 0.0 END) AS blank_prob
+                FROM model_annotations
+                WHERE annotation_type = 'blank_non_blank'
+                GROUP BY video_id
+            ),
+            nr_species AS (
+                SELECT video_id,
+                    MAX(COALESCE(probability, 0.0))   AS max_sp,
+                    COUNT(DISTINCT value_text)         AS distinct_top1,
+                    COUNT(*)                           AS model_count
+                FROM model_annotations
+                WHERE annotation_type = 'species'
+                GROUP BY video_id
+            ),
+            needs_review AS (
+                SELECT v.video_id,
+                    CASE
+                        WHEN COALESCE(nb.blank_prob, 0.0) >= :blank_thr
+                         AND COALESCE(ns.max_sp, 0.0) < :species_thr THEN 0
+                        WHEN ns.distinct_top1 = 1 AND ns.model_count = 3 THEN 0
+                        ELSE 1
+                    END AS needs_review_flag
+                FROM videos v
+                LEFT JOIN nr_blank nb ON nb.video_id = v.video_id
+                LEFT JOIN nr_species ns ON ns.video_id = v.video_id
+            )""")
+
         need_blank_filter = selected_blank_non_blank not in ("All",)
         if need_blank_filter:
             ctes.append("""
@@ -1000,11 +997,8 @@ class LocalDataProvider:
 
         # ── 3. JOINs — use INNER JOIN when include_unranked=False to let SQLite prune early ──
         joins: list[str] = []
-        if has_priority:
-            if include_unranked:
-                joins.append("LEFT JOIN video_priority vp ON vp.video_id = v.video_id")
-            else:
-                joins.append("JOIN video_priority vp ON vp.video_id = v.video_id")
+        if need_needs_review_filter:
+            joins.append("LEFT JOIN needs_review nr ON nr.video_id = v.video_id")
         if need_blank_filter:
             joins.append("LEFT JOIN effective_blank eb ON eb.video_id = v.video_id")
 
@@ -1069,32 +1063,24 @@ class LocalDataProvider:
         if web_safe_only:
             where.append("v.is_web_safe = 1")
 
-        if selected_review_status == "Reviewed":
+        if selected_needs_review == "Needs Review":
+            where.append("nr.needs_review_flag = 1")
+        elif selected_needs_review == "No Review":
+            where.append("nr.needs_review_flag = 0")
+
+        if selected_annotation_status == "Annotated":
             where.append("""
                 EXISTS (
                     SELECT 1 FROM video_labels vl2
                     WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
                 )""")
-        elif selected_review_status == "Unreviewed":
+        elif selected_annotation_status == "Not Annotated":
             where.append("""
                 NOT EXISTS (
                     SELECT 1 FROM video_labels vl2
                     WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
                 )""")
 
-        # ── 5. ORDER BY ──
-        if selected_sort == "priority":
-            if has_priority and include_unranked:
-                order_by = f"""ORDER BY
-                    CASE WHEN vp.video_id IS NULL THEN 1 ELSE 0 END,
-                    vp.annotation_importance_score {sort_dir},
-                    v.video_id ASC"""
-            elif has_priority:
-                order_by = f"""ORDER BY
-                    vp.annotation_importance_score {sort_dir},
-                    v.video_id ASC"""
-            else:
-                order_by = "ORDER BY v.video_id ASC"
         elif selected_sort == "camera":
             order_by = f"ORDER BY v.camera_id {sort_dir}, v.video_id ASC"
         elif selected_sort == "unreviewed_first":
@@ -1160,7 +1146,12 @@ class LocalDataProvider:
 
         return [] if rows.empty else rows["video_id"].astype(str).tolist()
 
-    def get_video_detail(self, video_id: str) -> dict | None:
+    def get_video_detail(
+        self,
+        video_id: str,
+        blank_threshold: float = 0.75,
+        species_threshold: float = 0.75,
+    ) -> dict | None:
         with self.engine.connect() as conn:
             detail_df = pd.read_sql(
                 text(
@@ -1191,8 +1182,8 @@ class LocalDataProvider:
                           AND TRIM(ma.value_text) <> ''
                         GROUP BY ma.video_id
                     ),
-                    avg_species_conf AS (
-                        SELECT video_id, AVG(COALESCE(probability, 0.0)) AS avg_species_confidence
+                    max_species_conf AS (
+                        SELECT video_id, MAX(COALESCE(probability, 0.0)) AS max_species_confidence
                         FROM model_annotations
                         WHERE annotation_type = 'species'
                         GROUP BY video_id
@@ -1264,7 +1255,7 @@ class LocalDataProvider:
                         CASE WHEN LOWER(TRIM(mb.blank_non_blank_model_result)) = 'blank'
                              THEN mb.probability ELSE NULL
                         END AS blank_model_probability,
-                        COALESCE(asc_.avg_species_confidence, 0.0) AS avg_species_confidence,
+                        COALESCE(msc_.max_species_confidence, 0.0) AS max_species_confidence,
                         rs.needs_manual_review
                     FROM videos v
                     LEFT JOIN video_labels vl ON vl.video_id = v.video_id
@@ -1272,7 +1263,7 @@ class LocalDataProvider:
                     LEFT JOIN manual_summary ms ON ms.video_id = v.video_id
                     LEFT JOIN model_species_consensus msc ON msc.video_id = v.video_id
                     LEFT JOIN model_behavior mbe ON mbe.video_id = v.video_id
-                    LEFT JOIN avg_species_conf asc_ ON asc_.video_id = v.video_id
+                    LEFT JOIN max_species_conf msc_ ON msc_.video_id = v.video_id
                     LEFT JOIN review_state rs ON rs.video_id = v.video_id
                     WHERE v.video_id = :video_id
                     """
@@ -1342,6 +1333,15 @@ class LocalDataProvider:
             model_ann, self.get_valid_species(), None
         )
 
+        blank_prob = row.get("blank_model_probability") or 0.0
+        max_sp = row.get("max_species_confidence") or 0.0
+        row["predicted_blank"] = (
+            row.get("is_blank") is None
+            and not selections
+            and blank_prob >= blank_threshold
+            and max_sp < species_threshold
+        )
+
         return row
 
     def get_model_annotations(self, video_id: str) -> pd.DataFrame:
@@ -1387,7 +1387,6 @@ class LocalDataProvider:
             selections = []
 
         now = self._utcnow_dt()
-        session_id = str(uuid.uuid4())
 
         normalized: list[dict[str, Any]] = []
         for selection in selections:
@@ -1443,7 +1442,6 @@ class LocalDataProvider:
                     session.add(
                         IndividualObservation(
                             video_id=video_id,
-                            session_id=session_id,
                             species=row["species"],
                             behavior=row["behavior"],
                             start_sec=row["start_sec"],

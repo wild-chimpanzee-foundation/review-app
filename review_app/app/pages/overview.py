@@ -1,8 +1,9 @@
 
 from nicegui import run, ui
+
 from review_app.app.state import get_data_provider
-from review_app.app.utils import sync_with_progress
 from review_app.app.translations import t
+from review_app.app.utils import sync_with_progress
 
 
 async def setup_overview():

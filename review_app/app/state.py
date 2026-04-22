@@ -21,14 +21,24 @@ def set_data_provider(dp):
 _dark_mode: bool = True
 _language: str = "en"
 _annotator_name: str = "default"
+_blank_threshold: float = 0.75
+_species_threshold: float = 0.75
 
 
-def init_user_prefs(dark_mode: bool, language: str, annotator_name: str) -> None:
+def init_user_prefs(
+    dark_mode: bool,
+    language: str,
+    annotator_name: str,
+    blank_threshold: float = 0.75,
+    species_threshold: float = 0.75,
+) -> None:
     """Initialize persistent preferences from configuration at startup."""
-    global _dark_mode, _language, _annotator_name
+    global _dark_mode, _language, _annotator_name, _blank_threshold, _species_threshold
     _dark_mode = dark_mode
     _language = language
     _annotator_name = annotator_name
+    _blank_threshold = blank_threshold
+    _species_threshold = species_threshold
 
 
 def _get_user_state() -> dict[str, Any]:
@@ -41,22 +51,26 @@ def _get_user_state() -> dict[str, Any]:
             "selected_possible_species": "All",
             "selected_blank_non_blank": "All",
             "selected_behavior": "All",
-            "selected_review_status": "All",
+            "selected_annotation_status": "All",
             "selected_sort": "priority",
             "selected_sort_direction": "desc",
-            "include_unranked": True,
             "web_safe_only": False,
-            "blank_threshold": 0.75,
-            "species_threshold": 0.75,
+            "selected_needs_review": "All",
         }
+    else:
+        # Migrate renamed/removed filter keys from older sessions
+        f = app.storage.user["filters"]
+        if "selected_review_status" in f and "selected_annotation_status" not in f:
+            f["selected_annotation_status"] = "All"
+            del f["selected_review_status"]
+        f.pop("blank_threshold", None)
+        f.pop("species_threshold", None)
     if "video_queue" not in app.storage.user:
         app.storage.user["video_queue"] = []
     if "current_video_idx" not in app.storage.user:
         app.storage.user["current_video_idx"] = 0
     if "review_selections" not in app.storage.user:
         app.storage.user["review_selections"] = []
-    if "video_playback_time" not in app.storage.user:
-        app.storage.user["video_playback_time"] = 0.0
     if "playback_speed" not in app.storage.user:
         app.storage.user["playback_speed"] = "1x"
     if "autoplay" not in app.storage.user:
@@ -66,14 +80,6 @@ def _get_user_state() -> dict[str, Any]:
     if "auto_transcode" not in app.storage.user:
         app.storage.user["auto_transcode"] = True
     return app.storage.user
-
-
-def get_video_playback_time():
-    return _get_user_state().get("video_playback_time", 0.0)
-
-
-def set_video_playback_time(time: float):
-    _get_user_state()["video_playback_time"] = time
 
 
 def get_queue():
@@ -112,10 +118,24 @@ def get_annotator_name():
     return _annotator_name
 
 
-def set_annotator_name(name: str):
-    global _annotator_name
-    _annotator_name = name
-    update_config_key("annotator_name", name)
+def get_blank_threshold() -> float:
+    return _blank_threshold
+
+
+def set_blank_threshold(value: float) -> None:
+    global _blank_threshold
+    _blank_threshold = value
+    update_config_key("blank_threshold", value)
+
+
+def get_species_threshold() -> float:
+    return _species_threshold
+
+
+def set_species_threshold(value: float) -> None:
+    global _species_threshold
+    _species_threshold = value
+    update_config_key("species_threshold", value)
 
 
 def get_playback_speed():
@@ -158,16 +178,6 @@ def set_dark_mode(enabled: bool):
     global _dark_mode
     _dark_mode = enabled
     update_config_key("dark_mode", enabled)
-
-
-def get_language():
-    return _language
-
-
-def set_language(lang: str):
-    global _language
-    _language = lang
-    update_config_key("language", lang)
 
 
 def get_state_val(key: str, default: Any = None) -> Any:

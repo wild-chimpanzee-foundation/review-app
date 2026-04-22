@@ -12,7 +12,9 @@ from review_app.app.config import (
 )
 from review_app.app.state import (
     get_annotator_name,
+    get_blank_threshold,
     get_data_provider,
+    get_species_threshold,
     init_user_prefs,
     set_current_idx,
     set_data_provider,
@@ -44,6 +46,8 @@ def _build_settings_content(container: ui.column):
     species_csv_val = config.get("species_csv_path") or bundled_species or ""
     behaviors_csv_val = config.get("species_behaviors_csv_path") or bundled_behaviors or ""
     initial_annotator = get_annotator_name()
+    initial_blank_threshold = get_blank_threshold()
+    initial_species_threshold = get_species_threshold()
 
     inputs = {}
 
@@ -64,6 +68,8 @@ def _build_settings_content(container: ui.column):
             or inputs["species_csv"].value.strip() != species_csv_val
             or inputs["behaviors_csv"].value.strip() != behaviors_csv_val
             or inputs["annotator"].value.strip() != initial_annotator
+            or abs(inputs["blank_threshold"].value - initial_blank_threshold) > 0.001
+            or abs(inputs["species_threshold"].value - initial_species_threshold) > 0.001
         )
         apply_btn.set_enabled(changed)
 
@@ -176,6 +182,22 @@ def _build_settings_content(container: ui.column):
 
                 with ui.card().classes("full-width"):
                     with ui.row().classes("items-center q-mb-sm"):
+                        ui.icon("tune", size="sm").classes("text-primary q-mr-sm")
+                        ui.label(t("blank_detection")).classes("text-subtitle1 font-weight-medium")
+                    ui.label(t("blank_detection_desc")).classes("text-caption text-grey-6 q-mb-md")
+                    ui.label(t("blank_threshold_label")).classes("text-caption text-grey-6 q-mb-xs")
+                    inputs["blank_threshold"] = ui.slider(
+                        min=0.0, max=1.0, step=0.05, value=initial_blank_threshold
+                    ).props("label label-always class=q-mb-md")
+                    inputs["blank_threshold"].on_value_change(check_changes)
+                    ui.label(t("species_threshold_label")).classes("text-caption text-grey-6 q-mb-xs")
+                    inputs["species_threshold"] = ui.slider(
+                        min=0.0, max=1.0, step=0.05, value=initial_species_threshold
+                    ).props("label label-always")
+                    inputs["species_threshold"].on_value_change(check_changes)
+
+                with ui.card().classes("full-width"):
+                    with ui.row().classes("items-center q-mb-sm"):
                         ui.icon("storage", size="sm").classes("text-primary q-mr-sm")
                         ui.label(t("database_management")).classes(
                             "text-subtitle1 font-weight-medium"
@@ -221,12 +243,10 @@ def _build_settings_content(container: ui.column):
                         ui.space()
 
                         reset_dialog = ui.dialog().props("persistent")
-                        reset_card = [None]
 
                         def build_confirm_step():
                             reset_dialog.clear()
-                            with reset_dialog, ui.card().classes("q-pa-lg") as card:
-                                reset_card[0] = card
+                            with reset_dialog, ui.card().classes("q-pa-lg"):
                                 ui.label(t("reset_confirm")).classes("text-h6 q-mb-sm")
                                 ui.label(t("reset_warning")).classes(
                                     "text-body2 text-negative q-mb-lg"
@@ -382,6 +402,8 @@ def _build_settings_content(container: ui.column):
             new_config["species_csv_path"] = species_csv
             new_config["species_behaviors_csv_path"] = behaviors_csv
             new_config["annotator_name"] = annotator_name
+            new_config["blank_threshold"] = inputs["blank_threshold"].value
+            new_config["species_threshold"] = inputs["species_threshold"].value
 
             save_config(new_config)
 
@@ -390,6 +412,8 @@ def _build_settings_content(container: ui.column):
                 dark_mode=new_config.get("dark_mode", True),
                 language=new_config.get("language", "en"),
                 annotator_name=new_config.get("annotator_name", "default"),
+                blank_threshold=new_config.get("blank_threshold", 0.75),
+                species_threshold=new_config.get("species_threshold", 0.75),
             )
 
             new_dp = LocalDataProvider(str(CONFIG_PATH))

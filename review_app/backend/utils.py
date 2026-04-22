@@ -1,5 +1,6 @@
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 
 _MIME_BY_EXT = {
     ".mp4": "video/mp4", ".avi": "video/x-msvideo", ".mov": "video/quicktime",

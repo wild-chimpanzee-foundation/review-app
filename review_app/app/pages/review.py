@@ -6,17 +6,18 @@ from nicegui import run, ui
 from review_app.app.config import get_config_path
 from review_app.app.state import (
     get_annotator_name,
+    get_blank_threshold,
     get_current_idx,
     get_data_provider,
     get_filters,
     get_playback_speed,
     get_queue,
     get_selections,
+    get_species_threshold,
     get_state_val,
     is_auto_transcode,
     is_autoplay,
     is_muted,
-    set_annotator_name,
     set_auto_transcode,
     set_autoplay,
     set_current_idx,
@@ -30,7 +31,7 @@ from review_app.app.state import (
 )
 from review_app.app.translations import t
 from review_app.backend.local_data_provider import LocalDataProvider
-from review_app.backend.utils import df_to_records, get_video_mime
+from review_app.backend.utils import df_to_records
 
 
 @ui.refreshable
@@ -49,13 +50,7 @@ def render_annotation_section(
 
         # If unreviewed (no labels in DB), check for predicted blank
         if is_blank is None and not selections:
-            f = get_filters()
-            blank_prob = video.get("blank_model_probability") or 0.0
-            avg_sp = video.get("avg_species_confidence") or 0.0
-            is_predicted_blank = blank_prob >= f.get("blank_threshold", 0.75) and avg_sp < f.get(
-                "species_threshold", 0.75
-            )
-            if is_predicted_blank:
+            if video.get("predicted_blank"):
                 is_blank = True
             else:
                 is_blank = False
@@ -94,19 +89,19 @@ def render_annotation_section(
 
     # UI Rendering
     if is_blank:
+        blank_prob = video.get("blank_model_probability")
+        max_sp = video.get("max_species_confidence")
         with ui.card().classes("full-width q-pa-md q-mb-sm"):
-            with ui.row().classes("items-center gap-sm"):
-                ui.badge(t("blank"), color="warning")
-                blank_prob = video.get("blank_model_probability")
-                avg_sp = video.get("avg_species_confidence")
-                if blank_prob is not None:
-                    ui.label(
-                        t("blank_prob_label", prob=f"{blank_prob:.0%}", sp=f"{avg_sp:.0%}")
-                    ).classes("text-caption text-grey-6")
-                ui.space()
-                ui.button(t("override"), icon="edit", on_click=set_not_blank).props(
-                    "flat dense size=sm"
-                )
+            with ui.row().classes("w-full gap-sm items-center"):
+                with ui.element("div").classes("col"):
+                    with ui.row().classes("items-center gap-sm"):
+                        ui.badge(t("blank"), color="warning")
+                        if blank_prob is not None:
+                            ui.label(
+                                t("blank_prob_label", prob=f"{blank_prob:.0%}", sp=f"{max_sp:.0%}")
+                            ).classes("text-caption text-grey-6")
+                ui.element("div").classes("col")
+                ui.button(icon="edit", on_click=set_not_blank).props("flat color=teal")
     else:
         for i, sel in enumerate(selections):
             with ui.card().classes("full-width q-pa-md q-mb-sm"):
@@ -197,7 +192,10 @@ def render_annotation_section(
             set_state_val("review_is_blank", False)
             render_annotation_section.refresh()
 
-        ui.button(t("add_species"), on_click=add_species).props("size=sm")
+        with ui.row().classes("w-full justify-center q-mt-xs"):
+            ui.button(t("add_species"), icon="add", on_click=add_species).props(
+                "size=md color=teal flat"
+            )
 
     queue = get_queue()
     current_idx = get_current_idx()
@@ -296,7 +294,12 @@ async def render_video_section(dp, valid_species):
     selected_video_id = queue[current_idx]
 
     # Parallelize data fetching to improve performance
-    video_task = run.io_bound(dp.get_video_detail, selected_video_id)
+    video_task = run.io_bound(
+        dp.get_video_detail,
+        selected_video_id,
+        get_blank_threshold(),
+        get_species_threshold(),
+    )
     model_ann_task = run.io_bound(dp.get_model_annotations, selected_video_id)
     video, model_ann = await asyncio.gather(video_task, model_ann_task)
 
@@ -313,7 +316,14 @@ async def render_video_section(dp, valid_species):
     if not video:
         # Queue can become stale after DB reset/re-sync or ID format changes.
         filters = get_filters()
-        fresh_queue = await run.io_bound(dp.get_video_queue, filters)
+        fresh_queue = await run.io_bound(
+            dp.get_video_queue,
+            {
+                **filters,
+                "blank_threshold": get_blank_threshold(),
+                "species_threshold": get_species_threshold(),
+            },
+        )
         if fresh_queue and fresh_queue != queue:
             set_queue(fresh_queue)
             set_current_idx(max(0, min(current_idx, len(fresh_queue) - 1)))
@@ -347,7 +357,6 @@ async def render_video_section(dp, valid_species):
     with ui.row().classes("w-full gap-md"):
         with ui.column().classes("col"):
             with ui.card().classes("full-width q-mb-md"):
-                video_id = f"video-{selected_video_id}"
                 if video.get("needs_transcode"):
                     attempted = set(get_state_val("transcode_attempted_ids", []))
                     if selected_video_id not in attempted and is_auto_transcode():
@@ -403,7 +412,6 @@ async def render_video_section(dp, valid_species):
                             video_url = None
 
                     if video_url:
-                        mime = get_video_mime(video_url)
                         autoplay = is_autoplay()
                         muted = is_muted()
 
@@ -563,12 +571,23 @@ async def setup_review():
 
     # Always refresh queue from DB to avoid stale IDs in session state.
     filter_options_task = run.io_bound(dp.get_queue_filter_options)
-    queue_ids_task = run.io_bound(dp.get_video_queue, filters)
+    queue_ids_task = run.io_bound(
+        dp.get_video_queue,
+        {
+            **filters,
+            "blank_threshold": get_blank_threshold(),
+            "species_threshold": get_species_threshold(),
+        },
+    )
     filter_options, queue_ids = await asyncio.gather(filter_options_task, queue_ids_task)
     set_queue(queue_ids)
     if queue != queue_ids:
         set_current_idx(0)
         set_selections([])
+        set_state_val("review_is_blank", None)
+        set_state_val("user_cleared_all", False)
+        set_state_val("review_active_id", None)
+        set_state_val("pending_blank_confirm", False)
 
     # Move CSS to a single injection
     ui.add_head_html(
@@ -657,37 +676,29 @@ async def setup_review():
                     value=filters.get("selected_blank_non_blank", "All"),
                 ).props("outlined dense class=full-width")
 
-                review_status_filter = ui.select(
-                    label=t("review_status_filter"),
+                annotation_filter = ui.select(
+                    label=t("annotation_filter"),
                     options={
                         "All": t("all_option"),
-                        "Reviewed": t("reviewed"),
-                        "Unreviewed": t("unreviewed"),
+                        "Annotated": t("annotated"),
+                        "Not Annotated": t("not_annotated"),
                     },
-                    value=filters.get("selected_review_status", "All"),
+                    value=filters.get("selected_annotation_status", "All"),
                 ).props("outlined dense class=full-width")
 
-                include_unranked_cb = ui.checkbox(
-                    t("include_unranked"), value=get_state_val("include_unranked", True)
+                needs_review_filter = ui.select(
+                    label=t("needs_review_filter"),
+                    options={
+                        "All": t("all_option"),
+                        "Needs Review": t("needs_review"),
+                        "No Review": t("no_review_needed"),
+                    },
+                    value=filters.get("selected_needs_review", "All"),
+                ).props("outlined dense class=full-width")
+
+                web_safe_only_cb = ui.checkbox(
+                    t("web_safe_only"), value=bool(filters.get("web_safe_only", False))
                 )
-
-                ui.separator().classes("q-my-sm")
-
-                ui.label(t("blank_detection")).classes("text-caption text-grey-6 q-mb-xs")
-                ui.label(t("blank_threshold_label")).classes("text-caption text-grey-6")
-                blank_thr_slider = ui.slider(
-                    min=0.0,
-                    max=1.0,
-                    step=0.05,
-                    value=filters.get("blank_threshold", 0.75),
-                ).props("label label-always")
-                ui.label(t("species_threshold_label")).classes("text-caption text-grey-6 q-mt-sm")
-                species_thr_slider = ui.slider(
-                    min=0.0,
-                    max=1.0,
-                    step=0.05,
-                    value=filters.get("species_threshold", 0.75),
-                ).props("label label-always")
 
                 async def apply_filters():
                     new_filters = {
@@ -699,17 +710,26 @@ async def setup_review():
                         "selected_possible_species": possible_species_filter.value,
                         "selected_behavior": behavior_filter.value,
                         "selected_blank_non_blank": blank_filter.value,
-                        "selected_review_status": review_status_filter.value,
-                        "include_unranked": include_unranked_cb.value,
-                        "blank_threshold": blank_thr_slider.value,
-                        "species_threshold": species_thr_slider.value,
+                        "selected_annotation_status": annotation_filter.value,
+                        "selected_needs_review": needs_review_filter.value,
+                        "web_safe_only": web_safe_only_cb.value,
                     }
-                    set_state_val("include_unranked", include_unranked_cb.value)
                     update_filters(**new_filters)
-                    new_queue = await run.io_bound(dp.get_video_queue, new_filters)
+                    new_queue = await run.io_bound(
+                        dp.get_video_queue,
+                        {
+                            **new_filters,
+                            "blank_threshold": get_blank_threshold(),
+                            "species_threshold": get_species_threshold(),
+                        },
+                    )
                     set_queue(new_queue)
                     set_current_idx(0)
                     set_selections([])
+                    set_state_val("review_is_blank", None)
+                    set_state_val("user_cleared_all", False)
+                    set_state_val("review_active_id", None)
+                    set_state_val("pending_blank_confirm", False)
                     render_video_section.refresh()
 
                 ui.button(t("apply_filters"), on_click=apply_filters, color="primary").props(
@@ -722,13 +742,12 @@ async def setup_review():
                 with ui.row().classes("w-full items-center gap-sm"):
                     sort_select = ui.select(
                         options={
-                            "priority": t("sort_priority"),
                             "camera": t("sort_camera"),
                             "unreviewed_first": t("sort_unreviewed"),
                             "species_prob": t("sort_species_prob"),
                             "random": t("sort_random"),
                         },
-                        value=filters.get("selected_sort", "priority"),
+                        value=filters.get("selected_sort", "camera"),
                     ).props("outlined dense class=col")
 
                     sort_dir = [filters.get("selected_sort_direction", "desc")]
@@ -742,10 +761,22 @@ async def setup_review():
                         selected_sort=sort_select.value,
                         selected_sort_direction=sort_dir[0],
                     )
-                    new_queue = await run.io_bound(dp.get_video_queue, get_filters())
+                    f = get_filters()
+                    new_queue = await run.io_bound(
+                        dp.get_video_queue,
+                        {
+                            **f,
+                            "blank_threshold": get_blank_threshold(),
+                            "species_threshold": get_species_threshold(),
+                        },
+                    )
                     set_queue(new_queue)
                     set_current_idx(0)
                     set_selections([])
+                    set_state_val("review_is_blank", None)
+                    set_state_val("user_cleared_all", False)
+                    set_state_val("review_active_id", None)
+                    set_state_val("pending_blank_confirm", False)
                     render_video_section.refresh()
 
                 async def toggle_dir():
@@ -805,8 +836,6 @@ async def setup_review():
                     value=is_auto_transcode(),
                     on_change=lambda e: set_auto_transcode(e.value),
                 )
-
-            # ── Annotator ─────────────────────────────────────────────────────
 
         with ui.column().classes("col q-pa-md"):
             await render_video_section(dp, valid_species)
