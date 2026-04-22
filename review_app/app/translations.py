@@ -82,6 +82,7 @@ TRANSLATIONS = {
         "col_value": "Value",
         "col_prob": "Prob",
         "no_model_annotations": "No model annotations found",
+        "no_manual_annotations": "No manual annotations yet",
         "manual_review": "Manual Review",
         "transcoding_video": "Transcoding video for browser playback...",
         "video_transcoded": "Video transcoded for web playback",
@@ -97,6 +98,7 @@ TRANSLATIONS = {
         "playback_settings": "Playback Settings",
         "autoplay": "Autoplay",
         "muted": "Muted",
+        "auto_transcode": "Auto-transcode incompatible videos",
         "sort_label": "Sort",
         "sort_priority": "Priority",
         "sort_camera": "Camera",
@@ -209,6 +211,14 @@ TRANSLATIONS = {
         "welcome_setup_msg": "Configure your workspace to start annotating videos",
         "ffmpeg_label": "ffmpeg",
         "ffmpeg_desc": "Required for video processing",
+        "blank_detection": "Blank Detection",
+        "blank_threshold_label": "Blank probability threshold",
+        "species_threshold_label": "Species confidence threshold",
+        "blank_prob_label": "blank {prob} · species {sp}",
+        "override": "Override",
+        "ffmpeg_checking": "Checking...",
+        "ffmpeg_not_found_title": "ffmpeg Not Found",
+        "ffmpeg_install_instructions": "Install ffmpeg using the command below, then restart the app.",
         "check_ffmpeg": "Check ffmpeg",
         "not_checked": "Not checked",
         "bundled_data": "Bundled Data",
@@ -218,6 +228,19 @@ TRANSLATIONS = {
         "advanced_settings": "Advanced Settings",
         "database_location": "Database Location",
         "database_location_desc": "Where to store review data",
+        "annotator_setup_desc": "Your name will be recorded with each annotation.",
+        "annotator_name_placeholder": "Your name",
+        "shortcuts_title": "Keyboard Shortcuts",
+        "shortcuts_global": "Navigation",
+        "shortcuts_review": "Review Page",
+        "shortcut_overview": "Overview",
+        "shortcut_review": "Review",
+        "shortcut_import": "Model Import",
+        "shortcut_settings": "Settings",
+        "shortcut_submit_next": "Submit & Next",
+        "shortcut_next_video": "Next video",
+        "shortcut_prev_video": "Previous video",
+        "shortcut_mark_blank": "Mark Blank",
     },
     "fr": {
         "app_title": "Annotation Vidéo",
@@ -299,6 +322,7 @@ TRANSLATIONS = {
         "col_value": "Valeur",
         "col_prob": "Prob",
         "no_model_annotations": "Aucune annotation de modèle trouvée",
+        "no_manual_annotations": "Aucune annotation manuelle",
         "manual_review": "Révision Manuelle",
         "transcoding_video": "Transcodage de la vidéo pour la lecture du navigateur...",
         "video_transcoded": "Vidéo transcodée pour la lecture du web",
@@ -314,6 +338,7 @@ TRANSLATIONS = {
         "playback_settings": "Paramètres de Lecture",
         "autoplay": "Lecture Automatique",
         "muted": "Muet",
+        "auto_transcode": "Transcodage automatique des vidéos incompatibles",
         "sort_label": "Trier",
         "sort_priority": "Priorité",
         "sort_camera": "Caméra",
@@ -426,6 +451,14 @@ TRANSLATIONS = {
         "welcome_setup_msg": "Configurez votre espace de travail pour commencer à annoter les vidéos",
         "ffmpeg_label": "ffmpeg",
         "ffmpeg_desc": "Requis pour le traitement vidéo",
+        "blank_detection": "Détection Vide",
+        "blank_threshold_label": "Seuil probabilité vide",
+        "species_threshold_label": "Seuil confiance espèces",
+        "blank_prob_label": "vide {prob} · espèces {sp}",
+        "override": "Modifier",
+        "ffmpeg_checking": "Vérification...",
+        "ffmpeg_not_found_title": "ffmpeg Introuvable",
+        "ffmpeg_install_instructions": "Installez ffmpeg avec la commande ci-dessous, puis redémarrez l'application.",
         "check_ffmpeg": "Vérifier ffmpeg",
         "not_checked": "Non vérifiée",
         "bundled_data": "Données Groupées",
@@ -435,14 +468,30 @@ TRANSLATIONS = {
         "advanced_settings": "Paramètres Avancés",
         "database_location": "Emplacement de la Base de Données",
         "database_location_desc": "Où stocker les données de révision",
+        "annotator_setup_desc": "Votre nom sera enregistré avec chaque annotation.",
+        "annotator_name_placeholder": "Votre nom",
+        "shortcuts_title": "Raccourcis Clavier",
+        "shortcuts_global": "Navigation",
+        "shortcuts_review": "Page de Révision",
+        "shortcut_overview": "Aperçu",
+        "shortcut_review": "Révision",
+        "shortcut_import": "Importation",
+        "shortcut_settings": "Paramètres",
+        "shortcut_submit_next": "Soumettre & Suivant",
+        "shortcut_next_video": "Vidéo suivante",
+        "shortcut_prev_video": "Vidéo précédente",
+        "shortcut_mark_blank": "Marquer comme Vide",
     },
 }
+
 
 def get_language():
     return get_state_val("language", "en")
 
+
 def set_language(lang: str):
     set_state_val("language", lang)
+
 
 def t(key: str, **kwargs) -> str:
     lang = get_language()

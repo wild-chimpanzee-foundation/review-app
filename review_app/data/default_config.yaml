@@ -1,0 +1,15 @@
+video_dir: ""
+db_dir: "" # empty = app directory
+db_filename: review_data.db
+recreate_db_on_start: false
+species_csv_path: ""
+species_column: Nom_commun_anglais
+species_behaviors_csv_path: ""
+fuzzy_match_threshold: 80
+behavior_defaults:
+  - unlabeled
+  - reacts_to_camera
+  - does_not_react
+dark_mode: true
+language: en
+annotator_name: default

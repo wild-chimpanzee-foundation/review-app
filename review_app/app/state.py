@@ -2,6 +2,8 @@ from typing import Any
 
 from nicegui import app
 
+from review_app.app.config import update_config_key
+
 # Data provider is shared across all sessions as it manages the local database connection
 _data_provider = None
 
@@ -15,8 +17,22 @@ def set_data_provider(dp):
     _data_provider = dp
 
 
+# Persistent user preferences (backed by config.yaml)
+_dark_mode: bool = True
+_language: str = "en"
+_annotator_name: str = "default"
+
+
+def init_user_prefs(dark_mode: bool, language: str, annotator_name: str) -> None:
+    """Initialize persistent preferences from configuration at startup."""
+    global _dark_mode, _language, _annotator_name
+    _dark_mode = dark_mode
+    _language = language
+    _annotator_name = annotator_name
+
+
 def _get_user_state() -> dict[str, Any]:
-    """Ensure basic state structure exists in user storage."""
+    """Ensure basic session-scoped state structure exists in user storage."""
     if "filters" not in app.storage.user:
         app.storage.user["filters"] = {
             "search_query": "",
@@ -30,6 +46,8 @@ def _get_user_state() -> dict[str, Any]:
             "selected_sort_direction": "desc",
             "include_unranked": True,
             "web_safe_only": False,
+            "blank_threshold": 0.75,
+            "species_threshold": 0.75,
         }
     if "video_queue" not in app.storage.user:
         app.storage.user["video_queue"] = []
@@ -37,8 +55,6 @@ def _get_user_state() -> dict[str, Any]:
         app.storage.user["current_video_idx"] = 0
     if "review_selections" not in app.storage.user:
         app.storage.user["review_selections"] = []
-    if "annotator_name" not in app.storage.user:
-        app.storage.user["annotator_name"] = "default"
     if "video_playback_time" not in app.storage.user:
         app.storage.user["video_playback_time"] = 0.0
     if "playback_speed" not in app.storage.user:
@@ -47,10 +63,8 @@ def _get_user_state() -> dict[str, Any]:
         app.storage.user["autoplay"] = True
     if "muted" not in app.storage.user:
         app.storage.user["muted"] = True
-    if "dark_mode" not in app.storage.user:
-        app.storage.user["dark_mode"] = True
-    if "language" not in app.storage.user:
-        app.storage.user["language"] = "en"
+    if "auto_transcode" not in app.storage.user:
+        app.storage.user["auto_transcode"] = True
     return app.storage.user
 
 
@@ -95,11 +109,13 @@ def update_filters(**kwargs):
 
 
 def get_annotator_name():
-    return _get_user_state().get("annotator_name", "default")
+    return _annotator_name
 
 
 def set_annotator_name(name: str):
-    _get_user_state()["annotator_name"] = name
+    global _annotator_name
+    _annotator_name = name
+    update_config_key("annotator_name", name)
 
 
 def get_playback_speed():
@@ -126,12 +142,32 @@ def set_muted(enabled: bool):
     _get_user_state()["muted"] = enabled
 
 
+def is_auto_transcode():
+    return _get_user_state().get("auto_transcode", True)
+
+
+def set_auto_transcode(enabled: bool):
+    _get_user_state()["auto_transcode"] = enabled
+
+
 def is_dark_mode():
-    return _get_user_state().get("dark_mode", True)
+    return _dark_mode
 
 
 def set_dark_mode(enabled: bool):
-    _get_user_state()["dark_mode"] = enabled
+    global _dark_mode
+    _dark_mode = enabled
+    update_config_key("dark_mode", enabled)
+
+
+def get_language():
+    return _language
+
+
+def set_language(lang: str):
+    global _language
+    _language = lang
+    update_config_key("language", lang)
 
 
 def get_state_val(key: str, default: Any = None) -> Any:

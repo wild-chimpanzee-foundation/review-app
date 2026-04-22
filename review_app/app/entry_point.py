@@ -26,19 +26,12 @@ for _ext, _mime in [
     mimetypes.add_type(_mime, _ext)
     mimetypes.add_type(_mime, _ext.upper())
 
-APP_DIR = (
-    Path(sys._MEIPASS).parent
-    if getattr(sys, "frozen", False)
-    else Path(__file__).parent.parent.parent
-)
-sys.path.insert(0, str(APP_DIR))
-os.chdir(APP_DIR)
 
-
-from review_app.app.config import get_config_path  # noqa: E402
+from review_app.app.config import get_config_path, load_config  # noqa: E402
 from review_app.app.setup_wizard import setup_wizard  # noqa: E402
 from review_app.app.state import (  # noqa: E402
     get_data_provider,
+    init_user_prefs,
     is_dark_mode,
     set_dark_mode,
     set_data_provider,
@@ -73,11 +66,51 @@ def shared_header():
         set_language(e.value)
         ui.run_javascript("window.location.reload()")
 
+    # Define shortcuts dialog once per page
+    with ui.dialog() as shortcuts_dialog, ui.card().classes("q-pa-lg relative").style(
+        "min-width: 400px"
+    ):
+        ui.button(icon="close", on_click=shortcuts_dialog.close).props("flat round").classes(
+            "absolute-top-right q-ma-sm"
+        )
+        with ui.row().classes("w-full items-center q-mb-md"):
+            ui.icon("keyboard", size="md", color="primary")
+            ui.label(t("shortcuts_title")).classes("text-h6 font-weight-bold")
+
+        with ui.column().classes("w-full gap-4"):
+            # Navigation
+            with ui.column().classes("w-full gap-1"):
+                ui.label(t("shortcuts_global")).classes("text-subtitle2 text-primary font-weight-medium")
+                ui.separator()
+                for key, label in [
+                    ("O", t("shortcut_overview")),
+                    ("R", t("shortcut_review")),
+                    ("M", t("shortcut_import")),
+                    ("S", t("shortcut_settings")),
+                ]:
+                    with ui.row().classes("w-full justify-between items-center"):
+                        ui.label(label).classes("text-body2")
+                        ui.label(key).classes("q-px-sm q-py-xs bg-grey-8 text-white rounded-borders text-bold text-caption shadow-1")
+
+            # Review Page
+            with ui.column().classes("w-full gap-1 q-mt-sm"):
+                ui.label(t("shortcuts_review")).classes("text-subtitle2 text-primary font-weight-medium")
+                ui.separator()
+                for key, label in [
+                    ("Enter", t("shortcut_submit_next")),
+                    ("N", t("shortcut_next_video")),
+                    ("P", t("shortcut_prev_video")),
+                    ("B", t("shortcut_mark_blank")),
+                ]:
+                    with ui.row().classes("w-full justify-between items-center"):
+                        ui.label(label).classes("text-body2")
+                        ui.label(key).classes("q-px-sm q-py-xs bg-grey-8 text-white rounded-borders text-bold text-caption shadow-1")
+
     with ui.header().classes("bg-primary"):
         with ui.row().classes("w-full items-center q-px-md"):
             ui.label(t("app_title")).classes("text-h6 text-white font-weight-bold")
             ui.space()
-            with ui.row().classes("gap-2"):
+            with ui.row().classes("gap-2 items-center"):
                 ui.button(t("nav_overview"), on_click=lambda: ui.navigate.to("/overview")).props(
                     "flat color=white"
                 )
@@ -95,6 +128,9 @@ def shared_header():
                     value=get_language(),
                     on_change=change_language,
                 ).props("dense outlined color=white").classes("text-white")
+                ui.button(icon="help_outline", on_click=shortcuts_dialog.open).props(
+                    "flat round color=white"
+                )
                 ui.button(icon="dark_mode", on_click=toggle_dark).props("flat round color=white")
 
 
@@ -122,10 +158,7 @@ class GUI:
             try:
                 dp = get_data_provider()
                 if not dp:
-                    ui.label(t("error_dp_init")).classes("text-negative")
-                    ui.button(
-                        t("go_to_overview_btn"), on_click=lambda: ui.navigate.to("/overview")
-                    )
+                    ui.navigate.to("/setup")
                     return
 
                 with ui.column().classes("w-full q-pa-lg"):
@@ -218,7 +251,6 @@ class GUI:
 
         def on_setup_complete():
             ui.navigate.to("/overview")
-            ui.notify("Setup complete! Syncing videos...", type="positive")
 
         setup_wizard(on_complete_callback=on_setup_complete, config_path=CONFIG_PATH)
 
@@ -280,20 +312,30 @@ class GUI:
             shared=True,
         )
 
+        # if dev_mode and CONFIG_PATH.exists():
+        #     CONFIG_PATH.unlink()
+
         # Load config and register media files at startup (before ui.run)
         if CONFIG_PATH.exists():
             try:
-                dp = LocalDataProvider(str(CONFIG_PATH))
-                set_data_provider(dp)
-                self.dp = dp
-                # Register video directory for media streaming
-                app.add_media_files("/media", dp.video_dir)
-                # Register temp transcoded dir for browser-transcoded sidecars
-                import tempfile
+                cfg = load_config()
+                init_user_prefs(
+                    dark_mode=cfg.get("dark_mode", True),
+                    language=cfg.get("language", "en"),
+                    annotator_name=cfg.get("annotator_name", "default"),
+                )
 
-                transcoded_tmp = Path(tempfile.gettempdir()) / "video_review_transcoded"
-                transcoded_tmp.mkdir(parents=True, exist_ok=True)
-                app.add_media_files("/transcoded", transcoded_tmp)
+                if cfg.get("video_dir"):
+                    dp = LocalDataProvider(str(CONFIG_PATH))
+                    set_data_provider(dp)
+                    self.dp = dp
+                    if dp.video_dir and Path(dp.video_dir).exists():
+                        app.add_media_files("/media", dp.video_dir)
+                    import tempfile
+
+                    transcoded_tmp = Path(tempfile.gettempdir()) / "video_review_transcoded"
+                    transcoded_tmp.mkdir(parents=True, exist_ok=True)
+                    app.add_media_files("/transcoded", transcoded_tmp)
             except Exception as e:
                 print(f"Warning: Could not load config at startup: {e}")
 

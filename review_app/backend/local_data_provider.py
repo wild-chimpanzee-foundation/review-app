@@ -16,6 +16,7 @@ import pandas as pd
 import yaml
 from dotenv import load_dotenv
 
+from review_app.app.config import get_app_dir, get_config_path
 from review_app.backend.utils import (
     get_default_species_from_annotations,
     needs_browser_transcode,
@@ -164,26 +165,12 @@ CSV_TEMPLATES: dict[str, str] = {
 }
 
 if getattr(sys, "frozen", False):
-    REPO_ROOT = Path(sys._MEIPASS).parent
+    REPO_ROOT = Path(sys.executable).parent
 else:
     REPO_ROOT = Path(__file__).parents[2]
 
 
-def _get_default_config_path() -> Path:
-    import platform
-
-    if platform.system() == "Windows":
-        base = Path(os.environ.get("APPDATA", Path.home()))
-    elif platform.system() == "Darwin":
-        base = Path.home() / "Library" / "Application Support"
-    else:
-        base = Path.home() / ".config"
-    app_dir = base / "video_review_app"
-    app_dir.mkdir(parents=True, exist_ok=True)
-    return app_dir / "config.yaml"
-
-
-DEFAULT_CONFIG_PATH = _get_default_config_path()
+DEFAULT_CONFIG_PATH = get_config_path()
 DEFAULT_DB_FILENAME = "review_data.db"
 
 
@@ -336,15 +323,24 @@ class LocalDataProvider:
     def __init__(self, config_path: str | Path | None = None) -> None:
         cfg = self._load_yaml_config(config_path)
         self.video_dir = self._required_path(cfg, "video_dir")
-        self.db_dir = self._required_path(cfg, "db_dir")
+
+        # Handle empty or relative db_dir
+        raw_db_dir = cfg.get("db_dir", "")
+        if not raw_db_dir or raw_db_dir == ".":
+            self.db_dir = get_app_dir()
+        else:
+            self.db_dir = self._resolve_path(raw_db_dir)
+
         self.db_dir.mkdir(parents=True, exist_ok=True)
 
         self._species: list[str] = self._load_species(cfg)
         self._species_behaviors: dict[str, list[str]] = self._load_species_behaviors(cfg)
+
         behavior_defaults = cfg.get("behavior_defaults")
         self._behavior_defaults: list[str] = self._normalize_string_list(
-            behavior_defaults, "behaviors"
+            behavior_defaults, "behavior_defaults"
         )
+
         self._priority_csv_path: Path | None = self._optional_path(cfg.get("priority_csv_path"))
         self._consensus_min_probability: float = float(cfg.get("consensus_min_probability", 0.0))
         self._fuzzy_match_threshold: int = int(cfg.get("fuzzy_match_threshold", 80))
@@ -355,6 +351,7 @@ class LocalDataProvider:
 
         self._db_path = self.db_dir / db_filename
         recreate_on_start = bool(cfg.get("recreate_db_on_start", False)) or (
+            # Compatibility with environment variable
             str(os.getenv("REVIEW_APP_RECREATE_DB", "")).lower() in {"1", "true", "yes"}
         )
         if recreate_on_start and self._db_path.exists():
@@ -440,14 +437,10 @@ class LocalDataProvider:
     @staticmethod
     def _load_yaml_config(config_path: str | Path | None) -> dict[str, Any]:
         if config_path is None:
-            env_path = os.getenv("LOCAL_CONFIG_YAML")
-            config_path = env_path if env_path else DEFAULT_CONFIG_PATH
+            config_path = get_config_path()
         p = LocalDataProvider._resolve_path(config_path)
         if not p.exists():
-            raise FileNotFoundError(
-                f"Config file not found: `{p}`. "
-                "Set LOCAL_CONFIG_YAML or pass config_path to LocalDataProvider."
-            )
+            raise FileNotFoundError(f"Config file not found: `{p}`. ")
         with open(p) as f:
             loaded = yaml.safe_load(f) or {}
         if not isinstance(loaded, dict):
@@ -497,6 +490,7 @@ class LocalDataProvider:
 
     @staticmethod
     def _load_species_behaviors(cfg: dict[str, Any]) -> dict[str, list[str]]:
+        # Standardized key name: species_behaviors_csv_path
         path = cfg.get("species_behaviors_csv_path")
         if not path:
             return {}
@@ -813,7 +807,9 @@ class LocalDataProvider:
             ]
 
             try:
-                subprocess.run(cmd, capture_output=True, text=True, check=True, env=_subprocess_env())
+                subprocess.run(
+                    cmd, capture_output=True, text=True, check=True, env=_subprocess_env()
+                )
             except subprocess.CalledProcessError as exc:
                 if sidecar_path.exists():
                     sidecar_path.unlink()
@@ -883,7 +879,8 @@ class LocalDataProvider:
         return {"model_annotations": template}
 
     def get_behaviors_for_species(self, species_name: str) -> list[str]:
-        defaults = ["unlabeled"] + self._behavior_defaults
+        # "unlabeled" is now part of _behavior_defaults in config
+        defaults = list(self._behavior_defaults)
         extras = self._species_behaviors.get(species_name, [])
         seen = set()
         result = []
@@ -1108,7 +1105,25 @@ class LocalDataProvider:
                 ) THEN 1 ELSE 0 END {sort_dir_inv},
                 v.video_id ASC"""
         elif selected_sort == "species_prob":
-            ctes.append("""
+            species_sort_filter = (
+                selected_possible_species
+                if selected_possible_species != "All"
+                else selected_species
+                if selected_species != "All"
+                else None
+            )
+            if species_sort_filter is not None:
+                params["species_sort_val"] = species_sort_filter
+                ctes.append("""
+            species_max_prob AS (
+                SELECT video_id, SUM(COALESCE(probability, 0)) AS max_species_prob
+                FROM model_annotations
+                WHERE annotation_type = 'species'
+                AND value_text = :species_sort_val
+                GROUP BY video_id
+            )""")
+            else:
+                ctes.append("""
             species_max_prob AS (
                 SELECT video_id, MAX(prob_sum) AS max_species_prob
                 FROM (
@@ -1176,6 +1191,12 @@ class LocalDataProvider:
                           AND TRIM(ma.value_text) <> ''
                         GROUP BY ma.video_id
                     ),
+                    avg_species_conf AS (
+                        SELECT video_id, AVG(COALESCE(probability, 0.0)) AS avg_species_confidence
+                        FROM model_annotations
+                        WHERE annotation_type = 'species'
+                        GROUP BY video_id
+                    ),
                     model_behavior AS (
                         SELECT video_id, value_text AS behavior_prediction
                         FROM (
@@ -1240,13 +1261,18 @@ class LocalDataProvider:
                                 THEN LOWER(TRIM(mb.blank_non_blank_model_result))
                             ELSE NULL
                         END AS blank_non_blank_final_result,
+                        CASE WHEN LOWER(TRIM(mb.blank_non_blank_model_result)) = 'blank'
+                             THEN mb.probability ELSE NULL
+                        END AS blank_model_probability,
+                        COALESCE(asc_.avg_species_confidence, 0.0) AS avg_species_confidence,
                         rs.needs_manual_review
                     FROM videos v
                     LEFT JOIN video_labels vl ON vl.video_id = v.video_id
-                    LEFT JOIN model_blank mb ON mb.video_id = v.video_id
+                    LEFT JOIN model_blank mb ON mb.video_id = v.video_id AND mb.rn = 1
                     LEFT JOIN manual_summary ms ON ms.video_id = v.video_id
                     LEFT JOIN model_species_consensus msc ON msc.video_id = v.video_id
                     LEFT JOIN model_behavior mbe ON mbe.video_id = v.video_id
+                    LEFT JOIN avg_species_conf asc_ ON asc_.video_id = v.video_id
                     LEFT JOIN review_state rs ON rs.video_id = v.video_id
                     WHERE v.video_id = :video_id
                     """
@@ -1287,7 +1313,7 @@ class LocalDataProvider:
         row["manual_selections"] = selections
         row["species_behavior_json"] = json.dumps(selections) if selections else None
         row["manual_review_prediction"] = (
-            ", ".join(
+            "\n".join(
                 [
                     (
                         f"{s['species']} ({s['behavior']}) @ {s['start_sec']}s"
@@ -1355,9 +1381,10 @@ class LocalDataProvider:
         video_id: str,
         selections: list[dict] | None,
         annotator: str = "local",
+        is_blank: bool | None = None,
     ) -> None:
         if selections is None:
-            return
+            selections = []
 
         now = self._utcnow_dt()
         session_id = str(uuid.uuid4())
@@ -1365,6 +1392,8 @@ class LocalDataProvider:
         normalized: list[dict[str, Any]] = []
         for selection in selections:
             species = str(selection.get("species") or "").strip() or "unknown"
+            if species.lower() == "blank":
+                continue
             behavior = str(selection.get("behavior") or "").strip() or "unlabeled"
             if "start_sec" in selection:
                 start_sec = pd.to_numeric(selection.get("start_sec"), errors="coerce")
@@ -1386,10 +1415,15 @@ class LocalDataProvider:
                 }
             )
 
-        if not normalized:
-            is_blank = None
-        else:
-            is_blank = len(normalized) == 1 and normalized[0]["species"].lower() == "blank"
+        if is_blank is None:
+            # Fallback to legacy detection if not explicitly provided
+            if not normalized:
+                is_blank = None
+            else:
+                # Still check if user passed a list containing only "blank" species
+                is_blank = (
+                    len(selections) == 1 and str(selections[0].get("species")).lower() == "blank"
+                )
 
         with self.Session() as session:
             label = session.get(VideoLabel, video_id)
