@@ -29,7 +29,7 @@ from review_app.app.state import (
     set_state_val,
     update_filters,
 )
-from review_app.app.translations import t
+from review_app.app.translations import get_language, t
 from review_app.backend.local_data_provider import LocalDataProvider
 from review_app.backend.utils import df_to_records
 
@@ -71,7 +71,7 @@ def _init_annotation_state(video, default_species, default_behavior):
 
 @ui.refreshable
 def render_annotation_section(
-    video, valid_species, dp, default_species, default_behavior="does_not_react"
+    video, species_map, dp, default_species, default_behavior="does_not_react"
 ):
     # Always reinitialize state when the rendered video differs from what state belongs to
     cached_video_id = get_state_val("review_state_video_id")
@@ -94,7 +94,8 @@ def render_annotation_section(
         set_state_val("review_is_blank", False)
         existing = list(video.get("manual_selections") or [])
         if not existing:
-            species = default_species or valid_species[0]
+            default = list(species_map.keys())[0] if species_map else "unknown"
+            species = default_species or default
             existing = [
                 {
                     "species": species,
@@ -126,16 +127,29 @@ def render_annotation_section(
             with ui.card().classes("full-width q-pa-md q-mb-sm"):
                 with ui.row().classes("w-full gap-sm items-center"):
                     behaviors = dp.get_behaviors_for_species(sel["species"])
-                    sp_value = (
-                        sel["species"] if sel["species"] in valid_species else valid_species[0]
+                    sp_value = sel["species"] if sel["species"] in species_map else None
+                    bp_value = (
+                        sel["behavior"]
+                        if sel["behavior"] in behaviors
+                        else (behaviors[0] if behaviors else "does_not_react")
                     )
-                    bp_value = sel["behavior"] if sel["behavior"] in behaviors else behaviors[0]
+
                     sp = ui.select(
                         label=t("species_label"),
-                        options=valid_species,
+                        options=species_map,
                         value=sp_value,
                         with_input=True,
                     ).props("outlined dense class=col")
+
+                    # # Custom slot to render scientific name as caption
+                    # sp.add_slot("option", """
+                    #     <q-item v-bind="scope.itemProps">
+                    #       <q-item-section>
+                    #         <q-item-label>{{ scope.opt.label }}</q-item-label>
+                    #         <q-item-label caption class="text-grey-6">{{ scope.opt.value }}</q-item-label>
+                    #       </q-item-section>
+                    #     </q-item>
+                    # """)
                     bp = ui.select(
                         label=t("behavior_label"),
                         options=behaviors,
@@ -197,7 +211,9 @@ def render_annotation_section(
                 )
 
         def add_species():
-            last = selections[-1]["species"] if selections else valid_species[0]
+            # Default to the first available scientific name if nothing selected
+            default = list(species_map.keys())[0] if species_map else "unknown"
+            last = selections[-1]["species"] if selections else default
             new_sels = get_selections()
             new_sels.append(
                 {
@@ -358,7 +374,7 @@ def render_annotation_section(
 
 
 @ui.refreshable
-async def render_video_section(dp, valid_species):
+async def render_video_section(dp, species_map):
     queue = get_queue()
     if not queue:
         ui.label(t("no_videos_match")).classes("text-h6 text-grey-5")
@@ -595,11 +611,11 @@ async def render_video_section(dp, valid_species):
                 if not default_species:
                     fallback_species = video.get("classification_consensus", "unknown")
                     if not fallback_species or fallback_species == "UNKNOWN":
-                        fallback_species = valid_species[0]
+                        fallback_species = list(species_map.keys())[0]
                     default_species = fallback_species
 
                 render_annotation_section(
-                    video, valid_species, dp, default_species, default_behavior
+                    video, species_map, dp, default_species, default_behavior
                 )
 
     current_speed = get_playback_speed().replace("x", "")
@@ -637,9 +653,9 @@ async def setup_review():
                 ui.button(t("setup_btn"), on_click=lambda: ui.navigate.to("/setup"))
             return
 
-    valid_species = await run.io_bound(dp.get_valid_species)
-    if not valid_species:
-        valid_species = ["unknown"]
+    species_map = await run.io_bound(dp.get_species_display_map, get_language())
+    if not species_map:
+        species_map = {"unknown": "unknown"}
 
     filters = get_filters()
     queue = get_queue()
@@ -710,7 +726,8 @@ async def setup_review():
                 species_filter = ui.select(
                     label=t("species_manual_filter"),
                     options={
-                        v: v if v != "All" else t("all_option") for v in ["All"] + species_values
+                        v: species_map.get(v, v) if v != "All" else t("all_option")
+                        for v in ["All"] + species_values
                     },
                     value=filters.get("selected_species", "All"),
                     with_input=True,
@@ -720,7 +737,7 @@ async def setup_review():
                 possible_species_filter = ui.select(
                     label=t("species_model_filter"),
                     options={
-                        v: v if v != "All" else t("all_option")
+                        v: species_map.get(v, v) if v != "All" else t("all_option")
                         for v in ["All"] + possible_species_values
                     },
                     value=filters.get("selected_possible_species", "All"),
@@ -915,7 +932,7 @@ async def setup_review():
                 )
 
         with ui.column().classes("col q-pa-md"):
-            await render_video_section(dp, valid_species)
+            await render_video_section(dp, species_map)
 
     ui.add_body_html(
         """

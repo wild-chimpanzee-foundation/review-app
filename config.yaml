@@ -1,13 +1,19 @@
-video_dir: /mnt/EA59000358FFCBF7/ML/compressed_videos/GKNP_2025_videos_resized/
-db_dir: /home/jonas/.local/share/video_review_app
-db_filename: review_data2.db
-recreate_db_on_start: false
-species_csv_path: /home/jonas/Documents/projects/review-app/review_app/data/species.csv
-species_column: Nom_commun_anglais
-fuzzy_match_threshold: 80
-behavior_defaults:
-- reacts_to_camera
-- does_not_react
-dark_mode: true
+db_filename: review_data.db
+video_dir: /mnt/EA59000358FFCBF7/ML/compressed_videos/GKNP_2025_videos_resized/Resize
+db_dir: ''
 species_behaviors_csv_path: /home/jonas/Documents/projects/review-app/review_app/data/species_behaviors.csv
-annotator_name: default2
+species_csv_mode: override
+species_behaviors_csv_mode: override
+behavior_defaults:
+- does_not_react
+- reacts_to_camera
+annotator_name: djonas
+blank_threshold: 0.75
+species_threshold: 0.75
+dark_mode: true
+language: en
+autoplay: true
+muted: false
+auto_transcode: true
+playback_speed: 1.0x
+species_csv_path: /home/jonas/Documents/projects/review-app/review_app/data/species.csv

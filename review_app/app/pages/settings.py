@@ -45,6 +45,9 @@ def _build_settings_content(container: ui.column):
     # Defaults to bundled if not specified in config
     species_csv_val = config.get("species_csv_path") or bundled_species or ""
     behaviors_csv_val = config.get("species_behaviors_csv_path") or bundled_behaviors or ""
+    species_csv_mode = config.get("species_csv_mode", "override")
+    behaviors_csv_mode = config.get("species_behaviors_csv_mode", "override")
+
     initial_annotator = get_annotator_name()
     initial_blank_threshold = get_blank_threshold()
     initial_species_threshold = get_species_threshold()
@@ -66,7 +69,9 @@ def _build_settings_content(container: ui.column):
             inputs["video_dir"].value.strip() != current_video_dir
             or inputs["db_path"].value.strip() != str(current_db_path)
             or inputs["species_csv"].value.strip() != species_csv_val
+            or inputs["species_csv_mode"].value != species_csv_mode
             or inputs["behaviors_csv"].value.strip() != behaviors_csv_val
+            or inputs["behaviors_csv_mode"].value != behaviors_csv_mode
             or inputs["annotator"].value.strip() != initial_annotator
             or abs(inputs["blank_threshold"].value - initial_blank_threshold) > 0.001
             or abs(inputs["species_threshold"].value - initial_species_threshold) > 0.001
@@ -141,6 +146,13 @@ def _build_settings_content(container: ui.column):
                     ).props("outlined dense class=w-full")
                     inputs["species_csv"].on_value_change(check_changes)
 
+                    with ui.row().classes("w-full items-center mt-2"):
+                        ui.label(t("csv_mode_label") + ":").classes("text-caption text-grey-6 q-mr-md")
+                        inputs["species_csv_mode"] = ui.radio(
+                            options={"override": t("mode_override"), "append": t("mode_append")},
+                            value=species_csv_mode,
+                        ).props("inline dense").on_value_change(check_changes)
+
                     if bundled_species:
                         with ui.row().classes("w-full items-center mt-1 justify-end"):
                             ui.label(t("mode_bundled") + ":").classes(
@@ -165,6 +177,13 @@ def _build_settings_content(container: ui.column):
                         value=behaviors_csv_val,
                     ).props("outlined dense class=w-full")
                     inputs["behaviors_csv"].on_value_change(check_changes)
+
+                    with ui.row().classes("w-full items-center mt-2"):
+                        ui.label(t("csv_mode_label") + ":").classes("text-caption text-grey-6 q-mr-md")
+                        inputs["behaviors_csv_mode"] = ui.radio(
+                            options={"override": t("mode_override"), "append": t("mode_append")},
+                            value=behaviors_csv_mode,
+                        ).props("inline dense").on_value_change(check_changes)
 
                     if bundled_behaviors:
                         with ui.row().classes("w-full items-center mt-1 justify-end"):
@@ -293,6 +312,7 @@ def _build_settings_content(container: ui.column):
                                 async def start_sync():
                                     sync_progress_col.visible = True
                                     sync_btn.visible = False
+                                    do_later_btn.set_enabled(False)
                                     await sync_with_progress(
                                         new_dp, progress=progress, status=status
                                     )
@@ -306,9 +326,9 @@ def _build_settings_content(container: ui.column):
                                     color="primary",
                                     on_click=start_sync,
                                 ).classes("full-width q-mb-sm")
-                                ui.button(t("do_later"), on_click=reset_dialog.close).props(
-                                    "flat class=full-width"
-                                )
+                                do_later_btn = ui.button(
+                                    t("do_later"), on_click=reset_dialog.close
+                                ).props("flat class=full-width")
 
                         ui.button(
                             t("reset_database_label"),
@@ -363,6 +383,8 @@ def _build_settings_content(container: ui.column):
             new_db_path = inputs["db_path"].value.strip()
             species_csv = inputs["species_csv"].value.strip()
             behaviors_csv = inputs["behaviors_csv"].value.strip()
+            species_mode = inputs["species_csv_mode"].value
+            behaviors_mode = inputs["behaviors_csv_mode"].value
             annotator_name = inputs["annotator"].value.strip() or "default"
 
             if not video_dir:
@@ -400,7 +422,9 @@ def _build_settings_content(container: ui.column):
             new_config["db_filename"] = Path(new_db_path).name
             new_config["video_dir"] = video_dir
             new_config["species_csv_path"] = species_csv
+            new_config["species_csv_mode"] = species_mode
             new_config["species_behaviors_csv_path"] = behaviors_csv
+            new_config["species_behaviors_csv_mode"] = behaviors_mode
             new_config["annotator_name"] = annotator_name
             new_config["blank_threshold"] = inputs["blank_threshold"].value
             new_config["species_threshold"] = inputs["species_threshold"].value

@@ -5,7 +5,7 @@ from nicegui import run, ui
 
 from review_app.app.config import get_config_path
 from review_app.app.state import get_data_provider, get_state_val, set_data_provider, set_state_val
-from review_app.app.translations import t
+from review_app.app.translations import get_language, t
 from review_app.backend.local_data_provider import LocalDataProvider
 
 
@@ -86,6 +86,7 @@ async def setup_model_import():
             )
 
             async def handle_upload(e):
+                loading_dialog.open()
                 try:
                     content = await e.file.read()
                     df = pd.read_csv(io.BytesIO(content))
@@ -114,6 +115,8 @@ async def setup_model_import():
                     refresh_results()
                 except Exception as exc:
                     ui.notify(f"{t('error')}: {exc}", type="negative")
+                finally:
+                    loading_dialog.close()
 
             ui.upload(
                 on_upload=handle_upload, multiple=False, label=t("choose_csv"), auto_upload=True
@@ -215,7 +218,10 @@ async def setup_model_import():
                         "text-caption text-grey-6 q-mb-md"
                     )
 
-                    valid_species = dp.get_valid_species()
+                    species_map = await run.io_bound(dp.get_species_display_map, get_language())
+                    select_options = {"": ""}
+                    select_options.update(species_map)
+
                     for orig in sorted(all_species):
                         current_mapping = all_mappings.get(orig, "")
                         is_unmapped = orig in unmapped_origs
@@ -223,7 +229,7 @@ async def setup_model_import():
                             ui.label(orig).classes(f"col {'text-negative' if is_unmapped else ''}")
                             select = ui.select(
                                 label=t("mapped_to"),
-                                options=[""] + valid_species,
+                                options=select_options,
                                 value=current_mapping,
                                 with_input=True,
                             ).props("outlined dense class=col-4")

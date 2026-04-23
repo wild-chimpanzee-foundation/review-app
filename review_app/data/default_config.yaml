@@ -1,17 +1,26 @@
-video_dir: ""
-db_dir: "" # empty = app directory
+# Default configuration for the review app
 db_filename: review_data.db
-recreate_db_on_start: false
-species_csv_path: ""
-species_column: Nom_commun_anglais
-species_behaviors_csv_path: ""
-fuzzy_match_threshold: 80
+video_dir: ""
+db_dir: ""
+
+# Species and behavior configuration
+# species_csv_path: ""  # If empty, uses bundled species.csv
+species_behaviors_csv_path: "" # If empty, returns empty behaviors list
+species_csv_mode: override # override or append
+species_behaviors_csv_mode: override # override or append
 behavior_defaults:
-  - unlabeled
-  - reacts_to_camera
   - does_not_react
-dark_mode: true
-language: en
+  - reacts_to_camera
+
+# Manual review defaults
 annotator_name: default
 blank_threshold: 0.75
 species_threshold: 0.75
+
+# Playback settings
+dark_mode: true
+language: en
+autoplay: true
+muted: false
+auto_transcode: true
+playback_speed: 1.0x

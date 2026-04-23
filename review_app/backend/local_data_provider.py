@@ -111,6 +111,16 @@ class ModelAnnotation(Base):
     )
 
 
+class SpeciesInfo(Base):
+    __tablename__ = "species"
+
+    scientific_name = Column(String, primary_key=True)
+    name_en = Column(String, nullable=True)
+    name_fr = Column(String, nullable=True)
+    groupe = Column(String, nullable=True)
+    iucn = Column(String, nullable=True)
+
+
 Index(
     "idx_individual_video_species", IndividualObservation.video_id, IndividualObservation.species
 )
@@ -327,7 +337,10 @@ class LocalDataProvider:
 
         self.db_dir.mkdir(parents=True, exist_ok=True)
 
-        self._species: list[str] = self._load_species(cfg)
+        self._species_rows: list[dict] = []
+        self._species: list[str] = []
+        self._variant_to_sci: dict[str, str] = {}
+        self._load_species_data(cfg)
         self._species_behaviors: dict[str, list[str]] = self._load_species_behaviors(cfg)
 
         behavior_defaults = cfg.get("behavior_defaults")
@@ -405,6 +418,21 @@ class LocalDataProvider:
             with self.engine.connect() as conn:
                 conn.execute(text("ALTER TABLE videos ADD COLUMN transcoded_path TEXT"))
                 conn.commit()
+        if not inspector.has_table("species"):
+            SpeciesInfo.__table__.create(self.engine)
+        self._sync_species_table()
+
+    def _sync_species_table(self) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(text("DELETE FROM species"))
+            if self._species_rows:
+                conn.execute(
+                    text(
+                        "INSERT INTO species (scientific_name, name_en, name_fr, groupe, iucn) "
+                        "VALUES (:scientific_name, :name_en, :name_fr, :groupe, :iucn)"
+                    ),
+                    self._species_rows,
+                )
 
     @property
     def _app_config_path(self) -> Path:
@@ -448,54 +476,93 @@ class LocalDataProvider:
 
     @staticmethod
     def _normalize_string_list(values: Any, key_name: str) -> list[str]:
+        if values is None:
+            return []
         if not isinstance(values, list):
             raise ValueError(f"`{key_name}` must be a list of strings.")
         normalized = [str(v).strip() for v in values if str(v).strip()]
-        if not normalized:
-            raise ValueError(f"`{key_name}` must contain at least one non-empty value.")
         return normalized
 
     @staticmethod
-    def _load_species(cfg: dict[str, Any]) -> list[str]:
-        path = cfg.get("species_csv_path")
-        column = cfg.get("species_column")
-        if not path or not column:
+    def _parse_species_csv(path: Path) -> list[dict]:
+        """Parse a species CSV. Requires Nom_scientifique column."""
+        df = pd.read_csv(path, sep=";")
+        if "Nom_scientifique" not in df.columns:
+            raise ValueError(f"Species CSV at `{path}` must have a `Nom_scientifique` column.")
+        rows = []
+        for _, row in df.iterrows():
+            sci = str(row.get("Nom_scientifique", "") or "").strip()
+            if not sci or sci.lower() in ("na", "nan", "none", ""):
+                continue
+            rows.append(
+                {
+                    "scientific_name": sci,
+                    "name_en": (str(row.get("Nom_commun_anglais", "") or "").strip() or None)
+                    if "Nom_commun_anglais" in df.columns
+                    else None,
+                    "name_fr": (str(row.get("Nom_commun_francais", "") or "").strip() or None)
+                    if "Nom_commun_francais" in df.columns
+                    else None,
+                    "groupe": (str(row.get("Groupe", "") or "").strip() or None)
+                    if "Groupe" in df.columns
+                    else None,
+                    "iucn": (str(row.get("IUCN", "") or "").strip() or None)
+                    if "IUCN" in df.columns
+                    else None,
+                }
+            )
+        return rows
+
+    def _load_species_data(self, cfg: dict[str, Any]) -> None:
+        """Load species from bundled and/or custom CSV, populating _species_rows, _species, _variant_to_sci."""
+        from review_app.app.config import get_bundled_species_csv
+
+        bundled_path = get_bundled_species_csv()
+        custom_path_raw = str(cfg.get("species_csv_path") or "").strip()
+        mode = str(cfg.get("species_csv_mode") or "override").strip()
+
+        bundled_rows: list[dict] = []
+        if bundled_path:
+            bundled_rows = self._parse_species_csv(Path(bundled_path))
+
+        custom_rows: list[dict] = []
+        if custom_path_raw:
+            custom_p = self._resolve_path(custom_path_raw)
+            if custom_p.exists() and str(custom_p) != str(bundled_path):
+                custom_rows = self._parse_species_csv(custom_p)
+
+        if custom_rows:
+            if mode == "append":
+                merged = {r["scientific_name"]: r for r in bundled_rows}
+                merged.update({r["scientific_name"]: r for r in custom_rows})
+                rows = sorted(merged.values(), key=lambda r: r["scientific_name"])
+            else:
+                rows = custom_rows
+        else:
+            rows = bundled_rows
+
+        if not rows:
             raise ValueError(
-                "Config must define either `species` or both `species_csv_path` and `species_column`."
+                "No species found. Ensure a valid species CSV with Nom_scientifique column is configured."
             )
 
-        p = LocalDataProvider._resolve_path(path)
-        if not p.exists():
-            raise FileNotFoundError(f"Species CSV file not found at `{path}`.")
-
-        df = pd.read_csv(p, sep=";")
-        if column not in df.columns:
-            available_cols = ", ".join(df.columns)
-            raise ValueError(
-                f"Column `{column}` not found in species CSV. Available: {available_cols}"
-            )
-
-        species_list = sorted({str(s).strip() for s in df[column].dropna() if str(s).strip()})
-        if not species_list:
-            raise ValueError(f"No species names found in column `{column}` of `{path}`.")
-        return species_list
+        self._species_rows = rows
+        self._species = sorted(r["scientific_name"] for r in rows)
+        self._variant_to_sci = {}
+        for r in rows:
+            sci = r["scientific_name"]
+            self._variant_to_sci[sci.lower()] = sci
+            if r.get("name_en"):
+                self._variant_to_sci[r["name_en"].lower()] = sci
+            if r.get("name_fr"):
+                self._variant_to_sci[r["name_fr"].lower()] = sci
 
     @staticmethod
-    def _load_species_behaviors(cfg: dict[str, Any]) -> dict[str, list[str]]:
-        # Standardized key name: species_behaviors_csv_path
-        path = cfg.get("species_behaviors_csv_path")
-        if not path:
-            return {}
-
-        p = LocalDataProvider._resolve_path(path)
-        if not p.exists():
-            return {}
-
+    def _parse_behaviors_csv(path: Path) -> dict[str, list[str]]:
         try:
-            df = pd.read_csv(p, sep=";")
+            df = pd.read_csv(path, sep=";")
             if "Species" not in df.columns or "Behavior" not in df.columns:
                 return {}
-
             mapping: dict[str, list[str]] = {}
             for _, row in df.iterrows():
                 species = str(row["Species"]).strip()
@@ -506,31 +573,50 @@ class LocalDataProvider:
         except Exception:
             return {}
 
+    def _load_species_behaviors(self, cfg: dict[str, Any]) -> dict[str, list[str]]:
+        from review_app.app.config import get_bundled_behaviors_csv
+
+        bundled_path = get_bundled_behaviors_csv()
+        custom_path_raw = str(cfg.get("species_behaviors_csv_path") or "").strip()
+        mode = str(cfg.get("species_behaviors_csv_mode") or "override").strip()
+
+        bundled = self._parse_behaviors_csv(Path(bundled_path)) if bundled_path else {}
+
+        custom: dict[str, list[str]] = {}
+        if custom_path_raw:
+            custom_p = self._resolve_path(custom_path_raw)
+            if custom_p.exists() and str(custom_p) != str(bundled_path):
+                custom = self._parse_behaviors_csv(custom_p)
+
+        if custom:
+            if mode == "append":
+                merged = {**bundled, **custom}
+                return merged
+            else:
+                return custom
+        return bundled
+
     def _validate_species_fuzzy(self, value_text: str) -> tuple[bool, str | None]:
         """
-        Validate a species name against the known species list using fuzzy matching.
-
-        Args:
-            value_text: The species name to validate.
-
-        Returns:
-            A tuple of (is_valid, best_match). If is_valid is True, best_match is
-            the validated species name. If is_valid is False, best_match is the
-            closest match or None.
+        Validate a species name against known scientific names and all name variants.
+        Always returns a scientific name as best_match.
         """
         from thefuzz import process
 
         if not value_text:
             return False, None
 
-        value_text = str(value_text).strip()
+        value_lower = str(value_text).strip().lower()
 
-        if value_text in self._species:
-            return True, value_text
+        if value_lower in self._variant_to_sci:
+            return True, self._variant_to_sci[value_lower]
 
-        match, score = process.extractOne(value_text, self._species)
+        candidates = list(self._variant_to_sci.keys())
+        if not candidates:
+            return False, None
+        match, score = process.extractOne(value_lower, candidates)
         if score >= self._fuzzy_match_threshold:
-            return True, match
+            return True, self._variant_to_sci[match]
 
         return False, None
 
@@ -807,6 +893,15 @@ class LocalDataProvider:
     def get_valid_species(self) -> list[str]:
         return list(self._species)
 
+    def get_species_display_map(self, lang: str = "en") -> dict[str, str]:
+        """Returns {scientific_name: common_name} for the given language."""
+        key = "name_en" if lang == "en" else "name_fr"
+        return {
+            row["scientific_name"]: f"{row.get(key)} ({row['scientific_name']})"
+            or row["scientific_name"]
+            for row in self._species_rows
+        }
+
     def get_config(self) -> dict:
         if self._app_config_path.exists():
             with open(self._app_config_path) as f:
@@ -855,6 +950,8 @@ class LocalDataProvider:
             if b not in seen:
                 result.append(b)
                 seen.add(b)
+        if not result:
+            return ["does_not_react"]
         return result
 
     def _get_model_annotations_df(self) -> pd.DataFrame:
