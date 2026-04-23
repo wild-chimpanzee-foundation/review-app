@@ -1,6 +1,7 @@
 # Virtual environment
 .venv/
 
+
 # Python
 __pycache__/
 *.py[cod]
@@ -33,6 +34,8 @@ htmlcov/
 _local_db/
 config.yaml
 *.db
+*.db-shm
+*.db-wal
 
 # Downloaded/bundled tools
 ffmpeg/

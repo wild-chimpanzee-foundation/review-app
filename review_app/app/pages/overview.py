@@ -1,40 +1,15 @@
-
 from nicegui import run, ui
 
 from review_app.app.state import get_data_provider
 from review_app.app.translations import t
-from review_app.app.utils import sync_with_progress
 
 
 async def setup_overview():
     dp = get_data_provider()
-    if not dp:
+    if not dp or not await run.io_bound(dp.has_videos_in_db):
         with ui.column().classes("w-full q-pa-lg items-center"):
             ui.label(t("error_dp_init")).classes("text-h6 text-red-600")
             ui.button(t("setup_btn"), on_click=lambda: ui.navigate.to("/setup"), icon="settings")
-        return
-
-    if not await run.io_bound(dp.has_videos_in_db):
-        with ui.column().classes("w-full q-pa-lg items-center"):
-            ui.label(t("no_videos_db")).classes("text-h5 q-mb-sm")
-            ui.label(t("sync_ready")).classes("text-body2 text-grey-7 q-mb-md")
-
-            sync_dialog = ui.dialog()
-
-            async def run_sync():
-                sync_dialog.clear()
-                with sync_dialog, ui.card().classes("q-pa-lg"):
-                    ui.label(t("syncing_videos")).classes("text-h6 q-mb-md")
-                    progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
-                    status = ui.label(t("sync_starting_simple"))
-                
-                sync_dialog.open()
-                await sync_with_progress(dp, progress=progress, status=status)
-                ui.notify(t("videos_synced_notify"), type="positive")
-                sync_dialog.close()
-                ui.navigate.to("/overview")
-
-            ui.button(t("sync_videos_btn"), icon="sync", color="primary", on_click=run_sync)
         return
 
     stats = await run.io_bound(dp.get_overview_stats)

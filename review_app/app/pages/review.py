@@ -34,43 +34,54 @@ from review_app.backend.local_data_provider import LocalDataProvider
 from review_app.backend.utils import df_to_records
 
 
+def _normalize_is_blank(raw):
+    """Coerce DB-origin values (numpy bools, floats, NaN) to Python bool | None."""
+    if raw is None:
+        return None
+    # NaN check without requiring a pandas import here
+    if isinstance(raw, float) and raw != raw:
+        return None
+    return bool(raw)
+
+
+def _init_annotation_state(video, default_species, default_behavior):
+    is_blank = _normalize_is_blank(video.get("is_blank"))
+    selections = list(video.get("manual_selections") or [])
+
+    if is_blank is None and not selections:
+        if video.get("predicted_blank"):
+            is_blank = True
+        else:
+            is_blank = False
+            species = default_species or video.get("classification_consensus", "unknown")
+            if species and species != "UNKNOWN":
+                selections = [
+                    {
+                        "species": species,
+                        "behavior": default_behavior,
+                        "start_sec": 0.0,
+                        "end_sec": video.get("duration_sec"),
+                    }
+                ]
+
+    set_state_val("review_is_blank", is_blank)
+    set_selections(selections)
+    set_state_val("review_state_video_id", video.get("video_id"))
+
+
 @ui.refreshable
 def render_annotation_section(
     video, valid_species, dp, default_species, default_behavior="does_not_react"
 ):
-    selections = get_selections()
-    # Track is_blank as an independent property in the session state
+    # Always reinitialize state when the rendered video differs from what state belongs to
+    cached_video_id = get_state_val("review_state_video_id")
+    if cached_video_id != video.get("video_id"):
+        _init_annotation_state(video, default_species, default_behavior)
+
     is_blank = get_state_val("review_is_blank")
-
-    # Initial population for a new video
-    if is_blank is None and not selections:
-        is_blank = video.get("is_blank")
-        selections = video.get("manual_selections") or []
-
-        # If unreviewed (no labels in DB), check for predicted blank
-        if is_blank is None and not selections:
-            if video.get("predicted_blank"):
-                is_blank = True
-            else:
-                is_blank = False
-                # If not blank, try consensus species
-                species = default_species or video.get("classification_consensus", "unknown")
-                if species and species != "UNKNOWN":
-                    selections = [
-                        {
-                            "species": species,
-                            "behavior": default_behavior,
-                            "start_sec": 0.0,
-                            "end_sec": video.get("duration_sec"),
-                        }
-                    ]
-
-        set_state_val("review_is_blank", is_blank)
-        set_selections(selections)
-
+    selections = get_selections()
     if selections is None:
         selections = []
-        set_selections([])
 
     async def delete_selection(idx):
         new_sels = get_selections()
@@ -81,6 +92,18 @@ def render_annotation_section(
 
     def set_not_blank():
         set_state_val("review_is_blank", False)
+        existing = list(video.get("manual_selections") or [])
+        if not existing:
+            species = default_species or valid_species[0]
+            existing = [
+                {
+                    "species": species,
+                    "behavior": default_behavior,
+                    "start_sec": 0.0,
+                    "end_sec": video.get("duration_sec"),
+                }
+            ]
+        set_selections(existing)
         render_annotation_section.refresh()
 
     # UI Rendering
@@ -193,55 +216,110 @@ def render_annotation_section(
                 "size=md color=teal flat"
             )
 
-    queue = get_queue()
-    current_idx = get_current_idx()
-    selected_video_id = queue[max(0, min(current_idx, len(queue) - 1))]
+    # Source of truth: the video currently rendered. Do NOT recompute from queue —
+    # current_idx can change between render_video_section and render_annotation_section refreshes.
+    selected_video_id = video.get("video_id")
 
-    async def submit_and_next():
-        sels = get_selections()
-        is_b = get_state_val("review_is_blank", False)
-        await run.io_bound(
-            dp.update_manual_review,
-            selected_video_id,
-            sels,
-            annotator=get_annotator_name(),
-            is_blank=is_b,
+    async def _advance_to_next(current_video_id):
+        """Refetch queue after an annotation and position idx to the next unprocessed video.
+
+        If current_video_id is still in the queue (filter didn't remove it), advance past it.
+        If it was filtered out, keep the same index — the queue shifted left so that index
+        now points to what was previously the next video.
+        """
+        filters = get_filters()
+        new_queue = await run.io_bound(
+            dp.get_video_queue,
+            {
+                **filters,
+                "blank_threshold": get_blank_threshold(),
+                "species_threshold": get_species_threshold(),
+            },
         )
-        ui.notify(t("review_saved"), type="positive")
-        set_current_idx(get_current_idx() + 1)
+        prev_idx = get_current_idx()
+        set_queue(new_queue)
+        if not new_queue:
+            set_current_idx(0)
+        elif current_video_id in new_queue:
+            set_current_idx(min(new_queue.index(current_video_id) + 1, len(new_queue) - 1))
+        else:
+            set_current_idx(max(0, min(prev_idx, len(new_queue) - 1)))
+
+    def _clear_review_state():
+        set_state_val("review_state_video_id", None)
+        set_state_val("review_is_blank", None)
+        set_selections([])
         set_state_val("review_active_id", None)
         set_state_val("pending_blank_confirm", False)
-        set_state_val("review_is_blank", None)
-        set_selections([])
-        ui.run_javascript("window.location.reload()")
+
+    async def submit_and_next():
+        # Reentry guard: browser/keyboard shortcuts can fire this handler multiple times
+        # in parallel, which causes slot-deleted crashes in ui.notify and double-advances.
+        if get_state_val("submit_in_progress"):
+            return
+        set_state_val("submit_in_progress", True)
+        try:
+            sels = get_selections()
+            is_b = get_state_val("review_is_blank", False)
+            if not is_b and not sels:
+                ui.notify(t("no_species_warning"), type="warning")
+                return
+            await run.io_bound(
+                dp.update_manual_review,
+                selected_video_id,
+                sels,
+                annotator=get_annotator_name(),
+                is_blank=is_b,
+            )
+            ui.notify(t("review_saved"), type="positive")
+            await _advance_to_next(selected_video_id)
+            _clear_review_state()
+            render_video_section.refresh()
+        finally:
+            set_state_val("submit_in_progress", False)
 
     async def submit():
-        sels = get_selections()
-        is_b = get_state_val("review_is_blank", False)
-        await run.io_bound(
-            dp.update_manual_review,
-            selected_video_id,
-            sels,
-            annotator=get_annotator_name(),
-            is_blank=is_b,
-        )
-        ui.notify(t("review_saved"), type="positive")
-        ui.run_javascript("window.location.reload()")
+        if get_state_val("submit_in_progress"):
+            return
+        set_state_val("submit_in_progress", True)
+        try:
+            sels = get_selections()
+            is_b = get_state_val("review_is_blank", False)
+            if not is_b and not sels:
+                ui.notify(t("no_species_warning"), type="warning")
+                return
+            await run.io_bound(
+                dp.update_manual_review,
+                selected_video_id,
+                sels,
+                annotator=get_annotator_name(),
+                is_blank=is_b,
+            )
+            ui.notify(t("review_saved"), type="positive")
+            # Stay on the same video but reload its data (updated labeled_by, selections, etc.)
+            set_state_val("review_state_video_id", None)
+            render_video_section.refresh()
+        finally:
+            set_state_val("submit_in_progress", False)
 
     async def mark_blank():
-        await run.io_bound(
-            dp.update_manual_review,
-            selected_video_id,
-            [],
-            annotator=get_annotator_name(),
-            is_blank=True,
-        )
-        ui.notify(t("marked_blank"), type="positive")
-        set_current_idx(get_current_idx() + 1)
-        set_state_val("review_active_id", None)
-        set_state_val("review_is_blank", None)
-        set_selections([])
-        render_video_section.refresh()
+        if get_state_val("submit_in_progress"):
+            return
+        set_state_val("submit_in_progress", True)
+        try:
+            await run.io_bound(
+                dp.update_manual_review,
+                selected_video_id,
+                [],
+                annotator=get_annotator_name(),
+                is_blank=True,
+            )
+            ui.notify(t("marked_blank"), type="positive")
+            await _advance_to_next(selected_video_id)
+            _clear_review_state()
+            render_video_section.refresh()
+        finally:
+            set_state_val("submit_in_progress", False)
 
     with ui.row().classes("w-full gap-sm q-mt-sm q-mb-md"):
         submit_next_btn = ui.button(t("submit_next"), on_click=submit_and_next, color="primary")
@@ -338,6 +416,7 @@ async def render_video_section(dp, valid_species):
             set_current_idx(new_idx)
             set_state_val("review_active_id", None)
             set_state_val("pending_blank_confirm", False)
+            set_state_val("review_state_video_id", None)
             set_state_val("review_is_blank", None)
             set_selections([])
             render_video_section.refresh()
@@ -580,6 +659,7 @@ async def setup_review():
     if queue != queue_ids:
         set_current_idx(0)
         set_selections([])
+        set_state_val("review_state_video_id", None)
         set_state_val("review_is_blank", None)
         set_state_val("review_active_id", None)
         set_state_val("pending_blank_confirm", False)
@@ -721,6 +801,7 @@ async def setup_review():
                     set_queue(new_queue)
                     set_current_idx(0)
                     set_selections([])
+                    set_state_val("review_state_video_id", None)
                     set_state_val("review_is_blank", None)
                     set_state_val("user_cleared_all", False)
                     set_state_val("review_active_id", None)
@@ -768,6 +849,7 @@ async def setup_review():
                     set_queue(new_queue)
                     set_current_idx(0)
                     set_selections([])
+                    set_state_val("review_state_video_id", None)
                     set_state_val("review_is_blank", None)
                     set_state_val("user_cleared_all", False)
                     set_state_val("review_active_id", None)
@@ -838,24 +920,28 @@ async def setup_review():
     ui.add_body_html(
         """
         <script>
-            document.addEventListener('keydown', function(e) {
-                const tag = e.target.tagName.toLowerCase();
-                if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-                if (e.ctrlKey || e.metaKey || e.altKey) return;
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    document.querySelector('[data-shortcut="submit-next"]')?.click();
-                } else if (e.key === 'n' || e.key === 'N') {
-                    e.preventDefault();
-                    document.querySelector('[data-shortcut="next"]')?.click();
-                } else if (e.key === 'p' || e.key === 'P') {
-                    e.preventDefault();
-                    document.querySelector('[data-shortcut="prev"]')?.click();
-                } else if (e.key === 'b' || e.key === 'B') {
-                    e.preventDefault();
-                    document.querySelector('[data-shortcut="mark-blank"]')?.click();
-                }
-            });
+            // Guard against multiple listener registrations if this script is injected more than once.
+            if (!window.__reviewShortcutsBound) {
+                window.__reviewShortcutsBound = true;
+                document.addEventListener('keydown', function(e) {
+                    const tag = e.target.tagName.toLowerCase();
+                    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+                    if (e.ctrlKey || e.metaKey || e.altKey) return;
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        document.querySelector('[data-shortcut="submit-next"]')?.click();
+                    } else if (e.key === 'n' || e.key === 'N') {
+                        e.preventDefault();
+                        document.querySelector('[data-shortcut="next"]')?.click();
+                    } else if (e.key === 'p' || e.key === 'P') {
+                        e.preventDefault();
+                        document.querySelector('[data-shortcut="prev"]')?.click();
+                    } else if (e.key === 'b' || e.key === 'B') {
+                        e.preventDefault();
+                        document.querySelector('[data-shortcut="mark-blank"]')?.click();
+                    }
+                });
+            }
         </script>
     """,
         shared=True,

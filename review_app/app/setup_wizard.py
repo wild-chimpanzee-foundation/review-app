@@ -121,6 +121,7 @@ class SetupWizard:
                 ui.label(f"{db_path}").classes("text-caption text-grey-6 q-mb-md")
                 ui.label(t("database_exists_msg")).classes("text-body2 q-mb-lg")
                 with ui.row().classes("w-full justify-end gap-sm"):
+
                     def on_cancel():
                         result[0] = None
                         done[0] = True
@@ -137,8 +138,15 @@ class SetupWizard:
                         dialog.close()
 
                     ui.button(t("cancel"), on_click=on_cancel).props("flat")
-                    ui.button(t("keep_existing"), icon="storage", color="primary", on_click=on_keep)
-                    ui.button(t("delete_fresh"), icon="delete_forever", color="negative", on_click=on_delete)
+                    ui.button(
+                        t("keep_existing"), icon="storage", color="primary", on_click=on_keep
+                    )
+                    ui.button(
+                        t("delete_fresh"),
+                        icon="delete_forever",
+                        color="negative",
+                        on_click=on_delete,
+                    )
 
             dialog.open()
             while not done[0]:
@@ -146,23 +154,29 @@ class SetupWizard:
             return result[0]
 
         async def submit():
+            submit_button_holder[0].set_enabled(False)
+
             video_dir = self.inputs["video_dir"].value.strip()
             annotator_name = self.inputs["annotator_name"].value.strip() or "default"
 
             if not video_dir:
                 ui.notify(t("enter_video_dir"), type="warning")
+                update_submit_button()
                 return
             if not Path(video_dir).exists():
                 ui.notify(t("video_dir_not_exist"), type="negative")
+                update_submit_button()
                 return
             if not self.ffmpeg_ok:
                 ui.notify(t("ffmpeg_required"), type="negative")
+                update_submit_button()
                 return
 
             db_path = get_default_db_path()
             if db_path.exists():
                 confirmed = await _confirm_existing_db(str(db_path))
                 if confirmed is None:
+                    update_submit_button()
                     return
                 if confirmed is False:
                     db_path.unlink()
@@ -191,25 +205,31 @@ class SetupWizard:
             has_videos = await run.io_bound(dp.has_videos_in_db)
 
             if not has_videos:
-                wizard_container = ui.column().classes("w-full max-w-2xl mx-auto q-pa-lg")
+                submit_button_holder[0].visible = False
+                self.inputs["video_dir"].props("readonly")
+                self.inputs["annotator_name"].props("readonly")
                 start_button_holder: list = [None]
 
-                with wizard_container:
+                with main_container:
                     with ui.card().classes("full-width q-mb-lg"):
-                        ui.label(t("setup_complete")).classes("text-h5 text-primary font-weight-bold")
+                        ui.label(t("setup_complete")).classes(
+                            "text-h4 text-primary font-weight-bold"
+                        )
                         ui.label(t("setup_complete_msg")).classes("text-body1 text-grey-7")
 
                     with ui.card().classes("full-width q-mb-lg"):
                         ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
-                        progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
+                        progress = ui.linear_progress(value=0, show_value=False).props(
+                            "color=primary"
+                        )
                         status = ui.label(t("starting"))
 
                     start_button_holder[0] = ui.button(
-                        t("start_annotating"),
+                        t("go_to_overview_btn"),
                         icon="play_arrow",
                         color="primary",
                         on_click=lambda: self.on_complete_callback(),
-                    )
+                    ).props("size=lg").classes("full-width")
                     start_button_holder[0].visible = False
 
                 await sync_with_progress(dp, progress=progress, status=status)
@@ -219,7 +239,7 @@ class SetupWizard:
             else:
                 self.on_complete_callback()
 
-        with ui.column().classes("w-full max-w-2xl mx-auto q-pa-lg"):
+        with ui.column().classes("w-full max-w-2xl mx-auto q-pa-lg") as main_container:
             with ui.card().classes("full-width q-mb-lg"):
                 ui.label(t("welcome_setup")).classes("text-h4 text-primary font-weight-bold")
                 ui.label(t("welcome_setup_msg")).classes("text-body1 text-grey-7")
@@ -242,18 +262,22 @@ class SetupWizard:
             with ui.card().classes("full-width q-mb-md"):
                 with ui.row().classes("items-center gap-sm"):
                     ui.label(t("ffmpeg_label")).classes("text-subtitle1 font-weight-medium")
-                    ffmpeg_status_label = ui.label(t("ffmpeg_checking")).classes("text-caption text-grey-6")
+                    ffmpeg_status_label = ui.label(t("ffmpeg_checking")).classes(
+                        "text-caption text-grey-6"
+                    )
                 ui.label(t("ffmpeg_desc")).classes("text-caption text-grey-6 q-mt-xs")
 
             ffmpeg_install_card = ui.card().classes("full-width q-mb-md bg-negative text-white")
             ffmpeg_install_card.visible = False
             with ffmpeg_install_card:
-                ui.label(t("ffmpeg_not_found_title")).classes("text-subtitle1 font-weight-bold q-mb-xs")
+                ui.label(t("ffmpeg_not_found_title")).classes(
+                    "text-subtitle1 font-weight-bold q-mb-xs"
+                )
                 ui.label(t("ffmpeg_install_instructions")).classes("text-caption q-mb-sm")
                 ui.code(get_ffmpeg_install_cmd()).classes("full-width")
 
             submit_button_holder[0] = ui.button(
-                t("start_annotating"), on_click=submit, icon="play_arrow", color="primary"
+                t("sync_videos_title"), on_click=submit, icon="play_arrow", color="primary"
             ).props("size=lg")
             submit_button_holder[0].classes("full-width")
             submit_button_holder[0].set_enabled(False)
