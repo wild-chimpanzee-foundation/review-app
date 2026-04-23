@@ -899,7 +899,7 @@ class LocalDataProvider:
         return {
             row["scientific_name"]: f"{row.get(key)} ({row['scientific_name']})"
             or row["scientific_name"]
-            for row in self._species_rows
+            for row in sorted(self._species_rows, key=lambda item: list(item.values())[1])
         }
 
     def get_config(self) -> dict:

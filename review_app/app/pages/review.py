@@ -115,13 +115,15 @@ def render_annotation_section(
             with ui.row().classes("w-full gap-sm items-center"):
                 with ui.element("div").classes("col"):
                     with ui.row().classes("items-center gap-sm"):
-                        ui.badge(t("blank"), color="warning")
+                        ui.badge(t("blank"), color="warning").classes(
+                            "text-body2 px-4 py-2 rounded-full"
+                        )
                         if blank_prob is not None:
                             ui.label(
                                 t("blank_prob_label", prob=f"{blank_prob:.0%}", sp=f"{max_sp:.0%}")
                             ).classes("text-caption text-grey-6")
                 ui.element("div").classes("col")
-                ui.button(icon="edit", on_click=set_not_blank).props("flat color=teal")
+                ui.button(icon="edit", on_click=set_not_blank).props("flat")
     else:
         for i, sel in enumerate(selections):
             with ui.card().classes("full-width q-pa-md q-mb-sm"):
@@ -318,7 +320,13 @@ def render_annotation_section(
         finally:
             set_state_val("submit_in_progress", False)
 
-    async def mark_blank():
+    async def mark_blank_stay():
+        await mark_blank(go_next=False)
+
+    async def mark_blank_next():
+        await mark_blank(go_next=True)
+
+    async def mark_blank(go_next=True):
         if get_state_val("submit_in_progress"):
             return
         set_state_val("submit_in_progress", True)
@@ -331,25 +339,27 @@ def render_annotation_section(
                 is_blank=True,
             )
             ui.notify(t("marked_blank"), type="positive")
-            await _advance_to_next(selected_video_id)
+            if go_next:
+                await _advance_to_next(selected_video_id)
             _clear_review_state()
             render_video_section.refresh()
         finally:
             set_state_val("submit_in_progress", False)
 
     with ui.row().classes("w-full gap-sm q-mt-sm q-mb-md"):
-        submit_next_btn = ui.button(t("submit_next"), on_click=submit_and_next, color="primary")
+        submit_next_btn = ui.button(t("submit_next"), on_click=submit_and_next, color="warning")
         submit_next_btn._props["data-shortcut"] = "submit-next"
         ui.button(t("submit"), on_click=submit)
-        blank_btn = ui.button(t("mark_blank"), on_click=mark_blank, color="warning")
+        blank_btn = ui.button(t("mark_blank"), on_click=mark_blank_next, color="warning")
         blank_btn._props["data-shortcut"] = "mark-blank"
+        ui.button(t("blank"), on_click=mark_blank_stay)
 
-    ui.label(t("shortcuts_help")).classes("text-caption text-grey-5")
+    ui.label(t("shortcuts_help")).classes("text-body2 font-weight-medium")
 
     with ui.column().classes("w-full q-mt-md gap-1"):
         labeled_by = video.get("labeled_by")
         if labeled_by:
-            ui.label(t("labeled_by", name=labeled_by)).classes("text-caption text-grey-6 q-mb-xs")
+            ui.label(t("labeled_by", name=labeled_by)).classes("text-body3 text-grey-6 q-mb-xs")
 
         if video.get("is_blank"):
             with ui.row().classes("items-center gap-sm"):
@@ -507,7 +517,6 @@ async def render_video_section(dp, species_map):
                         muted = is_muted()
 
                         # Use NiceGUI video component
-                        # We don't overwrite v.id as it breaks NiceGUI's internal mapping
                         v = ui.video(
                             video_url, autoplay=autoplay, muted=muted, controls=True
                         ).classes("w-full")

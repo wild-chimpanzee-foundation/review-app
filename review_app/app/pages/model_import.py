@@ -39,7 +39,9 @@ async def setup_model_import():
         else:
             with ui.card().classes("q-pa-xl"):
                 ui.label(t("error_dp_init")).classes("text-h6 text-negative")
-                ui.button(t("setup_btn"), on_click=lambda: ui.navigate.to("/setup"), icon="settings")
+                ui.button(
+                    t("setup_btn"), on_click=lambda: ui.navigate.to("/setup"), icon="settings"
+                )
             return
 
     set_state_val("uploaded_df", None)
@@ -60,9 +62,7 @@ async def setup_model_import():
         with ui.row().classes("items-center q-mb-md"):
             ui.label(t("model_import_title")).classes("text-h5 text-primary font-weight-bold")
 
-        ui.label(t("model_import_desc")).classes(
-            "text-body2 q-mb-lg"
-        )
+        ui.label(t("model_import_desc")).classes("text-body2 q-mb-lg")
 
         with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("items-center"):
@@ -74,16 +74,12 @@ async def setup_model_import():
             def download_template():
                 ui.download(csv_content.encode("utf-8"), "model_annotations_template.csv")
 
-            ui.button(
-                t("download_template"), icon="download", on_click=download_template
-            )
+            ui.button(t("download_template"), icon="download", on_click=download_template)
 
         with ui.card().classes("full-width q-mb-lg"):
             ui.label(t("upload_csv")).classes("text-subtitle1 font-weight-medium q-mb-md")
 
-            upload_result = ui.label(t("upload_csv_msg")).classes(
-                "text-body2 text-grey-6"
-            )
+            upload_result = ui.label(t("upload_csv_msg")).classes("text-body2 text-grey-6")
 
             async def handle_upload(e):
                 loading_dialog.open()
@@ -142,7 +138,9 @@ async def setup_model_import():
                     ].replace(mappings)
 
                 result = await run.io_bound(dp.import_model_csv, cleaned_df=df_to_import)
-                ui.notify(t("imported_rows", count=result.get('inserted_rows', 0)), type="positive")
+                ui.notify(
+                    t("imported_rows", count=result.get("inserted_rows", 0)), type="positive"
+                )
                 set_state_val("uploaded_df", None)
                 set_state_val("cleaned_df", None)
                 set_state_val("errors_df", None)
@@ -151,9 +149,7 @@ async def setup_model_import():
                 results_container.clear()
                 mappings_container.clear()
                 with results_container:
-                    ui.label(t("upload_csv_msg")).classes(
-                        "text-body2 text-grey-6"
-                    )
+                    ui.label(t("upload_csv_msg")).classes("text-body2 text-grey-6")
             except Exception as exc:
                 ui.notify(t("import_failed", error=str(exc)), type="negative")
             finally:
@@ -185,7 +181,9 @@ async def setup_model_import():
             mappings_container.clear()
 
             with results_container:
-                ui.label(t("validation_result")).classes("text-subtitle1 font-weight-medium q-mb-md")
+                ui.label(t("validation_result")).classes(
+                    "text-subtitle1 font-weight-medium q-mb-md"
+                )
 
                 cleaned_df = _get_df_from_state("cleaned_df")
                 valid_count = len(cleaned_df) if cleaned_df is not None else 0
@@ -214,11 +212,9 @@ async def setup_model_import():
                     ui.label(t("species_mappings")).classes(
                         "text-subtitle1 font-weight-medium q-mb-sm"
                     )
-                    ui.label(t("edit_mappings_desc")).classes(
-                        "text-caption text-grey-6 q-mb-md"
-                    )
+                    ui.label(t("edit_mappings_desc")).classes("text-caption text-grey-6 q-mb-md")
 
-                    species_map = await run.io_bound(dp.get_species_display_map, get_language())
+                    species_map = dp.get_species_display_map(get_language())
                     select_options = {"": ""}
                     select_options.update(species_map)
 
@@ -293,9 +289,9 @@ async def setup_model_import():
                     ).props(f"wide {'disabled' if not can_apply_mappings else ''}")
 
                     if pending_unmapped:
-                        ui.label(
-                            t("map_all_to_import", list=", ".join(pending_unmapped))
-                        ).classes("text-warning text-caption q-mt-sm")
+                        ui.label(t("map_all_to_import", list=", ".join(pending_unmapped))).classes(
+                            "text-warning text-caption q-mt-sm"
+                        )
 
             errors_df = _get_df_from_state("errors_df")
             if errors_df is not None and not errors_df.empty:
