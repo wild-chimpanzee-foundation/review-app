@@ -2,12 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
-import sys
-import tempfile
-import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,320 +9,34 @@ from typing import Any
 import pandas as pd
 import yaml
 from dotenv import load_dotenv
-from sqlalchemy import (
-    Boolean,
-    Column,
-    DateTime,
-    Float,
-    ForeignKey,
-    Index,
-    String,
-    UniqueConstraint,
-    create_engine,
-    event,
-    func,
-    select,
-    text,
-)
-from sqlalchemy import (
-    inspect as sa_inspect,
-)
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import create_engine, event, select, text
+from sqlalchemy.orm import sessionmaker
 
 from review_app.app.config import get_app_dir, get_config_path
-from review_app.backend.utils import (
-    get_default_species_from_annotations,
-    needs_browser_transcode,
+from review_app.backend.migrations import run_migrations
+from review_app.backend.models import (
+    CSV_TEMPLATES,
+    DEFAULT_DB_FILENAME,
+    REPO_ROOT,
+    Base,
+    IndividualObservation,
+    ModelAnnotation,
+    VideoLabel,
 )
+from review_app.backend.species import SpeciesMixin
+from review_app.backend.utils import get_default_species_from_annotations, needs_browser_transcode
+from review_app.backend.video import VideoMixin
 
 load_dotenv()
 
-Base = declarative_base()
 
-# ---------------------------------------------------------------------------
-# Maximum threads for parallel ffprobe calls.  Tune to your I/O concurrency.
-# ---------------------------------------------------------------------------
-_FFPROBE_MAX_WORKERS: int = int(os.getenv("FFPROBE_MAX_WORKERS", "16"))
-_FFPROBE_TIMEOUT_SEC: int = int(os.getenv("FFPROBE_TIMEOUT_SEC", "10"))
-
-
-class Video(Base):
-    __tablename__ = "videos"
-
-    video_id = Column(String, primary_key=True)
-    video_path = Column(String, nullable=False)
-    camera_id = Column(String, index=True)
-    created_at = Column(DateTime, nullable=True)
-    duration_sec = Column(Float, nullable=True)
-    last_seen_at = Column(DateTime, nullable=False, default=func.now())
-    # Populated by ffprobe on first ingest; never overwritten for existing rows.
-    is_valid = Column(Boolean, nullable=True)
-    is_web_safe = Column(Boolean, nullable=True)
-    validation_error = Column(String, nullable=True)
-    transcoded_path = Column(String, nullable=True)
-
-
-class VideoLabel(Base):
-    __tablename__ = "video_labels"
-
-    video_id = Column(String, ForeignKey("videos.video_id"), primary_key=True)
-    is_blank = Column(Boolean, nullable=True)
-    labeled_by = Column(String, nullable=True)
-    labeled_at = Column(DateTime, nullable=False, default=func.now())
-
-
-class IndividualObservation(Base):
-    __tablename__ = "individual_observations"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    video_id = Column(String, ForeignKey("videos.video_id"), nullable=False, index=True)
-    species = Column(String, nullable=False)
-    behavior = Column(String, nullable=False)
-    start_sec = Column(Float, nullable=False, default=0.0)
-    end_sec = Column(Float, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=func.now())
-    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
-
-
-class ModelAnnotation(Base):
-    __tablename__ = "model_annotations"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    video_id = Column(String, ForeignKey("videos.video_id"), nullable=False, index=True)
-    annotation_type = Column(String, nullable=False, index=True)
-    model_name = Column(String, nullable=False, index=True)
-    value_text = Column(String, nullable=True)
-    value_num = Column(Float, nullable=True)
-    probability = Column(Float, nullable=True)
-    t_start_sec = Column(Float, nullable=True)
-    t_end_sec = Column(Float, nullable=True)
-    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint(
-            "video_id", "model_name", "annotation_type", name="uq_model_ann_identity"
-        ),
-    )
-
-
-class SpeciesInfo(Base):
-    __tablename__ = "species"
-
-    scientific_name = Column(String, primary_key=True)
-    name_en = Column(String, nullable=True)
-    name_fr = Column(String, nullable=True)
-    groupe = Column(String, nullable=True)
-    iucn = Column(String, nullable=True)
-
-
-Index(
-    "idx_individual_video_species", IndividualObservation.video_id, IndividualObservation.species
-)
-Index(
-    "idx_individual_video_behavior", IndividualObservation.video_id, IndividualObservation.behavior
-)
-Index("idx_individual_video_time", IndividualObservation.video_id, IndividualObservation.start_sec)
-
-Index("idx_videos_is_valid", Video.is_valid)
-Index("idx_model_ann_type_value", ModelAnnotation.annotation_type, ModelAnnotation.value_text)
-# Covers: WHERE annotation_type='species' AND value_text=:ps  (possible_species filter)
-Index(
-    "idx_model_ann_type_text_video",
-    ModelAnnotation.annotation_type,
-    ModelAnnotation.value_text,
-    ModelAnnotation.video_id,
-)
-
-# Covers: WHERE annotation_type='blank_non_blank' inside effective_blank CTE
-Index(
-    "idx_model_ann_blank_probe",
-    ModelAnnotation.annotation_type,
-    ModelAnnotation.video_id,
-    ModelAnnotation.probability,
-)
-
-# Covers: WHERE video_id=? AND behavior=?  (behavior filter EXISTS)
-# (video_id + species already exists; behavior composite is missing)
-Index(
-    "idx_individual_behavior_video",
-    IndividualObservation.behavior,
-    IndividualObservation.video_id,
-)
-
-VIDEO_EXTENSIONS: frozenset[str] = frozenset(
-    {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm", ".m4v"}
-)
-
-CSV_TEMPLATES: dict[str, str] = {
-    "model_annotations": (
-        "video_uid,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec\n"
-        "CAM01/VIDEO_001.mp4,species,species_model_a,deer,,0.92,0,12.0\n"
-        "CAM01/VIDEO_001.mp4,behavior,behavior_model_a,reacts_to_camera,,0.83,0,12.0\n"
-        "CAM01/VIDEO_002.mp4,blank_non_blank,blank_model,blank,,0.98,0,\n"
-    )
-}
-
-if getattr(sys, "frozen", False):
-    REPO_ROOT = Path(sys.executable).parent
-else:
-    REPO_ROOT = Path(__file__).parents[2]
-
-
-DEFAULT_CONFIG_PATH = get_config_path()
-DEFAULT_DB_FILENAME = "review_data.db"
-
-
-# ---------------------------------------------------------------------------
-# subprocess helpers
-# ---------------------------------------------------------------------------
-
-
-def _subprocess_env() -> dict:
-    """Return an environment safe for subprocesses when running frozen.
-
-    PyInstaller prepends _internal/ to LD_LIBRARY_PATH so its bundled libs
-    are found by Python. Subprocesses (ffprobe, ffmpeg) inherit this and can
-    crash when the bundled libs conflict with system libs they link against.
-    Restoring the original value fixes that.
-    """
-    env = os.environ.copy()
-    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
-        orig = env.get("LD_LIBRARY_PATH_ORIG", "")
-        if orig:
-            env["LD_LIBRARY_PATH"] = orig
-        else:
-            env.pop("LD_LIBRARY_PATH", None)
-    return env
-
-
-# ---------------------------------------------------------------------------
-# ffprobe helpers
-# ---------------------------------------------------------------------------
-
-
-def _find_ffprobe() -> str | None:
-    """Return the ffprobe executable path, or None if not installed."""
-    return shutil.which("ffprobe")
-
-
-def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
-    """
-    Run ffprobe on *path* and return ``(duration_sec, is_valid, is_web_safe, error_message)``.
-
-    Uses a single fast JSON query on the *format* section only – no stream
-    decoding, so it completes in milliseconds even for large files.
-
-    Returns:
-        duration_sec   – float seconds, or None if not parseable
-        is_valid       – True when the container is readable by ffprobe
-        is_web_safe    – True if codec/container are known to work in browsers
-        error_message  – human-readable string when is_valid is False, else None
-    """
-    ffprobe = _find_ffprobe()
-    if ffprobe is None:
-        # ffprobe not installed: treat all videos as valid with unknown duration.
-        return None, False, False, "ffprobe executable not found"
-
-    cmd = [
-        ffprobe,
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration,format_name:stream=duration,codec_name,codec_type",
-        "-of",
-        "json",
-        str(path),
-    ]
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=_FFPROBE_TIMEOUT_SEC,
-            env=_subprocess_env(),
-        )
-    except subprocess.TimeoutExpired:
-        return None, False, False, f"ffprobe timed out after {_FFPROBE_TIMEOUT_SEC}s"
-    except OSError as exc:
-        return None, False, False, f"ffprobe OS error: {exc}"
-
-    if result.returncode != 0:
-        stderr_text = result.stderr.strip()
-        # Keep only the first 200 chars to avoid bloating the DB.
-        return None, False, False, stderr_text[:200] or "ffprobe returned non-zero exit code"
-
-    try:
-        data = json.loads(result.stdout)
-        # Try format first, then fallback to the first stream
-        raw_duration = data.get("format", {}).get("duration")
-
-        if raw_duration is None:
-            streams = data.get("streams", [])
-            if streams:
-                raw_duration = streams[0].get("duration")
-
-        # Web safe check
-        format_name = data.get("format", {}).get("format_name", "").lower()
-        streams = data.get("streams", [])
-        video_codec = next(
-            (s.get("codec_name", "") for s in streams if s.get("codec_type") == "video"), ""
-        ).lower()
-
-        # Simple web-safe logic: MP4/MOV/WebM with H.264/VP8/VP9/AV1
-        safe_formats = {"mp4", "mov", "webm", "ogg"}
-        safe_codecs = {"h264", "vp8", "vp9", "av1", "theora"}
-
-        formats = {f.strip() for f in format_name.split(",")}
-        is_web_safe = bool(formats & safe_formats) and video_codec in safe_codecs
-
-    except (json.JSONDecodeError, ValueError, TypeError):
-        return None, False, False, "ffprobe returned unparseable JSON"
-
-    return raw_duration, True, is_web_safe, None
-
-
-def _probe_many(
-    paths: list[Path], max_workers: int = _FFPROBE_MAX_WORKERS, progress_callback: callable = None
-) -> dict[Path, tuple[float | None, bool, bool, str | None]]:
-    """
-    Probe *paths* in parallel and return a mapping of
-    ``path -> (duration_sec, is_valid, is_web_safe, error_message)``.
-
-    Falls back gracefully when ffprobe is absent.
-    """
-    if not paths:
-        return {}
-
-    results: dict[Path, tuple[float | None, bool, bool, str | None]] = {}
-
-    total = len(paths)
-
-    with ThreadPoolExecutor(max_workers=min(max_workers, len(paths))) as pool:
-        future_to_path = {pool.submit(_probe_video, p): p for p in paths}
-        for i, future in enumerate(as_completed(future_to_path)):
-            path = future_to_path[future]
-            try:
-                results[path] = future.result()
-            except Exception as exc:  # pragma: no cover – safety net
-                results[path] = (None, False, False, str(exc))
-            if progress_callback:
-                progress_callback(i + 1, total, path.name)
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-
-
-class LocalDataProvider:
+class LocalDataProvider(VideoMixin, SpeciesMixin):
     """SQLite-backed local data provider for manual review + constrained model imports."""
 
     def __init__(self, config_path: str | Path | None = None) -> None:
         cfg = self._load_yaml_config(config_path)
         self.video_dir = self._required_path(cfg, "video_dir")
 
-        # Handle empty or relative db_dir
         raw_db_dir = cfg.get("db_dir", "")
         if not raw_db_dir or raw_db_dir == ".":
             self.db_dir = get_app_dir()
@@ -337,17 +45,9 @@ class LocalDataProvider:
 
         self.db_dir.mkdir(parents=True, exist_ok=True)
 
-        self._species_rows: list[dict] = []
-        self._species: list[str] = []
-        self._variant_to_sci: dict[str, str] = {}
-        self._load_species_data(cfg)
-        self._species_behaviors: dict[str, list[str]] = self._load_species_behaviors(cfg)
-
-        behavior_defaults = cfg.get("behavior_defaults")
         self._behavior_defaults: list[str] = self._normalize_string_list(
-            behavior_defaults, "behavior_defaults"
+            cfg.get("behavior_defaults"), "behavior_defaults"
         )
-
         self._consensus_min_probability: float = float(cfg.get("consensus_min_probability", 0.0))
         self._fuzzy_match_threshold: int = int(cfg.get("fuzzy_match_threshold", 80))
 
@@ -357,7 +57,6 @@ class LocalDataProvider:
 
         self._db_path = self.db_dir / db_filename
         recreate_on_start = bool(cfg.get("recreate_db_on_start", False)) or (
-            # Compatibility with environment variable
             str(os.getenv("REVIEW_APP_RECREATE_DB", "")).lower() in {"1", "true", "yes"}
         )
         if recreate_on_start and self._db_path.exists():
@@ -370,73 +69,21 @@ class LocalDataProvider:
 
         self.engine = create_engine(f"sqlite:///{self._db_path}")
 
-        if self._needs_schema_reset():
-            self.engine.dispose()
-            if self._db_path.exists():
-                try:
-                    self._db_path.unlink()
-                except PermissionError as exc:
-                    raise RuntimeError(
-                        f"Cannot reset incompatible sqlite DB at `{self._db_path}` due to permissions: {exc}"
-                    ) from exc
-            self.engine = create_engine(f"sqlite:///{self._db_path}")
-
         @event.listens_for(self.engine, "connect")
         def set_sqlite_pragma(conn, _):
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")  # safe with WAL
-            conn.execute("PRAGMA cache_size=-64000")  # 64 MB page cache
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=-64000")
             conn.execute("PRAGMA temp_store=MEMORY")
-            conn.execute("PRAGMA mmap_size=268435456")  # 256 MB memory-mapped I/O
+            conn.execute("PRAGMA mmap_size=268435456")
 
         Base.metadata.create_all(self.engine)
-        self._migrate_schema()
+        run_migrations(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+        self._load_species_data(cfg)
+        self._load_species_behaviors(cfg)
 
-    def sync_videos(self, progress_callback):
-        self._sync_videos_table(progress_callback)
-
-    def _needs_schema_reset(self) -> bool:
-        """Detect incompatible legacy schemas and trigger full DB recreation."""
-        if not self._db_path.exists():
-            return False
-        try:
-            inspector = sa_inspect(self.engine)
-            if not inspector.has_table("videos"):
-                return False
-            columns = {col["name"] for col in inspector.get_columns("videos")}
-        except Exception:
-            return True
-        required = {"is_valid", "validation_error"}
-        return not required.issubset(columns)
-
-    def _migrate_schema(self) -> None:
-        """Add new nullable columns to existing databases without dropping data."""
-        inspector = sa_inspect(self.engine)
-        cols = {col["name"] for col in inspector.get_columns("videos")}
-        if "transcoded_path" not in cols:
-            with self.engine.connect() as conn:
-                conn.execute(text("ALTER TABLE videos ADD COLUMN transcoded_path TEXT"))
-                conn.commit()
-        if not inspector.has_table("species"):
-            SpeciesInfo.__table__.create(self.engine)
-        self._sync_species_table()
-
-    def _sync_species_table(self) -> None:
-        with self.engine.begin() as conn:
-            conn.execute(text("DELETE FROM species"))
-            if self._species_rows:
-                conn.execute(
-                    text(
-                        "INSERT INTO species (scientific_name, name_en, name_fr, groupe, iucn) "
-                        "VALUES (:scientific_name, :name_en, :name_fr, :groupe, :iucn)"
-                    ),
-                    self._species_rows,
-                )
-
-    @property
-    def _app_config_path(self) -> Path:
-        return self.db_dir / "config.json"
+    # ── Config helpers ────────────────────────────────────────────────────────
 
     @staticmethod
     def _resolve_path(raw_path: str | Path) -> Path:
@@ -460,7 +107,7 @@ class LocalDataProvider:
             config_path = get_config_path()
         p = LocalDataProvider._resolve_path(config_path)
         if not p.exists():
-            raise FileNotFoundError(f"Config file not found: `{p}`. ")
+            raise FileNotFoundError(f"Config file not found: `{p}`.")
         with open(p) as f:
             loaded = yaml.safe_load(f) or {}
         if not isinstance(loaded, dict):
@@ -480,401 +127,26 @@ class LocalDataProvider:
             return []
         if not isinstance(values, list):
             raise ValueError(f"`{key_name}` must be a list of strings.")
-        normalized = [str(v).strip() for v in values if str(v).strip()]
-        return normalized
-
-    @staticmethod
-    def _parse_species_csv(path: Path) -> list[dict]:
-        """Parse a species CSV. Requires Nom_scientifique column."""
-        df = pd.read_csv(path, sep=";")
-        if "Nom_scientifique" not in df.columns:
-            raise ValueError(f"Species CSV at `{path}` must have a `Nom_scientifique` column.")
-        rows = []
-        for _, row in df.iterrows():
-            sci = str(row.get("Nom_scientifique", "") or "").strip()
-            if not sci or sci.lower() in ("na", "nan", "none", ""):
-                continue
-            rows.append(
-                {
-                    "scientific_name": sci,
-                    "name_en": (str(row.get("Nom_commun_anglais", "") or "").strip() or None)
-                    if "Nom_commun_anglais" in df.columns
-                    else None,
-                    "name_fr": (str(row.get("Nom_commun_francais", "") or "").strip() or None)
-                    if "Nom_commun_francais" in df.columns
-                    else None,
-                    "groupe": (str(row.get("Groupe", "") or "").strip() or None)
-                    if "Groupe" in df.columns
-                    else None,
-                    "iucn": (str(row.get("IUCN", "") or "").strip() or None)
-                    if "IUCN" in df.columns
-                    else None,
-                }
-            )
-        return rows
-
-    def _load_species_data(self, cfg: dict[str, Any]) -> None:
-        """Load species from bundled and/or custom CSV, populating _species_rows, _species, _variant_to_sci."""
-        from review_app.app.config import get_bundled_species_csv
-
-        bundled_path = get_bundled_species_csv()
-        custom_path_raw = str(cfg.get("species_csv_path") or "").strip()
-        mode = str(cfg.get("species_csv_mode") or "override").strip()
-
-        bundled_rows: list[dict] = []
-        if bundled_path:
-            bundled_rows = self._parse_species_csv(Path(bundled_path))
-
-        custom_rows: list[dict] = []
-        if custom_path_raw:
-            custom_p = self._resolve_path(custom_path_raw)
-            if custom_p.exists() and str(custom_p) != str(bundled_path):
-                custom_rows = self._parse_species_csv(custom_p)
-
-        if custom_rows:
-            if mode == "append":
-                merged = {r["scientific_name"]: r for r in bundled_rows}
-                merged.update({r["scientific_name"]: r for r in custom_rows})
-                rows = sorted(merged.values(), key=lambda r: r["scientific_name"])
-            else:
-                rows = custom_rows
-        else:
-            rows = bundled_rows
-
-        if not rows:
-            raise ValueError(
-                "No species found. Ensure a valid species CSV with Nom_scientifique column is configured."
-            )
-
-        self._species_rows = rows
-        self._species = sorted(r["scientific_name"] for r in rows)
-        self._variant_to_sci = {}
-        for r in rows:
-            sci = r["scientific_name"]
-            self._variant_to_sci[sci.lower()] = sci
-            if r.get("name_en"):
-                self._variant_to_sci[r["name_en"].lower()] = sci
-            if r.get("name_fr"):
-                self._variant_to_sci[r["name_fr"].lower()] = sci
-
-    @staticmethod
-    def _parse_behaviors_csv(path: Path) -> dict[str, list[str]]:
-        try:
-            df = pd.read_csv(path, sep=";")
-            if "Species" not in df.columns or "Behavior" not in df.columns:
-                return {}
-            mapping: dict[str, list[str]] = {}
-            for _, row in df.iterrows():
-                species = str(row["Species"]).strip()
-                behavior = str(row["Behavior"]).strip()
-                if species and behavior:
-                    mapping.setdefault(species, []).append(behavior)
-            return mapping
-        except Exception:
-            return {}
-
-    def _load_species_behaviors(self, cfg: dict[str, Any]) -> dict[str, list[str]]:
-        from review_app.app.config import get_bundled_behaviors_csv
-
-        bundled_path = get_bundled_behaviors_csv()
-        custom_path_raw = str(cfg.get("species_behaviors_csv_path") or "").strip()
-        mode = str(cfg.get("species_behaviors_csv_mode") or "override").strip()
-
-        bundled = self._parse_behaviors_csv(Path(bundled_path)) if bundled_path else {}
-
-        custom: dict[str, list[str]] = {}
-        if custom_path_raw:
-            custom_p = self._resolve_path(custom_path_raw)
-            if custom_p.exists() and str(custom_p) != str(bundled_path):
-                custom = self._parse_behaviors_csv(custom_p)
-
-        if custom:
-            if mode == "append":
-                merged = {**bundled, **custom}
-                return merged
-            else:
-                return custom
-        return bundled
-
-    def _validate_species_fuzzy(self, value_text: str) -> tuple[bool, str | None]:
-        """
-        Validate a species name against known scientific names and all name variants.
-        Always returns a scientific name as best_match.
-        """
-        from thefuzz import process
-
-        if not value_text:
-            return False, None
-
-        value_lower = str(value_text).strip().lower()
-
-        if value_lower in self._variant_to_sci:
-            return True, self._variant_to_sci[value_lower]
-
-        candidates = list(self._variant_to_sci.keys())
-        if not candidates:
-            return False, None
-        match, score = process.extractOne(value_lower, candidates)
-        if score >= self._fuzzy_match_threshold:
-            return True, self._variant_to_sci[match]
-
-        return False, None
+        return [str(v).strip() for v in values if str(v).strip()]
 
     @staticmethod
     def _utcnow_dt() -> datetime:
         return datetime.now(timezone.utc)
 
-    def _video_id_from_path(self, path: Path) -> str:
-        try:
-            rel = path.relative_to(self.video_dir)
-            parent = rel.parent.name if rel.parent != Path(".") else "default"
-            return f"{parent}/{path.stem}"
-        except ValueError:
-            parent = path.parent.name if path.parent.name else "default"
-            return f"{parent}/{path.stem}"
+    @property
+    def _app_config_path(self) -> Path:
+        return self.db_dir / "config.json"
 
-    def _scan_videos(self) -> pd.DataFrame:
-        if not self.video_dir.exists():
-            return pd.DataFrame(
-                columns=["video_id", "video_path", "camera_id", "created_at", "duration_sec"]
-            )
+    # ── Video sync ────────────────────────────────────────────────────────────
 
-        rows: list[dict[str, Any]] = []
-        for p in sorted(self.video_dir.rglob("*")):
-            if p.suffix.lower() not in VIDEO_EXTENSIONS:
-                continue
-            camera_id = p.parent.name if p.parent != self.video_dir else "default"
-            created_at = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
-            rows.append(
-                {
-                    "video_id": self._video_id_from_path(p),
-                    "video_path": str(p),
-                    "camera_id": camera_id,
-                    "created_at": created_at,
-                    # duration/validity filled in by _sync_videos_table for new rows
-                    "duration_sec": None,
-                }
-            )
-        return pd.DataFrame(rows)
+    def sync_videos(self, progress_callback):
+        self._sync_videos_table(progress_callback)
 
-    def _sync_videos_table(self, progress_callback=None) -> None:
-        """
-        Sync the filesystem scan into the ``videos`` table.
-
-        New videos are probed with ffprobe **in parallel** before the DB write.
-        Existing rows are updated (path/camera/timestamp) but their
-        ``duration_sec``, ``is_valid``, and ``validation_error`` are preserved
-        so we never re-probe files that are already known.
-        """
-        scanned = self._scan_videos()
-        now = self._utcnow_dt()
-
-        with self.Session() as session:
-            if scanned.empty:
-                session.commit()
-                return
-
-            # Single query for all existing IDs + their probe status
-            existing_rows = {
-                row[0]: row
-                for row in session.execute(
-                    select(
-                        Video.video_id, Video.is_valid, Video.duration_sec, Video.validation_error
-                    )
-                ).fetchall()
-            }
-
-            new_video_ids = [r for r in scanned["video_id"] if r not in existing_rows]
-            new_rows = scanned[scanned["video_id"].isin(new_video_ids)]
-
-            # Probe only new videos
-            probe_results: dict[str, tuple] = {}
-            if not new_rows.empty:
-                path_map = {
-                    Path(row["video_path"]): row["video_id"] for _, row in new_rows.iterrows()
-                }
-                probe_results = {
-                    path_map[p]: result
-                    for p, result in _probe_many(
-                        list(path_map), progress_callback=progress_callback
-                    ).items()
-                }
-
-            # Bulk-insert new videos
-            if new_video_ids:
-                session.execute(
-                    Video.__table__.insert(),
-                    [
-                        {
-                            "video_id": row["video_id"],
-                            "video_path": row["video_path"],
-                            "camera_id": row["camera_id"],
-                            "created_at": row["created_at"].to_pydatetime(),
-                            "last_seen_at": now,
-                            **dict(
-                                zip(
-                                    (
-                                        "duration_sec",
-                                        "is_valid",
-                                        "is_web_safe",
-                                        "validation_error",
-                                    ),
-                                    probe_results.get(row["video_id"], (None, None, None, None)),
-                                )
-                            ),
-                        }
-                        for _, row in new_rows.iterrows()
-                    ],
-                )
-
-            # Bulk-update existing rows (path/camera/timestamp only)
-            existing_df = scanned[scanned["video_id"].isin(existing_rows)]
-            if not existing_df.empty:
-                session.execute(
-                    text("""
-                        UPDATE videos
-                        SET video_path = :video_path,
-                            camera_id  = :camera_id,
-                            created_at = :created_at,
-                            last_seen_at = :last_seen_at
-                        WHERE video_id = :video_id
-                    """),
-                    [
-                        {
-                            "video_id": row["video_id"],
-                            "video_path": row["video_path"],
-                            "camera_id": row["camera_id"],
-                            "created_at": row["created_at"].to_pydatetime(),
-                            "last_seen_at": now,
-                        }
-                        for _, row in existing_df.iterrows()
-                    ],
-                )
-
-            session.commit()
-
-    def reprobe_video(self, video_id: str) -> None:
-        """
-        Force a fresh ffprobe run for a single video and persist the result.
-        Useful after a file is replaced or repaired.
-        """
-        with self.Session() as session:
-            video = session.get(Video, video_id)
-            if video is None:
-                raise ValueError(f"Unknown video_id: {video_id!r}")
-            duration, is_valid, is_web_safe, validation_error = _probe_video(
-                Path(video.video_path)
-            )
-            video.duration_sec = duration
-            video.is_valid = is_valid
-            video.is_web_safe = is_web_safe
-            video.validation_error = validation_error
-            session.commit()
-
-    def reprobe_invalid_videos(self) -> dict[str, Any]:
-        """
-        Re-probe all videos currently marked as invalid (e.g. after a bulk
-        file repair).  Returns a summary dict.
-        """
-        with self.Session() as session:
-            invalid_videos = (
-                session.query(Video)
-                .filter((Video.is_valid == False) | (Video.is_valid.is_(None)))  # noqa: E712
-                .all()
-            )
-            if not invalid_videos:
-                return {"re_probed": 0, "now_valid": 0, "still_invalid": 0}
-
-            path_map: dict[Path, str] = {Path(v.video_path): v.video_id for v in invalid_videos}
-            probe_results = _probe_many(list(path_map.keys()))
-
-            now_valid = 0
-            still_invalid = 0
-            for path, (duration, is_valid, is_web_safe, validation_error) in probe_results.items():
-                vid_id = path_map[path]
-                video = session.get(Video, vid_id)
-                if video is None:
-                    continue
-                video.duration_sec = duration
-                video.is_valid = is_valid
-                video.is_web_safe = is_web_safe
-                video.validation_error = validation_error
-                if is_valid:
-                    now_valid += 1
-                else:
-                    still_invalid += 1
-            session.commit()
-
-        return {
-            "re_probed": len(invalid_videos),
-            "now_valid": now_valid,
-            "still_invalid": still_invalid,
-        }
-
-    def transcode_video(self, video_id: str) -> dict[str, Any]:
-        """
-        Transcode a video to web-safe H.264 MP4 using ffmpeg.
-
-        Output is written to a sidecar cache under video_dir/_transcoded/ so
-        the original file is never modified.  On success, ``transcoded_path``
-        is set on the DB row and can be used for playback instead of the
-        original.
-        """
-        with self.Session() as session:
-            video = session.get(Video, video_id)
-            if video is None:
-                raise ValueError(f"Unknown video_id: {video_id!r}")
-
-            input_path = Path(video.video_path)
-            if not input_path.exists():
-                raise FileNotFoundError(f"Video file not found: {input_path}")
-
-            tmp_dir = Path(tempfile.gettempdir()) / "video_review_transcoded"
-            tmp_dir.mkdir(parents=True, exist_ok=True)
-            safe_name = video_id.replace("/", "_").replace("\\", "_").replace(":", "_")
-            sidecar_path = tmp_dir / f"{safe_name}.mp4"
-
-            if sidecar_path.exists():
-                video.transcoded_path = str(sidecar_path)
-                session.commit()
-                return {"success": True, "new_path": str(sidecar_path)}
-
-            cmd = [
-                "ffmpeg",
-                "-y",
-                "-i",
-                str(input_path),
-                "-c:v",
-                "libx264",
-                "-preset",
-                "fast",
-                "-crf",
-                "23",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "128k",
-                "-movflags",
-                "+faststart",
-                str(sidecar_path),
-            ]
-
-            try:
-                subprocess.run(
-                    cmd, capture_output=True, text=True, check=True, env=_subprocess_env()
-                )
-            except subprocess.CalledProcessError as exc:
-                if sidecar_path.exists():
-                    sidecar_path.unlink()
-                return {"success": False, "error": f"ffmpeg failed: {exc.stderr}"}
-
-            video.transcoded_path = str(sidecar_path)
-            video.is_web_safe = True
-            session.commit()
-
-            return {"success": True, "new_path": str(sidecar_path)}
+    # ── DB state ──────────────────────────────────────────────────────────────
 
     def check_db_exists(self) -> bool:
+        from review_app.backend.models import VIDEO_EXTENSIONS
+
         return self.video_dir.exists() and any(
             p.suffix.lower() in VIDEO_EXTENSIONS for p in self.video_dir.rglob("*")
         )
@@ -890,17 +162,7 @@ class LocalDataProvider:
             result = conn.execute(text("SELECT COUNT(*) FROM videos")).fetchone()
             return result[0] > 0 if result else False
 
-    def get_valid_species(self) -> list[str]:
-        return list(self._species)
-
-    def get_species_display_map(self, lang: str = "en") -> dict[str, str]:
-        """Returns {scientific_name: common_name} for the given language."""
-        key = "name_en" if lang == "en" else "name_fr"
-        return {
-            row["scientific_name"]: f"{row.get(key)} ({row['scientific_name']})"
-            or row["scientific_name"]
-            for row in sorted(self._species_rows, key=lambda item: list(item.values())[1])
-        }
+    # ── Config persistence ────────────────────────────────────────────────────
 
     def get_config(self) -> dict:
         if self._app_config_path.exists():
@@ -915,12 +177,11 @@ class LocalDataProvider:
     def get_overrides(self) -> dict:
         return self.get_config()
 
+    # ── CSV templates ─────────────────────────────────────────────────────────
+
     def get_csv_templates(self) -> dict[str, str]:
         with self.engine.connect() as conn:
-            videos_df = pd.read_sql(
-                text("SELECT video_id FROM videos LIMIT 10"),
-                conn,
-            )
+            videos_df = pd.read_sql(text("SELECT video_id FROM videos LIMIT 10"), conn)
 
         if not videos_df.empty:
             sample_video_ids = videos_df["video_id"].tolist()
@@ -940,19 +201,7 @@ class LocalDataProvider:
 
         return {"model_annotations": template}
 
-    def get_behaviors_for_species(self, species_name: str) -> list[str]:
-        # "unlabeled" is now part of _behavior_defaults in config
-        defaults = list(self._behavior_defaults)
-        extras = self._species_behaviors.get(species_name, [])
-        seen = set()
-        result = []
-        for b in defaults + extras:
-            if b not in seen:
-                result.append(b)
-                seen.add(b)
-        if not result:
-            return ["does_not_react"]
-        return result
+    # ── Queue ─────────────────────────────────────────────────────────────────
 
     def _get_model_annotations_df(self) -> pd.DataFrame:
         with self.engine.connect() as conn:
@@ -979,6 +228,9 @@ class LocalDataProvider:
                     UNION ALL
                     SELECT 'possible_species', value_text FROM model_annotations
                     WHERE annotation_type = 'species' AND value_text IS NOT NULL AND TRIM(value_text) <> '' GROUP BY value_text
+                    UNION ALL
+                    SELECT 'model_behavior', value_text FROM model_annotations
+                    WHERE annotation_type = 'behavior' AND value_text IS NOT NULL AND TRIM(value_text) <> '' GROUP BY value_text
                     """
                 ),
                 conn,
@@ -989,6 +241,7 @@ class LocalDataProvider:
             "species_values": [],
             "behavior_values": [],
             "possible_species_values": [],
+            "model_behavior_values": [],
         }
         for _, row in df.iterrows():
             source = str(row["source"])
@@ -1001,11 +254,14 @@ class LocalDataProvider:
                 result["behavior_values"].append(val)
             elif source == "possible_species":
                 result["possible_species_values"].append(val)
+            elif source == "model_behavior":
+                result["model_behavior_values"].append(val)
 
         result["camera_values"].sort()
         result["species_values"].sort()
         result["behavior_values"].sort()
         result["possible_species_values"].sort()
+        result["model_behavior_values"].sort()
 
         return result
 
@@ -1014,7 +270,9 @@ class LocalDataProvider:
         selected_camera = filters.get("selected_camera", "All")
         selected_species = filters.get("selected_species", "All")
         selected_possible_species = filters.get("selected_possible_species", "All")
-        selected_blank_non_blank = filters.get("selected_blank_non_blank", "All")
+        selected_manual_blank = filters.get("selected_manual_blank", "All")
+        selected_model_blank = filters.get("selected_model_blank", "All")
+        selected_model_behavior = filters.get("selected_model_behavior", "All")
         selected_behavior = filters.get("selected_behavior", "All")
         selected_annotation_status = filters.get("selected_annotation_status", "All")
         selected_sort = filters.get("selected_sort", "camera")
@@ -1027,9 +285,10 @@ class LocalDataProvider:
         species_threshold = float(filters.get("species_threshold", 0.75))
 
         params: dict[str, Any] = {}
-
-        # ── 2. CTEs — only emit when the filter is actually used ──
         ctes: list[str] = []
+        joins: list[str] = []
+        where: list[str] = []
+
         need_needs_review_filter = selected_needs_review != "All"
         if need_needs_review_filter:
             params["blank_thr"] = blank_threshold
@@ -1057,7 +316,7 @@ class LocalDataProvider:
                     CASE
                         WHEN COALESCE(nb.blank_prob, 0.0) >= :blank_thr
                          AND COALESCE(ns.max_sp, 0.0) < :species_thr THEN 0
-                        WHEN ns.distinct_top1 = 1 AND ns.model_count = 3 THEN 0
+                        WHEN ns.distinct_top1 = 1 AND ns.model_count >= 1 THEN 0
                         ELSE 1
                     END AS needs_review_flag
                 FROM videos v
@@ -1065,23 +324,12 @@ class LocalDataProvider:
                 LEFT JOIN nr_species ns ON ns.video_id = v.video_id
             )""")
 
-        need_blank_filter = selected_blank_non_blank not in ("All",)
-        if need_blank_filter:
+        need_model_blank_filter = selected_model_blank != "All"
+        if need_model_blank_filter:
             ctes.append("""
-            effective_blank AS (
-                SELECT
-                    v.video_id,
-                    CASE
-                        WHEN vl.is_blank IS NOT NULL
-                            THEN CASE WHEN vl.is_blank = 1 THEN 'blank' ELSE 'non_blank' END
-                        WHEN mb.value_text IS NOT NULL
-                        AND LOWER(TRIM(mb.value_text)) IN ('blank', 'non_blank')
-                            THEN LOWER(TRIM(mb.value_text))
-                        ELSE NULL
-                    END AS blank_non_blank_final_result
-                FROM videos v
-                LEFT JOIN video_labels vl ON vl.video_id = v.video_id
-                LEFT JOIN (
+            model_blank AS (
+                SELECT video_id, LOWER(TRIM(value_text)) AS result
+                FROM (
                     SELECT video_id, value_text,
                         ROW_NUMBER() OVER (
                             PARTITION BY video_id
@@ -1089,18 +337,13 @@ class LocalDataProvider:
                         ) AS rn
                     FROM model_annotations
                     WHERE annotation_type = 'blank_non_blank'
-                ) mb ON mb.video_id = v.video_id AND mb.rn = 1
+                ) mb WHERE rn = 1
             )""")
 
-        # ── 3. JOINs — use INNER JOIN when include_unranked=False to let SQLite prune early ──
-        joins: list[str] = []
         if need_needs_review_filter:
             joins.append("LEFT JOIN needs_review nr ON nr.video_id = v.video_id")
-        if need_blank_filter:
-            joins.append("LEFT JOIN effective_blank eb ON eb.video_id = v.video_id")
-
-        # ── 4. WHERE clauses — only emit conditions for active filters ──
-        where: list[str] = []
+        if need_model_blank_filter:
+            joins.append("LEFT JOIN model_blank mb_f ON mb_f.video_id = v.video_id")
 
         if search_raw:
             params["sq"] = f"%{search_raw}%"
@@ -1128,12 +371,19 @@ class LocalDataProvider:
                     AND ma.value_text = :ps
                 )""")
 
-        if selected_blank_non_blank == "Blank":
-            where.append("eb.blank_non_blank_final_result = 'blank'")
-        elif selected_blank_non_blank == "Non-Blank":
-            where.append("eb.blank_non_blank_final_result = 'non_blank'")
-        elif selected_blank_non_blank == "Unknown":
-            where.append("eb.blank_non_blank_final_result IS NULL")
+        if selected_manual_blank == "Blank":
+            where.append("EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.is_blank = 1)")
+        elif selected_manual_blank == "Non-Blank":
+            where.append("EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.is_blank = 0)")
+        elif selected_manual_blank == "Unlabeled":
+            where.append("NOT EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL)")
+
+        if selected_model_blank == "Blank":
+            where.append("mb_f.result = 'blank'")
+        elif selected_model_blank == "Non-Blank":
+            where.append("mb_f.result = 'non_blank'")
+        elif selected_model_blank == "Unknown":
+            where.append("mb_f.video_id IS NULL")
 
         if selected_behavior == "Has Behavior":
             where.append("""
@@ -1157,6 +407,16 @@ class LocalDataProvider:
                     WHERE io.video_id = v.video_id AND io.behavior = :behavior
                 )""")
 
+        if selected_model_behavior != "All":
+            params["model_behavior"] = selected_model_behavior
+            where.append("""
+                EXISTS (
+                    SELECT 1 FROM model_annotations ma
+                    WHERE ma.video_id = v.video_id
+                    AND ma.annotation_type = 'behavior'
+                    AND ma.value_text = :model_behavior
+                )""")
+
         if web_safe_only:
             where.append("v.is_web_safe = 1")
 
@@ -1178,7 +438,7 @@ class LocalDataProvider:
                     WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
                 )""")
 
-        elif selected_sort == "camera":
+        if selected_sort == "camera":
             order_by = f"ORDER BY v.camera_id {sort_dir}, v.video_id ASC"
         elif selected_sort == "unreviewed_first":
             order_by = f"""ORDER BY
@@ -1224,7 +484,6 @@ class LocalDataProvider:
         else:
             order_by = "ORDER BY v.video_id ASC"
 
-        # ── Assemble ──
         cte_sql = ("WITH " + ",\n".join(ctes)) if ctes else ""
         join_sql = "\n".join(joins)
         where_sql = ("WHERE " + "\nAND ".join(where)) if where else ""
@@ -1242,6 +501,8 @@ class LocalDataProvider:
             rows = pd.read_sql(sql, conn, params=params)
 
         return [] if rows.empty else rows["video_id"].astype(str).tolist()
+
+    # ── Video detail ──────────────────────────────────────────────────────────
 
     def get_video_detail(
         self,
@@ -1337,8 +598,7 @@ class LocalDataProvider:
                         v.transcoded_path,
                         v.validation_error AS video_validation_details,
                         vl.is_blank,
-                        vl.labeled_by,
-                        vl.labeled_at,
+                        vl.labeled_by AS blank_labeled_by,
                         ms.behavior_prediction,
                         ms.individual_count,
                         COALESCE(msc.classification_consensus, 'UNKNOWN') AS classification_consensus,
@@ -1372,7 +632,7 @@ class LocalDataProvider:
             manual_rows = pd.read_sql(
                 text(
                     """
-                    SELECT species, behavior, start_sec, end_sec
+                    SELECT species, behavior, start_sec, end_sec, labeled_by, labeled_at
                     FROM individual_observations
                     WHERE video_id = :video_id
                     ORDER BY COALESCE(start_sec, 0.0), species
@@ -1396,6 +656,8 @@ class LocalDataProvider:
                     "end_sec": None
                     if pd.isna(manual.get("end_sec"))
                     else float(manual.get("end_sec")),
+                    "labeled_by": manual.get("labeled_by"),
+                    "labeled_at": manual.get("labeled_at"),
                 }
             )
         row["manual_selections"] = selections
@@ -1422,8 +684,6 @@ class LocalDataProvider:
         row["is_video_valid"] = (
             True if row.get("is_video_valid") is None else bool(row.get("is_video_valid"))
         )
-
-        # Pre-calculate fields for the UI to improve separation of concerns
         row["needs_transcode"] = needs_browser_transcode(row)
         model_ann = self.get_model_annotations(video_id)
         row["default_species"] = get_default_species_from_annotations(
@@ -1473,12 +733,14 @@ class LocalDataProvider:
         model_df["created_at"] = pd.to_datetime(model_df["created_at"], errors="coerce")
         return model_df
 
+    # ── Manual review ─────────────────────────────────────────────────────────
+
     def update_manual_review(
         self,
         video_id: str,
         selections: list[dict] | None,
-        annotator: str = "local",
         is_blank: bool | None = None,
+        labeled_by: str | None = None,
     ) -> None:
         if selections is None:
             selections = []
@@ -1508,15 +770,14 @@ class LocalDataProvider:
                     "behavior": behavior,
                     "start_sec": float(start_sec),
                     "end_sec": end_sec_val,
+                    "labeled_by": selection.get("labeled_by"),
                 }
             )
 
         if is_blank is None:
-            # Fallback to legacy detection if not explicitly provided
             if not normalized:
                 is_blank = None
             else:
-                # Still check if user passed a list containing only "blank" species
                 is_blank = (
                     len(selections) == 1 and str(selections[0].get("species")).lower() == "blank"
                 )
@@ -1527,23 +788,26 @@ class LocalDataProvider:
                 label = VideoLabel(video_id=video_id)
                 session.add(label)
             label.is_blank = is_blank
-            label.labeled_by = annotator
-            label.labeled_at = now
+            if is_blank:
+                label.labeled_by = labeled_by
+                label.labeled_at = now
 
             session.query(IndividualObservation).filter(
                 IndividualObservation.video_id == video_id
             ).delete(synchronize_session=False)
 
             if is_blank is False:
-                for row in normalized:
+                for obs_id, row in enumerate(normalized, start=1):
                     session.add(
                         IndividualObservation(
                             video_id=video_id,
+                            id=obs_id,
                             species=row["species"],
                             behavior=row["behavior"],
                             start_sec=row["start_sec"],
                             end_sec=row["end_sec"],
-                            created_at=now,
+                            labeled_by=row.get("labeled_by"),
+                            labeled_at=now,
                             updated_at=now,
                         )
                     )
@@ -1589,6 +853,8 @@ class LocalDataProvider:
 
         if selections:
             self.update_manual_review(snapshot["video_id"], selections)
+
+    # ── Model CSV import ──────────────────────────────────────────────────────
 
     @staticmethod
     def _normalize_annotation_type(annotation_type: str) -> str:
@@ -1678,7 +944,6 @@ class LocalDataProvider:
 
             if annotation_type == "species" and value_text:
                 original_value = value_text
-                # First, check if there is an explicit user mapping
                 mapped_to = mappings.get(original_value)
                 if mapped_to:
                     value_text = mapped_to
@@ -1758,14 +1023,91 @@ class LocalDataProvider:
 
         return {"inserted_rows": int(len(cleaned_df)), "upserted_rows": int(upserted)}
 
+    # ── Annotation export / import ────────────────────────────────────────────
+
+    def export_annotations_csv(self) -> pd.DataFrame:
+        with self.engine.connect() as conn:
+            return pd.read_sql(
+                text("""
+                    SELECT
+                        v.video_id,
+                        v.video_path,
+                        v.camera_id,
+                        v.created_at              AS recorded_at,
+                        v.duration_sec,
+                        CAST(vl.is_blank AS INTEGER) AS is_blank,
+                        COALESCE(io.labeled_by, vl.labeled_by) AS annotator,
+                        COALESCE(io.labeled_at, vl.labeled_at) AS labeled_at,
+                        io.id                     AS observation_id,
+                        io.species,
+                        io.behavior,
+                        io.start_sec,
+                        io.end_sec
+                    FROM videos v
+                    JOIN video_labels vl ON vl.video_id = v.video_id
+                    LEFT JOIN individual_observations io ON io.video_id = v.video_id
+                    ORDER BY v.camera_id, v.video_path, io.start_sec
+                """),
+                conn,
+            )
+
+    def import_annotations_csv(self, df: pd.DataFrame) -> dict[str, Any]:
+        required = {"video_id", "is_blank"}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+        with self.engine.connect() as conn:
+            known_ids = set(
+                pd.read_sql(text("SELECT video_id FROM videos"), conn)["video_id"]
+            )
+
+        imported = 0
+        skipped: list[str] = []
+
+        for video_id, group in df.groupby("video_id", sort=False):
+            if video_id not in known_ids:
+                skipped.append(str(video_id))
+                continue
+
+            first = group.iloc[0]
+            is_blank_raw = first["is_blank"]
+            is_blank = bool(int(is_blank_raw)) if pd.notna(is_blank_raw) else None
+
+            if is_blank:
+                self.update_manual_review(str(video_id), [], is_blank=True)
+            else:
+                selections = []
+                for _, row in group.iterrows():
+                    sp = str(row.get("species") or "").strip()
+                    if not sp:
+                        continue
+                    beh = str(row.get("behavior") or "unlabeled").strip() or "unlabeled"
+                    labeled_by = (
+                        str(row["annotator"])
+                        if "annotator" in group.columns and pd.notna(row.get("annotator"))
+                        else None
+                    )
+                    selections.append({
+                        "species": sp,
+                        "behavior": beh,
+                        "start_sec": row.get("start_sec"),
+                        "end_sec": row.get("end_sec"),
+                        "labeled_by": labeled_by,
+                    })
+                if selections:
+                    self.update_manual_review(str(video_id), selections)
+
+            imported += 1
+
+        return {"imported": imported, "skipped": skipped}
+
+    # ── Stats ─────────────────────────────────────────────────────────────────
+
     def get_overview_stats(self) -> dict[str, Any]:
-        """
-        Single-query overview for dashboards. All counts in one round-trip.
-        """
         with self.engine.connect() as conn:
             stats = {}
 
-            # ── Videos ──────────────────────────────────────────────────────
             stats["videos"] = (
                 pd.read_sql(
                     text("""
@@ -1785,14 +1127,10 @@ class LocalDataProvider:
             )
 
             stats["failed_videos"] = pd.read_sql(
-                text("""
-                    SELECT * FROM videos
-                    WHERE is_valid = 0
-                    """),
+                text("SELECT * FROM videos WHERE is_valid = 0"),
                 conn,
             )
 
-            # ── Label / review progress ──────────────────────────────────────
             stats["labeling"] = (
                 pd.read_sql(
                     text("""
@@ -1813,7 +1151,6 @@ class LocalDataProvider:
                 .to_dict()
             )
 
-            # ── Manual observations: species breakdown ───────────────────────
             stats["species_counts"] = pd.read_sql(
                 text("""
                 SELECT
@@ -1827,7 +1164,6 @@ class LocalDataProvider:
                 conn,
             ).to_dict(orient="records")
 
-            # ── Manual observations: behavior breakdown ──────────────────────
             stats["behavior_counts"] = pd.read_sql(
                 text("""
                 SELECT
@@ -1841,7 +1177,6 @@ class LocalDataProvider:
                 conn,
             ).to_dict(orient="records")
 
-            # ── Model annotation coverage ────────────────────────────────────
             stats["model_coverage"] = pd.read_sql(
                 text("""
                 SELECT
@@ -1858,7 +1193,6 @@ class LocalDataProvider:
                 conn,
             ).to_dict(orient="records")
 
-            # ── Model species predictions ────────────────────────────────────
             stats["model_species_dist"] = pd.read_sql(
                 text("""
                 SELECT
@@ -1875,8 +1209,6 @@ class LocalDataProvider:
                 conn,
             ).to_dict(orient="records")
 
-            # ── Agreement: model vs manual ───────────────────────────────────
-            # Where a manual label exists, how often does the top model agree?
             stats["model_human_agreement"] = pd.read_sql(
                 text("""
                 WITH top_model AS (
@@ -1912,7 +1244,6 @@ class LocalDataProvider:
                 conn,
             ).to_dict(orient="records")
 
-            # ── Per-camera breakdown ─────────────────────────────────────────
             stats["camera_summary"] = pd.read_sql(
                 text("""
                 SELECT

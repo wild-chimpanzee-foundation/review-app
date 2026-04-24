@@ -206,40 +206,33 @@ class SetupWizard:
 
             if not has_videos:
                 submit_button_holder[0].visible = False
-                self.inputs["video_dir"].props("readonly")
-                self.inputs["annotator_name"].props("readonly")
-                start_button_holder: list = [None]
 
-                with main_container:
-                    with ui.card().classes("full-width q-mb-lg"):
-                        ui.label(t("setup_complete")).classes(
-                            "text-h4 text-primary font-weight-bold"
+                dialog = ui.dialog().props("persistent")
+                with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
+                    ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
+                    progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
+                    status = ui.label(t("starting")).classes("text-caption text-grey-6 q-mt-sm")
+                    go_btn = (
+                        ui.button(
+                            t("go_to_overview_btn"),
+                            icon="play_arrow",
+                            color="primary",
+                            on_click=lambda: (dialog.close(), self.on_complete_callback()),
                         )
-                        ui.label(t("setup_complete_msg")).classes("text-body1 text-grey-7")
+                        .props("size=lg")
+                        .classes("full-width q-mt-md")
+                    )
+                    go_btn.visible = False
 
-                    with ui.card().classes("full-width q-mb-lg"):
-                        ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
-                        progress = ui.linear_progress(value=0, show_value=False).props(
-                            "color=primary"
-                        )
-                        status = ui.label(t("starting"))
-
-                    start_button_holder[0] = ui.button(
-                        t("go_to_overview_btn"),
-                        icon="play_arrow",
-                        color="primary",
-                        on_click=lambda: self.on_complete_callback(),
-                    ).props("size=lg").classes("full-width")
-                    start_button_holder[0].visible = False
-
+                dialog.open()
                 await sync_with_progress(dp, progress=progress, status=status)
                 ui.notify(t("videos_synced_notify"), type="positive")
                 status.text = t("sync_complete")
-                start_button_holder[0].visible = True
+                go_btn.visible = True
             else:
                 self.on_complete_callback()
 
-        with ui.column().classes("w-full max-w-2xl mx-auto q-pa-lg") as main_container:
+        with ui.column().classes("w-full max-w-2xl mx-auto q-pa-lg"):
             with ui.card().classes("full-width q-mb-lg"):
                 ui.label(t("welcome_setup")).classes("text-h4 text-primary font-weight-bold")
                 ui.label(t("welcome_setup_msg")).classes("text-body1 text-grey-7")

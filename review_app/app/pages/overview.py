@@ -2,14 +2,13 @@ from nicegui import run, ui
 
 from review_app.app.state import get_data_provider
 from review_app.app.translations import get_language, t
+from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
 
 
 async def setup_overview():
-    dp = get_data_provider()
+    dp = await get_or_create_data_provider()
     if not dp or not await run.io_bound(dp.has_videos_in_db):
-        with ui.column().classes("w-full q-pa-lg items-center"):
-            ui.label(t("error_dp_init")).classes("text-h6 text-red-600")
-            ui.button(t("setup_btn"), on_click=lambda: ui.navigate.to("/setup"), icon="settings")
+        render_uninitialized_state()
         return
 
     stats = await run.io_bound(dp.get_overview_stats)

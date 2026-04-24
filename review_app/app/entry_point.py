@@ -38,6 +38,7 @@ from review_app.app.state import (  # noqa: E402
 )
 from review_app.app.theme import apply_theme  # noqa: E402
 from review_app.app.translations import get_language, set_language, t  # noqa: E402
+from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state  # noqa: E402
 from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
 
 CONFIG_PATH = get_config_path()
@@ -79,24 +80,6 @@ def shared_header():
             ui.label(t("shortcuts_title")).classes("text-h6 font-weight-bold")
 
         with ui.column().classes("w-full gap-4"):
-            # Navigation
-            with ui.column().classes("w-full gap-1"):
-                ui.label(t("shortcuts_global")).classes(
-                    "text-subtitle2 text-primary font-weight-medium"
-                )
-                ui.separator()
-                for key, label in [
-                    ("O", t("shortcut_overview")),
-                    ("R", t("shortcut_review")),
-                    ("M", t("shortcut_import")),
-                    ("S", t("shortcut_settings")),
-                ]:
-                    with ui.row().classes("w-full justify-between items-center"):
-                        ui.label(label).classes("text-body2")
-                        ui.label(key).classes(
-                            "q-px-sm q-py-xs bg-grey-8 text-white rounded-borders text-bold text-caption shadow-1"
-                        )
-
             # Review Page
             with ui.column().classes("w-full gap-1 q-mt-sm"):
                 ui.label(t("shortcuts_review")).classes(
@@ -108,6 +91,9 @@ def shared_header():
                     ("N", t("shortcut_next_video")),
                     ("P", t("shortcut_prev_video")),
                     ("B", t("shortcut_mark_blank")),
+                    ("Space", t("shortcut_play_pause")),
+                    ("← →", t("shortcut_seek")),
+                    ("D / S", t("shortcut_speed_up_down")),
                 ]:
                     with ui.row().classes("w-full justify-between items-center"):
                         ui.label(label).classes("text-body2")
@@ -165,9 +151,9 @@ class GUI:
                     ).props("size=lg")
         else:
             try:
-                dp = get_data_provider()
-                if not dp:
-                    ui.navigate.to("/setup")
+                dp = await get_or_create_data_provider()
+                if not dp or not await run.io_bound(dp.has_videos_in_db):
+                    render_uninitialized_state()
                     return
 
                 with ui.column().classes("w-full q-pa-lg"):
@@ -305,21 +291,6 @@ class GUI:
         ui.page("/setup")(self.setup_page)
         ui.page("/model-import")(self.model_import_page)
         ui.page("/settings")(self.settings_page)
-
-        ui.add_body_html(
-            """
-            <script>
-                document.addEventListener('keydown', function(e) {
-                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-                    if (e.ctrlKey || e.metaKey || e.altKey) return;
-                    const routes = { o: '/overview', r: '/review', m: '/model-import', s: '/settings' };
-                    const path = routes[e.key.toLowerCase()];
-                    if (path) window.location.href = path;
-                });
-            </script>
-            """,
-            shared=True,
-        )
 
         # Load config and register media files at startup (before ui.run)
         if CONFIG_PATH.exists():

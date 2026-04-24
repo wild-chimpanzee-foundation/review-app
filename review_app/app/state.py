@@ -49,8 +49,10 @@ def _get_user_state() -> dict[str, Any]:
             "selected_camera": "All",
             "selected_species": "All",
             "selected_possible_species": "All",
-            "selected_blank_non_blank": "All",
+            "selected_manual_blank": "All",
+            "selected_model_blank": "All",
             "selected_behavior": "All",
+            "selected_model_behavior": "All",
             "selected_annotation_status": "All",
             "selected_sort": "camera",
             "selected_sort_direction": "desc",
@@ -65,6 +67,11 @@ def _get_user_state() -> dict[str, Any]:
             del f["selected_review_status"]
         f.pop("blank_threshold", None)
         f.pop("species_threshold", None)
+        if "selected_blank_non_blank" in f:
+            del f["selected_blank_non_blank"]
+        f.setdefault("selected_manual_blank", "All")
+        f.setdefault("selected_model_blank", "All")
+        f.setdefault("selected_model_behavior", "All")
     if "video_queue" not in app.storage.user:
         app.storage.user["video_queue"] = []
     if "current_video_idx" not in app.storage.user:
@@ -160,6 +167,14 @@ def is_muted():
 
 def set_muted(enabled: bool):
     _get_user_state()["muted"] = enabled
+
+
+def is_reset_speed_on_seek():
+    return _get_user_state().get("reset_speed_on_seek", True)
+
+
+def set_reset_speed_on_seek(enabled: bool):
+    _get_user_state()["reset_speed_on_seek"] = enabled
 
 
 def is_auto_transcode():

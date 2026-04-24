@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import run, ui
 
 from review_app.app.config import (
     get_bundled_behaviors_csv,
@@ -22,7 +22,11 @@ from review_app.app.state import (
     set_selections,
 )
 from review_app.app.translations import t
-from review_app.app.utils import sync_with_progress
+from review_app.app.utils import (
+    get_or_create_data_provider,
+    render_uninitialized_state,
+    sync_with_progress,
+)
 from review_app.backend.local_data_provider import LocalDataProvider
 
 CONFIG_PATH = get_config_path()
@@ -337,6 +341,7 @@ def _build_settings_content(container: ui.column):
                             on_click=lambda: (build_confirm_step(), reset_dialog.open()),
                         )
 
+
         async def _confirm_existing_db(db_path: str):
             """Returns True to keep, False to delete, None to cancel."""
             result: list = [None]
@@ -457,6 +462,11 @@ def _build_settings_content(container: ui.column):
 
 
 async def setup_settings():
+    dp = await get_or_create_data_provider()
+    if not dp or not await run.io_bound(dp.has_videos_in_db):
+        render_uninitialized_state()
+        return
+
     container = ui.column().classes("w-full q-pa-lg")
     container.clear()
     _build_settings_content(container)

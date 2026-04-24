@@ -35,9 +35,33 @@ async def sync_with_progress(data_provider, progress=None, status=None):
                 status.text = t("scanning_file", filename=filename)
         await asyncio.sleep(0.15)
 
-    if progress is not None:
-        progress.value = 1.0
     if status is not None:
         status.text = t("sync_complete")
 
     return future.result()
+
+
+def render_uninitialized_state():
+    from nicegui import ui
+
+    from review_app.app.translations import t
+    with ui.column().classes("w-full q-pa-lg items-center"):
+        ui.label(t("error_dp_init")).classes("text-h6 text-red-600")
+        ui.button(t("setup_btn"), on_click=lambda: ui.navigate.to("/setup"), icon="settings")
+
+
+async def get_or_create_data_provider():
+    from review_app.app.config import get_config_path
+    from review_app.app.state import get_data_provider, set_data_provider
+    from review_app.backend.local_data_provider import LocalDataProvider
+
+    dp = get_data_provider()
+    if not dp:
+        config_path = get_config_path()
+        if config_path.exists():
+            try:
+                dp = LocalDataProvider(str(config_path))
+                set_data_provider(dp)
+            except Exception:
+                return None
+    return dp

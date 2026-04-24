@@ -6,6 +6,7 @@ from nicegui import run, ui
 from review_app.app.config import get_config_path
 from review_app.app.state import get_data_provider, get_state_val, set_data_provider, set_state_val
 from review_app.app.translations import get_language, t
+from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
 from review_app.backend.local_data_provider import LocalDataProvider
 
 
@@ -30,19 +31,10 @@ def _get_df_from_state(key: str) -> pd.DataFrame | None:
 
 
 async def setup_model_import():
-    dp = get_data_provider()
-    if not dp:
-        config_path = get_config_path()
-        if config_path.exists():
-            dp = LocalDataProvider(str(config_path))
-            set_data_provider(dp)
-        else:
-            with ui.card().classes("q-pa-xl"):
-                ui.label(t("error_dp_init")).classes("text-h6 text-negative")
-                ui.button(
-                    t("setup_btn"), on_click=lambda: ui.navigate.to("/setup"), icon="settings"
-                )
-            return
+    dp = await get_or_create_data_provider()
+    if not dp or not await run.io_bound(dp.has_videos_in_db):
+        render_uninitialized_state()
+        return
 
     set_state_val("uploaded_df", None)
     set_state_val("cleaned_df", None)
@@ -59,198 +51,49 @@ async def setup_model_import():
     pending_warning_holder: list = [None]
 
     with ui.column().classes("w-full q-pa-md"):
-        with ui.row().classes("items-center q-mb-md"):
-            ui.label(t("model_import_title")).classes("text-h5 text-primary font-weight-bold")
+        ui.label(t("nav_import")).classes("text-h5 text-primary font-weight-bold q-mb-lg")
 
-        ui.label(t("model_import_desc")).classes("text-body2 q-mb-lg")
+        with ui.tabs().classes("w-full") as tabs:
+            tab_model = ui.tab("model_import", label=t("model_import_title"))
+            tab_annotations = ui.tab("annotations", label=t("annotation_export_import_title"))
 
-        with ui.card().classes("full-width q-mb-lg"):
-            with ui.row().classes("items-center"):
-                ui.label(t("csv_template")).classes("text-subtitle1 font-weight-medium")
+        with ui.tab_panels(tabs, value=tab_model).classes("w-full"):
+            with ui.tab_panel(tab_model):
+                ui.label(t("model_import_desc")).classes("text-body2 text-grey-7 q-mb-md")
 
-            templates = await run.io_bound(dp.get_csv_templates)
-            csv_content = templates["model_annotations"]
+                templates = await run.io_bound(dp.get_csv_templates)
+                csv_content = templates["model_annotations"]
 
-            def download_template():
-                ui.download(csv_content.encode("utf-8"), "model_annotations_template.csv")
+                def download_template():
+                    ui.download(csv_content.encode("utf-8"), "model_annotations_template.csv")
 
-            ui.button(t("download_template"), icon="download", on_click=download_template)
+                with ui.row().classes("items-center q-mb-md"):
+                    ui.label(t("csv_template")).classes("text-caption text-grey-6")
+                    ui.button(
+                        t("download_template"),
+                        icon="download",
+                        on_click=download_template,
+                    ).props("flat dense color=grey-7 size=sm")
 
-        with ui.card().classes("full-width q-mb-lg"):
-            ui.label(t("upload_csv")).classes("text-subtitle1 font-weight-medium q-mb-md")
+                with ui.card().classes("full-width q-mb-lg"):
+                    ui.label(t("upload_csv")).classes("text-subtitle1 font-weight-medium q-mb-md")
 
-            upload_result = ui.label(t("upload_csv_msg")).classes("text-body2 text-grey-6")
+                    upload_result = ui.label(t("upload_csv_msg")).classes("text-body2 text-grey-6")
 
-            async def handle_upload(e):
-                loading_dialog.open()
-                try:
-                    content = await e.file.read()
-                    df = pd.read_csv(io.BytesIO(content))
-                    set_state_val("uploaded_df", df.to_dict(orient="records"))
-                    upload_result.text = t("loaded_rows", count=len(df))
-
-                    cleaned_df, errors_df, species_mappings, unmapped_species = await run.io_bound(
-                        dp.validate_model_csv, df
-                    )
-
-                    set_state_val(
-                        "cleaned_df",
-                        cleaned_df.to_dict(orient="records") if cleaned_df is not None else None,
-                    )
-                    set_state_val(
-                        "errors_df",
-                        errors_df.to_dict(orient="records") if errors_df is not None else None,
-                    )
-                    set_state_val(
-                        "species_mappings",
-                        {m["original"]: m.get("mapped_to", "") for m in species_mappings},
-                    )
-                    set_state_val("unmapped_species", unmapped_species)
-
-                    ui.notify(t("csv_validated"), type="positive")
-                    refresh_results()
-                except Exception as exc:
-                    ui.notify(f"{t('error')}: {exc}", type="negative")
-                finally:
-                    loading_dialog.close()
-
-            ui.upload(
-                on_upload=handle_upload, multiple=False, label=t("choose_csv"), auto_upload=True
-            )
-
-        results_container = ui.card().classes("full-width q-mb-lg")
-        mappings_container = ui.card().classes("full-width q-mb-lg")
-
-        async def do_import():
-            loading_dialog.open()
-            try:
-                cleaned_df = _get_df_from_state("cleaned_df")
-                if cleaned_df is None or cleaned_df.empty:
-                    raise ValueError(t("no_data_import"))
-
-                df_to_import = cleaned_df.copy()
-                mappings = get_state_val("species_mappings", {})
-
-                if mappings:
-                    species_mask = df_to_import["annotation_type"] == "species"
-                    df_to_import.loc[species_mask, "value_text"] = df_to_import.loc[
-                        species_mask, "value_text"
-                    ].replace(mappings)
-
-                result = await run.io_bound(dp.import_model_csv, cleaned_df=df_to_import)
-                ui.notify(
-                    t("imported_rows", count=result.get("inserted_rows", 0)), type="positive"
-                )
-                set_state_val("uploaded_df", None)
-                set_state_val("cleaned_df", None)
-                set_state_val("errors_df", None)
-                set_state_val("species_mappings", {})
-                set_state_val("unmapped_species", [])
-                results_container.clear()
-                mappings_container.clear()
-                with results_container:
-                    ui.label(t("upload_csv_msg")).classes("text-body2 text-grey-6")
-            except Exception as exc:
-                ui.notify(t("import_failed", error=str(exc)), type="negative")
-            finally:
-                loading_dialog.close()
-
-        def update_import_button():
-            cleaned_df = _get_df_from_state("cleaned_df")
-            species_mappings = get_state_val("species_mappings", {})
-            can_import = (
-                cleaned_df is not None
-                and not cleaned_df.empty
-                and all(v for v in species_mappings.values())
-            )
-            btn = import_button_holder[0]
-            if btn:
-                btn.props(f"wide {'disabled' if not can_import else ''}")
-
-            pending = [k for k, v in species_mappings.items() if not v]
-            warning = pending_warning_holder[0]
-            if warning:
-                if pending:
-                    warning.text = t("missing_mappings", list=", ".join(pending))
-                    warning.visible = True
-                else:
-                    warning.visible = False
-
-        def refresh_results():
-            results_container.clear()
-            mappings_container.clear()
-
-            with results_container:
-                ui.label(t("validation_result")).classes(
-                    "text-subtitle1 font-weight-medium q-mb-md"
-                )
-
-                cleaned_df = _get_df_from_state("cleaned_df")
-                valid_count = len(cleaned_df) if cleaned_df is not None else 0
-                errors_df = _get_df_from_state("errors_df")
-                invalid_count = len(errors_df) if errors_df is not None else 0
-
-                with ui.row().classes("gap-lg q-mb-md"):
-                    with ui.card().classes("text-center q-pa-md"):
-                        ui.label(str(valid_count)).classes(
-                            "text-h5 font-weight-bold text-positive"
-                        )
-                        ui.label(t("valid_rows")).classes("text-caption text-grey-6")
-                    with ui.card().classes("text-center q-pa-md"):
-                        ui.label(str(invalid_count)).classes(
-                            "text-h5 font-weight-bold text-negative"
-                        )
-                        ui.label(t("invalid_rows")).classes("text-caption text-grey-6")
-
-            with mappings_container:
-                all_mappings = dict(get_state_val("species_mappings", {}))
-                unmapped = get_state_val("unmapped_species", [])
-                unmapped_origs = {u["original"] for u in unmapped}
-                all_species = set(all_mappings.keys()) | unmapped_origs
-
-                if all_species:
-                    ui.label(t("species_mappings")).classes(
-                        "text-subtitle1 font-weight-medium q-mb-sm"
-                    )
-                    ui.label(t("edit_mappings_desc")).classes("text-caption text-grey-6 q-mb-md")
-
-                    species_map = dp.get_species_display_map(get_language())
-                    select_options = {"": ""}
-                    select_options.update(species_map)
-
-                    for orig in sorted(all_species):
-                        current_mapping = all_mappings.get(orig, "")
-                        is_unmapped = orig in unmapped_origs
-                        with ui.row().classes("w-full items-center q-mb-sm"):
-                            ui.label(orig).classes(f"col {'text-negative' if is_unmapped else ''}")
-                            select = ui.select(
-                                label=t("mapped_to"),
-                                options=select_options,
-                                value=current_mapping,
-                                with_input=True,
-                            ).props("outlined dense class=col-4")
-
-                            def make_update_fn(o, sel):
-                                def update_mapping():
-                                    mappings = get_state_val("species_mappings", {})
-                                    mappings[o] = sel.value
-                                    set_state_val("species_mappings", mappings)
-                                    update_import_button()
-
-                                return update_mapping
-
-                            select.on_value_change(make_update_fn(orig, select))
-
-                    async def apply_mappings():
+                    async def handle_upload(e):
                         loading_dialog.open()
                         try:
-                            uploaded_df = _get_df_from_state("uploaded_df")
-                            mappings = get_state_val("species_mappings", {})
+                            content = await e.file.read()
+                            df = pd.read_csv(io.BytesIO(content))
+                            set_state_val("uploaded_df", df.to_dict(orient="records"))
+                            upload_result.text = t("loaded_rows", count=len(df))
 
-                            # Re-validate with current mappings
-                            cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
-                                dp.validate_model_csv, uploaded_df, mappings
-                            )
+                            (
+                                cleaned_df,
+                                errors_df,
+                                species_mappings,
+                                unmapped_species,
+                            ) = await run.io_bound(dp.validate_model_csv, df)
 
                             set_state_val(
                                 "cleaned_df",
@@ -258,91 +101,326 @@ async def setup_model_import():
                                 if cleaned_df is not None
                                 else None,
                             )
-
                             set_state_val(
                                 "errors_df",
                                 errors_df.to_dict(orient="records")
                                 if errors_df is not None
                                 else None,
                             )
+                            set_state_val(
+                                "species_mappings",
+                                {m["original"]: m.get("mapped_to", "") for m in species_mappings},
+                            )
                             set_state_val("unmapped_species", unmapped_species)
 
-                            ui.notify(t("mappings_applied"), type="positive")
+                            ui.notify(t("csv_validated"), type="positive")
                             refresh_results()
                         except Exception as exc:
-                            ui.notify(t("mapping_failed", error=str(exc)), type="negative")
+                            ui.notify(f"{t('error')}: {exc}", type="negative")
                         finally:
                             loading_dialog.close()
 
-                    species_mappings = get_state_val("species_mappings", {})
-                    pending_unmapped = [k for k, v in species_mappings.items() if not v]
-                    cleaned_df = _get_df_from_state("cleaned_df")
-                    can_apply_mappings = (
-                        cleaned_df is not None and not cleaned_df.empty and not pending_unmapped
+                    ui.upload(
+                        on_upload=handle_upload,
+                        multiple=False,
+                        label=t("choose_csv"),
+                        auto_upload=True,
                     )
 
-                    ui.button(
-                        t("apply"),
-                        icon="refresh",
-                        on_click=apply_mappings,
-                        color="primary",
-                    ).props(f"wide {'disabled' if not can_apply_mappings else ''}")
+                results_container = ui.card().classes("full-width q-mb-lg")
+                results_container.visible = False
+                mappings_container = ui.card().classes("full-width q-mb-lg")
+                mappings_container.visible = False
 
-                    if pending_unmapped:
-                        ui.label(t("map_all_to_import", list=", ".join(pending_unmapped))).classes(
-                            "text-warning text-caption q-mt-sm"
+                async def do_import():
+                    loading_dialog.open()
+                    try:
+                        cleaned_df = _get_df_from_state("cleaned_df")
+                        if cleaned_df is None or cleaned_df.empty:
+                            raise ValueError(t("no_data_import"))
+
+                        df_to_import = cleaned_df.copy()
+                        mappings = get_state_val("species_mappings", {})
+
+                        if mappings:
+                            species_mask = df_to_import["annotation_type"] == "species"
+                            df_to_import.loc[species_mask, "value_text"] = df_to_import.loc[
+                                species_mask, "value_text"
+                            ].replace(mappings)
+
+                        result = await run.io_bound(dp.import_model_csv, cleaned_df=df_to_import)
+                        ui.notify(
+                            t("imported_rows", count=result.get("inserted_rows", 0)),
+                            type="positive",
+                        )
+                        set_state_val("uploaded_df", None)
+                        set_state_val("cleaned_df", None)
+                        set_state_val("errors_df", None)
+                        set_state_val("species_mappings", {})
+                        set_state_val("unmapped_species", [])
+                        results_container.clear()
+                        results_container.visible = False
+                        mappings_container.clear()
+                        mappings_container.visible = False
+                    except Exception as exc:
+                        ui.notify(t("import_failed", error=str(exc)), type="negative")
+                    finally:
+                        loading_dialog.close()
+
+                def update_import_button():
+                    cleaned_df = _get_df_from_state("cleaned_df")
+                    species_mappings = get_state_val("species_mappings", {})
+                    can_import = (
+                        cleaned_df is not None
+                        and not cleaned_df.empty
+                        and all(v for v in species_mappings.values())
+                    )
+                    btn = import_button_holder[0]
+                    if btn:
+                        btn.props(f"wide {'disabled' if not can_import else ''}")
+
+                    pending = [k for k, v in species_mappings.items() if not v]
+                    warning = pending_warning_holder[0]
+                    if warning:
+                        if pending:
+                            warning.text = t("missing_mappings", list=", ".join(pending))
+                            warning.visible = True
+                        else:
+                            warning.visible = False
+
+                def refresh_results():
+                    results_container.clear()
+                    results_container.visible = True
+                    mappings_container.clear()
+                    mappings_container.visible = True
+
+                    with results_container:
+                        ui.label(t("validation_result")).classes(
+                            "text-subtitle1 font-weight-medium q-mb-md"
                         )
 
-            errors_df = _get_df_from_state("errors_df")
-            if errors_df is not None and not errors_df.empty:
-                with results_container:
-                    ui.label(t("validation_errors_count", count=len(errors_df))).classes(
-                        "text-negative q-mb-sm"
+                        cleaned_df = _get_df_from_state("cleaned_df")
+                        valid_count = len(cleaned_df) if cleaned_df is not None else 0
+                        errors_df = _get_df_from_state("errors_df")
+                        invalid_count = len(errors_df) if errors_df is not None else 0
+
+                        with ui.row().classes("gap-lg q-mb-md"):
+                            with ui.card().classes("text-center q-pa-md"):
+                                ui.label(str(valid_count)).classes(
+                                    "text-h5 font-weight-bold text-positive"
+                                )
+                                ui.label(t("valid_rows")).classes("text-caption text-grey-6")
+                            with ui.card().classes("text-center q-pa-md"):
+                                ui.label(str(invalid_count)).classes(
+                                    "text-h5 font-weight-bold text-negative"
+                                )
+                                ui.label(t("invalid_rows")).classes("text-caption text-grey-6")
+
+                    with mappings_container:
+                        all_mappings = dict(get_state_val("species_mappings", {}))
+                        unmapped = get_state_val("unmapped_species", [])
+                        unmapped_origs = {u["original"] for u in unmapped}
+                        all_species = set(all_mappings.keys()) | unmapped_origs
+
+                        if all_species:
+                            ui.label(t("species_mappings")).classes(
+                                "text-subtitle1 font-weight-medium q-mb-sm"
+                            )
+                            ui.label(t("edit_mappings_desc")).classes(
+                                "text-caption text-grey-6 q-mb-md"
+                            )
+
+                            species_map = dp.get_species_display_map(get_language())
+                            select_options = {"": ""}
+                            select_options.update(species_map)
+
+                            for orig in sorted(all_species):
+                                current_mapping = all_mappings.get(orig, "")
+                                is_unmapped = orig in unmapped_origs
+                                with ui.row().classes("w-full items-center q-mb-sm"):
+                                    ui.label(orig).classes(
+                                        f"col {'text-negative' if is_unmapped else ''}"
+                                    )
+                                    select = ui.select(
+                                        label=t("mapped_to"),
+                                        options=select_options,
+                                        value=current_mapping,
+                                        with_input=True,
+                                    ).props("outlined dense class=col-4")
+
+                                    def make_update_fn(o, sel):
+                                        def update_mapping():
+                                            mappings = get_state_val("species_mappings", {})
+                                            mappings[o] = sel.value
+                                            set_state_val("species_mappings", mappings)
+                                            update_import_button()
+
+                                        return update_mapping
+
+                                    select.on_value_change(make_update_fn(orig, select))
+
+                            async def apply_mappings():
+                                loading_dialog.open()
+                                try:
+                                    uploaded_df = _get_df_from_state("uploaded_df")
+                                    mappings = get_state_val("species_mappings", {})
+
+                                    (
+                                        cleaned_df,
+                                        errors_df,
+                                        _,
+                                        unmapped_species,
+                                    ) = await run.io_bound(
+                                        dp.validate_model_csv, uploaded_df, mappings
+                                    )
+
+                                    set_state_val(
+                                        "cleaned_df",
+                                        cleaned_df.to_dict(orient="records")
+                                        if cleaned_df is not None
+                                        else None,
+                                    )
+
+                                    set_state_val(
+                                        "errors_df",
+                                        errors_df.to_dict(orient="records")
+                                        if errors_df is not None
+                                        else None,
+                                    )
+                                    set_state_val("unmapped_species", unmapped_species)
+
+                                    ui.notify(t("mappings_applied"), type="positive")
+                                    refresh_results()
+                                except Exception as exc:
+                                    ui.notify(t("mapping_failed", error=str(exc)), type="negative")
+                                finally:
+                                    loading_dialog.close()
+
+                            species_mappings = get_state_val("species_mappings", {})
+                            pending_unmapped = [k for k, v in species_mappings.items() if not v]
+                            cleaned_df = _get_df_from_state("cleaned_df")
+                            can_apply_mappings = (
+                                cleaned_df is not None
+                                and not cleaned_df.empty
+                                and not pending_unmapped
+                            )
+
+                            ui.button(
+                                t("apply"),
+                                icon="refresh",
+                                on_click=apply_mappings,
+                                color="primary",
+                            ).props(f"wide {'disabled' if not can_apply_mappings else ''}")
+
+                            if pending_unmapped:
+                                ui.label(
+                                    t("map_all_to_import", list=", ".join(pending_unmapped))
+                                ).classes("text-warning text-caption q-mt-sm")
+
+                    errors_df = _get_df_from_state("errors_df")
+                    if errors_df is not None and not errors_df.empty:
+                        with results_container:
+                            ui.label(t("validation_errors_count", count=len(errors_df))).classes(
+                                "text-negative q-mb-sm"
+                            )
+
+                            error_summary = errors_df["error"].value_counts().to_dict()
+                            if error_summary:
+                                ui.label(t("error_summary")).classes("text-body2 q-mt-sm")
+                                for err, count in error_summary.items():
+                                    ui.label(f"  • {err}: {count} rows").classes("text-body2")
+
+                            with ui.expansion(
+                                t("show_detailed_errors"), icon="table_rows"
+                            ).classes("full-width q-mt-sm"):
+                                error_cols = [
+                                    {"field": c, "headerName": c} for c in errors_df.columns
+                                ]
+                                ui.aggrid(
+                                    {
+                                        "columnDefs": error_cols,
+                                        "rowData": _df_to_records(errors_df),
+                                        "columnSize": "responsive",
+                                        "rowSelection": "single",
+                                        "pagination": True,
+                                        "paginationPageSize": 50,
+                                    }
+                                ).classes("h-64")
+
+                    unmapped = get_state_val("unmapped_species", [])
+                    if unmapped:
+                        with results_container:
+                            ui.label(t("unmapped_species_count", count=len(unmapped))).classes(
+                                "text-warning q-mb-sm"
+                            )
+
+                    cleaned_df = _get_df_from_state("cleaned_df")
+                    species_mappings = get_state_val("species_mappings", {})
+                    can_import = (
+                        cleaned_df is not None
+                        and not cleaned_df.empty
+                        and all(v for v in species_mappings.values())
                     )
 
-                    error_summary = errors_df["error"].value_counts().to_dict()
-                    if error_summary:
-                        ui.label(t("error_summary")).classes("text-body2 q-mt-sm")
-                        for err, count in error_summary.items():
-                            ui.label(f"  • {err}: {count} rows").classes("text-body2")
+                    with results_container:
+                        pending_warning_holder[0] = ui.label("").classes("text-warning q-mb-sm")
+                        pending_warning_holder[0].visible = False
+                        update_import_button()
 
-                    with ui.expansion(t("show_detailed_errors"), icon="table_rows").classes(
-                        "full-width q-mt-sm"
-                    ):
-                        error_cols = [{"field": c, "headerName": c} for c in errors_df.columns]
-                        ui.aggrid(
-                            {
-                                "columnDefs": error_cols,
-                                "rowData": _df_to_records(errors_df),
-                                "columnSize": "responsive",
-                                "rowSelection": "single",
-                                "pagination": True,
-                                "paginationPageSize": 50,
-                            }
-                        ).classes("h-64")
+                        import_button_holder[0] = ui.button(
+                            t("import_valid_rows"),
+                            on_click=do_import,
+                            color="primary",
+                        ).props(f"wide {'disabled' if not can_import else ''}")
 
-            unmapped = get_state_val("unmapped_species", [])
-            if unmapped:
-                with results_container:
-                    ui.label(t("unmapped_species_count", count=len(unmapped))).classes(
-                        "text-warning q-mb-sm"
-                    )
+            with ui.tab_panel(tab_annotations):
+                with ui.row().classes("w-full gap-md q-mt-md items-start"):
+                    with ui.card().classes("col q-pa-md"):
+                        ui.label(t("upload_csv")).classes(
+                            "text-subtitle2 font-weight-medium q-mb-xs"
+                        )
+                        ui.label(t("annotation_import_desc")).classes(
+                            "text-caption text-grey-6 q-mb-md"
+                        )
 
-            cleaned_df = _get_df_from_state("cleaned_df")
-            species_mappings = get_state_val("species_mappings", {})
-            can_import = (
-                cleaned_df is not None
-                and not cleaned_df.empty
-                and all(v for v in species_mappings.values())
-            )
+                        annotation_import_status = ui.label("").classes("text-body2 text-grey-6")
 
-            with results_container:
-                pending_warning_holder[0] = ui.label("").classes("text-warning q-mb-sm")
-                pending_warning_holder[0].visible = False
-                update_import_button()
+                        async def handle_annotation_upload(e):
+                            try:
+                                content = await e.file.read()
+                                df = pd.read_csv(io.BytesIO(content))
+                                result = await run.io_bound(dp.import_annotations_csv, df)
+                                msg = f"Imported {result['imported']} videos."
+                                if result["skipped"]:
+                                    msg += f" Skipped {len(result['skipped'])} unknown video IDs."
+                                annotation_import_status.set_text(msg)
+                                ui.notify(msg, type="positive")
+                            except Exception as exc:
+                                ui.notify(f"Import failed: {exc}", type="negative")
 
-                import_button_holder[0] = ui.button(
-                    t("import_valid_rows"),
-                    on_click=do_import,
-                    color="primary",
-                ).props(f"wide {'disabled' if not can_import else ''}")
+                        ui.upload(
+                            on_upload=handle_annotation_upload,
+                            multiple=False,
+                            label=t("choose_annotations_csv"),
+                            auto_upload=True,
+                        ).props("accept=.csv")
+
+                    with ui.card().classes("col q-pa-md"):
+                        ui.label(t("export_annotations")).classes(
+                            "text-subtitle2 font-weight-medium q-mb-xs"
+                        )
+                        ui.label(t("annotation_export_desc")).classes(
+                            "text-caption text-grey-6 q-mb-md"
+                        )
+
+                        async def do_export():
+                            try:
+                                df = await run.io_bound(dp.export_annotations_csv)
+                                csv_bytes = df.to_csv(index=False).encode("utf-8")
+                                ui.download(csv_bytes, "annotations.csv")
+                            except Exception as exc:
+                                ui.notify(f"Export failed: {exc}", type="negative")
+
+                        ui.button(
+                            t("export_annotations"), icon="download", on_click=do_export
+                        ).props("flat color=primary")
