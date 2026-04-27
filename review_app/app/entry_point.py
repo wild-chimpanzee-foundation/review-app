@@ -27,13 +27,24 @@ for _ext, _mime in [
     mimetypes.add_type(_mime, _ext.upper())
 
 
-from review_app.app.config import get_config_path, get_default_db_path, load_config  # noqa: E402
-from review_app.app.setup_wizard import setup_wizard  # noqa: E402
+from review_app.app.config import (
+    get_config_path,
+    get_default_db_path,
+    load_config,
+)  # noqa: E402
+from review_app.app.media import register_media_dir, setup_media_route  # noqa: E402
+from review_app.app.setup_wizard import setup_wizard, validate_video_dir  # noqa: E402
 from review_app.app.state import (  # noqa: E402
+    get_active_project_name,
+    get_active_project_id,
     init_user_prefs,
     is_dark_mode,
+    set_active_project,
+    set_current_idx,
     set_dark_mode,
     set_data_provider,
+    set_queue,
+    set_selections,
 )
 from review_app.app.theme import apply_theme  # noqa: E402
 from review_app.app.translations import get_language, set_language, t  # noqa: E402
@@ -47,7 +58,7 @@ CONFIG_PATH = get_config_path()
 
 
 def shared_header():
-    from nicegui import ui
+    from nicegui import app, ui
 
     apply_theme()
 
@@ -106,6 +117,76 @@ def shared_header():
     with ui.header().classes("bg-primary"):
         with ui.row().classes("w-full items-center q-px-md"):
             ui.label(t("app_title")).classes("text-h6 text-white font-weight-bold")
+
+            project_name = get_active_project_name()
+            if project_name:
+                with (
+                    ui.dialog() as project_dialog,
+                    ui.card().classes("q-pa-lg").style("min-width: 480px"),
+                ):
+                    ui.label(t("switch_project")).classes("text-h6 q-mb-md")
+                    projects_col = ui.column().classes("w-full gap-xs q-mb-md")
+
+                    def refresh_projects_col():
+                        projects_col.clear()
+                        _dp = LocalDataProvider(str(CONFIG_PATH))
+                        projects = _dp.list_projects()
+                        active_id = get_active_project_id()
+                        with projects_col:
+                            for proj in projects:
+                                is_active = proj.id == active_id
+                                with ui.row().classes("w-full items-center gap-sm"):
+
+                                    def make_switch(pid, pname):
+                                        async def do_switch():
+                                            from review_app.app.config import update_config_key
+
+                                            switch_dp = LocalDataProvider(str(CONFIG_PATH))
+                                            dirs = switch_dp.get_project_dirs(pid)
+                                            update_config_key("active_project_id", pid)
+                                            switch_dp.touch_project(pid)
+                                            new_dp = LocalDataProvider(str(CONFIG_PATH))
+                                            set_data_provider(new_dp)
+                                            set_active_project(pid, pname)
+                                            set_queue([])
+                                            set_current_idx(0)
+                                            set_selections([])
+                                            for d in dirs or []:
+                                                if Path(d.path).exists():
+                                                    register_media_dir(Path(d.path))
+                                            project_dialog.close()
+                                            ui.navigate.to("/overview")
+
+                                        return do_switch
+
+                                    ui.button(
+                                        proj.name,
+                                        on_click=make_switch(proj.id, proj.name),
+                                        color="primary" if is_active else None,
+                                    ).props(
+                                        f"{'unelevated' if is_active else 'flat'} dense"
+                                    ).classes("col text-left")
+                                    if is_active:
+                                        ui.icon("check_circle", color="positive", size="sm")
+
+                    refresh_projects_col()
+
+                    ui.separator().classes("q-my-sm")
+
+                    def go_to_setup():
+                        project_dialog.close()
+                        ui.navigate.to("/setup")
+
+                    ui.button(
+                        t("new_project"), icon="add", color="primary", on_click=go_to_setup
+                    ).props("flat dense").classes("w-full")
+
+                ui.button(
+                    project_name,
+                    icon="folder_special",
+                    on_click=lambda: (refresh_projects_col(), project_dialog.open()),
+                ).props("flat color=white dense").classes("q-ml-sm text-caption")
+
             ui.space()
             with ui.row().classes("gap-2 items-center"):
                 ui.button(t("nav_overview"), on_click=lambda: ui.navigate.to("/overview")).props(
@@ -155,7 +236,6 @@ class GUI:
 
         try:
             cfg = load_config()
-            video_dir = cfg.get("video_dir", "")
 
             raw_db_dir = cfg.get("db_dir", "")
             db_filename = cfg.get("db_filename", "review_data.db")
@@ -164,10 +244,7 @@ class GUI:
             else:
                 expected_db = get_default_db_path()
 
-            video_dir_missing = bool(video_dir) and not Path(video_dir).exists()
-            db_missing = not expected_db.exists()
-
-            if db_missing:
+            if not expected_db.exists():
                 with ui.column().classes("w-full items-center justify-center q-pa-xl"):
                     with ui.card().classes("q-pa-xl").style("max-width: 560px"):
                         with ui.row().classes("items-center gap-md q-mb-md"):
@@ -197,7 +274,14 @@ class GUI:
                             ).props("flat")
                 return
 
-            if video_dir_missing:
+            dp = await get_or_create_data_provider()
+            if not dp:
+                render_uninitialized_state()
+                return
+
+            missing_dirs = [d for d in dp.video_dirs if not d.exists()]
+            if dp.video_dirs and len(missing_dirs) == len(dp.video_dirs):
+                video_dir_str = str(dp.video_dirs[0])
                 with ui.column().classes("w-full items-center justify-center q-pa-xl"):
                     with ui.card().classes("q-pa-xl").style("max-width: 560px"):
                         with ui.row().classes("items-center gap-md q-mb-md"):
@@ -208,7 +292,7 @@ class GUI:
                         ui.label("Your configured video directory cannot be found:").classes(
                             "text-body2 text-grey-7"
                         )
-                        ui.label(str(video_dir)).classes(
+                        ui.label(video_dir_str).classes(
                             "text-caption text-grey-5 q-mb-md q-pa-sm bg-grey-9 rounded-borders"
                         )
                         ui.label(
@@ -229,8 +313,7 @@ class GUI:
                             ).props("flat")
                 return
 
-            dp = await get_or_create_data_provider()
-            if not dp or not await run.io_bound(dp.has_videos_in_db):
+            if not await run.io_bound(dp.has_videos_in_db, get_active_project_id()):
                 render_uninitialized_state()
                 return
 
@@ -241,7 +324,7 @@ class GUI:
                     )
                     ui.label(t("welcome_subtitle")).classes("text-body1 text-grey-7")
 
-                has_videos = await run.io_bound(dp.has_videos_in_db)
+                has_videos = await run.io_bound(dp.has_videos_in_db, get_active_project_id())
 
                 with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
                     with ui.card().classes("col"):
@@ -249,7 +332,8 @@ class GUI:
                         ui.label(str(dp.db_path)).classes("text-body2")
                     with ui.card().classes("col"):
                         ui.label(t("video_dir_label")).classes("text-caption text-grey-6")
-                        ui.label(str(dp.video_dir)).classes("text-body2")
+                        for _d in dp.video_dirs:
+                            ui.label(str(_d)).classes("text-body2")
                     with ui.card().classes("col"):
                         ui.label(t("videos_in_db_label")).classes("text-caption text-grey-6")
                         ui.label(t("yes") if has_videos else t("no")).classes("text-body2")
@@ -300,6 +384,16 @@ class GUI:
 
         shared_header()
         await setup_review()
+
+    async def settings_page(self):
+        from review_app.app.pages.settings import setup_settings
+
+        shared_header()
+        dp, error = await get_or_create_data_provider()
+        if not dp:
+            render_uninitialized_state(error)
+            return
+        await setup_settings(dp)
 
     async def model_import_page(self):
         from review_app.app.pages.model_import import setup_model_import
@@ -378,19 +472,30 @@ class GUI:
                     species_threshold=cfg.get("species_threshold", 0.75),
                 )
 
-                if cfg.get("video_dir"):
-                    dp = LocalDataProvider(str(CONFIG_PATH))
-                    set_data_provider(dp)
-                    self.dp = dp
-                    if dp.video_dir and Path(dp.video_dir).exists():
-                        app.add_media_files("/media", dp.video_dir)
-                    import tempfile
+                dp = LocalDataProvider(str(CONFIG_PATH))
+                set_data_provider(dp)
+                self.dp = dp
+                active_id = get_active_project_id()
+                if active_id:
+                    proj = dp.get_project(active_id)
+                    if proj:
+                        set_active_project(proj.id, proj.name)
+                        dp.touch_project(proj.id)
 
-                    transcoded_tmp = Path(tempfile.gettempdir()) / "video_review_transcoded"
-                    transcoded_tmp.mkdir(parents=True, exist_ok=True)
-                    app.add_media_files("/transcoded", transcoded_tmp)
+                # Register all video directories for the active project
+                import tempfile
+
+                transcoded_tmp = Path(tempfile.gettempdir()) / "video_review_transcoded"
+                transcoded_tmp.mkdir(parents=True, exist_ok=True)
+                app.add_media_files("/transcoded", transcoded_tmp)
+
+                for d in dp.video_dirs:
+                    if d.exists():
+                        register_media_dir(d)
             except Exception as e:
                 print(f"Warning: Could not load config at startup: {e}")
+
+        setup_media_route()
 
         storage_secret = os.environ.get("VIDEO_REVIEW_SECRET")
         if not storage_secret:

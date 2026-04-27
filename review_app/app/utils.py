@@ -3,13 +3,14 @@ import asyncio
 from review_app.app.translations import t
 
 
-async def sync_with_progress(data_provider, progress=None, status=None):
+async def sync_with_progress(data_provider, progress=None, status=None, video_dir=None):
     """
     Run sync_videos in a thread that is independent of NiceGUI client context.
 
     Uses run_in_executor directly instead of run.io_bound so the background
     thread survives page navigation and new tabs being opened mid-sync.
     """
+    from pathlib import Path as _Path
     loop = asyncio.get_event_loop()
     sync_progress = {"current": 0, "total": 0, "filename": ""}
 
@@ -18,9 +19,10 @@ async def sync_with_progress(data_provider, progress=None, status=None):
         sync_progress["total"] = total
         sync_progress["filename"] = filename
 
+    dir_path = _Path(video_dir) if video_dir else None
     future = loop.run_in_executor(
         None,
-        lambda: data_provider.sync_videos(progress_callback=update_progress),
+        lambda: data_provider.sync_videos(progress_callback=update_progress, video_dir=dir_path),
     )
 
     while not future.done():

@@ -45,7 +45,7 @@ async def setup_overview():
         # Annotation progress bar
         blank = int(lb.get("blank", 0))
         non_blank = int(lb.get("non_blank", 0))
-        unlabeled = int(lb.get("unlabeled", 0))
+        unlabeled = max(total - blank - non_blank, 0)
         blank_pct = 100 * blank / total
         nonblank_pct = 100 * non_blank / total
         unlabeled_pct = 100 * unlabeled / total
@@ -54,20 +54,20 @@ async def setup_overview():
             with ui.row().classes("items-center q-pa-md q-pb-sm"):
                 ui.label(t("annotation_progress")).classes("text-subtitle1 font-weight-medium")
             with ui.column().classes("w-full q-px-md q-pb-md gap-sm"):
-                with ui.row().classes("w-full overflow-hidden").style(
-                    "height:12px; border-radius:6px"
+                with ui.element("div").style(
+                    "display:flex; width:100%; height:12px; border-radius:6px; overflow:hidden"
                 ):
                     if blank_pct > 0:
                         ui.element("div").style(
-                            f"width:{blank_pct:.1f}%; background:#4caf50; height:100%"
+                            f"flex:{blank_pct:.3f}; background:#4caf50; height:100%"
                         )
                     if nonblank_pct > 0:
                         ui.element("div").style(
-                            f"width:{nonblank_pct:.1f}%; background:#2196f3; height:100%"
+                            f"flex:{nonblank_pct:.3f}; background:#2196f3; height:100%"
                         )
                     if unlabeled_pct > 0:
                         ui.element("div").style(
-                            f"width:{unlabeled_pct:.1f}%; background:#e0e0e0; height:100%"
+                            f"flex:{unlabeled_pct:.3f}; background:#e0e0e0; height:100%"
                         )
                 with ui.row().classes("gap-lg"):
                     for color, label, count in [

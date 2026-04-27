@@ -92,13 +92,8 @@ class SpeciesMixin:
         from review_app.app.config import get_bundled_behaviors_csv
 
         bundled_path = get_bundled_behaviors_csv()
-        custom_path_raw = str(cfg.get("species_behaviors_csv_path") or "").strip()
 
         rows: list[dict] = []
-        if custom_path_raw:
-            custom_p = self._resolve_path(custom_path_raw)
-            if custom_p.exists() and str(custom_p) != str(bundled_path):
-                rows = self._parse_behaviors_csv(custom_p)
 
         if not rows and bundled_path:
             rows = self._parse_behaviors_csv(Path(bundled_path))

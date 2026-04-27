@@ -1,13 +1,8 @@
 # Default configuration for the review app
 db_filename: review_data.db
-video_dir: ""
 db_dir: ""
 
 # Species and behavior configuration
-# species_csv_path: ""  # If empty, uses bundled species.csv
-species_behaviors_csv_path: "" # If empty, returns empty behaviors list
-species_csv_mode: override # override or append
-species_behaviors_csv_mode: override # override or append
 behavior_defaults:
   - does_not_react
   - reacts_to_camera

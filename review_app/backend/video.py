@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import uuid
+
 import pandas as pd
 from sqlalchemy import select, text
 
@@ -127,79 +129,73 @@ def _probe_many(
 
 
 class VideoMixin:
-    """Video scanning, probing, and transcoding. Requires self.engine, self.Session, self.video_dir."""
+    """Video scanning, probing, and transcoding. Requires self.engine, self.Session, self.video_dirs."""
 
-    def _video_id_from_path(self, path: Path) -> str:
-        try:
-            rel = path.relative_to(self.video_dir)
-            parent = rel.parent.name if rel.parent != Path(".") else "default"
-            return f"{parent}/{path.stem}"
-        except ValueError:
-            parent = path.parent.name if path.parent.name else "default"
-            return f"{parent}/{path.stem}"
-
-    def _scan_videos(self) -> pd.DataFrame:
-        if not self.video_dir.exists():
-            return pd.DataFrame(
-                columns=["video_id", "video_path", "camera_id", "created_at", "duration_sec"]
+    def _scan_videos(self, video_dir: Path | None = None) -> pd.DataFrame:
+        if video_dir is not None:
+            scan_dirs = [video_dir]
+        else:
+            scan_dirs = getattr(self, "video_dirs", None) or (
+                [self.video_dir] if self.video_dir else []
             )
 
         rows: list[dict[str, Any]] = []
-        for p in sorted(self.video_dir.rglob("*")):
-            if p.suffix.lower() not in VIDEO_EXTENSIONS:
+        for scan_dir in scan_dirs:
+            if not scan_dir.exists():
                 continue
-            camera_id = p.parent.name if p.parent != self.video_dir else "default"
-            created_at = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
-            rows.append(
-                {
-                    "video_id": self._video_id_from_path(p),
-                    "video_path": str(p),
-                    "camera_id": camera_id,
-                    "created_at": created_at,
-                    "duration_sec": None,
-                }
-            )
+            for p in sorted(scan_dir.rglob("*")):
+                if p.suffix.lower() not in VIDEO_EXTENSIONS:
+                    continue
+                camera_id = p.parent.name if p.parent != scan_dir else "default"
+                created_at = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+                rows.append(
+                    {
+                        "video_path": str(p),
+                        "camera_id": camera_id,
+                        "created_at": created_at,
+                    }
+                )
+
+        if not rows:
+            return pd.DataFrame(columns=["video_path", "camera_id", "created_at"])
         return pd.DataFrame(rows)
 
-    def _sync_videos_table(self, progress_callback=None) -> None:
-        scanned = self._scan_videos()
+    def _sync_videos_table(self, progress_callback=None, video_dir: Path | None = None) -> dict:
+        scanned = self._scan_videos(video_dir)
         now = self._utcnow_dt()
+        active_project_id = getattr(self, "active_project_id", None)
 
         with self.Session() as session:
             if scanned.empty:
                 session.commit()
-                return
+                return {"scanned": 0, "added": 0, "updated": 0}
 
-            existing_rows = {
+            # Deduplicate by (video_path, project_id)
+            existing = {
                 row[0]: row
                 for row in session.execute(
-                    select(
-                        Video.video_id, Video.is_valid, Video.duration_sec, Video.validation_error
-                    )
+                    select(Video.video_path, Video.video_id, Video.is_valid, Video.duration_sec, Video.validation_error)
+                    .where(Video.project_id == active_project_id)
                 ).fetchall()
             }
 
-            new_video_ids = [r for r in scanned["video_id"] if r not in existing_rows]
-            new_rows = scanned[scanned["video_id"].isin(new_video_ids)]
+            new_rows = scanned[~scanned["video_path"].isin(existing)]
+            existing_df = scanned[scanned["video_path"].isin(existing)]
 
-            probe_results: dict[str, tuple] = {}
+            probe_results: dict[Path, tuple] = {}
             if not new_rows.empty:
-                path_map = {
-                    Path(row["video_path"]): row["video_id"] for _, row in new_rows.iterrows()
-                }
-                probe_results = {
-                    path_map[p]: result
-                    for p, result in _probe_many(
-                        list(path_map), progress_callback=progress_callback
-                    ).items()
-                }
+                probe_results = _probe_many(
+                    [Path(r) for r in new_rows["video_path"]],
+                    progress_callback=progress_callback,
+                )
 
-            if new_video_ids:
+            if not new_rows.empty:
                 session.execute(
                     Video.__table__.insert(),
                     [
                         {
-                            "video_id": row["video_id"],
+                            "video_id": str(uuid.uuid4()),
+                            "project_id": active_project_id,
                             "video_path": row["video_path"],
                             "camera_id": row["camera_id"],
                             "created_at": row["created_at"].to_pydatetime(),
@@ -207,7 +203,7 @@ class VideoMixin:
                             **dict(
                                 zip(
                                     ("duration_sec", "is_valid", "is_web_safe", "validation_error"),
-                                    probe_results.get(row["video_id"], (None, None, None, None)),
+                                    probe_results.get(Path(row["video_path"]), (None, None, None, None)),
                                 )
                             ),
                         }
@@ -215,30 +211,35 @@ class VideoMixin:
                     ],
                 )
 
-            existing_df = scanned[scanned["video_id"].isin(existing_rows)]
             if not existing_df.empty:
                 session.execute(
                     text("""
                         UPDATE videos
-                        SET video_path = :video_path,
-                            camera_id  = :camera_id,
-                            created_at = :created_at,
+                        SET camera_id    = :camera_id,
+                            created_at   = :created_at,
                             last_seen_at = :last_seen_at
-                        WHERE video_id = :video_id
+                        WHERE video_path = :video_path
+                          AND project_id IS :project_id
                     """),
                     [
                         {
-                            "video_id": row["video_id"],
                             "video_path": row["video_path"],
                             "camera_id": row["camera_id"],
                             "created_at": row["created_at"].to_pydatetime(),
                             "last_seen_at": now,
+                            "project_id": active_project_id,
                         }
                         for _, row in existing_df.iterrows()
                     ],
                 )
 
             session.commit()
+
+        return {
+            "scanned": len(scanned),
+            "added": len(new_rows),
+            "updated": len(existing_df),
+        }
 
     def reprobe_video(self, video_id: str) -> None:
         with self.Session() as session:

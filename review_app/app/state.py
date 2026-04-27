@@ -24,6 +24,9 @@ _annotator_name: str = "default"
 _blank_threshold: float = 0.75
 _species_threshold: float = 0.75
 
+_active_project_id: str | None = None
+_active_project_name: str | None = None
+
 
 def init_user_prefs(
     dark_mode: bool,
@@ -39,6 +42,20 @@ def init_user_prefs(
     _annotator_name = annotator_name
     _blank_threshold = blank_threshold
     _species_threshold = species_threshold
+
+
+def set_active_project(project_id: str | None, project_name: str | None) -> None:
+    global _active_project_id, _active_project_name
+    _active_project_id = project_id
+    _active_project_name = project_name
+
+
+def get_active_project_id() -> str | None:
+    return _active_project_id
+
+
+def get_active_project_name() -> str | None:
+    return _active_project_name
 
 
 def _get_user_state() -> dict[str, Any]:

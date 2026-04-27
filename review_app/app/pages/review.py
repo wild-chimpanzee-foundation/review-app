@@ -4,6 +4,7 @@ from pathlib import Path
 from nicegui import run, ui
 
 from review_app.app.state import (
+    get_active_project_id,
     get_annotator_name,
     get_blank_threshold,
     get_current_idx,
@@ -389,16 +390,20 @@ def render_annotation_section(
             set_state_val("submit_in_progress", False)
 
     with ui.row().classes("w-full gap-sm q-mt-sm q-mb-md"):
-        with ui.button(on_click=submit_and_next, color="warning").props("stack").classes(
-            "col"
-        ) as submit_next_btn:
+        with (
+            ui.button(on_click=submit_and_next, color="warning")
+            .props("stack")
+            .classes("col") as submit_next_btn
+        ):
             ui.label(t("submit_next"))
             _shortcut_badge("Enter")
         submit_next_btn._props["data-shortcut"] = "submit-next"
         ui.button(t("submit"), on_click=submit).classes("col")
-        with ui.button(on_click=mark_blank_next, color="warning").props("stack").classes(
-            "col"
-        ) as blank_btn:
+        with (
+            ui.button(on_click=mark_blank_next, color="warning")
+            .props("stack")
+            .classes("col") as blank_btn
+        ):
             ui.label(t("mark_blank"))
             _shortcut_badge("B")
         blank_btn._props["data-shortcut"] = "mark-blank"
@@ -498,7 +503,12 @@ async def render_video_section(dp, species_map):
             ui.badge("P").props("color=grey-9").classes("text-caption")
         ui.element("div").classes("col flex justify-center")
         with ui.element("div").classes("col flex justify-center"):
-            ui.label(selected_video_id).classes("text-subtitle1 font-weight-medium text-center")
+            with ui.column().classes("items-center gap-0"):
+                ui.label(Path(video.get("video_path", "")).name).classes(
+                    "text-subtitle1 font-weight-medium text-center"
+                )
+                if video.get("camera_id"):
+                    ui.label(video["camera_id"]).classes("text-caption text-grey-5 text-center")
         ui.element("div").classes("col flex justify-center")
         with ui.row().classes("items-center gap-xs"):
             ui.badge("N").props("color=grey-9").classes("text-caption")
@@ -550,12 +560,16 @@ async def render_video_section(dp, species_map):
                     else:
                         serve_path = Path(video["video_path"])
                         if serve_path.exists():
-                            try:
-                                rel_path = serve_path.relative_to(dp.video_dir)
-                                video_url = f"/media/{rel_path}"
-                            except ValueError:
+                            video_url = None
+                            for _base in dp.video_dirs or ([dp.video_dir] if dp.video_dir else []):
+                                try:
+                                    rel_path = serve_path.relative_to(_base)
+                                    video_url = f"/media/{rel_path}"
+                                    break
+                                except ValueError:
+                                    continue
+                            if video_url is None:
                                 ui.label(t("video_outside_media")).classes("text-negative")
-                                video_url = None
                         else:
                             ui.label(t("video_not_found", path=video["video_path"])).classes(
                                 "text-negative"
@@ -903,9 +917,10 @@ async def setup_review():
     queue = get_queue()
 
     # Always refresh queue from DB to avoid stale IDs in session state.
-    filter_options_task = run.io_bound(dp.get_queue_filter_options)
+    filter_options_task = run.io_bound(dp.get_queue_filter_options, get_active_project_id())
     queue_ids_task = run.io_bound(
         dp.get_video_queue,
+        get_active_project_id(),
         {
             **filters,
             "blank_threshold": get_blank_threshold(),

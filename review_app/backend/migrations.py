@@ -9,9 +9,7 @@ MIGRATIONS: list[tuple[int, str]] = []
 
 def run_migrations(engine) -> None:
     with engine.begin() as conn:
-        conn.execute(text(
-            "CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER)"
-        ))
+        conn.execute(text("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER)"))
         row = conn.execute(text("SELECT version FROM _schema_version")).fetchone()
         current = row[0] if row else 0
         for version, sql in MIGRATIONS:

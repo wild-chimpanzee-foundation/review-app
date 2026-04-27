@@ -21,10 +21,31 @@ from sqlalchemy.orm import declarative_base, relationship
 Base = declarative_base()
 
 
+class Project(Base):
+    __tablename__ = "projects"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    last_opened = Column(DateTime, nullable=True)
+    dirs = relationship("ProjectDir", backref="project", cascade="all, delete-orphan")
+
+
+class ProjectDir(Base):
+    __tablename__ = "project_dirs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    path = Column(String, nullable=False)
+    sort_order = Column(Integer, nullable=False, default=0)
+
+
 class Video(Base):
     __tablename__ = "videos"
+    __table_args__ = (UniqueConstraint("video_path", "project_id", name="uq_video_path_project"),)
 
     video_id = Column(String, primary_key=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
     video_path = Column(String, nullable=False)
     camera_id = Column(String, index=True)
     created_at = Column(DateTime, nullable=True)
@@ -51,6 +72,7 @@ class IndividualObservation(Base):
 
     video_id = Column(String, ForeignKey("videos.video_id"), primary_key=True)
     id = Column(Integer, primary_key=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
     species = Column(String, nullable=False)
     behavior = Column(String, nullable=False)
     start_sec = Column(Float, nullable=False, default=0.0)
@@ -64,6 +86,7 @@ class ModelAnnotation(Base):
     __tablename__ = "model_annotations"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
     video_id = Column(String, ForeignKey("videos.video_id"), nullable=False, index=True)
     annotation_type = Column(String, nullable=False, index=True)
     model_name = Column(String, nullable=False, index=True)
@@ -85,6 +108,7 @@ class Species(Base):
     __tablename__ = "species"
 
     scientific_name = Column(String, primary_key=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
     name_en = Column(String, nullable=True)
     name_fr = Column(String, nullable=True)
     group_en = Column(String, nullable=True)
@@ -98,6 +122,7 @@ class SpeciesBehavior(Base):
 
     scientific_name = Column(String, ForeignKey("species.scientific_name"), primary_key=True)
     behavior = Column(String, primary_key=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
 
 
 Index(
@@ -129,23 +154,3 @@ Index(
     IndividualObservation.behavior,
     IndividualObservation.video_id,
 )
-
-VIDEO_EXTENSIONS: frozenset[str] = frozenset(
-    {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm", ".m4v"}
-)
-
-CSV_TEMPLATES: dict[str, str] = {
-    "model_annotations": (
-        "video_uid,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec\n"
-        "CAM01/VIDEO_001.mp4,species,species_model_a,deer,,0.92,0,12.0\n"
-        "CAM01/VIDEO_001.mp4,behavior,behavior_model_a,reacts_to_camera,,0.83,0,12.0\n"
-        "CAM01/VIDEO_002.mp4,blank_non_blank,blank_model,blank,,0.98,0,\n"
-    )
-}
-
-if getattr(sys, "frozen", False):
-    REPO_ROOT = Path(sys.executable).parent
-else:
-    REPO_ROOT = Path(__file__).parents[2]
-
-DEFAULT_DB_FILENAME = "review_data.db"

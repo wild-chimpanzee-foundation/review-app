@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,15 +11,21 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import sessionmaker
 
-from review_app.app.config import get_config_path, get_user_data_dir
-from review_app.backend.migrations import run_migrations
-from review_app.backend.models import (
+from review_app.app.config import (
     CSV_TEMPLATES,
     DEFAULT_DB_FILENAME,
     REPO_ROOT,
+    get_config_path,
+    get_user_data_dir,
+)
+from review_app.app.state import get_active_project_id
+from review_app.backend.migrations import run_migrations
+from review_app.backend.models import (
     Base,
     IndividualObservation,
     ModelAnnotation,
+    Project,
+    ProjectDir,
     VideoLabel,
 )
 from review_app.backend.species import SpeciesMixin
@@ -35,13 +40,8 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
     def __init__(self, config_path: str | Path | None = None) -> None:
         cfg = self._load_yaml_config(config_path)
-        self.video_dir = self._required_path(cfg, "video_dir")
 
-        raw_db_dir = cfg.get("db_dir", "")
-        if not raw_db_dir or raw_db_dir == ".":
-            self.db_dir = get_user_data_dir()
-        else:
-            self.db_dir = self._resolve_path(raw_db_dir)
+        self.db_dir = get_user_data_dir()
 
         self.db_dir.mkdir(parents=True, exist_ok=True)
 
@@ -51,21 +51,9 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         self._consensus_min_probability: float = float(cfg.get("consensus_min_probability", 0.0))
         self._fuzzy_match_threshold: int = int(cfg.get("fuzzy_match_threshold", 80))
 
-        db_filename = str(cfg.get("db_filename") or DEFAULT_DB_FILENAME).strip()
-        if not db_filename:
-            raise ValueError("`db_filename` cannot be empty.")
+        db_filename = DEFAULT_DB_FILENAME
 
         self._db_path = self.db_dir / db_filename
-        recreate_on_start = bool(cfg.get("recreate_db_on_start", False)) or (
-            str(os.getenv("REVIEW_APP_RECREATE_DB", "")).lower() in {"1", "true", "yes"}
-        )
-        if recreate_on_start and self._db_path.exists():
-            try:
-                self._db_path.unlink()
-            except PermissionError as exc:
-                raise RuntimeError(
-                    f"Cannot recreate sqlite DB at `{self._db_path}` due to permissions: {exc}"
-                ) from exc
 
         self.engine = create_engine(f"sqlite:///{self._db_path}")
 
@@ -80,6 +68,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         Base.metadata.create_all(self.engine)
         run_migrations(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+
         self._load_species_data(cfg)
         self._load_species_behaviors(cfg)
 
@@ -139,27 +128,24 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
     # ── Video sync ────────────────────────────────────────────────────────────
 
-    def sync_videos(self, progress_callback):
-        self._sync_videos_table(progress_callback)
-
-    # ── DB state ──────────────────────────────────────────────────────────────
-
-    def check_db_exists(self) -> bool:
-        from review_app.backend.models import VIDEO_EXTENSIONS
-
-        return self.video_dir.exists() and any(
-            p.suffix.lower() in VIDEO_EXTENSIONS for p in self.video_dir.rglob("*")
-        )
+    def sync_videos(self, progress_callback, video_dir: Path | None = None) -> dict:
+        return self._sync_videos_table(progress_callback, video_dir=video_dir)
 
     @property
     def db_path(self) -> Path:
         return self._db_path
 
-    def has_videos_in_db(self) -> bool:
+    def has_videos_in_db(self, active_project_id) -> bool:
         if not self._db_path.exists():
             return False
         with self.engine.connect() as conn:
-            result = conn.execute(text("SELECT COUNT(*) FROM videos")).fetchone()
+            if active_project_id:
+                result = conn.execute(
+                    text("SELECT COUNT(*) FROM videos WHERE project_id = :pid"),
+                    {"pid": active_project_id},
+                ).fetchone()
+            else:
+                result = conn.execute(text("SELECT COUNT(*) FROM videos")).fetchone()
             return result[0] > 0 if result else False
 
     # ── Config persistence ────────────────────────────────────────────────────
@@ -176,6 +162,80 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
     def get_overrides(self) -> dict:
         return self.get_config()
+
+    # ── Project management ────────────────────────────────────────────────────
+
+    def create_project(self, name: str, video_dir: str) -> Project:
+        project = Project(id=str(__import__("uuid").uuid4()), name=name)
+        with self.Session() as s:
+            s.add(project)
+            s.flush()
+            if video_dir:
+                s.add(
+                    ProjectDir(
+                        id=str(__import__("uuid").uuid4()),
+                        project_id=project.id,
+                        path=str(video_dir),
+                        sort_order=0,
+                    )
+                )
+            s.commit()
+            s.refresh(project)
+            return project
+
+    def list_projects(self) -> list[Project]:
+        with self.Session() as s:
+            return s.query(Project).order_by(Project.created_at).all()
+
+    def get_project(self, project_id: str) -> Project | None:
+        with self.Session() as s:
+            return s.query(Project).filter_by(id=project_id).first()
+
+    def update_project_name(self, project_id: str, name: str) -> None:
+        with self.Session() as s:
+            project = s.query(Project).filter_by(id=project_id).first()
+            if project:
+                project.name = name
+                s.commit()
+
+    def touch_project(self, project_id: str) -> None:
+        with self.Session() as s:
+            project = s.query(Project).filter_by(id=project_id).first()
+            if project:
+                project.last_opened = self._utcnow_dt()
+                s.commit()
+
+    def get_project_dirs(self, project_id: str) -> list[ProjectDir]:
+        with self.Session() as s:
+            return (
+                s.query(ProjectDir)
+                .filter_by(project_id=project_id)
+                .order_by(ProjectDir.sort_order)
+                .all()
+            )
+
+    def add_project_dir(self, project_id: str, path: str) -> ProjectDir:
+        with self.Session() as s:
+            existing = s.query(ProjectDir).filter_by(project_id=project_id).all()
+            sort_order = max((d.sort_order for d in existing), default=-1) + 1
+            d = ProjectDir(
+                id=str(__import__("uuid").uuid4()),
+                project_id=project_id,
+                path=str(path),
+                sort_order=sort_order,
+            )
+            s.add(d)
+            s.commit()
+            s.refresh(d)
+            return d
+
+    def remove_project_dir(self, dir_id: str) -> None:
+        # TODO deal with videos from that dir
+        with self.Session() as s:
+            d = s.query(ProjectDir).filter_by(id=dir_id).first()
+            if d:
+                s.delete(d)
+                s.commit()
 
     # ── CSV templates ─────────────────────────────────────────────────────────
 
@@ -215,25 +275,29 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         with self.engine.connect() as conn:
             return pd.read_sql(select(VideoLabel), conn)
 
-    def get_queue_filter_options(self) -> dict[str, list[str]]:
+    def get_queue_filter_options(self, active_project_id: str | None) -> dict[str, list[str]]:
+        pid_clause = "AND project_id = :pid" if active_project_id else ""
+        params = {"pid": active_project_id} if active_project_id else {}
         with self.engine.connect() as conn:
             df = pd.read_sql(
-                text(
-                    """
-                    SELECT 'camera' AS source, camera_id AS val FROM videos WHERE camera_id IS NOT NULL GROUP BY camera_id
+                text(f"""
+                    SELECT 'camera' AS source, camera_id AS val FROM videos
+                    WHERE camera_id IS NOT NULL {pid_clause} GROUP BY camera_id
                     UNION ALL
-                    SELECT 'species', species FROM individual_observations WHERE species IS NOT NULL AND TRIM(species) <> '' GROUP BY species
+                    SELECT 'species', species FROM individual_observations
+                    WHERE species IS NOT NULL AND TRIM(species) <> '' {pid_clause} GROUP BY species
                     UNION ALL
-                    SELECT 'behavior', behavior FROM individual_observations WHERE behavior IS NOT NULL AND TRIM(behavior) <> '' GROUP BY behavior
+                    SELECT 'behavior', behavior FROM individual_observations
+                    WHERE behavior IS NOT NULL AND TRIM(behavior) <> '' {pid_clause} GROUP BY behavior
                     UNION ALL
                     SELECT 'possible_species', value_text FROM model_annotations
-                    WHERE annotation_type = 'species' AND value_text IS NOT NULL AND TRIM(value_text) <> '' GROUP BY value_text
+                    WHERE annotation_type = 'species' AND value_text IS NOT NULL AND TRIM(value_text) <> '' {pid_clause} GROUP BY value_text
                     UNION ALL
                     SELECT 'model_behavior', value_text FROM model_annotations
-                    WHERE annotation_type = 'behavior' AND value_text IS NOT NULL AND TRIM(value_text) <> '' GROUP BY value_text
-                    """
-                ),
+                    WHERE annotation_type = 'behavior' AND value_text IS NOT NULL AND TRIM(value_text) <> '' {pid_clause} GROUP BY value_text
+                """),
                 conn,
+                params=params,
             )
 
         result: dict[str, list[str]] = {
@@ -265,7 +329,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
         return result
 
-    def get_video_queue(self, filters: dict) -> list[str]:
+    def get_video_queue(self, filters: dict, active_project_id: str | None) -> list[str]:
         search_raw = (filters.get("search_query") or "").strip().lower()
         selected_camera = filters.get("selected_camera", "All")
         selected_species = filters.get("selected_species", "All")
@@ -288,6 +352,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         ctes: list[str] = []
         joins: list[str] = []
         where: list[str] = []
+
+        if active_project_id:
+            params["pid"] = active_project_id
+            where.append("v.project_id = :pid")
 
         need_needs_review_filter = selected_needs_review != "All"
         if need_needs_review_filter:
@@ -347,7 +415,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
         if search_raw:
             params["sq"] = f"%{search_raw}%"
-            where.append("(LOWER(v.video_id) LIKE :sq OR LOWER(v.video_path) LIKE :sq)")
+            where.append("LOWER(v.video_path) LIKE :sq")
 
         if selected_camera != "All":
             params["camera"] = selected_camera
@@ -372,11 +440,17 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 )""")
 
         if selected_manual_blank == "Blank":
-            where.append("EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.is_blank = 1)")
+            where.append(
+                "EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.is_blank = 1)"
+            )
         elif selected_manual_blank == "Non-Blank":
-            where.append("EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.is_blank = 0)")
+            where.append(
+                "EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.is_blank = 0)"
+            )
         elif selected_manual_blank == "Unlabeled":
-            where.append("NOT EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL)")
+            where.append(
+                "NOT EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL)"
+            )
 
         if selected_model_blank == "Blank":
             where.append("mb_f.result = 'blank'")
@@ -439,14 +513,14 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 )""")
 
         if selected_sort == "camera":
-            order_by = f"ORDER BY v.camera_id {sort_dir}, v.video_id ASC"
+            order_by = f"ORDER BY v.camera_id {sort_dir}, v.video_path ASC"
         elif selected_sort == "unreviewed_first":
             order_by = f"""ORDER BY
                 CASE WHEN EXISTS (
                     SELECT 1 FROM video_labels vl2
                     WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
                 ) THEN 1 ELSE 0 END {sort_dir_inv},
-                v.video_id ASC"""
+                v.video_path ASC"""
         elif selected_sort == "species_prob":
             species_sort_filter = (
                 selected_possible_species
@@ -478,11 +552,11 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 GROUP BY video_id
             )""")
             joins.append("LEFT JOIN species_max_prob smp ON smp.video_id = v.video_id")
-            order_by = f"ORDER BY smp.max_species_prob {sort_dir} NULLS LAST, v.video_id ASC"
+            order_by = f"ORDER BY smp.max_species_prob {sort_dir} NULLS LAST, v.video_path ASC"
         elif selected_sort == "random":
             order_by = "ORDER BY RANDOM()"
         else:
-            order_by = "ORDER BY v.video_id ASC"
+            order_by = "ORDER BY v.video_path ASC"
 
         cte_sql = ("WITH " + ",\n".join(ctes)) if ctes else ""
         join_sql = "\n".join(joins)
@@ -741,6 +815,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         selections: list[dict] | None,
         is_blank: bool | None = None,
         labeled_by: str | None = None,
+        active_project_id: str | None = None,
     ) -> None:
         if selections is None:
             selections = []
@@ -802,6 +877,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                         IndividualObservation(
                             video_id=video_id,
                             id=obs_id,
+                            project_id=active_project_id,
                             species=row["species"],
                             behavior=row["behavior"],
                             start_sec=row["start_sec"],
@@ -812,49 +888,6 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                         )
                     )
             session.commit()
-
-    def restore_video_snapshot(self, snapshot: dict) -> None:
-        if not snapshot or "video_id" not in snapshot:
-            return
-
-        selections: list[dict[str, Any]] = []
-        raw = snapshot.get("species_behavior_json")
-        if raw:
-            try:
-                data = json.loads(raw)
-                if isinstance(data, list):
-                    for item in data:
-                        start = item.get("start_sec", item.get("timestamp", 0.0))
-                        selections.append(
-                            {
-                                "species": item.get("species", "unknown"),
-                                "behavior": item.get("behavior", "unlabeled"),
-                                "start_sec": start,
-                                "end_sec": item.get("end_sec"),
-                            }
-                        )
-            except Exception:
-                selections = []
-
-        if not selections and snapshot.get("blank_non_blank_final_result") == "blank":
-            selections = [
-                {"species": "blank", "behavior": "unlabeled", "start_sec": 0.0, "end_sec": None}
-            ]
-
-        if not selections and snapshot.get("final_species_prediction"):
-            selections = [
-                {
-                    "species": snapshot["final_species_prediction"],
-                    "behavior": "unlabeled",
-                    "start_sec": 0.0,
-                    "end_sec": snapshot.get("duration_sec"),
-                }
-            ]
-
-        if selections:
-            self.update_manual_review(snapshot["video_id"], selections)
-
-    # ── Model CSV import ──────────────────────────────────────────────────────
 
     @staticmethod
     def _normalize_annotation_type(annotation_type: str) -> str:
@@ -1006,6 +1039,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 if existing is None:
                     existing = ModelAnnotation(
                         video_id=row["video_id"],
+                        project_id=self.active_project_id,
                         model_name=row["model_name"],
                         annotation_type=row["annotation_type"],
                     )
@@ -1026,9 +1060,11 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
     # ── Annotation export / import ────────────────────────────────────────────
 
     def export_annotations_csv(self) -> pd.DataFrame:
+        pid_clause = "AND v.project_id = :pid" if self.active_project_id else ""
+        params = {"pid": self.active_project_id} if self.active_project_id else {}
         with self.engine.connect() as conn:
             return pd.read_sql(
-                text("""
+                text(f"""
                     SELECT
                         v.video_id,
                         v.video_path,
@@ -1046,21 +1082,32 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     FROM videos v
                     JOIN video_labels vl ON vl.video_id = v.video_id
                     LEFT JOIN individual_observations io ON io.video_id = v.video_id
+                    WHERE 1=1 {pid_clause}
                     ORDER BY v.camera_id, v.video_path, io.start_sec
                 """),
                 conn,
+                params=params,
             )
 
-    def import_annotations_csv(self, df: pd.DataFrame) -> dict[str, Any]:
+    def import_annotations_csv(
+        self, df: pd.DataFrame, active_project_id: str | None
+    ) -> dict[str, Any]:
         required = {"video_id", "is_blank"}
         missing = required - set(df.columns)
         if missing:
             raise ValueError(f"Missing required columns: {sorted(missing)}")
 
         with self.engine.connect() as conn:
-            known_ids = set(
-                pd.read_sql(text("SELECT video_id FROM videos"), conn)["video_id"]
-            )
+            if active_project_id:
+                known_ids = set(
+                    pd.read_sql(
+                        text("SELECT video_id FROM videos WHERE project_id = :pid"),
+                        conn,
+                        params={"pid": active_project_id},
+                    )["video_id"]
+                )
+            else:
+                known_ids = set(pd.read_sql(text("SELECT video_id FROM videos"), conn)["video_id"])
 
         imported = 0
         skipped: list[str] = []
@@ -1075,7 +1122,9 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             is_blank = bool(int(is_blank_raw)) if pd.notna(is_blank_raw) else None
 
             if is_blank:
-                self.update_manual_review(str(video_id), [], is_blank=True)
+                self.update_manual_review(
+                    str(video_id), [], is_blank=True, active_project_id=active_project_id
+                )
             else:
                 selections = []
                 for _, row in group.iterrows():
@@ -1088,15 +1137,19 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                         if "annotator" in group.columns and pd.notna(row.get("annotator"))
                         else None
                     )
-                    selections.append({
-                        "species": sp,
-                        "behavior": beh,
-                        "start_sec": row.get("start_sec"),
-                        "end_sec": row.get("end_sec"),
-                        "labeled_by": labeled_by,
-                    })
+                    selections.append(
+                        {
+                            "species": sp,
+                            "behavior": beh,
+                            "start_sec": row.get("start_sec"),
+                            "end_sec": row.get("end_sec"),
+                            "labeled_by": labeled_by,
+                        }
+                    )
                 if selections:
-                    self.update_manual_review(str(video_id), selections)
+                    self.update_manual_review(
+                        str(video_id), selections, active_project_id=active_project_id
+                    )
 
             imported += 1
 
@@ -1105,12 +1158,16 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
     # ── Stats ─────────────────────────────────────────────────────────────────
 
     def get_overview_stats(self) -> dict[str, Any]:
+        p = {"pid": self.active_project_id} if self.active_project_id else {}
+        pf = "WHERE project_id = :pid" if self.active_project_id else ""
+        vf = "WHERE v.project_id = :pid" if self.active_project_id else ""
+
         with self.engine.connect() as conn:
             stats = {}
 
             stats["videos"] = (
                 pd.read_sql(
-                    text("""
+                    text(f"""
                 SELECT
                     COUNT(*)                                            AS total,
                     SUM(CASE WHEN is_valid = 1  THEN 1 ELSE 0 END)    AS valid,
@@ -1118,67 +1175,76 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     SUM(CASE WHEN is_valid IS NULL THEN 1 ELSE 0 END)  AS unprobed,
                     COUNT(DISTINCT camera_id)                          AS cameras,
                     ROUND(SUM(COALESCE(duration_sec, 0)) / 3600.0, 2) AS total_hours
-                FROM videos
+                FROM videos {pf}
             """),
                     conn,
+                    params=p,
                 )
                 .iloc[0]
                 .to_dict()
             )
 
             stats["failed_videos"] = pd.read_sql(
-                text("SELECT * FROM videos WHERE is_valid = 0"),
+                text(
+                    f"SELECT * FROM videos WHERE is_valid = 0 {'AND project_id = :pid' if self.active_project_id else ''}"
+                ),
                 conn,
+                params=p,
             )
 
             stats["labeling"] = (
                 pd.read_sql(
-                    text("""
+                    text(f"""
                 SELECT
-                    COUNT(DISTINCT v.video_id)                                         AS total_videos,
-                    COUNT(DISTINCT vl.video_id)                                        AS labeled,
-                    COUNT(DISTINCT v.video_id) - COUNT(DISTINCT vl.video_id)           AS unlabeled,
-                    SUM(CASE WHEN vl.is_blank = 1 THEN 1 ELSE 0 END)                  AS blank,
-                    SUM(CASE WHEN vl.is_blank = 0 THEN 1 ELSE 0 END)                  AS non_blank,
-                    COUNT(DISTINCT io.video_id)                                        AS has_observations
+                    COUNT(DISTINCT v.video_id)                                                    AS total_videos,
+                    COUNT(DISTINCT CASE WHEN vl.is_blank IS NOT NULL THEN v.video_id END)         AS labeled,
+                    COUNT(DISTINCT CASE WHEN vl.is_blank = 1 THEN v.video_id END)                AS blank,
+                    COUNT(DISTINCT CASE WHEN vl.is_blank = 0 THEN v.video_id END)                AS non_blank,
+                    COUNT(DISTINCT io.video_id)                                                   AS has_observations
                 FROM videos v
                 LEFT JOIN video_labels     vl ON vl.video_id = v.video_id
                 LEFT JOIN individual_observations io ON io.video_id = v.video_id
+                {vf}
             """),
                     conn,
+                    params=p,
                 )
                 .iloc[0]
                 .to_dict()
             )
 
             stats["species_counts"] = pd.read_sql(
-                text("""
+                text(f"""
                 SELECT
                     species,
                     COUNT(*)              AS observations,
                     COUNT(DISTINCT video_id) AS videos
                 FROM individual_observations
+                {pf}
                 GROUP BY species
                 ORDER BY observations DESC
             """),
                 conn,
+                params=p,
             ).to_dict(orient="records")
 
             stats["behavior_counts"] = pd.read_sql(
-                text("""
+                text(f"""
                 SELECT
                     behavior,
                     COUNT(*)              AS observations,
                     COUNT(DISTINCT video_id) AS videos
                 FROM individual_observations
+                {pf}
                 GROUP BY behavior
                 ORDER BY observations DESC
             """),
                 conn,
+                params=p,
             ).to_dict(orient="records")
 
             stats["model_coverage"] = pd.read_sql(
-                text("""
+                text(f"""
                 SELECT
                     model_name,
                     annotation_type,
@@ -1187,14 +1253,16 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     ROUND(MIN(probability), 3)            AS min_probability,
                     ROUND(MAX(probability), 3)            AS max_probability
                 FROM model_annotations
+                {pf}
                 GROUP BY model_name, annotation_type
                 ORDER BY model_name, annotation_type
             """),
                 conn,
+                params=p,
             ).to_dict(orient="records")
 
             stats["model_species_dist"] = pd.read_sql(
-                text("""
+                text(f"""
                 SELECT
                     model_name,
                     value_text           AS predicted_species,
@@ -1203,14 +1271,18 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 FROM model_annotations
                 WHERE annotation_type = 'species'
                 AND value_text IS NOT NULL
+                {"AND project_id = :pid" if self.active_project_id else ""}
                 GROUP BY model_name, value_text
                 ORDER BY model_name, predictions DESC
             """),
                 conn,
+                params=p,
             ).to_dict(orient="records")
 
+            ma_pid = "AND project_id = :pid" if self.active_project_id else ""
+            io_pid = "AND project_id = :pid" if self.active_project_id else ""
             stats["model_human_agreement"] = pd.read_sql(
-                text("""
+                text(f"""
                 WITH top_model AS (
                     SELECT
                         video_id,
@@ -1221,11 +1293,12 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                             ORDER BY COALESCE(probability, 0) DESC
                         ) AS rn
                     FROM model_annotations
-                    WHERE annotation_type = 'species'
+                    WHERE annotation_type = 'species' {ma_pid}
                 ),
                 manual AS (
                     SELECT DISTINCT video_id, species AS manual_species
                     FROM individual_observations
+                    WHERE 1=1 {io_pid}
                 )
                 SELECT
                     tm.model_name,
@@ -1242,10 +1315,11 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 GROUP BY tm.model_name
             """),
                 conn,
+                params=p,
             ).to_dict(orient="records")
 
             stats["camera_summary"] = pd.read_sql(
-                text("""
+                text(f"""
                 SELECT
                     v.camera_id,
                     COUNT(*)                                               AS total_videos,
@@ -1254,10 +1328,12 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     ROUND(SUM(COALESCE(v.duration_sec,0))/3600.0, 2)         AS hours
                 FROM videos v
                 LEFT JOIN video_labels vl ON vl.video_id = v.video_id
+                {vf}
                 GROUP BY v.camera_id
                 ORDER BY total_videos DESC
             """),
                 conn,
+                params=p,
             ).to_dict(orient="records")
 
         return stats
