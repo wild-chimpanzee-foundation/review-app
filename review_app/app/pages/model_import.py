@@ -3,11 +3,9 @@ import io
 import pandas as pd
 from nicegui import run, ui
 
-from review_app.app.config import get_config_path
-from review_app.app.state import get_data_provider, get_state_val, set_data_provider, set_state_val
+from review_app.app.state import get_state_val, set_state_val
 from review_app.app.translations import get_language, t
 from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
-from review_app.backend.local_data_provider import LocalDataProvider
 
 
 def _make_serializable(val):

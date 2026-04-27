@@ -1,6 +1,5 @@
 from nicegui import run, ui
 
-from review_app.app.state import get_data_provider
 from review_app.app.translations import get_language, t
 from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
 

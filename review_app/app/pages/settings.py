@@ -10,6 +10,7 @@ from review_app.app.config import (
     load_config,
     save_config,
 )
+from review_app.app.setup_wizard import validate_video_dir
 from review_app.app.state import (
     get_annotator_name,
     get_blank_threshold,
@@ -395,8 +396,9 @@ def _build_settings_content(container: ui.column):
             if not video_dir:
                 ui.notify(t("video_dir_required"), type="warning")
                 return
-            if not Path(video_dir).exists():
-                ui.notify(t("video_dir_not_exist"), type="negative")
+            dir_error = await run.io_bound(validate_video_dir, video_dir)
+            if dir_error:
+                ui.notify(dir_error, type="negative", timeout=6000)
                 return
             if not new_db_path:
                 ui.notify(t("database_path_required"), type="warning")

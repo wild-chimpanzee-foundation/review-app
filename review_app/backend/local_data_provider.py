@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import sessionmaker
 
-from review_app.app.config import get_app_dir, get_config_path
+from review_app.app.config import get_config_path, get_user_data_dir
 from review_app.backend.migrations import run_migrations
 from review_app.backend.models import (
     CSV_TEMPLATES,
@@ -39,7 +39,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
         raw_db_dir = cfg.get("db_dir", "")
         if not raw_db_dir or raw_db_dir == ".":
-            self.db_dir = get_app_dir()
+            self.db_dir = get_user_data_dir()
         else:
             self.db_dir = self._resolve_path(raw_db_dir)
 

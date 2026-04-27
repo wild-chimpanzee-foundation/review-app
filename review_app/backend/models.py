@@ -18,8 +18,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, relationship
 
-from review_app.app.config import get_config_path
-
 Base = declarative_base()
 
 
@@ -150,5 +148,4 @@ if getattr(sys, "frozen", False):
 else:
     REPO_ROOT = Path(__file__).parents[2]
 
-DEFAULT_CONFIG_PATH = get_config_path()
 DEFAULT_DB_FILENAME = "review_data.db"

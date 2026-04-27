@@ -1,25 +1,33 @@
 import sys
 from pathlib import Path
 
+import platformdirs
 import yaml
+
+APP_NAME = "VideoAnnotation"
+
+
+def get_user_data_dir() -> Path:
+    """Platform-correct writable directory for config and DB on all OSes."""
+    return Path(platformdirs.user_data_dir(APP_NAME))
 
 
 def get_app_dir() -> Path:
-    """Run directory: parent of _MEIPASS when frozen, repo root in dev."""
+    """Location of bundled read-only resources (CSV files, default config).
+
+    NOT for writing — use get_user_data_dir() for config and DB.
+    """
     if getattr(sys, "frozen", False):
-        # When frozen, _MEIPASS points to the internal temp dir
-        # We want the directory where the executable itself is located.
         return Path(sys.executable).parent
-    # In dev, use the project root
     return Path(__file__).parents[2]
 
 
 def get_config_path() -> Path:
-    return get_app_dir() / "config.yaml"
+    return get_user_data_dir() / "config.yaml"
 
 
 def get_default_db_path() -> Path:
-    return get_app_dir() / "review_data.db"
+    return get_user_data_dir() / "review_data.db"
 
 
 def get_bundled_default_config_path() -> Path:
@@ -37,7 +45,6 @@ def get_bundled_species_csv() -> str | None:
 
 def get_bundled_behaviors_csv() -> str | None:
     bundle_dir = Path(__file__).parent.parent / "data"
-    # Unified naming: species_behaviors.csv
     bundled = bundle_dir / "species_behaviors.csv"
     if bundled.exists():
         return str(bundled)

@@ -23,6 +23,26 @@ FFMPEG_INSTALL_WINDOWS = "winget install ffmpeg"
 FFMPEG_INSTALL_LINUX = "sudo apt install ffmpeg"
 
 
+def validate_video_dir(path: str) -> str | None:
+    """Return an error message if the directory is unsuitable, or None if valid."""
+    from review_app.backend.models import VIDEO_EXTENSIONS
+
+    p = Path(path)
+    if not p.exists():
+        return t("video_dir_not_exist")
+    if not p.is_dir():
+        return "The selected path is a file, not a directory."
+    all_children = list(p.rglob("*"))
+    files = [f for f in all_children if f.is_file()]
+    if not files:
+        return "The directory is empty — no files were found."
+    video_files = [f for f in files if f.suffix.lower() in VIDEO_EXTENSIONS]
+    if not video_files:
+        exts = ", ".join(sorted(VIDEO_EXTENSIONS))
+        return f"No video files found in this directory. Supported formats: {exts}"
+    return None
+
+
 def check_ffmpeg() -> bool:
     if not shutil.which("ffmpeg"):
         return False
@@ -163,8 +183,9 @@ class SetupWizard:
                 ui.notify(t("enter_video_dir"), type="warning")
                 update_submit_button()
                 return
-            if not Path(video_dir).exists():
-                ui.notify(t("video_dir_not_exist"), type="negative")
+            dir_error = await run.io_bound(validate_video_dir, video_dir)
+            if dir_error:
+                ui.notify(dir_error, type="negative", timeout=6000)
                 update_submit_button()
                 return
             if not self.ffmpeg_ok:

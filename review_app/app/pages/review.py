@@ -3,12 +3,10 @@ from pathlib import Path
 
 from nicegui import run, ui
 
-from review_app.app.config import get_config_path
 from review_app.app.state import (
     get_annotator_name,
     get_blank_threshold,
     get_current_idx,
-    get_data_provider,
     get_filters,
     get_playback_speed,
     get_queue,
@@ -22,7 +20,6 @@ from review_app.app.state import (
     set_auto_transcode,
     set_autoplay,
     set_current_idx,
-    set_data_provider,
     set_muted,
     set_playback_speed,
     set_queue,
@@ -33,7 +30,6 @@ from review_app.app.state import (
 )
 from review_app.app.translations import get_language, t
 from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
-from review_app.backend.local_data_provider import LocalDataProvider
 from review_app.backend.utils import df_to_records
 
 
