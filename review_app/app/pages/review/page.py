@@ -427,6 +427,22 @@ async def setup_review():
                         const speedSel = document.querySelector('[id^="vp-speed-"]');
                         if (speedSel) speedSel.value = Number.isInteger(newRate) ? newRate.toFixed(1) : String(newRate);
                         videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRate }));
+                    } else if (e.key === ']') {
+                        e.preventDefault();
+                        const brightSlider = document.querySelector('[id^="vp-brightness-"]');
+                        if (brightSlider) { brightSlider.value = Math.min(2, parseFloat(brightSlider.value) + 0.05); brightSlider.dispatchEvent(new Event('input')); }
+                    } else if (e.key === '[') {
+                        e.preventDefault();
+                        const brightSlider = document.querySelector('[id^="vp-brightness-"]');
+                        if (brightSlider) { brightSlider.value = Math.max(0.5, parseFloat(brightSlider.value) - 0.05); brightSlider.dispatchEvent(new Event('input')); }
+                    } else if (e.key === '}') {
+                        e.preventDefault();
+                        const contrastSlider = document.querySelector('[id^="vp-contrast-"]');
+                        if (contrastSlider) { contrastSlider.value = Math.min(2, parseFloat(contrastSlider.value) + 0.05); contrastSlider.dispatchEvent(new Event('input')); }
+                    } else if (e.key === '{') {
+                        e.preventDefault();
+                        const contrastSlider = document.querySelector('[id^="vp-contrast-"]');
+                        if (contrastSlider) { contrastSlider.value = Math.max(0.5, parseFloat(contrastSlider.value) - 0.05); contrastSlider.dispatchEvent(new Event('input')); }
                     }
                 });
             }

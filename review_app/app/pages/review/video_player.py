@@ -84,6 +84,30 @@ def render_custom_video_player(video_url, duration, vid_key):
                 border: none;
                 cursor: pointer;
             }}
+            #vp-brightness-{vid_key}, #vp-contrast-{vid_key} {{
+                -webkit-appearance: none;
+                appearance: none;
+                height: 6px;
+                border-radius: 3px;
+                background: #555;
+                outline: none;
+            }}
+            #vp-brightness-{vid_key}::-webkit-slider-thumb, #vp-contrast-{vid_key}::-webkit-slider-thumb {{
+                -webkit-appearance: none;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: var(--q-primary);
+                cursor: pointer;
+            }}
+            #vp-brightness-{vid_key}::-moz-range-thumb, #vp-contrast-{vid_key}::-moz-range-thumb {{
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: var(--q-primary);
+                border: none;
+                cursor: pointer;
+            }}
         </style>
         <div style="display:flex;align-items:center;gap:8px;padding:4px 8px 0;width:100%">
             <button id="vp-playpause-{vid_key}"
@@ -102,6 +126,24 @@ def render_custom_video_player(video_url, duration, vid_key):
                     style="font-size:15px;font-weight:600;color:var(--q-primary);background:none;border:1px solid var(--q-primary);border-radius:4px;cursor:pointer;font-family:monospace;outline:none;padding:2px 4px;">
                 {speed_options_html}
             </select>
+        </div>
+        <div style="display:flex;gap:16px;padding:4px 8px;width:100%;align-items:center;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:200px;">
+                <label style="font-size:12px;color:#888;min-width:65px;">Brightness:</label>
+                <input type="range" id="vp-brightness-{vid_key}" min="0.5" max="2" step="0.05" value="1" style="flex:1;min-width:0;">
+                <span id="vp-brightness-val-{vid_key}" style="font-size:12px;color:#888;min-width:32px;text-align:right;">1.0</span>
+                <button id="vp-reset-brightness-{vid_key}" style="flex-shrink:0;width:24px;height:24px;border:none;background:none;cursor:pointer;color:#888;display:flex;align-items:center;justify-content:center;padding:0;border-radius:50%">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                </button>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:200px;">
+                <label style="font-size:12px;color:#888;min-width:65px;">Contrast:</label>
+                <input type="range" id="vp-contrast-{vid_key}" min="0.5" max="2" step="0.05" value="1" style="flex:1;min-width:0;">
+                <span id="vp-contrast-val-{vid_key}" style="font-size:12px;color:#888;min-width:32px;text-align:right;">1.0</span>
+                <button id="vp-reset-contrast-{vid_key}" style="flex-shrink:0;width:24px;height:24px;border:none;background:none;cursor:pointer;color:#888;display:flex;align-items:center;justify-content:center;padding:0;border-radius:50%">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                </button>
+            </div>
         </div>
     ''').classes("full-width")
 
@@ -122,6 +164,42 @@ def render_custom_video_player(video_url, duration, vid_key):
             const pauseIcon = document.getElementById('vp-pause-icon-{vid_key}');
             const speedSel = document.getElementById('vp-speed-{vid_key}');
             if (!videoEl || !range) return;
+
+            // Brightness/Contrast controls
+            const brightnessSlider = document.getElementById('vp-brightness-{vid_key}');
+            const contrastSlider = document.getElementById('vp-contrast-{vid_key}');
+            const brightnessVal = document.getElementById('vp-brightness-val-{vid_key}');
+            const contrastVal = document.getElementById('vp-contrast-val-{vid_key}');
+            const resetBrightness = document.getElementById('vp-reset-brightness-{vid_key}');
+            const resetContrast = document.getElementById('vp-reset-contrast-{vid_key}');
+
+            function updateVideoTransform() {{
+                const brightness = brightnessSlider ? parseFloat(brightnessSlider.value) : 1;
+                const contrast = contrastSlider ? parseFloat(contrastSlider.value) : 1;
+                videoEl.style.filter = `brightness(${{brightness}}) contrast(${{contrast}})`;
+                if (brightnessVal) brightnessVal.textContent = brightness.toFixed(1);
+                if (contrastVal) contrastVal.textContent = contrast.toFixed(1);
+            }}
+
+            if (brightnessSlider) {{
+                brightnessSlider.addEventListener('input', updateVideoTransform);
+            }}
+            if (contrastSlider) {{
+                contrastSlider.addEventListener('input', updateVideoTransform);
+            }}
+            if (resetBrightness) {{
+                resetBrightness.addEventListener('click', () => {{
+                    brightnessSlider.value = 1;
+                    updateVideoTransform();
+                }});
+            }}
+            if (resetContrast) {{
+                resetContrast.addEventListener('click', () => {{
+                    contrastSlider.value = 1;
+                    updateVideoTransform();
+                }});
+            }}
+            updateVideoTransform();
 
             if (speedSel) {{
                 speedSel.addEventListener('change', function() {{
@@ -240,4 +318,14 @@ def render_custom_video_player(video_url, duration, vid_key):
             ui.label(f"{t('shortcut_speed_down')} / {t('shortcut_speed_up')}").classes(
                 "text-caption text-grey-6"
             )
+        with ui.column().classes("col items-center gap-xs"):
+            with ui.row().classes("items-center gap-xs"):
+                _key("[")
+                _key("]")
+            ui.label("Brightness").classes("text-caption text-grey-6")
+        with ui.column().classes("col items-center gap-xs"):
+            with ui.row().classes("items-center gap-xs"):
+                _key("{{")
+                _key("}}")
+            ui.label("Contrast").classes("text-caption text-grey-6")
     return v
