@@ -128,14 +128,15 @@ def shared_header(show_drawer: bool = False):
 
         with drawer:
             with ui.row().classes("items-center q-mb-sm"):
-                ui.button(icon="tune", on_click=toggle_drawer).props("flat round color=primary").tooltip(t("filters_label"))
-                ui.label(t("filters_label")).classes("q-mini-drawer-hide text-subtitle2 font-weight-medium")
+                ui.button(icon="tune", on_click=toggle_drawer).props(
+                    "flat round color=primary"
+                ).tooltip(t("filters_label"))
+                ui.label(t("filters_label")).classes(
+                    "q-mini-drawer-hide text-subtitle2 font-weight-medium"
+                )
 
     with ui.header().classes("bg-primary text-white"):
-        with ui.row().classes("w-full items-center q-px-md"):
-
-            ui.label(t("app_title")).classes("text-h6 text-white font-weight-bold gt-xs")
-
+        with ui.row().classes("w-full items-center q-px-md no-wrap gap-2"):
             _active_pid = get_active_project_id()
             if _active_pid:
                 _header_dp = LocalDataProvider(str(CONFIG_PATH))
@@ -146,6 +147,7 @@ def shared_header(show_drawer: bool = False):
                     ui.dialog() as project_dialog,
                     ui.card().classes("q-pa-lg").style("min-width: 480px"),
                 ):
+                    # ... project dialog code unchanged ...
                     ui.label(t("switch_project")).classes("text-h6 q-mb-md")
                     projects_col = ui.column().classes("w-full gap-xs q-mb-md")
 
@@ -205,10 +207,8 @@ def shared_header(show_drawer: bool = False):
                 ).props("outline color=white dense icon-right=arrow_drop_down").classes(
                     "q-ml-sm text-caption q-px-sm"
                 ).style("border-color: rgba(255, 255, 255, 0.5)")
-
             ui.space()
             with ui.row().classes("gap-2 items-center"):
-                # Navigation items back in header
                 ui.button(t("nav_overview"), on_click=lambda: ui.navigate.to("/overview")).props(
                     "flat color=white"
                 ).classes("gt-sm")
@@ -222,6 +222,9 @@ def shared_header(show_drawer: bool = False):
                     "flat color=white"
                 ).classes("gt-sm")
 
+            ui.space()
+
+            with ui.row().classes("gap-2 items-center q-ml-md"):
                 ui.select(
                     options={"en": t("lang_en"), "fr": t("lang_fr")},
                     value=get_language(),
@@ -233,8 +236,6 @@ def shared_header(show_drawer: bool = False):
                 ui.button(icon="dark_mode", on_click=toggle_dark).props("flat round color=white")
 
     return drawer
-
-
 
 
 class GUI:

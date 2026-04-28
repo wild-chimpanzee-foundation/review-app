@@ -18,7 +18,7 @@ from review_app.app.translations import t
 
 
 def _shortcut_badge(key):
-    ui.badge(key).props("color=grey-9").classes("text-caption q-mt-xs")
+    ui.badge(key).props("color=grey-9").classes("text-caption")
 
 
 def _normalize_is_blank(raw):
@@ -59,8 +59,13 @@ def _init_annotation_state(video, default_species, default_behavior):
 
 @ui.refreshable
 def render_annotation_section(
-    video, species_map, dp, default_species, default_behavior,
-    render_video_section_callback, render_filter_drawer_callback,
+    video,
+    species_map,
+    dp,
+    default_species,
+    default_behavior,
+    render_video_section_callback,
+    render_filter_drawer_callback,
 ):
     # Always reinitialize state when the rendered video differs from what state belongs to
     cached_video_id = get_state_val("review_state_video_id")
@@ -153,30 +158,45 @@ def render_annotation_section(
                         with_input=True,
                     ).props("outlined dense class=col")
 
-                    bp = ui.select(
-                        label=t("behavior_label"),
-                        options=behaviors,
-                        value=bp_value,
-                        with_input=True,
-                    ).props("outlined dense class=col")
-
                     ui.button(icon="delete", on_click=lambda idx=i: delete_selection(idx)).props(
                         "flat color=negative"
                     )
 
-                with ui.row().classes("w-full gap-sm items-center q-mt-sm") as time_row:
-                    start_in = ui.number(
-                        label=t("start_sec"),
-                        value=sel.get("start_sec", 0.0),
-                        step=0.1,
-                        format="%.1f",
-                    ).props("outlined dense class=col")
-                    end_in = ui.number(
-                        label=t("end_sec"),
-                        value=sel.get("end_sec"),
-                        step=0.1,
-                        format="%.1f",
-                    ).props("outlined dense class=col")
+                    with ui.row().classes(
+                        "w-full gap-sm items-center q-mt-sm no-wrap"
+                    ) as time_row:
+                        bp = (
+                            ui.select(
+                                label=t("behavior_label"),
+                                options=behaviors,
+                                value=bp_value,
+                                with_input=True,
+                            )
+                            .props("outlined dense")
+                            .style("flex: 2; min-width: 0;")
+                        )
+
+                        start_in = (
+                            ui.number(
+                                label=t("start_sec"),
+                                value=sel.get("start_sec", 0.0),
+                                step=0.1,
+                                format="%.1f",
+                            )
+                            .props("outlined dense")
+                            .style("flex: 1; min-width: 0;")
+                        )
+
+                        end_in = (
+                            ui.number(
+                                label=t("end_sec"),
+                                value=sel.get("end_sec"),
+                                step=0.1,
+                                format="%.1f",
+                            )
+                            .props("outlined dense")
+                            .style("flex: 1; min-width: 0;")
+                        )
 
                 labeled_by = sel.get("labeled_by")
                 labeled_at = sel.get("labeled_at")
@@ -247,8 +267,8 @@ def render_annotation_section(
 
         with ui.row().classes("w-full justify-center q-mt-xs"):
             ui.button(t("add_species"), icon="add", on_click=add_species).props(
-                "size=md color=teal flat"
-            )
+                "size=md color=primary outline"
+            ).style("border-style: dashed")
 
     # Source of truth: the video currently rendered.
     selected_video_id = video.get("video_id")
@@ -375,30 +395,37 @@ def render_annotation_section(
         finally:
             set_state_val("submit_in_progress", False)
 
-    with ui.row().classes("w-full gap-sm q-mt-sm q-mb-md"):
+    # ── Action buttons ────────────────────────────────────────────────────────
+    # Primary row: the two most-used actions, full-width, visually dominant
+    with ui.row().classes("w-full gap-sm q-mt-sm"):
         with (
             ui.button(on_click=submit_and_next, color="warning")
-            .props("stack")
-            .classes("col") as submit_next_btn
+            .classes("col")
+            .style("font-weight:700") as submit_next_btn
         ):
-            ui.label(t("submit_next"))
-            _shortcut_badge("Enter")
+            with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
+                ui.label(t("submit_next"))
+                _shortcut_badge("↵ Enter")
         submit_next_btn._props["data-shortcut"] = "submit-next"
-        ui.button(t("submit"), on_click=submit).classes("col")
+
+        with ui.button(on_click=mark_blank_next).props("outline").classes("col") as blank_next_btn:
+            with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
+                ui.label(t("mark_blank"))
+                _shortcut_badge("B")
+        blank_next_btn._props["data-shortcut"] = "mark-blank"
+
+    # Secondary row: less-common actions, subtle styling
+    with ui.row().classes("w-full gap-sm q-mb-md q-mt-xs"):
+        ui.button(t("submit"), on_click=submit).props("flat").classes("col text-caption")
+
+        ui.button(t("blank"), on_click=mark_blank_stay).props("flat").classes("col text-caption")
+
         with (
-            ui.button(on_click=mark_blank_next, color="warning")
-            .props("stack")
-            .classes("col") as blank_btn
+            ui.button(on_click=mark_review_later)
+            .props("flat color=grey")
+            .classes("col text-caption") as review_later_btn
         ):
-            ui.label(t("mark_blank"))
-            _shortcut_badge("B")
-        blank_btn._props["data-shortcut"] = "mark-blank"
-        ui.button(t("blank"), on_click=mark_blank_stay).classes("col")
-        with (
-            ui.button(on_click=mark_review_later, color="grey")
-            .props("stack")
-            .classes("col") as review_later_btn
-        ):
-            ui.label(t("mark_review_later"))
-            _shortcut_badge("U")
+            with ui.row().classes("items-center gap-xs no-wrap"):
+                ui.label(t("mark_review_later"))
+                _shortcut_badge("U")
         review_later_btn._props["data-shortcut"] = "mark-unknown"

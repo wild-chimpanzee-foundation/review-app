@@ -154,8 +154,8 @@ async def render_video_section(dp, species_map):
             next_btn = ui.button(icon="chevron_right", on_click=lambda: navigate(1)).props("flat")
             next_btn._props["data-shortcut"] = "next"
 
-    with ui.row().classes("w-full gap-md"):
-        with ui.column().classes("col"):
+    with ui.row().classes("w-full flex-nowrap gap-md items-start"):
+        with ui.column().style("flex: 3; min-width: 500px; max-width: 1500px"):
             with ui.card().classes("full-width q-mb-md"):
                 if video.get("needs_transcode"):
                     attempted = set(get_state_val("transcode_attempted_ids", []))
@@ -232,28 +232,8 @@ async def render_video_section(dp, species_map):
                         )
                     ).classes("text-negative text-caption q-mt-sm")
 
+        with ui.column().style("flex:1;min-width:500px;"):
             with ui.card().classes("full-width"):
-                ui.label(t("model_annotations")).classes(
-                    "text-subtitle1 font-weight-medium q-mb-sm"
-                )
-
-                if model_ann is not None and not model_ann.empty:
-                    columns = [
-                        {"name": "model_name", "label": t("col_model"), "field": "model_name"},
-                        {
-                            "name": "annotation_type",
-                            "label": t("col_type"),
-                            "field": "annotation_type",
-                        },
-                        {"name": "value_text", "label": t("col_value"), "field": "value_text"},
-                        {"name": "probability", "label": t("col_prob"), "field": "probability"},
-                    ]
-                    ui.table(columns=columns, rows=df_to_records(model_ann, 10))
-                else:
-                    ui.label(t("no_model_annotations")).classes("text-grey-5")
-
-        with ui.column().classes("col"):
-            with ui.card().classes("full-width q-mb-md"):
                 with ui.row().classes("items-center w-full q-mb-sm"):
                     ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium")
                     ui.space()
@@ -279,6 +259,80 @@ async def render_video_section(dp, species_map):
                     render_video_section,
                     render_filter_drawer,
                 )
+
+            # ── Model annotations ─────────────────────────────────────────────
+            with ui.card().classes("full-width"):
+                ui.label(t("model_annotations")).classes(
+                    "text-subtitle1 font-weight-medium q-mb-sm"
+                )
+
+                def is_number(value: str) -> bool:
+                    try:
+                        float(value)
+                        return True
+                    except (TypeError, ValueError):
+                        return False
+
+                if model_ann is not None and not model_ann.empty:
+                    species_map = await run.io_bound(dp.get_species_display_map, get_language())
+                    for row in df_to_records(model_ann, 10):
+                        model_name = row.get("model_name", "")
+                        ann_type = row.get("annotation_type", "")
+                        value_text = row.get("value_text", "") or ""
+                        if ann_type == "blank_non_blank" and is_number(value_text):
+                            if (
+                                get_blank_threshold() is not None
+                                and get_blank_threshold() >= 0
+                                and float(value_text) < get_blank_threshold()
+                            ):
+                                value_text = t("non_blank")
+                            else:
+                                value_text = t("blank")
+                        prob_raw = row.get("probability", 0.0)
+
+                        if ann_type == "species":
+                            value_text = species_map.get(value_text, value_text)
+                            element_color = (
+                                "positive"
+                                if prob_raw > 0.85
+                                else "warning"
+                                if prob_raw > 0.5
+                                else "negative"
+                            )
+
+                        else:
+                            element_color = "primary"
+                        with ui.row().classes("w-full items-center q-py-sm "):
+                            # 1. Identity Block (Left-aligned, fixed size)
+                            with ui.column().classes("gap-0").style("width: 140px"):
+                                ui.label(model_name).classes("text-bold text-primary").style(
+                                    "font-size: 0.75rem"
+                                )
+                                ui.label(ann_type).classes("text-caption text-grey-6 italic")
+
+                            # 2. Value & Bar Block (Flex-grow to fill space)
+                            with ui.column().classes("col gap-1 px-4"):
+                                # The text value sits right above its bar
+                                ui.label(value_text).classes(
+                                    "text-body2 text-weight-medium"
+                                ).style("line-height: 1")
+
+                                with ui.row().classes("w-full items-center gap-2"):
+                                    if prob_raw is not None:
+                                        try:
+                                            p = float(prob_raw)
+                                            # round to 2 decimals for display
+                                            p_display = round(p, 2)
+                                            ui.linear_progress(
+                                                value=p_display, color=element_color
+                                            ).props("rounded")
+                                        except:
+                                            ui.label(str(prob_raw))
+
+                        ui.separator().style("opacity: 0.2")
+
+                else:
+                    ui.label(t("no_model_annotations")).classes("text-grey-5")
 
 
 async def setup_review():
@@ -415,7 +469,6 @@ async def setup_review():
                         videoEl.playbackRate = newRate;
                         const speedSel = document.querySelector('[id^="vp-speed-"]');
                         if (speedSel) speedSel.value = Number.isInteger(newRate) ? newRate.toFixed(1) : String(newRate);
-                        // Trigger sync to Python if needed - this is handled by the video specific setup's sync listener
                         videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRate }));
                     } else if (e.key === 's' || e.key === 'S') {
                         e.preventDefault();
