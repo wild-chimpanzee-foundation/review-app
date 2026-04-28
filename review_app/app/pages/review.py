@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from urllib.parse import quote
 
 from nicegui import run, ui
 
@@ -558,7 +559,7 @@ async def render_video_section(dp, species_map):
                     transcoded_path = Path(transcoded_str) if transcoded_str else None
 
                     if transcoded_path and transcoded_path.exists():
-                        video_url = f"/transcoded/{transcoded_path.name}"
+                        video_url = f"/transcoded/{quote(transcoded_path.name)}"
                     else:
                         serve_path = Path(video["video_path"])
                         if serve_path.exists():
@@ -568,7 +569,7 @@ async def render_video_section(dp, species_map):
                             ]:
                                 try:
                                     rel_path = serve_path.relative_to(_base)
-                                    video_url = f"/media/{rel_path}"
+                                    video_url = f"/media/{quote(str(rel_path), safe='/')}"
                                     break
                                 except ValueError:
                                     continue
