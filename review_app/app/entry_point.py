@@ -110,7 +110,7 @@ def shared_header():
                     with ui.row().classes("w-full justify-between items-center"):
                         ui.label(label).classes("text-body2")
                         ui.label(key).classes(
-                            "q-px-sm q-py-xs bg-grey-8 text-white rounded-borders text-bold text-caption shadow-1"
+                            "q-px-sm q-py-xs bg-grey-8  rounded-borders text-bold text-caption shadow-1"
                         )
 
     with ui.header().classes("bg-primary"):
@@ -120,7 +120,9 @@ def shared_header():
             _active_pid = get_active_project_id()
             if _active_pid:
                 _header_dp = LocalDataProvider(str(CONFIG_PATH))
-                _active_proj_name = (p.name if (p := _header_dp.get_project(_active_pid)) else _active_pid)
+                _active_proj_name = (
+                    p.name if (p := _header_dp.get_project(_active_pid)) else _active_pid
+                )
                 with (
                     ui.dialog() as project_dialog,
                     ui.card().classes("q-pa-lg").style("min-width: 480px"),
@@ -201,7 +203,7 @@ def shared_header():
                     options={"en": t("lang_en"), "fr": t("lang_fr")},
                     value=get_language(),
                     on_change=change_language,
-                ).props("dense outlined color=white").classes("text-white")
+                ).props("dense outlined dark popup-content-class=header-dropdown")
                 ui.button(icon="help_outline", on_click=shortcuts_dialog.open).props(
                     "flat round color=white"
                 )
@@ -329,7 +331,9 @@ class GUI:
                         ui.label(str(dp.db_path)).classes("text-body2")
                     with ui.card().classes("col"):
                         ui.label(t("video_dir_label")).classes("text-caption text-grey-6")
-                        for _d in [Path(d.path) for d in dp.get_project_dirs(get_active_project_id())]:
+                        for _d in [
+                            Path(d.path) for d in dp.get_project_dirs(get_active_project_id())
+                        ]:
                             ui.label(str(_d)).classes("text-body2")
                     with ui.card().classes("col"):
                         ui.label(t("videos_in_db_label")).classes("text-caption text-grey-6")
@@ -478,7 +482,9 @@ class GUI:
                 transcoded_tmp.mkdir(parents=True, exist_ok=True)
                 app.add_media_files("/transcoded", transcoded_tmp)
 
-                set_media_dirs([Path(d.path) for d in dp.get_project_dirs(get_active_project_id())])
+                set_media_dirs(
+                    [Path(d.path) for d in dp.get_project_dirs(get_active_project_id())]
+                )
             except Exception as e:
                 print(f"Warning: Could not load config at startup: {e}")
 

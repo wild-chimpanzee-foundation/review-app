@@ -65,6 +65,41 @@ def apply_theme():
                 font-weight: 500;
                 letter-spacing: normal;
             }
+
+            /* Theme-aware grey text colors */
+            .body--light .text-grey-1 { color: #f5f5f5 !important; }
+            .body--light .text-grey-2 { color: #eeeeee !important; }
+            .body--light .text-grey-3 { color: #e0e0e0 !important; }
+            .body--light .text-grey-4 { color: #bdbdbd !important; }
+            .body--light .text-grey-5 { color: #9e9e9e !important; }
+            .body--light .text-grey-6 { color: #757575 !important; }
+            .body--light .text-grey-7 { color: #616161 !important; }
+            .body--light .text-grey-8 { color: #424242 !important; }
+            .body--light .text-grey-9 { color: #212121 !important; }
+            .body--light .text-grey-10 { color: #121212 !important; }
+
+            .body--dark .text-grey-1 { color: #fafafa !important; }
+            .body--dark .text-grey-2 { color: #eeeeee !important; }
+            .body--dark .text-grey-3 { color: #e0e0e0 !important; }
+            .body--dark .text-grey-4 { color: #bdbdbd !important; }
+            .body--dark .text-grey-5 { color: #a0a0a0 !important; }
+            .body--dark .text-grey-6 { color: #9e9e9e !important; }
+            .body--dark .text-grey-7 { color: #b0b0b0 !important; }
+            .body--dark .text-grey-8 { color: #c0c0c0 !important; }
+            .body--dark .text-grey-9 { color: #d0d0d0 !important; }
+            .body--dark .text-grey-10 { color: #e0e0e0 !important; }
+
+            /* Header select dropdown styling */
+            .header-dropdown {
+                background: var(--q-primary) !important;
+                color: white !important;
+            }
+            .header-dropdown .q-item {
+                color: white !important;
+            }
+            .header-dropdown .q-item:hover {
+                background: rgba(255, 255, 255, 0.1) !important;
+            }
         </style>
     """,
         shared=True,

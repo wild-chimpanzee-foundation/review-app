@@ -1076,6 +1076,24 @@ async def setup_review():
                     value=filters.get("selected_annotation_status", "All"),
                 ).props("outlined dense class=full-width")
 
+                async def reset_filters():
+                    # Reset all filter UI elements to defaults
+                    search.value = ""
+                    camera_select.value = "All"
+                    possible_species_filter.value = "All"
+                    model_behavior_filter.value = "All"
+                    model_blank_filter.value = "All"
+                    needs_review_filter.value = "All"
+                    species_filter.value = "All"
+                    behavior_filter.value = "All"
+                    manual_blank_filter.value = "All"
+                    annotation_filter.value = "All"
+                    web_safe_only_cb.value = False
+                    sort_select.value = "camera"
+                    sort_dir[0] = "desc"
+                    dir_btn.props("outlined dense icon=arrow_downward")
+                    apply_filters()
+
                 async def apply_filters():
                     new_filters = {
                         "search_query": search.value,
@@ -1105,9 +1123,13 @@ async def setup_review():
                     set_queue(new_queue)
                     navigate_to(0)
 
-                ui.button(t("apply_filters"), on_click=apply_filters, color="primary").props(
-                    "full-width"
-                )
+                with ui.row().classes("w-full gap-sm"):
+                    ui.button(t("apply_filters"), on_click=apply_filters, color="primary").classes(
+                        "col"
+                    )
+                    ui.button(
+                        t("reset_filters"), on_click=lambda: reset_filters(), color="negative"
+                    ).classes("col")
 
             # ── Sort ─────────────────────────────────────────────────────────
             with ui.card().classes("full-width q-mb-md"):
