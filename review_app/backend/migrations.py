@@ -4,7 +4,20 @@ from sqlalchemy import text
 
 # Add tuples of (version: int, sql: str) to apply schema changes to existing DBs.
 # Versions must be contiguous starting at 1. Never modify or remove existing entries.
-MIGRATIONS: list[tuple[int, str]] = []
+MIGRATIONS: list[tuple[int, str]] = [
+    (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
+    (
+        2,
+        """
+        UPDATE individual_observations
+        SET project_id = (
+            SELECT project_id FROM videos
+            WHERE videos.video_id = individual_observations.video_id
+        )
+        WHERE project_id IS NULL
+        """,
+    ),
+]
 
 
 def run_migrations(engine) -> None:

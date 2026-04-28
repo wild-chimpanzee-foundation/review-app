@@ -521,6 +521,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     SELECT 1 FROM video_labels vl2
                     WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
                 )""")
+        elif selected_annotation_status == "Review Later":
+            where.append(
+                "EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.review_later = 1)"
+            )
 
         if selected_sort == "camera":
             order_by = f"ORDER BY v.camera_id {sort_dir}, v.video_path ASC"
@@ -682,6 +686,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                         v.transcoded_path,
                         v.validation_error AS video_validation_details,
                         vl.is_blank,
+                        vl.review_later,
                         vl.labeled_by AS blank_labeled_by,
                         ms.behavior_prediction,
                         ms.individual_count,
@@ -873,6 +878,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 label = VideoLabel(video_id=video_id)
                 session.add(label)
             label.is_blank = is_blank
+            label.review_later = False
             if is_blank:
                 label.labeled_by = labeled_by
                 label.labeled_at = now
@@ -897,6 +903,15 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                             updated_at=now,
                         )
                     )
+            session.commit()
+
+    def set_review_later(self, video_id: str, value: bool = True) -> None:
+        with self.Session() as session:
+            label = session.get(VideoLabel, video_id)
+            if label is None:
+                label = VideoLabel(video_id=video_id)
+                session.add(label)
+            label.review_later = value
             session.commit()
 
     @staticmethod
@@ -1359,7 +1374,8 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     COUNT(DISTINCT CASE WHEN vl.is_blank IS NOT NULL THEN v.video_id END)         AS labeled,
                     COUNT(DISTINCT CASE WHEN vl.is_blank = 1 THEN v.video_id END)                AS blank,
                     COUNT(DISTINCT CASE WHEN vl.is_blank = 0 THEN v.video_id END)                AS non_blank,
-                    COUNT(DISTINCT io.video_id)                                                   AS has_observations
+                    COUNT(DISTINCT io.video_id)                                                   AS has_observations,
+                    COUNT(DISTINCT CASE WHEN vl.review_later = 1 THEN v.video_id END)            AS review_later
                 FROM videos v
                 LEFT JOIN video_labels     vl ON vl.video_id = v.video_id
                 LEFT JOIN individual_observations io ON io.video_id = v.video_id

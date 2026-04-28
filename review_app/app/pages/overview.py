@@ -6,10 +6,16 @@ from review_app.app.utils import get_or_create_data_provider, render_uninitializ
 
 
 async def setup_overview():
+    from review_app.app.entry_point import shared_header
+
     dp = await get_or_create_data_provider()
     if not dp:
+        shared_header()
         render_uninitialized_state()
         return
+
+    shared_header()
+
     pid = get_active_project_id()
     if not await run.io_bound(dp.has_videos_in_db, pid):
         with ui.column().classes("w-full q-pa-lg items-center"):
@@ -28,6 +34,7 @@ async def setup_overview():
         lb = stats.get("labeling", {})
         total = max(int(lb.get("total_videos", 1)), 1)
         labeled = int(lb.get("labeled", 0))
+        review_later = int(lb.get("review_later", 0))
 
         # Stat cards
         with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
@@ -35,11 +42,9 @@ async def setup_overview():
                 (t("stat_total_videos"), int(v.get("total", 0))),
                 (t("stat_cameras"), int(v.get("cameras", 0))),
                 (t("stat_hours"), f"{v.get('total_hours', 0):.1f}h"),
-                (
-                    t("stat_labeled"),
-                    f"{labeled} ({100 * labeled / total:.0f}%)",
-                ),
+                (t("stat_labeled"), f"{labeled} ({100 * labeled / total:.0f}%)"),
                 (t("stat_blank"), int(lb.get("blank", 0))),
+                (t("review_later"), review_later, "text-orange" if review_later else ""),
                 (t("stat_invalid"), int(v.get("invalid", 0)), "text-negative"),
                 (t("stat_unprobed"), int(v.get("unprobed", 0)), "text-warning"),
             ]

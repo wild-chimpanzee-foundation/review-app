@@ -66,10 +66,15 @@ def _auto_suggest_path_col(columns: list[str], sample: list[dict]) -> str:
 
 
 async def setup_model_import():
+    from review_app.app.entry_point import shared_header
+
     dp = await get_or_create_data_provider()
     if not dp or not await run.io_bound(dp.has_videos_in_db, get_active_project_id()):
+        shared_header()
         render_uninitialized_state()
         return
+
+    shared_header()
 
     for key in (
         "raw_df_records", "raw_csv_columns",

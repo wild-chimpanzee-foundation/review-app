@@ -524,6 +524,10 @@ def _build_settings_content(container: ui.column):
 
 
 async def setup_settings():
+    from review_app.app.entry_point import shared_header
+
+    shared_header()
+
     dp = await get_or_create_data_provider()
     if not dp or not await run.io_bound(dp.has_videos_in_db, get_active_project_id()):
         pass

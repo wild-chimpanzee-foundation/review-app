@@ -1,0 +1,295 @@
+from nicegui import run, ui
+
+from review_app.app.state import (
+    get_active_project_id,
+    get_blank_threshold,
+    get_filters,
+    get_species_threshold,
+    is_auto_transcode,
+    is_autoplay,
+    is_muted,
+    is_reset_speed_on_seek,
+    set_auto_transcode,
+    set_autoplay,
+    set_muted,
+    set_queue,
+    set_reset_speed_on_seek,
+    update_filters,
+)
+from review_app.app.translations import t
+
+
+@ui.refreshable
+async def render_filter_drawer(
+    dp,
+    species_map,
+    navigate_to_callback,
+    render_video_section_callback,
+):
+    filter_options = await run.io_bound(dp.get_queue_filter_options, get_active_project_id())
+    filters = get_filters()
+
+    with ui.element("div").classes("q-mini-drawer-hide full-width"):
+        # ── Filters ──────────────────────────────────────────────────
+        with ui.card().classes("full-width q-mb-md"):
+            ui.label(t("filter_section_general")).classes("text-caption text-grey-5 q-mt-xs")
+
+            search = ui.input(t("search"), placeholder=t("search_placeholder")).props(
+                "outlined dense class=full-width"
+            )
+            search.value = filters.get("search_query", "")
+
+            camera_values = filter_options.get("camera_values", [])
+            camera_select = ui.select(
+                label=t("camera_filter"),
+                options={v: v if v != "All" else t("all_option") for v in ["All"] + camera_values},
+                value=filters.get("selected_camera", "All"),
+                with_input=True,
+            ).props("outlined dense class=full-width")
+
+            web_safe_only_cb = ui.checkbox(
+                t("web_safe_only"), value=bool(filters.get("web_safe_only", False))
+            )
+
+            ui.separator().classes("q-my-xs")
+            ui.label(t("filter_section_model")).classes("text-caption text-grey-5")
+
+            possible_species_values = filter_options.get("possible_species_values", [])
+            selected_possible_species = filters.get("selected_possible_species", "All")
+            if selected_possible_species not in ["All"] + possible_species_values:
+                selected_possible_species = "All"
+            possible_species_filter = ui.select(
+                label=t("species_model_filter"),
+                options={
+                    v: species_map.get(v, v) if v != "All" else t("all_option")
+                    for v in ["All"] + possible_species_values
+                },
+                value=selected_possible_species,
+                with_input=True,
+            ).props("outlined dense class=full-width")
+
+            model_behavior_values = filter_options.get("model_behavior_values", [])
+            selected_model_behavior = filters.get("selected_model_behavior", "All")
+            if selected_model_behavior not in ["All"] + model_behavior_values:
+                selected_model_behavior = "All"
+            model_behavior_filter = ui.select(
+                label=t("model_behavior_filter"),
+                options={
+                    "All": t("all_option"),
+                    **{v: v for v in model_behavior_values},
+                },
+                value=selected_model_behavior,
+                with_input=True,
+            ).props("outlined dense class=full-width")
+
+            selected_model_blank = filters.get("selected_model_blank", "All")
+            model_blank_filter = ui.select(
+                label=t("model_blank_filter"),
+                options={
+                    "All": t("all_option"),
+                    "Blank": t("blank"),
+                    "Non-Blank": t("non_blank"),
+                    "Unknown": t("unknown"),
+                },
+                value=selected_model_blank,
+            ).props("outlined dense class=full-width")
+
+            needs_review_filter = ui.select(
+                label=t("needs_review_filter"),
+                options={
+                    "All": t("all_option"),
+                    "Needs Review": t("needs_review"),
+                    "No Review": t("no_review_needed"),
+                },
+                value=filters.get("selected_needs_review", "All"),
+            ).props("outlined dense class=full-width")
+
+            ui.separator().classes("q-my-xs")
+            ui.label(t("filter_section_manual")).classes("text-caption text-grey-5")
+
+            species_values = filter_options.get("species_values", [])
+            selected_species = filters.get("selected_species", "All")
+            if selected_species not in ["All"] + species_values:
+                selected_species = "All"
+            species_filter = ui.select(
+                label=t("species_manual_filter"),
+                options={
+                    v: species_map.get(v, v) if v != "All" else t("all_option")
+                    for v in ["All"] + species_values
+                },
+                value=selected_species,
+                with_input=True,
+            ).props("outlined dense class=full-width")
+
+            behavior_values = filter_options.get("behavior_values", [])
+            behavior_filter = ui.select(
+                label=t("manual_behavior_filter"),
+                options={
+                    "All": t("all_option"),
+                    "Has Behavior": t("has_behavior"),
+                    "No Behavior": t("no_behavior"),
+                    **{v: v for v in behavior_values},
+                },
+                value=filters.get("selected_behavior", "All"),
+                with_input=True,
+            ).props("outlined dense class=full-width")
+
+            selected_manual_blank = filters.get("selected_manual_blank", "All")
+            manual_blank_filter = ui.select(
+                label=t("manual_blank_filter"),
+                options={
+                    "All": t("all_option"),
+                    "Blank": t("blank"),
+                    "Non-Blank": t("non_blank"),
+                    "Unlabeled": t("unlabeled_option"),
+                },
+                value=selected_manual_blank,
+            ).props("outlined dense class=full-width")
+
+            annotation_filter = ui.select(
+                label=t("annotation_filter"),
+                options={
+                    "All": t("all_option"),
+                    "Annotated": t("annotated"),
+                    "Not Annotated": t("not_annotated"),
+                    "Review Later": t("review_later"),
+                },
+                value=filters.get("selected_annotation_status", "All"),
+            ).props("outlined dense class=full-width")
+
+            async def reset_filters():
+                search.value = ""
+                camera_select.value = "All"
+                possible_species_filter.value = "All"
+                model_behavior_filter.value = "All"
+                model_blank_filter.value = "All"
+                needs_review_filter.value = "All"
+                species_filter.value = "All"
+                behavior_filter.value = "All"
+                manual_blank_filter.value = "All"
+                annotation_filter.value = "All"
+                web_safe_only_cb.value = False
+                sort_select.value = "camera"
+                sort_dir[0] = "desc"
+                dir_btn.props("outlined dense icon=arrow_downward")
+                await apply_filters()
+
+            async def apply_filters():
+                new_filters = {
+                    "search_query": search.value,
+                    "selected_camera": camera_select.value,
+                    "selected_sort": sort_select.value,
+                    "selected_sort_direction": sort_dir[0],
+                    "selected_species": species_filter.value,
+                    "selected_possible_species": possible_species_filter.value,
+                    "selected_behavior": behavior_filter.value,
+                    "selected_model_behavior": model_behavior_filter.value,
+                    "selected_manual_blank": manual_blank_filter.value,
+                    "selected_model_blank": model_blank_filter.value,
+                    "selected_annotation_status": annotation_filter.value,
+                    "selected_needs_review": needs_review_filter.value,
+                    "web_safe_only": web_safe_only_cb.value,
+                }
+                update_filters(**new_filters)
+                new_queue = await run.io_bound(
+                    dp.get_video_queue,
+                    {
+                        **new_filters,
+                        "blank_threshold": get_blank_threshold(),
+                        "species_threshold": get_species_threshold(),
+                    },
+                    get_active_project_id(),
+                )
+                set_queue(new_queue)
+                navigate_to_callback(0)
+                ui.run_javascript("document.activeElement?.blur()")
+
+            with ui.row().classes("w-full gap-sm"):
+                ui.button(t("apply_filters"), on_click=apply_filters, color="primary").classes("col")
+                ui.button(t("reset_filters"), on_click=lambda: reset_filters(), color="negative").classes("col")
+
+        # ── Sort ─────────────────────────────────────────────────────────
+        with ui.card().classes("full-width q-mb-md"):
+            ui.label(t("sort_label")).classes("text-subtitle2 text-grey-7 q-mb-xs")
+            with ui.row().classes("w-full items-center gap-sm"):
+                sort_select = ui.select(
+                    options={
+                        "camera": t("sort_camera"),
+                        "unreviewed_first": t("sort_unreviewed"),
+                        "species_prob": t("sort_species_prob"),
+                        "random": t("sort_random"),
+                    },
+                    value=filters.get("selected_sort", "camera"),
+                ).props("outlined dense class=col")
+
+                sort_dir = [filters.get("selected_sort_direction", "desc")]
+
+                dir_btn = ui.button(
+                    icon="arrow_downward" if sort_dir[0] == "desc" else "arrow_upward"
+                ).props("outlined dense")
+
+            async def apply_sort():
+                update_filters(
+                    selected_sort=sort_select.value,
+                    selected_sort_direction=sort_dir[0],
+                )
+                f = get_filters()
+                new_queue = await run.io_bound(
+                    dp.get_video_queue,
+                    {
+                        **f,
+                        "blank_threshold": get_blank_threshold(),
+                        "species_threshold": get_species_threshold(),
+                    },
+                    get_active_project_id(),
+                )
+                set_queue(new_queue)
+                navigate_to_callback(0)
+
+            async def toggle_dir():
+                sort_dir[0] = "asc" if sort_dir[0] == "desc" else "desc"
+                dir_btn.props(
+                    f"outlined dense icon={'arrow_upward' if sort_dir[0] == 'asc' else 'arrow_downward'}"
+                )
+                await apply_sort()
+
+            dir_btn.on_click(toggle_dir)
+            sort_select.on_value_change(lambda _: apply_sort())
+
+        # ── Playback ──────────────────────────────────────────────────────
+        with ui.card().classes("full-width q-mb-md"):
+            ui.label(t("playback_settings")).classes("text-subtitle2 text-grey-7 q-mb-xs")
+
+            ui.run_javascript(
+                f"window._resetSpeedOnSeek = {str(is_reset_speed_on_seek()).lower()};"
+            )
+
+            ui.checkbox(
+                t("reset_speed_on_seek"),
+                value=is_reset_speed_on_seek(),
+                on_change=lambda e: (
+                    set_reset_speed_on_seek(e.value),
+                    ui.run_javascript(f"window._resetSpeedOnSeek = {str(e.value).lower()};"),
+                ),
+            )
+            ui.checkbox(
+                t("autoplay"),
+                value=is_autoplay(),
+                on_change=lambda e: (
+                    set_autoplay(e.value),
+                    render_video_section_callback.refresh(),
+                ),
+            )
+            ui.checkbox(
+                t("muted"),
+                value=is_muted(),
+                on_change=lambda e: (
+                    set_muted(e.value),
+                    render_video_section_callback.refresh(),
+                ),
+            )
+            ui.checkbox(
+                t("auto_transcode"),
+                value=is_auto_transcode(),
+                on_change=lambda e: set_auto_transcode(e.value),
+            )

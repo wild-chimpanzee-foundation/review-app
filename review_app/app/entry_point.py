@@ -56,10 +56,11 @@ for _ext, _mime in [
 CONFIG_PATH = get_config_path()
 
 
-def shared_header():
+def shared_header(show_drawer: bool = False):
     from nicegui import ui
 
     apply_theme()
+    ui.query(".q-layout").props('view="hHh Lpr lFf"')
 
     # Register navigate handler per-page
     def handle_navigate(e):
@@ -113,9 +114,27 @@ def shared_header():
                             "q-px-sm q-py-xs bg-grey-8  rounded-borders text-bold text-caption shadow-1"
                         )
 
-    with ui.header().classes("bg-primary"):
+    drawer = None
+
+    def toggle_drawer():
+        if drawer is not None:
+            if "mini" in drawer._props:
+                drawer.props(remove="mini")
+            else:
+                drawer.props("mini")
+
+    if show_drawer:
+        drawer = ui.left_drawer(value=True).classes("q-pa-sm")
+
+        with drawer:
+            with ui.row().classes("items-center q-mb-sm"):
+                ui.button(icon="tune", on_click=toggle_drawer).props("flat round color=primary").tooltip(t("filters_label"))
+                ui.label(t("filters_label")).classes("q-mini-drawer-hide text-subtitle2 font-weight-medium")
+
+    with ui.header().classes("bg-primary text-white"):
         with ui.row().classes("w-full items-center q-px-md"):
-            ui.label(t("app_title")).classes("text-h6 text-white font-weight-bold")
+
+            ui.label(t("app_title")).classes("text-h6 text-white font-weight-bold gt-xs")
 
             _active_pid = get_active_project_id()
             if _active_pid:
@@ -183,31 +202,39 @@ def shared_header():
                     _active_proj_name,
                     icon="folder_special",
                     on_click=lambda: (refresh_projects_col(), project_dialog.open()),
-                ).props("flat color=white dense").classes("q-ml-sm text-caption")
+                ).props("outline color=white dense icon-right=arrow_drop_down").classes(
+                    "q-ml-sm text-caption q-px-sm"
+                ).style("border-color: rgba(255, 255, 255, 0.5)")
 
             ui.space()
             with ui.row().classes("gap-2 items-center"):
+                # Navigation items back in header
                 ui.button(t("nav_overview"), on_click=lambda: ui.navigate.to("/overview")).props(
                     "flat color=white"
-                )
+                ).classes("gt-sm")
                 ui.button(t("nav_review"), on_click=lambda: ui.navigate.to("/review")).props(
                     "flat color=white"
-                )
+                ).classes("gt-sm")
                 ui.button(t("nav_import"), on_click=lambda: ui.navigate.to("/model-import")).props(
                     "flat color=white"
-                )
+                ).classes("gt-sm")
                 ui.button(t("nav_settings"), on_click=lambda: ui.navigate.to("/settings")).props(
                     "flat color=white"
-                )
+                ).classes("gt-sm")
+
                 ui.select(
                     options={"en": t("lang_en"), "fr": t("lang_fr")},
                     value=get_language(),
                     on_change=change_language,
-                ).props("dense outlined dark popup-content-class=header-dropdown")
+                ).props("dense outlined dark popup-content-class=header-dropdown").classes("w-32")
                 ui.button(icon="help_outline", on_click=shortcuts_dialog.open).props(
                     "flat round color=white"
                 )
                 ui.button(icon="dark_mode", on_click=toggle_dark).props("flat round color=white")
+
+    return drawer
+
+
 
 
 class GUI:
@@ -377,29 +404,27 @@ class GUI:
     async def overview_page(self):
         from review_app.app.pages.overview import setup_overview
 
-        shared_header()
         await setup_overview()
 
     async def review_page(self):
         from review_app.app.pages.review import setup_review
 
-        shared_header()
         await setup_review()
 
     async def model_import_page(self):
         from review_app.app.pages.model_import import setup_model_import
 
-        shared_header()
         await setup_model_import()
 
     async def settings_page(self):
         from review_app.app.pages.settings import setup_settings
 
-        shared_header()
         await setup_settings()
 
     def setup_page(self):
         from nicegui import ui
+
+        from review_app.app.setup_wizard import setup_wizard
 
         shared_header()
 

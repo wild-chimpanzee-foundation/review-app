@@ -63,6 +63,7 @@ class VideoLabel(Base):
     is_blank = Column(Boolean, nullable=True)
     labeled_by = Column(String, nullable=True)
     labeled_at = Column(DateTime, nullable=True)
+    review_later = Column(Boolean, nullable=True, default=False)
 
 
 class IndividualObservation(Base):
