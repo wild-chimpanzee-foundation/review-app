@@ -7,14 +7,13 @@ from pathlib import Path
 import yaml
 from nicegui import run, ui
 
-from review_app.app.media import register_media_dir
 from review_app.app.config import (
     get_bundled_default_config_path,
     get_config_path,
     get_default_db_path,
     save_config,
-    update_config_key,
 )
+from review_app.app.media import set_media_dirs
 from review_app.app.translations import t
 from review_app.app.utils import sync_with_progress
 
@@ -25,7 +24,7 @@ FFMPEG_INSTALL_LINUX = "sudo apt install ffmpeg"
 
 def validate_video_dir(path: str) -> str | None:
     """Return an error message if the directory is unsuitable, or None if valid."""
-    from review_app.backend.models import VIDEO_EXTENSIONS
+    from review_app.app.config import VIDEO_EXTENSIONS
 
     p = Path(path)
     if not p.exists():
@@ -64,7 +63,7 @@ def get_ffmpeg_install_cmd() -> str:
         return FFMPEG_INSTALL_LINUX
 
 
-def generate_config(video_dir: str, annotator_name: str) -> dict:
+def generate_config(annotator_name: str) -> dict:
     default_path = get_bundled_default_config_path()
     if default_path.exists():
         with open(default_path) as f:
@@ -221,10 +220,11 @@ class SetupWizard:
                 config = dict(self.existing_config)
                 config["annotator_name"] = annotator_name
             else:
-                config = generate_config(video_dir, annotator_name)
+                config = generate_config(annotator_name)
             save_config(config)
 
             from review_app.app.state import (
+                get_active_project_id,
                 init_user_prefs,
                 set_active_project,
                 set_current_idx,
@@ -243,20 +243,17 @@ class SetupWizard:
             # Create project in a temporary dp (active_project_id not in config yet)
             _dp_tmp = LocalDataProvider(str(self.config_path))
             project = _dp_tmp.create_project(project_name, video_dir)
-            update_config_key("active_project_id", project.id)
-            set_active_project(project.id, project.name)
+            set_active_project(project.id)
             set_queue([])
             set_current_idx(0)
             set_selections([])
 
-            # Reload dp now that active_project_id is in config so video_dirs is populated
+            # Reload dp now that active_project_id is in config so project dirs are populated
             dp = LocalDataProvider(str(self.config_path))
             set_data_provider(dp)
 
-            for _d in dp.video_dirs:
-                if _d.exists():
-                    register_media_dir(_d)
-            has_videos = await run.io_bound(dp.has_videos_in_db)
+            set_media_dirs([Path(d.path) for d in dp.get_project_dirs(get_active_project_id())])
+            has_videos = await run.io_bound(dp.has_videos_in_db, get_active_project_id())
 
             if not has_videos:
                 submit_button_holder[0].visible = False
@@ -280,7 +277,8 @@ class SetupWizard:
 
                 dialog.open()
                 stats = await sync_with_progress(
-                    dp, progress=progress, status=status, video_dir=video_dir
+                    dp, progress=progress, status=status, video_dir=video_dir,
+                    active_project_id=get_active_project_id(),
                 )
                 status.text = t("sync_complete")
                 if stats:

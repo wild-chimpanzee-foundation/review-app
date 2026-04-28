@@ -3,7 +3,7 @@ import asyncio
 from review_app.app.translations import t
 
 
-async def sync_with_progress(data_provider, progress=None, status=None, video_dir=None):
+async def sync_with_progress(data_provider, progress=None, status=None, video_dir=None, active_project_id=None):
     """
     Run sync_videos in a thread that is independent of NiceGUI client context.
 
@@ -22,7 +22,7 @@ async def sync_with_progress(data_provider, progress=None, status=None, video_di
     dir_path = _Path(video_dir) if video_dir else None
     future = loop.run_in_executor(
         None,
-        lambda: data_provider.sync_videos(progress_callback=update_progress, video_dir=dir_path),
+        lambda: data_provider.sync_videos(progress_callback=update_progress, video_dir=dir_path, active_project_id=active_project_id),
     )
 
     while not future.done():

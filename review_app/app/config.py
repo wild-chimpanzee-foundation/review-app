@@ -94,7 +94,3 @@ def update_config_key(key: str, value) -> None:
     config = load_config()
     config[key] = value
     save_config(config)
-
-
-def get_active_project_id() -> str | None:
-    return load_config().get("active_project_id")

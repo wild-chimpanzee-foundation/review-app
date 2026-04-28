@@ -294,6 +294,7 @@ def render_annotation_section(
                 "blank_threshold": get_blank_threshold(),
                 "species_threshold": get_species_threshold(),
             },
+            get_active_project_id(),
         )
         prev_idx = get_current_idx()
         set_queue(new_queue)
@@ -451,6 +452,7 @@ async def render_video_section(dp, species_map):
                 "blank_threshold": get_blank_threshold(),
                 "species_threshold": get_species_threshold(),
             },
+            get_active_project_id(),
         )
         if fresh_queue and fresh_queue != queue:
             set_queue(fresh_queue)
@@ -561,7 +563,9 @@ async def render_video_section(dp, species_map):
                         serve_path = Path(video["video_path"])
                         if serve_path.exists():
                             video_url = None
-                            for _base in dp.video_dirs or ([dp.video_dir] if dp.video_dir else []):
+                            for _base in [
+                                Path(d.path) for d in dp.get_project_dirs(get_active_project_id())
+                            ]:
                                 try:
                                     rel_path = serve_path.relative_to(_base)
                                     video_url = f"/media/{rel_path}"
@@ -905,7 +909,9 @@ async def render_video_section(dp, species_map):
 
 async def setup_review():
     dp = await get_or_create_data_provider()
-    if not dp or not await run.io_bound(dp.has_videos_in_db):
+    if not dp or not await run.io_bound(
+        dp.has_videos_in_db, active_project_id=get_active_project_id()
+    ):
         render_uninitialized_state()
         return
 
@@ -920,12 +926,12 @@ async def setup_review():
     filter_options_task = run.io_bound(dp.get_queue_filter_options, get_active_project_id())
     queue_ids_task = run.io_bound(
         dp.get_video_queue,
-        get_active_project_id(),
-        {
+        filters={
             **filters,
             "blank_threshold": get_blank_threshold(),
             "species_threshold": get_species_threshold(),
         },
+        active_project_id=get_active_project_id(),
     )
     filter_options, queue_ids = await asyncio.gather(filter_options_task, queue_ids_task)
     set_queue(queue_ids)
@@ -1117,6 +1123,7 @@ async def setup_review():
                             "blank_threshold": get_blank_threshold(),
                             "species_threshold": get_species_threshold(),
                         },
+                        get_active_project_id(),
                     )
                     set_queue(new_queue)
                     set_current_idx(0)
@@ -1165,6 +1172,7 @@ async def setup_review():
                             "blank_threshold": get_blank_threshold(),
                             "species_threshold": get_species_threshold(),
                         },
+                        get_active_project_id(),
                     )
                     set_queue(new_queue)
                     set_current_idx(0)

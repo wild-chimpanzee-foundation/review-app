@@ -6,10 +6,9 @@ from fastapi.responses import Response
 _video_dirs: list[Path] = []
 
 
-def register_media_dir(path: Path | str) -> None:
-    resolved = Path(path).resolve()
-    if resolved not in _video_dirs:
-        _video_dirs.append(resolved)
+def set_media_dirs(dirs: list[Path | str]) -> None:
+    _video_dirs.clear()
+    _video_dirs.extend(Path(d).resolve() for d in dirs)
 
 
 def setup_media_route() -> None:

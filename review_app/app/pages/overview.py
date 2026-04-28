@@ -1,16 +1,24 @@
 from nicegui import run, ui
 
+from review_app.app.state import get_active_project_id
 from review_app.app.translations import get_language, t
 from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
 
 
 async def setup_overview():
     dp = await get_or_create_data_provider()
-    if not dp or not await run.io_bound(dp.has_videos_in_db):
+    if not dp:
         render_uninitialized_state()
         return
+    pid = get_active_project_id()
+    if not await run.io_bound(dp.has_videos_in_db, pid):
+        with ui.column().classes("w-full q-pa-lg items-center"):
+            ui.label(t("no_videos_synced")).classes("text-h6 text-grey-6")
+            ui.label(t("no_videos_synced_hint")).classes("text-body2 text-grey-6")
+            ui.button(t("go_to_settings"), on_click=lambda: ui.navigate.to("/settings"), icon="settings")
+        return
 
-    stats = await run.io_bound(dp.get_overview_stats)
+    stats = await run.io_bound(dp.get_overview_stats, pid)
 
     with ui.column().classes("w-full q-pa-lg"):
         with ui.row().classes("items-center q-mb-lg"):

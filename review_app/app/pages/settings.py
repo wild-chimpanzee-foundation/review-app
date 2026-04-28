@@ -4,7 +4,6 @@ from pathlib import Path
 from nicegui import run, ui
 
 from review_app.app.config import (
-    get_active_project_id,
     get_bundled_behaviors_csv,
     get_bundled_species_csv,
     get_config_path,
@@ -12,7 +11,7 @@ from review_app.app.config import (
     update_config_key,
 )
 from review_app.app.state import (
-    get_active_project_name,
+    get_active_project_id,
     get_annotator_name,
     get_blank_threshold,
     get_data_provider,
@@ -56,14 +55,23 @@ def _build_settings_content(container: ui.column):
     initial_species_threshold = get_species_threshold()
 
     active_project_id = get_active_project_id()
-    current_project_name = get_active_project_name() or ""
+    current_project_name = ""
 
     stats = {"videos": 0}
     current_video_dirs: list = []
     try:
         _dp_stats = LocalDataProvider(str(CONFIG_PATH))
-        stats["videos"] = _dp_stats.get_overview_stats().get("videos", {}).get("total", 0)
-        current_video_dirs = _dp_stats.video_dirs or []
+        if active_project_id:
+            _proj = _dp_stats.get_project(active_project_id)
+            current_project_name = _proj.name if _proj else ""
+        stats["videos"] = (
+            _dp_stats.get_overview_stats(active_project_id).get("videos", {}).get("total", 0)
+        )
+        current_video_dirs = (
+            [Path(d.path) for d in _dp_stats.get_project_dirs(active_project_id)]
+            if active_project_id
+            else []
+        )
     except Exception:
         pass
 
@@ -132,7 +140,7 @@ def _build_settings_content(container: ui.column):
                             return
                         _dp = get_data_provider() or LocalDataProvider(str(CONFIG_PATH))
                         _dp.update_project_name(active_project_id, name)
-                        set_active_project(active_project_id, name)
+                        set_active_project(active_project_id)
                         ui.notify(t("project_name_saved"), type="positive")
                         await asyncio.sleep(0.5)
                         ui.navigate.to("/settings")
@@ -205,7 +213,9 @@ def _build_settings_content(container: ui.column):
                         )
                         status = ui.label(t("starting"))
                     dir_sync_dialog.open()
-                    sync_stats = await sync_with_progress(_dp, progress=progress, status=status)
+                    sync_stats = await sync_with_progress(
+                        _dp, progress=progress, status=status, active_project_id=active_project_id
+                    )
                     dir_sync_dialog.clear()
                     with dir_sync_dialog, ui.card().classes("q-pa-lg").style("min-width: 360px"):
                         ui.icon("check_circle", size="lg").classes("text-positive q-mb-sm")
@@ -439,7 +449,12 @@ def _build_settings_content(container: ui.column):
                                 )
                                 status = ui.label(t("starting"))
                             sync_dialog.open()
-                            stats = await sync_with_progress(_dp, progress=progress, status=status)
+                            stats = await sync_with_progress(
+                                _dp,
+                                progress=progress,
+                                status=status,
+                                active_project_id=active_project_id,
+                            )
                             sync_dialog.clear()
                             with (
                                 sync_dialog,
@@ -510,9 +525,8 @@ def _build_settings_content(container: ui.column):
 
 async def setup_settings():
     dp = await get_or_create_data_provider()
-    if not dp or not await run.io_bound(dp.has_videos_in_db):
-        render_uninitialized_state()
-        return
+    if not dp or not await run.io_bound(dp.has_videos_in_db, get_active_project_id()):
+        pass
 
     container = ui.column().classes("w-full q-pa-lg")
     container.clear()

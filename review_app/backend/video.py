@@ -6,17 +6,17 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import uuid
-
 import pandas as pd
 from sqlalchemy import select, text
 
-from review_app.backend.models import VIDEO_EXTENSIONS, Video
+from review_app.app.config import VIDEO_EXTENSIONS
+from review_app.backend.models import ProjectDir, Video
 
 _FFPROBE_MAX_WORKERS: int = int(os.getenv("FFPROBE_MAX_WORKERS", "16"))
 _FFPROBE_TIMEOUT_SEC: int = int(os.getenv("FFPROBE_TIMEOUT_SEC", "10"))
@@ -54,10 +54,12 @@ def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
 
     cmd = [
         ffprobe,
-        "-v", "error",
+        "-v",
+        "error",
         "-show_entries",
         "format=duration,format_name:stream=duration,codec_name,codec_type",
-        "-of", "json",
+        "-of",
+        "json",
         str(path),
     ]
 
@@ -129,15 +131,22 @@ def _probe_many(
 
 
 class VideoMixin:
-    """Video scanning, probing, and transcoding. Requires self.engine, self.Session, self.video_dirs."""
+    """Video scanning, probing, and transcoding. Requires self.engine, self.Session."""
 
-    def _scan_videos(self, video_dir: Path | None = None) -> pd.DataFrame:
+    def _scan_videos(self, video_dir: Path | None = None, active_project_id: str | None = None) -> pd.DataFrame:
         if video_dir is not None:
             scan_dirs = [video_dir]
+        elif active_project_id:
+            with self.Session() as s:
+                scan_dirs = [
+                    Path(d.path)
+                    for d in s.query(ProjectDir)
+                    .filter_by(project_id=active_project_id)
+                    .order_by(ProjectDir.sort_order)
+                    .all()
+                ]
         else:
-            scan_dirs = getattr(self, "video_dirs", None) or (
-                [self.video_dir] if self.video_dir else []
-            )
+            scan_dirs = []
 
         rows: list[dict[str, Any]] = []
         for scan_dir in scan_dirs:
@@ -160,10 +169,14 @@ class VideoMixin:
             return pd.DataFrame(columns=["video_path", "camera_id", "created_at"])
         return pd.DataFrame(rows)
 
-    def _sync_videos_table(self, progress_callback=None, video_dir: Path | None = None) -> dict:
-        scanned = self._scan_videos(video_dir)
+    def _sync_videos_table(
+        self,
+        progress_callback=None,
+        video_dir: Path | None = None,
+        active_project_id: str | None = None,
+    ) -> dict:
+        scanned = self._scan_videos(video_dir, active_project_id)
         now = self._utcnow_dt()
-        active_project_id = getattr(self, "active_project_id", None)
 
         with self.Session() as session:
             if scanned.empty:
@@ -174,8 +187,13 @@ class VideoMixin:
             existing = {
                 row[0]: row
                 for row in session.execute(
-                    select(Video.video_path, Video.video_id, Video.is_valid, Video.duration_sec, Video.validation_error)
-                    .where(Video.project_id == active_project_id)
+                    select(
+                        Video.video_path,
+                        Video.video_id,
+                        Video.is_valid,
+                        Video.duration_sec,
+                        Video.validation_error,
+                    ).where(Video.project_id == active_project_id)
                 ).fetchall()
             }
 
@@ -202,8 +220,15 @@ class VideoMixin:
                             "last_seen_at": now,
                             **dict(
                                 zip(
-                                    ("duration_sec", "is_valid", "is_web_safe", "validation_error"),
-                                    probe_results.get(Path(row["video_path"]), (None, None, None, None)),
+                                    (
+                                        "duration_sec",
+                                        "is_valid",
+                                        "is_web_safe",
+                                        "validation_error",
+                                    ),
+                                    probe_results.get(
+                                        Path(row["video_path"]), (None, None, None, None)
+                                    ),
                                 )
                             ),
                         }
@@ -312,10 +337,22 @@ class VideoMixin:
                 return {"success": True, "new_path": str(sidecar_path)}
 
             cmd = [
-                "ffmpeg", "-y", "-i", str(input_path),
-                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-                "-c:a", "aac", "-b:a", "128k",
-                "-movflags", "+faststart",
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(input_path),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "23",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-movflags",
+                "+faststart",
                 str(sidecar_path),
             ]
 

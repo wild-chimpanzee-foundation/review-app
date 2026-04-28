@@ -18,7 +18,6 @@ from review_app.app.config import (
     get_config_path,
     get_user_data_dir,
 )
-from review_app.app.state import get_active_project_id
 from review_app.backend.migrations import run_migrations
 from review_app.backend.models import (
     Base,
@@ -128,8 +127,15 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
     # ── Video sync ────────────────────────────────────────────────────────────
 
-    def sync_videos(self, progress_callback, video_dir: Path | None = None) -> dict:
-        return self._sync_videos_table(progress_callback, video_dir=video_dir)
+    def sync_videos(
+        self,
+        progress_callback,
+        video_dir: Path | None = None,
+        active_project_id: str | None = None,
+    ) -> dict:
+        return self._sync_videos_table(
+            progress_callback, video_dir=video_dir, active_project_id=active_project_id
+        )
 
     @property
     def db_path(self) -> Path:
@@ -185,7 +191,11 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
     def list_projects(self) -> list[Project]:
         with self.Session() as s:
-            return s.query(Project).order_by(Project.created_at).all()
+            return s.query(Project).order_by(Project.last_opened.desc().nullslast(), Project.created_at).all()
+
+    def get_most_recent_project(self) -> Project | None:
+        with self.Session() as s:
+            return s.query(Project).order_by(Project.last_opened.desc().nullslast(), Project.created_at).first()
 
     def get_project(self, project_id: str) -> Project | None:
         with self.Session() as s:
@@ -205,7 +215,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 project.last_opened = self._utcnow_dt()
                 s.commit()
 
-    def get_project_dirs(self, project_id: str) -> list[ProjectDir]:
+    def get_project_dirs(self, project_id: str | None) -> list[ProjectDir]:
         with self.Session() as s:
             return (
                 s.query(ProjectDir)
@@ -899,8 +909,154 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             )
         return normalized
 
+    def _build_video_path_lookup(
+        self, active_project_id: str | None
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """
+        Build two lookups for matching CSV file paths to DB video_ids:
+        - by_suffix: {(parent_dir/stem).lower() -> video_id}  — precise
+        - by_stem:   {stem.lower() -> video_id}               — fallback, only for unambiguous stems
+        """
+        with self.engine.connect() as conn:
+            df = pd.read_sql(
+                text(
+                    "SELECT video_id, video_path FROM videos"
+                    + (" WHERE project_id = :pid" if active_project_id else "")
+                ),
+                conn,
+                params={"pid": active_project_id} if active_project_id else {},
+            )
+        by_suffix: dict[str, str] = {}
+        stem_to_id: dict[str, str] = {}
+        stem_count: dict[str, int] = {}
+        for _, row in df.iterrows():
+            p = Path(str(row["video_path"]))
+            vid = str(row["video_id"])
+            by_suffix[f"{p.parent.name}/{p.stem}".lower()] = vid
+            stem = p.stem.lower()
+            stem_to_id[stem] = vid
+            stem_count[stem] = stem_count.get(stem, 0) + 1
+        by_stem = {s: vid for s, vid in stem_to_id.items() if stem_count[s] == 1}
+        return by_suffix, by_stem
+
+    def preview_path_match(
+        self,
+        df: pd.DataFrame,
+        path_col: str,
+        match_strategy: str,
+        active_project_id: str | None,
+    ) -> dict[str, Any]:
+        """Return match stats for a given path column and strategy without producing annotations."""
+        by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
+        matched = 0
+        unmatched: list[str] = []
+        for _, src_row in df.iterrows():
+            raw_path = str(src_row.get(path_col, "")).strip()
+            p = Path(raw_path)
+            video_id = None
+            if match_strategy == "suffix":
+                video_id = by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
+            elif match_strategy == "stem":
+                video_id = by_stem.get(p.stem.lower())
+            if video_id:
+                matched += 1
+            else:
+                unmatched.append(raw_path)
+        return {
+            "total_rows": len(df),
+            "matched": matched,
+            "unmatched": len(unmatched),
+            "unmatched_sample": unmatched[:10],
+        }
+
+    def normalize_model_csv_with_mapping(
+        self,
+        df: pd.DataFrame,
+        path_col: str,
+        match_strategy: str,
+        ann_mappings: list[dict[str, str]],
+        active_project_id: str | None,
+    ) -> tuple[pd.DataFrame, dict[str, Any]]:
+        """
+        Normalize an arbitrary CSV to the long format expected by validate_model_csv, using
+        an explicit column mapping provided by the user.
+
+        match_strategy: "suffix" (parent_dir/stem) or "stem" (filename only, unambiguous)
+        ann_mappings: list of {model_name, annotation_type, value_col, prob_col}
+        """
+        by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
+
+        rows: list[dict[str, Any]] = []
+        matched_suffix = 0
+        matched_stem = 0
+        unmatched_paths: list[str] = []
+
+        for _, src_row in df.iterrows():
+            raw_path = str(src_row.get(path_col, "")).strip()
+            p = Path(raw_path)
+
+            video_id: str | None = None
+            if match_strategy == "suffix":
+                video_id = by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
+                if video_id:
+                    matched_suffix += 1
+            elif match_strategy == "stem":
+                video_id = by_stem.get(p.stem.lower())
+                if video_id:
+                    matched_stem += 1
+
+            if video_id is None:
+                unmatched_paths.append(raw_path)
+                continue
+
+            for m in ann_mappings:
+                model_name = m.get("model_name", "").strip()
+                ann_type = m.get("annotation_type", "species")
+                value_col = m.get("value_col", "").strip()
+                prob_col = m.get("prob_col", "").strip()
+
+                if not model_name:
+                    continue
+
+                value_text: str | None = None
+                if value_col and value_col in src_row.index:
+                    v = src_row[value_col]
+                    if not pd.isna(v):
+                        value_text = str(v).strip() or None
+
+                if ann_type == "blank_non_blank" and value_text is None:
+                    value_text = "blank"
+
+                probability: float | None = None
+                if prob_col and prob_col in src_row.index:
+                    pv = pd.to_numeric(src_row[prob_col], errors="coerce")
+                    probability = None if pd.isna(pv) else float(pv)
+
+                if value_text is not None or probability is not None:
+                    rows.append({
+                        "video_uid": video_id,
+                        "annotation_type": ann_type,
+                        "model_name": model_name,
+                        "value_text": value_text,
+                        "probability": probability,
+                    })
+
+        empty = pd.DataFrame(columns=["video_uid", "annotation_type", "model_name", "value_text", "probability"])
+        stats: dict[str, Any] = {
+            "total_rows": len(df),
+            "matched": matched_suffix + matched_stem,
+            "matched_by_suffix": matched_suffix,
+            "matched_by_stem": matched_stem,
+            "unmatched": len(unmatched_paths),
+            "unmatched_sample": unmatched_paths[:10],
+        }
+        return pd.DataFrame(rows) if rows else empty, stats
+
     def validate_model_csv(
-        self, df: pd.DataFrame, mappings: dict[str, str] | None = None
+        self,
+        df: pd.DataFrame,
+        mappings: dict[str, str] | None = None,
+        active_project_id: str | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame, list[dict], list[dict]]:
         src = df.copy()
         src.columns = [str(c).strip() for c in src.columns]
@@ -912,7 +1068,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         if missing:
             raise ValueError(f"CSV must include columns: {', '.join(sorted(missing))}")
 
-        known_videos = set(self.get_video_queue(filters={}))
+        known_videos = set(self.get_video_queue(filters={}, active_project_id=active_project_id))
 
         species_mask = src["annotation_type"].str.strip().str.lower() == "species"
         unique_species = src.loc[species_mask, "value_text"].dropna().str.strip().unique()
@@ -1019,7 +1175,9 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             unmapped_species_list,
         )
 
-    def import_model_csv(self, cleaned_df: pd.DataFrame) -> dict[str, Any]:
+    def import_model_csv(
+        self, cleaned_df: pd.DataFrame, active_project_id: str | None
+    ) -> dict[str, Any]:
         if cleaned_df.empty:
             return {"inserted_rows": 0, "upserted_rows": 0}
 
@@ -1039,7 +1197,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 if existing is None:
                     existing = ModelAnnotation(
                         video_id=row["video_id"],
-                        project_id=self.active_project_id,
+                        project_id=active_project_id,
                         model_name=row["model_name"],
                         annotation_type=row["annotation_type"],
                     )
@@ -1059,14 +1217,15 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
     # ── Annotation export / import ────────────────────────────────────────────
 
-    def export_annotations_csv(self) -> pd.DataFrame:
-        pid_clause = "AND v.project_id = :pid" if self.active_project_id else ""
-        params = {"pid": self.active_project_id} if self.active_project_id else {}
+    def export_annotations_csv(self, active_project_id) -> pd.DataFrame:
+        pid_clause = "AND v.project_id = :pid" if active_project_id else ""
+        params = {"pid": active_project_id} if active_project_id else {}
         with self.engine.connect() as conn:
             return pd.read_sql(
                 text(f"""
                     SELECT
                         v.video_id,
+                        v.project_id,
                         v.video_path,
                         v.camera_id,
                         v.created_at              AS recorded_at,
@@ -1157,10 +1316,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 
-    def get_overview_stats(self) -> dict[str, Any]:
-        p = {"pid": self.active_project_id} if self.active_project_id else {}
-        pf = "WHERE project_id = :pid" if self.active_project_id else ""
-        vf = "WHERE v.project_id = :pid" if self.active_project_id else ""
+    def get_overview_stats(self, active_project_id: str | None = None) -> dict[str, Any]:
+        p = {"pid": active_project_id} if active_project_id else {}
+        pf = "WHERE project_id = :pid" if active_project_id else ""
+        vf = "WHERE v.project_id = :pid" if active_project_id else ""
 
         with self.engine.connect() as conn:
             stats = {}
@@ -1186,7 +1345,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
             stats["failed_videos"] = pd.read_sql(
                 text(
-                    f"SELECT * FROM videos WHERE is_valid = 0 {'AND project_id = :pid' if self.active_project_id else ''}"
+                    f"SELECT * FROM videos WHERE is_valid = 0 {'AND project_id = :pid' if active_project_id else ''}"
                 ),
                 conn,
                 params=p,
@@ -1271,7 +1430,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 FROM model_annotations
                 WHERE annotation_type = 'species'
                 AND value_text IS NOT NULL
-                {"AND project_id = :pid" if self.active_project_id else ""}
+                {"AND project_id = :pid" if active_project_id else ""}
                 GROUP BY model_name, value_text
                 ORDER BY model_name, predictions DESC
             """),
@@ -1279,8 +1438,8 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 params=p,
             ).to_dict(orient="records")
 
-            ma_pid = "AND project_id = :pid" if self.active_project_id else ""
-            io_pid = "AND project_id = :pid" if self.active_project_id else ""
+            ma_pid = "AND project_id = :pid" if active_project_id else ""
+            io_pid = "AND project_id = :pid" if active_project_id else ""
             stats["model_human_agreement"] = pd.read_sql(
                 text(f"""
                 WITH top_model AS (

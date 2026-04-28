@@ -5,6 +5,32 @@ import secrets
 import sys
 from pathlib import Path
 
+from review_app.app.config import (
+    get_config_path,
+    get_default_db_path,
+    load_config,
+)  # noqa: E402
+from review_app.app.media import set_media_dirs, setup_media_route  # noqa: E402
+from review_app.app.setup_wizard import setup_wizard  # noqa: E402
+from review_app.app.state import (  # noqa: E402
+    get_active_project_id,
+    init_user_prefs,
+    is_dark_mode,
+    set_active_project,
+    set_current_idx,
+    set_dark_mode,
+    set_data_provider,
+    set_queue,
+    set_selections,
+)
+from review_app.app.theme import apply_theme  # noqa: E402
+from review_app.app.translations import get_language, set_language, t  # noqa: E402
+from review_app.app.utils import (  # noqa: E402
+    get_or_create_data_provider,
+    render_uninitialized_state,
+)
+from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
+
 # Configure display backends for Wayland/Hyprland/X11 compatibility (Linux only)
 if sys.platform.startswith("linux"):
     if os.environ.get("XDG_SESSION_TYPE") == "wayland":
@@ -27,38 +53,11 @@ for _ext, _mime in [
     mimetypes.add_type(_mime, _ext.upper())
 
 
-from review_app.app.config import (
-    get_config_path,
-    get_default_db_path,
-    load_config,
-)  # noqa: E402
-from review_app.app.media import register_media_dir, setup_media_route  # noqa: E402
-from review_app.app.setup_wizard import setup_wizard, validate_video_dir  # noqa: E402
-from review_app.app.state import (  # noqa: E402
-    get_active_project_name,
-    get_active_project_id,
-    init_user_prefs,
-    is_dark_mode,
-    set_active_project,
-    set_current_idx,
-    set_dark_mode,
-    set_data_provider,
-    set_queue,
-    set_selections,
-)
-from review_app.app.theme import apply_theme  # noqa: E402
-from review_app.app.translations import get_language, set_language, t  # noqa: E402
-from review_app.app.utils import (  # noqa: E402
-    get_or_create_data_provider,
-    render_uninitialized_state,
-)
-from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
-
 CONFIG_PATH = get_config_path()
 
 
 def shared_header():
-    from nicegui import app, ui
+    from nicegui import ui
 
     apply_theme()
 
@@ -118,8 +117,10 @@ def shared_header():
         with ui.row().classes("w-full items-center q-px-md"):
             ui.label(t("app_title")).classes("text-h6 text-white font-weight-bold")
 
-            project_name = get_active_project_name()
-            if project_name:
+            _active_pid = get_active_project_id()
+            if _active_pid:
+                _header_dp = LocalDataProvider(str(CONFIG_PATH))
+                _active_proj_name = (p.name if (p := _header_dp.get_project(_active_pid)) else _active_pid)
                 with (
                     ui.dialog() as project_dialog,
                     ui.card().classes("q-pa-lg").style("min-width: 480px"),
@@ -137,23 +138,18 @@ def shared_header():
                                 is_active = proj.id == active_id
                                 with ui.row().classes("w-full items-center gap-sm"):
 
-                                    def make_switch(pid, pname):
+                                    def make_switch(pid):
                                         async def do_switch():
-                                            from review_app.app.config import update_config_key
-
                                             switch_dp = LocalDataProvider(str(CONFIG_PATH))
                                             dirs = switch_dp.get_project_dirs(pid)
-                                            update_config_key("active_project_id", pid)
                                             switch_dp.touch_project(pid)
                                             new_dp = LocalDataProvider(str(CONFIG_PATH))
                                             set_data_provider(new_dp)
-                                            set_active_project(pid, pname)
+                                            set_active_project(pid)
                                             set_queue([])
                                             set_current_idx(0)
                                             set_selections([])
-                                            for d in dirs or []:
-                                                if Path(d.path).exists():
-                                                    register_media_dir(Path(d.path))
+                                            set_media_dirs([Path(d.path) for d in dirs or []])
                                             project_dialog.close()
                                             ui.navigate.to("/overview")
 
@@ -161,7 +157,7 @@ def shared_header():
 
                                     ui.button(
                                         proj.name,
-                                        on_click=make_switch(proj.id, proj.name),
+                                        on_click=make_switch(proj.id),
                                         color="primary" if is_active else None,
                                     ).props(
                                         f"{'unelevated' if is_active else 'flat'} dense"
@@ -182,7 +178,7 @@ def shared_header():
                     ).props("flat dense").classes("w-full")
 
                 ui.button(
-                    project_name,
+                    _active_proj_name,
                     icon="folder_special",
                     on_click=lambda: (refresh_projects_col(), project_dialog.open()),
                 ).props("flat color=white dense").classes("q-ml-sm text-caption")
@@ -279,9 +275,10 @@ class GUI:
                 render_uninitialized_state()
                 return
 
-            missing_dirs = [d for d in dp.video_dirs if not d.exists()]
-            if dp.video_dirs and len(missing_dirs) == len(dp.video_dirs):
-                video_dir_str = str(dp.video_dirs[0])
+            _project_dirs = [Path(d.path) for d in dp.get_project_dirs(get_active_project_id())]
+            missing_dirs = [d for d in _project_dirs if not d.exists()]
+            if _project_dirs and len(missing_dirs) == len(_project_dirs):
+                video_dir_str = str(_project_dirs[0])
                 with ui.column().classes("w-full items-center justify-center q-pa-xl"):
                     with ui.card().classes("q-pa-xl").style("max-width: 560px"):
                         with ui.row().classes("items-center gap-md q-mb-md"):
@@ -332,7 +329,7 @@ class GUI:
                         ui.label(str(dp.db_path)).classes("text-body2")
                     with ui.card().classes("col"):
                         ui.label(t("video_dir_label")).classes("text-caption text-grey-6")
-                        for _d in dp.video_dirs:
+                        for _d in [Path(d.path) for d in dp.get_project_dirs(get_active_project_id())]:
                             ui.label(str(_d)).classes("text-body2")
                     with ui.card().classes("col"):
                         ui.label(t("videos_in_db_label")).classes("text-caption text-grey-6")
@@ -385,16 +382,6 @@ class GUI:
         shared_header()
         await setup_review()
 
-    async def settings_page(self):
-        from review_app.app.pages.settings import setup_settings
-
-        shared_header()
-        dp, error = await get_or_create_data_provider()
-        if not dp:
-            render_uninitialized_state(error)
-            return
-        await setup_settings(dp)
-
     async def model_import_page(self):
         from review_app.app.pages.model_import import setup_model_import
 
@@ -431,7 +418,11 @@ class GUI:
                 status.text = t("sync_scanning")
 
         async def do_sync():
-            await run.io_bound(data_provider.sync_videos, progress_callback=update_progress)
+            await run.io_bound(
+                data_provider.sync_videos,
+                progress_callback=update_progress,
+                active_project_id=get_active_project_id(),
+            )
             progress.value = 1.0
             status.text = t("sync_complete")
             ui.notify(t("sync_notify"), type="positive")
@@ -475,12 +466,10 @@ class GUI:
                 dp = LocalDataProvider(str(CONFIG_PATH))
                 set_data_provider(dp)
                 self.dp = dp
-                active_id = get_active_project_id()
-                if active_id:
-                    proj = dp.get_project(active_id)
-                    if proj:
-                        set_active_project(proj.id, proj.name)
-                        dp.touch_project(proj.id)
+                proj = dp.get_most_recent_project()
+                if proj:
+                    set_active_project(proj.id)
+                    dp.touch_project(proj.id)
 
                 # Register all video directories for the active project
                 import tempfile
@@ -489,9 +478,7 @@ class GUI:
                 transcoded_tmp.mkdir(parents=True, exist_ok=True)
                 app.add_media_files("/transcoded", transcoded_tmp)
 
-                for d in dp.video_dirs:
-                    if d.exists():
-                        register_media_dir(d)
+                set_media_dirs([Path(d.path) for d in dp.get_project_dirs(get_active_project_id())])
             except Exception as e:
                 print(f"Warning: Could not load config at startup: {e}")
 
