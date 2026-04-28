@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from pathlib import Path
 from urllib.parse import quote
 
@@ -412,6 +413,36 @@ def render_annotation_section(
         ui.button(t("blank"), on_click=mark_blank_stay).classes("col")
 
 
+def navigate(direction: int):
+    queue = get_queue()
+    new_idx = get_current_idx() + direction
+    if 0 <= new_idx < len(queue):
+        navigate_to(new_idx)
+
+
+def navigate_to(idx: int):
+    queue = get_queue()
+    idx = max(0, min(idx, len(queue) - 1))
+    # Debounce to prevent rapid overlap
+    token = str(uuid.uuid4())
+    set_state_val("nav_token", token)
+    set_state_val("is_loading", True)
+
+    async def _do_nav():
+        await asyncio.sleep(0.12)
+        if get_state_val("nav_token") == token:
+            set_current_idx(idx)
+            set_state_val("review_active_id", None)
+            set_state_val("pending_blank_confirm", False)
+            set_state_val("review_state_video_id", None)
+            set_state_val("review_is_blank", None)
+            set_selections([])
+            set_state_val("is_loading", False)
+            render_video_section.refresh()
+
+    asyncio.create_task(_do_nav())
+
+
 @ui.refreshable
 async def render_video_section(dp, species_map):
     queue = get_queue()
@@ -463,27 +494,11 @@ async def render_video_section(dp, species_map):
         ui.label(t("video_load_error")).classes("text-h6 text-negative")
         return
 
-    def navigate(direction):
-        new_idx = get_current_idx() + direction
-        if 0 <= new_idx < len(queue):
-            set_current_idx(new_idx)
-            set_state_val("review_active_id", None)
-            set_state_val("pending_blank_confirm", False)
-            set_state_val("review_state_video_id", None)
-            set_state_val("review_is_blank", None)
-            set_selections([])
-            render_video_section.refresh()
-
-    def navigate_to(idx: int):
-        idx = max(0, min(idx, len(queue) - 1))
-        if idx != get_current_idx():
-            set_current_idx(idx)
-            set_state_val("review_active_id", None)
-            set_state_val("pending_blank_confirm", False)
-            set_state_val("review_state_video_id", None)
-            set_state_val("review_is_blank", None)
-            set_selections([])
-            render_video_section.refresh()
+    if get_state_val("is_loading"):
+        with ui.column().classes("w-full h-64 items-center justify-center"):
+            ui.spinner(size="lg")
+            ui.label(t("loading_video")).classes("text-grey-6 q-mt-md")
+        return
 
     with ui.column().classes("w-full q-mb-xs gap-0"):
         queue_label = ui.label().classes("text-caption text-grey-6")
@@ -703,11 +718,15 @@ async def render_video_section(dp, species_map):
 
                                 if (speedSel) {{
                                     speedSel.addEventListener('change', function() {{
-                                        const rate = parseFloat(speedSel.value);
-                                        videoEl.playbackRate = rate;
-                                        const sync = getElement({_speed_sync.id});
-                                        if (sync) sync.$emit('update:model-value', rate);
+                                        setSpeed(parseFloat(speedSel.value));
                                     }});
+                                }}
+
+                                function setSpeed(rate) {{
+                                    videoEl.playbackRate = rate;
+                                    if (speedSel) speedSel.value = Number.isInteger(rate) ? rate.toFixed(1) : String(rate);
+                                    const sync = getElement({_speed_sync.id});
+                                    if (sync) sync.$emit('update:model-value', rate);
                                 }}
 
                                 function syncBtn() {{
@@ -765,52 +784,30 @@ async def render_video_section(dp, species_map):
                                 }});
 
                                 videoEl.addEventListener('seeked', function() {{
-                                    if (window._esetSpeedOnSeek === false) return;
+                                    if (window._resetSpeedOnSeek === false) return;
                                     videoEl.playbackRate = 1;
                                     if (speedSel) speedSel.value = '1.0';
                                     const sync = getElement({_speed_sync.id});
                                     if (sync) sync.$emit('update:model-value', 1);
                                 }});
 
-                                if (window.__videoKbHandler) {{
-                                    document.removeEventListener('keydown', window.__videoKbHandler);
-                                }}
-                                const speedSteps = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0];
-                                function currentSpeedIdx() {{
-                                    const r = videoEl.playbackRate;
-                                    let best = 3, bestDiff = Infinity;
-                                    speedSteps.forEach((s, i) => {{ const d = Math.abs(s - r); if (d < bestDiff) {{ bestDiff = d; best = i; }} }});
-                                    return best;
-                                }}
-                                function setSpeed(rate) {{
+                                // Apply and maintain playback speed via event listeners instead of loops
+                                function applyCurrentSpeed() {{
+                                    const rate = parseFloat(document.getElementById('vp-speed-{vid_key}').value);
                                     videoEl.playbackRate = rate;
-                                    if (speedSel) speedSel.value = Number.isInteger(rate) ? rate.toFixed(1) : String(rate);
-                                    const sync = getElement({_speed_sync.id});
-                                    if (sync) sync.$emit('update:model-value', rate);
                                 }}
-                                window.__videoKbHandler = function(e) {{
-                                    const tag = e.target.tagName.toLowerCase();
-                                    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-                                    if (e.target.isContentEditable) return;
-                                    if (e.ctrlKey || e.metaKey || e.altKey) return;
-                                    if (e.key === ' ') {{
-                                        e.preventDefault();
-                                        videoEl.paused ? videoEl.play() : videoEl.pause();
-                                    }} else if (e.key === 'ArrowLeft') {{
-                                        e.preventDefault();
-                                        videoEl.currentTime = Math.max(0, videoEl.currentTime - 5);
-                                    }} else if (e.key === 'ArrowRight') {{
-                                        e.preventDefault();
-                                        videoEl.currentTime = Math.min(videoEl.duration || 0, videoEl.currentTime + 5);
-                                    }} else if (e.key === 'd' || e.key === 'D') {{
-                                        e.preventDefault();
-                                        setSpeed(speedSteps[Math.min(currentSpeedIdx() + 1, speedSteps.length - 1)]);
-                                    }} else if (e.key === 's' || e.key === 'S') {{
-                                        e.preventDefault();
-                                        setSpeed(speedSteps[Math.max(currentSpeedIdx() - 1, 0)]);
-                                    }}
-                                }};
-                                document.addEventListener('keydown', window.__videoKbHandler);
+                                videoEl.addEventListener('loadedmetadata', applyCurrentSpeed);
+                                videoEl.addEventListener('play', applyCurrentSpeed);
+                                
+                                // Sync when playbackRate changes (e.g. via keyboard shortcuts or system events)
+                                videoEl.addEventListener('playbackratechange', () => {{
+                                    if (speedSel) speedSel.value = Number.isInteger(videoEl.playbackRate) ? videoEl.playbackRate.toFixed(1) : String(videoEl.playbackRate);
+                                }});
+
+                                videoEl.addEventListener('speedchange', (e) => {{
+                                    setSpeed(e.detail);
+                                }});
+                                applyCurrentSpeed();
                             }})();
                         """)
 
@@ -885,27 +882,6 @@ async def render_video_section(dp, species_map):
                 render_annotation_section(
                     video, species_map, dp, default_species, default_behavior
                 )
-
-    current_speed = get_playback_speed().replace("x", "")
-    ui.run_javascript(f"""
-        (function() {{
-            const rate = {current_speed};
-            const applyRate = () => {{
-                document.querySelectorAll('video').forEach(v => {{
-                    v.playbackRate = rate;
-                    if (!v.dataset.speedBound) {{
-                        v.addEventListener('loadedmetadata', () => {{
-                            v.playbackRate = rate;
-                        }});
-                        v.dataset.speedBound = '1';
-                    }}
-                }});
-            }};
-            applyRate();
-            requestAnimationFrame(applyRate);
-            setTimeout(applyRate, 120);
-        }})();
-    """)
 
 
 async def setup_review():
@@ -1127,14 +1103,7 @@ async def setup_review():
                         get_active_project_id(),
                     )
                     set_queue(new_queue)
-                    set_current_idx(0)
-                    set_selections([])
-                    set_state_val("review_state_video_id", None)
-                    set_state_val("review_is_blank", None)
-                    set_state_val("user_cleared_all", False)
-                    set_state_val("review_active_id", None)
-                    set_state_val("pending_blank_confirm", False)
-                    render_video_section.refresh()
+                    navigate_to(0)
 
                 ui.button(t("apply_filters"), on_click=apply_filters, color="primary").props(
                     "full-width"
@@ -1176,14 +1145,7 @@ async def setup_review():
                         get_active_project_id(),
                     )
                     set_queue(new_queue)
-                    set_current_idx(0)
-                    set_selections([])
-                    set_state_val("review_state_video_id", None)
-                    set_state_val("review_is_blank", None)
-                    set_state_val("user_cleared_all", False)
-                    set_state_val("review_active_id", None)
-                    set_state_val("pending_blank_confirm", False)
-                    render_video_section.refresh()
+                    navigate_to(0)
 
                 async def toggle_dir():
                     sort_dir[0] = "asc" if sort_dir[0] == "desc" else "desc"
@@ -1233,13 +1195,37 @@ async def setup_review():
     ui.add_body_html(
         """
         <script>
-            // Guard against multiple listener registrations if this script is injected more than once.
-            if (!window.__reviewShortcutsBound) {
-                window.__reviewShortcutsBound = true;
+            if (!window.__videoManagerInitialized) {
+                window.__videoManagerInitialized = true;
+                
+                // MutationObserver to clean up video elements immediately when removed from DOM
+                const observer = new MutationObserver((mutations) => {
+                    for (const mutation of mutations) {
+                        for (const node of mutation.removedNodes) {
+                            if (node.tagName === 'VIDEO') {
+                                node.pause();
+                                node.src = "";
+                                node.load();
+                            } else if (node.querySelectorAll) {
+                                node.querySelectorAll('video').forEach(v => {
+                                    v.pause();
+                                    v.src = "";
+                                    v.load();
+                                });
+                            }
+                        }
+                    }
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+
+                // Global keyboard listener that targets the active video or UI elements
                 document.addEventListener('keydown', function(e) {
                     const tag = e.target.tagName.toLowerCase();
                     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+                    if (e.target.isContentEditable) return;
                     if (e.ctrlKey || e.metaKey || e.altKey) return;
+                    
+                    // Priority shortcuts: Submit, Next, Prev, Blank
                     if (e.key === 'Enter') {
                         e.preventDefault();
                         document.querySelector('[data-shortcut="submit-next"]')?.click();
@@ -1252,6 +1238,42 @@ async def setup_review():
                     } else if (e.key === 'b' || e.key === 'B') {
                         e.preventDefault();
                         document.querySelector('[data-shortcut="mark-blank"]')?.click();
+                    }
+                    
+                    // Video playback shortcuts - delegated to the first visible video element
+                    const videoEl = document.querySelector('video');
+                    if (!videoEl) return;
+                    
+                    if (e.key === ' ') {
+                        e.preventDefault();
+                        videoEl.paused ? videoEl.play() : videoEl.pause();
+                    } else if (e.key === 'ArrowLeft') {
+                        e.preventDefault();
+                        videoEl.currentTime = Math.max(0, videoEl.currentTime - 5);
+                    } else if (e.key === 'ArrowRight') {
+                        e.preventDefault();
+                        videoEl.currentTime = Math.min(videoEl.duration || 0, videoEl.currentTime + 5);
+                    } else if (e.key === 'd' || e.key === 'D') {
+                        e.preventDefault();
+                        const speedSteps = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0];
+                        let best = 3, bestDiff = Infinity;
+                        speedSteps.forEach((s, i) => { const d = Math.abs(s - videoEl.playbackRate); if (d < bestDiff) { bestDiff = d; best = i; } });
+                        const newRate = speedSteps[Math.min(best + 1, speedSteps.length - 1)];
+                        videoEl.playbackRate = newRate;
+                        const speedSel = document.querySelector('[id^="vp-speed-"]');
+                        if (speedSel) speedSel.value = Number.isInteger(newRate) ? newRate.toFixed(1) : String(newRate);
+                        // Trigger sync to Python if needed - this is handled by the video specific setup's sync listener
+                        videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRate }));
+                    } else if (e.key === 's' || e.key === 'S') {
+                        e.preventDefault();
+                        const speedSteps = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0];
+                        let best = 3, bestDiff = Infinity;
+                        speedSteps.forEach((s, i) => { const d = Math.abs(s - videoEl.playbackRate); if (d < bestDiff) { bestDiff = d; best = i; } });
+                        const newRate = speedSteps[Math.max(best - 1, 0)];
+                        videoEl.playbackRate = newRate;
+                        const speedSel = document.querySelector('[id^="vp-speed-"]');
+                        if (speedSel) speedSel.value = Number.isInteger(newRate) ? newRate.toFixed(1) : String(newRate);
+                        videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRate }));
                     }
                 });
             }
