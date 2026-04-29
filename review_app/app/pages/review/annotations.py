@@ -138,7 +138,9 @@ def render_annotation_section(
                                         f"color: {get_probability_color(blank_prob)}; font-weight: bold"
                                     ).classes("text-caption")
                                     ui.label("·").classes("text-caption text-grey-6")
-                                    ui.label(t("species_label")).classes("text-caption text-grey-6")
+                                    ui.label(t("species_label")).classes(
+                                        "text-caption text-grey-6"
+                                    )
                                     ui.label(f"{max_sp:.0%}").style(
                                         f"color: {get_probability_color(max_sp)}; font-weight: bold"
                                     ).classes("text-caption")
@@ -411,14 +413,19 @@ def render_annotation_section(
         with (
             ui.button(on_click=submit_and_next, color="warning")
             .classes("col")
-            .style("font-weight:700") as submit_next_btn
+            .style("height: 60px; font-weight:700") as submit_next_btn
         ):
             with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
                 ui.label(t("submit_next"))
                 _shortcut_badge("↵ Enter")
         submit_next_btn._props["data-shortcut"] = "submit-next"
 
-        with ui.button(on_click=mark_blank_next).props("outline").classes("col") as blank_next_btn:
+        with (
+            ui.button(on_click=mark_blank_next, color="primary")
+            .props("outline")
+            .classes("col")
+            .style("height: 60px;") as blank_next_btn
+        ):
             with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
                 ui.label(t("mark_blank"))
                 _shortcut_badge("B")
@@ -426,16 +433,31 @@ def render_annotation_section(
 
     # Secondary row: less-common actions, subtle styling
     with ui.row().classes("w-full gap-sm q-mb-md q-mt-xs"):
-        ui.button(t("submit"), on_click=submit).props("outline").classes("col text-caption")
+        with (
+            ui.button(on_click=submit, color="primary")
+            .props("outline")
+            .classes("col")
+            .style("height: 60px;")
+        ):
+            with ui.row().classes("items-center justify-center w-full no-wrap"):
+                ui.label(t("submit"))
 
-        ui.button(t("blank"), on_click=mark_blank_stay).props("outline").classes("col text-caption")
+        with (
+            ui.button(on_click=mark_blank_stay, color="primary")
+            .props("outline")
+            .classes("col")
+            .style("height: 60px;")
+        ):
+            with ui.row().classes("items-center justify-center w-full no-wrap"):
+                ui.label(t("blank"))
 
         with (
             ui.button(on_click=mark_review_later)
             .props("outline color=grey")
-            .classes("col text-caption") as review_later_btn
+            .classes("col")
+            .style("height: 60px;") as review_later_btn
         ):
-            with ui.row().classes("items-center gap-xs no-wrap"):
+            with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
                 ui.label(t("mark_review_later"))
-                _shortcut_badge("U")
+                _shortcut_badge("M")
         review_later_btn._props["data-shortcut"] = "mark-unknown"

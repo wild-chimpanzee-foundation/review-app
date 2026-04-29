@@ -214,6 +214,8 @@ def render_custom_video_player(video_url, duration, vid_key):
                         if (resetBtn) resetBtn.click();
                     }} else if (e.key === 'Escape' && vpWrapper.classList.contains('vp-fs-active')) {{
                         exitFs();
+                    }} else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey) {{
+                        vpWrapper.classList.contains('vp-fs-active') ? exitFs() : enterFs();
                     }}
                 }});
 
@@ -229,7 +231,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                 speedSel.addEventListener('change', () => {{
                     const rate = parseFloat(speedSel.value);
                     videoEl.playbackRate = rate;
-                    getElement({_speed_sync.id}).$emit('update:model-value', rate);
+                    getElement({_speed_sync.id}).value = rate;
                 }});
 
                 videoEl.addEventListener('timeupdate', () => {{
@@ -253,9 +255,11 @@ def render_custom_video_player(video_url, duration, vid_key):
         def _key(k):
             ui.badge(k).props("outline color=grey-6").classes("text-caption text-grey-6")
 
-        with ui.expansion(t("shortcuts_title"), icon="keyboard", value=True).classes(
-            "w-full text-caption text-grey-6"
-        ).props("dense"):
+        with (
+            ui.expansion(t("shortcuts_title"), icon="keyboard", value=True)
+            .classes("w-full text-caption text-grey-6")
+            .props("dense")
+        ):
             with ui.row().classes("w-full justify-between q-mt-xs"):
                 with ui.column().classes("col items-center gap-xs"):
                     with ui.row().classes("items-center gap-xs"):
@@ -281,7 +285,9 @@ def render_custom_video_player(video_url, duration, vid_key):
                         ui.label("+").classes("text-grey-6")
                         ui.icon("pan_tool").classes("text-grey-6")
                     ui.label(t("zoom")).classes("text-caption text-grey-6")
-                with ui.column().classes("col items-center gap-xs").tooltip(t("reset_zoom_tooltip")):
+                with (
+                    ui.column().classes("col items-center gap-xs").tooltip(t("reset_zoom_tooltip"))
+                ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("Z")
                     ui.label(t("reset_zoom")).classes("text-caption text-grey-6")
@@ -301,5 +307,9 @@ def render_custom_video_player(video_url, duration, vid_key):
                     with ui.row().classes("items-center gap-xs"):
                         _key("R")
                     ui.label(t("shortcut_reset_filters")).classes("text-caption text-grey-6")
+                with ui.column().classes("col items-center gap-xs"):
+                    with ui.row().classes("items-center gap-xs"):
+                        _key("F")
+                    ui.label(t("shortcut_fullscreen")).classes("text-caption text-grey-6")
 
     return v

@@ -11,6 +11,7 @@ from review_app.app.config import (
     load_config,
 )  # noqa: E402
 from review_app.app.media import set_media_dirs, setup_media_route  # noqa: E402
+from review_app.app.project_picker import build_project_picker  # noqa: E402
 from review_app.app.setup_wizard import setup_wizard  # noqa: E402
 from review_app.app.state import (  # noqa: E402
     get_active_project_id,
@@ -86,31 +87,6 @@ def shared_header(show_drawer: bool = False):
         ui.button(icon="close", on_click=shortcuts_dialog.close).props("flat round").classes(
             "absolute-top-right q-ma-sm"
         )
-        with ui.row().classes("w-full items-center q-mb-md"):
-            ui.icon("keyboard", size="md", color="primary")
-            ui.label(t("shortcuts_title")).classes("text-h6 font-weight-bold")
-
-        with ui.column().classes("w-full gap-4"):
-            # Review Page
-            with ui.column().classes("w-full gap-1 q-mt-sm"):
-                ui.label(t("shortcuts_review")).classes(
-                    "text-subtitle2 text-primary font-weight-medium"
-                )
-                ui.separator()
-                for key, label in [
-                    ("Enter", t("shortcut_submit_next")),
-                    ("N", t("shortcut_next_video")),
-                    ("P", t("shortcut_prev_video")),
-                    ("B", t("shortcut_mark_blank")),
-                    ("Space", t("shortcut_play_pause")),
-                    ("← →", t("shortcut_seek")),
-                    ("D / S", t("shortcut_speed_up_down")),
-                ]:
-                    with ui.row().classes("w-full justify-between items-center"):
-                        ui.label(label).classes("text-body2")
-                        ui.label(key).classes(
-                            "q-px-sm q-py-xs bg-grey-8  rounded-borders text-bold text-caption shadow-1"
-                        )
 
     drawer = None
 
@@ -122,7 +98,7 @@ def shared_header(show_drawer: bool = False):
                 drawer.props("mini")
 
     if show_drawer:
-        drawer = ui.left_drawer(value=True).classes("q-pa-sm").props("breakpoint=800")
+        drawer = ui.left_drawer(value=True).classes("q-pa-sm")
 
         with drawer:
             with ui.row().classes("items-center q-mb-sm"):
@@ -141,60 +117,11 @@ def shared_header(show_drawer: bool = False):
                 _active_proj_name = (
                     p.name if (p := _header_dp.get_project(_active_pid)) else _active_pid
                 )
-                with (
-                    ui.dialog() as project_dialog,
-                    ui.card().classes("q-pa-lg").style("min-width: 480px"),
-                ):
-                    # ... project dialog code unchanged ...
-                    ui.label(t("switch_project")).classes("text-h6 q-mb-md")
-                    projects_col = ui.column().classes("w-full gap-xs q-mb-md")
-
-                    def refresh_projects_col():
-                        projects_col.clear()
-                        _dp = LocalDataProvider(str(CONFIG_PATH))
-                        projects = _dp.list_projects()
-                        active_id = get_active_project_id()
-                        with projects_col:
-                            for proj in projects:
-                                is_active = proj.id == active_id
-                                with ui.row().classes("w-full items-center gap-sm"):
-
-                                    def make_switch(pid):
-                                        async def do_switch():
-                                            new_dp = LocalDataProvider(str(CONFIG_PATH))
-                                            set_data_provider(new_dp)
-                                            switch_project(new_dp, pid)
-                                            project_dialog.close()
-                                            ui.navigate.to("/overview")
-
-                                        return do_switch
-
-                                    ui.button(
-                                        proj.name,
-                                        on_click=make_switch(proj.id),
-                                        color="primary" if is_active else None,
-                                    ).props(
-                                        f"{'unelevated' if is_active else 'flat'} dense"
-                                    ).classes("col text-left")
-                                    if is_active:
-                                        ui.icon("check_circle", color="positive", size="sm")
-
-                    refresh_projects_col()
-
-                    ui.separator().classes("q-my-sm")
-
-                    def go_to_setup():
-                        project_dialog.close()
-                        ui.navigate.to("/setup")
-
-                    ui.button(
-                        t("new_project"), icon="add", color="primary", on_click=go_to_setup
-                    ).props("flat dense").classes("w-full")
-
+                project_dialog, refresh_projects = build_project_picker(CONFIG_PATH)
                 ui.button(
                     _active_proj_name,
                     icon="folder_special",
-                    on_click=lambda: (refresh_projects_col(), project_dialog.open()),
+                    on_click=lambda: (refresh_projects(), project_dialog.open()),
                 ).props("outline color=white dense icon-right=arrow_drop_down").classes(
                     "q-ml-sm text-caption q-px-sm"
                 ).style("border-color: rgba(255, 255, 255, 0.5)")

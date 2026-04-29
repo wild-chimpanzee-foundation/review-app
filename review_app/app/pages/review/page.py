@@ -475,7 +475,7 @@ async def setup_review():
                     } else if (e.key === 'b' || e.key === 'B') {
                         e.preventDefault();
                         document.querySelector('[data-shortcut="mark-blank"]')?.click();
-                    } else if (e.key === 'u' || e.key === 'U') {
+                    } else if (e.key === 'm' || e.key === 'M') {
                         e.preventDefault();
                         document.querySelector('[data-shortcut="mark-unknown"]')?.click();
                     }

@@ -247,6 +247,24 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 s.delete(d)
                 s.commit()
 
+    def get_project_video_count(self, project_id: str) -> int:
+        with self.engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT COUNT(*) FROM videos WHERE project_id = :pid"),
+                {"pid": project_id},
+            ).fetchone()
+            return result[0] if result else 0
+
+    def delete_project(self, project_id: str) -> dict:
+        with self.Session() as s:
+            project = s.get(Project, project_id)
+            if project is None:
+                return {"deleted": False}
+            video_count = len(project.videos)
+            s.delete(project)
+            s.commit()
+        return {"deleted": True, "videos_removed": video_count}
+
     # ── CSV templates ─────────────────────────────────────────────────────────
 
     def get_csv_templates(self) -> dict[str, str]:

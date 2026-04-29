@@ -27,6 +27,8 @@ class Project(Base):
     created_at = Column(DateTime, nullable=False, default=func.now())
     last_opened = Column(DateTime, nullable=True)
     dirs = relationship("ProjectDir", backref="project", cascade="all, delete-orphan")
+    videos = relationship("Video", cascade="all, delete-orphan")
+    species = relationship("Species", cascade="all, delete-orphan")
 
 
 class ProjectDir(Base):
@@ -54,6 +56,9 @@ class Video(Base):
     is_web_safe = Column(Boolean, nullable=True)
     validation_error = Column(String, nullable=True)
     transcoded_path = Column(String, nullable=True)
+    label = relationship("VideoLabel", cascade="all, delete-orphan")
+    observations = relationship("IndividualObservation", cascade="all, delete-orphan")
+    annotations = relationship("ModelAnnotation", cascade="all, delete-orphan")
 
 
 class VideoLabel(Base):
