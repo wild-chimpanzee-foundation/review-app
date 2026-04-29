@@ -53,7 +53,6 @@ def navigate_to(idx: int):
             set_selections([])
             set_state_val("is_loading", False)
             render_video_section.refresh()
-            ui.run_javascript("document.activeElement?.blur()")
 
     asyncio.create_task(_do_nav())
 

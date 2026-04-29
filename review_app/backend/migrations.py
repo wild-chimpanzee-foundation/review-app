@@ -24,7 +24,11 @@ def run_migrations(engine) -> None:
     with engine.begin() as conn:
         conn.execute(text("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER)"))
         row = conn.execute(text("SELECT version FROM _schema_version")).fetchone()
-        current = row[0] if row else 0
+        if row is None:
+            # Fresh DB — create_all already applied the latest schema; just stamp the version.
+            conn.execute(text("INSERT INTO _schema_version VALUES (:v)"), {"v": len(MIGRATIONS)})
+            return
+        current = row[0]
         for version, sql in MIGRATIONS:
             if version > current:
                 conn.execute(text(sql))

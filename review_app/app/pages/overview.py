@@ -63,10 +63,9 @@ async def setup_overview():
         nonblank_pct = 100 * non_blank / total
         unlabeled_pct = 100 * unlabeled / total
 
-        with ui.card().classes("full-width q-mb-lg"):
-            with ui.row().classes("items-center q-pa-md q-pb-sm"):
-                ui.label(t("annotation_progress")).classes("text-subtitle1 font-weight-medium")
-            with ui.column().classes("w-full q-px-md q-pb-md gap-sm"):
+        with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
+            with ui.card().classes("col q-pa-md"):
+                ui.label(t("annotation_progress")).classes("text-subtitle1 font-weight-medium q-mb-md")
                 with ui.element("div").style(
                     "display:flex; width:100%; height:12px; border-radius:6px; overflow:hidden"
                 ):
@@ -82,7 +81,7 @@ async def setup_overview():
                         ui.element("div").style(
                             f"flex:{unlabeled_pct:.3f}; background:#e0e0e0; height:100%"
                         )
-                with ui.row().classes("gap-lg"):
+                with ui.row().classes("gap-lg q-mt-md"):
                     for color, label, count in [
                         ("#4caf50", t("progress_blank"), blank),
                         ("#2196f3", t("progress_non_blank"), non_blank),
