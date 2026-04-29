@@ -7,7 +7,6 @@ from pathlib import Path
 
 from review_app.app.config import (
     get_config_path,
-    get_default_db_path,
     load_config,
 )  # noqa: E402
 from review_app.app.media import set_media_dirs, setup_media_route  # noqa: E402
@@ -23,11 +22,6 @@ from review_app.app.state import (  # noqa: E402
 )
 from review_app.app.theme import apply_theme  # noqa: E402
 from review_app.app.translations import get_language, set_language, t  # noqa: E402
-from review_app.app.utils import (  # noqa: E402
-    get_or_create_data_provider,
-    render_uninitialized_state,
-    switch_project,
-)
 from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
 
 # Configure display backends for Wayland/Hyprland/X11 compatibility (Linux only)
@@ -160,165 +154,10 @@ class GUI:
     def __init__(self):
         self.dp = None
 
-    async def main_page(self):
-        from nicegui import run, ui
+    def main_page(self):
+        from nicegui import ui
 
-        shared_header()
-
-        if not CONFIG_PATH.exists():
-            with ui.column().classes("w-full items-center justify-center q-pa-xl"):
-                with ui.card().classes("text-center q-pa-xl"):
-                    ui.label(t("no_config_title")).classes("text-h5 text-primary q-mb-md")
-                    ui.label(t("no_config_subtitle")).classes("text-body1 q-mb-lg")
-                    ui.button(
-                        t("setup_now_btn"),
-                        on_click=lambda: ui.navigate.to("/setup"),
-                        icon="settings",
-                        color="primary",
-                    ).props("size=lg")
-            return
-
-        try:
-            cfg = load_config()
-
-            raw_db_dir = cfg.get("db_dir", "")
-            db_filename = cfg.get("db_filename", "review_data.db")
-            if raw_db_dir and raw_db_dir != ".":
-                expected_db = Path(raw_db_dir) / db_filename
-            else:
-                expected_db = get_default_db_path()
-
-            if not expected_db.exists():
-                with ui.column().classes("w-full items-center justify-center q-pa-xl"):
-                    with ui.card().classes("q-pa-xl").style("max-width: 560px"):
-                        with ui.row().classes("items-center gap-md q-mb-md"):
-                            ui.icon("warning", size="lg").classes("text-warning")
-                            ui.label("Database not found").classes("text-h5 font-weight-bold")
-                        ui.label("The database was not found at:").classes(
-                            "text-body2 text-grey-7"
-                        )
-                        ui.label(str(expected_db)).classes(
-                            "text-caption text-grey-5 q-mb-md q-pa-sm bg-grey-9 rounded-borders"
-                        )
-                        ui.label(
-                            "This may mean the database was deleted or moved. "
-                            "Your existing annotations may be lost."
-                        ).classes("text-body2 q-mb-lg")
-                        with ui.row().classes("w-full gap-sm"):
-                            ui.button(
-                                "Start fresh",
-                                icon="refresh",
-                                color="primary",
-                                on_click=lambda: ui.navigate.to("/setup"),
-                            )
-                            ui.button(
-                                "Settings",
-                                icon="settings",
-                                on_click=lambda: ui.navigate.to("/settings"),
-                            ).props("flat")
-                return
-
-            dp = await get_or_create_data_provider()
-            if not dp:
-                render_uninitialized_state()
-                return
-
-            _project_dirs = [Path(d.path) for d in dp.get_project_dirs(get_active_project_id())]
-            missing_dirs = [d for d in _project_dirs if not d.exists()]
-            if _project_dirs and len(missing_dirs) == len(_project_dirs):
-                video_dir_str = str(_project_dirs[0])
-                with ui.column().classes("w-full items-center justify-center q-pa-xl"):
-                    with ui.card().classes("q-pa-xl").style("max-width: 560px"):
-                        with ui.row().classes("items-center gap-md q-mb-md"):
-                            ui.icon("folder_off", size="lg").classes("text-warning")
-                            ui.label("Video directory not accessible").classes(
-                                "text-h5 font-weight-bold"
-                            )
-                        ui.label("Your configured video directory cannot be found:").classes(
-                            "text-body2 text-grey-7"
-                        )
-                        ui.label(video_dir_str).classes(
-                            "text-caption text-grey-5 q-mb-md q-pa-sm bg-grey-9 rounded-borders"
-                        )
-                        ui.label(
-                            "This can happen when an external drive is disconnected. "
-                            "You can still access your annotations, but videos will not play."
-                        ).classes("text-body2 q-mb-lg")
-                        with ui.row().classes("w-full gap-sm"):
-                            ui.button(
-                                "Continue anyway",
-                                icon="play_arrow",
-                                color="primary",
-                                on_click=lambda: ui.navigate.to("/overview"),
-                            )
-                            ui.button(
-                                "Update path in Settings",
-                                icon="settings",
-                                on_click=lambda: ui.navigate.to("/settings"),
-                            ).props("flat")
-                return
-
-            if not await run.io_bound(dp.has_videos_in_db, get_active_project_id()):
-                render_uninitialized_state()
-                return
-
-            with ui.column().classes("w-full q-pa-lg").style("max-width: 1600px; margin: 0 auto"):
-                with ui.card().classes("full-width q-mb-lg"):
-                    ui.label(t("welcome_title")).classes(
-                        "text-h5 text-primary font-weight-bold q-mb-md"
-                    )
-                    ui.label(t("welcome_subtitle")).classes("text-body1 text-grey-7")
-
-                has_videos = await run.io_bound(dp.has_videos_in_db, get_active_project_id())
-
-                with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
-                    with ui.card().classes("col"):
-                        ui.label(t("db_label")).classes("text-caption text-grey-6")
-                        ui.label(str(dp.db_path)).classes("text-body2")
-                    with ui.card().classes("col"):
-                        ui.label(t("video_dir_label")).classes("text-caption text-grey-6")
-                        for _d in [
-                            Path(d.path) for d in dp.get_project_dirs(get_active_project_id())
-                        ]:
-                            ui.label(str(_d)).classes("text-body2")
-                    with ui.card().classes("col"):
-                        ui.label(t("videos_in_db_label")).classes("text-caption text-grey-6")
-                        ui.label(t("yes") if has_videos else t("no")).classes("text-body2")
-
-                if not has_videos:
-                    with ui.card().classes("full-width"):
-                        ui.label(t("sync_videos_title")).classes("text-body1 q-mb-md")
-                        ui.button(
-                            t("sync_videos_btn"),
-                            icon="sync",
-                            on_click=lambda: self._sync_videos(dp),
-                            color="primary",
-                        )
-                else:
-                    with ui.row().classes("w-full gap-4"):
-                        ui.button(
-                            t("go_to_overview_btn"),
-                            icon="dashboard",
-                            on_click=lambda: ui.navigate.to("/overview"),
-                            color="primary",
-                        )
-                        ui.button(
-                            t("start_reviewing_btn"),
-                            icon="rate_review",
-                            on_click=lambda: ui.navigate.to("/review"),
-                            color="secondary",
-                        )
-
-        except Exception as e:
-            with ui.card().classes("text-center q-pa-xl"):
-                ui.label(t("error_loading_config_title")).classes("text-h6 text-negative q-mb-md")
-                ui.label(str(e)).classes("text-body2 q-mb-lg")
-                ui.button(
-                    t("reconfigure_btn"),
-                    icon="settings",
-                    on_click=lambda: ui.navigate.to("/setup"),
-                    color="negative",
-                )
+        ui.navigate.to("/overview")
 
     async def overview_page(self):
         from review_app.app.pages.overview import setup_overview
@@ -342,8 +181,6 @@ class GUI:
 
     def setup_page(self):
         from nicegui import ui
-
-        from review_app.app.setup_wizard import setup_wizard
 
         shared_header()
 
@@ -438,15 +275,12 @@ class GUI:
         if not storage_secret:
             storage_secret = secrets.token_hex(32)
 
-        use_native = not dev_mode
-        if use_native:
-            try:
-                from webview import guilib
+        use_native = not dev_mode and not sys.platform.startswith("linux")
 
-                guilib.initialize()
-            except Exception as e:
-                print(f"Warning: native window unavailable ({e}), falling back to browser mode.")
-                use_native = False
+        if use_native:
+            from nicegui import app as nicegui_app
+
+            nicegui_app.native.start_args["gui"] = "qt"
 
         ui.run(
             native=use_native,

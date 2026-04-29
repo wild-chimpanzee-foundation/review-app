@@ -29,7 +29,7 @@ def render_custom_video_player(video_url, duration, vid_key):
             try:
                 m, sec = divmod(int(float(s)), 60)
                 return f"{m:02d}:{sec:02d}"
-            except:
+            except (ValueError, TypeError):
                 return "00:00"
 
         speed_options = [

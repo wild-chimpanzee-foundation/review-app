@@ -322,7 +322,7 @@ async def render_video_section(dp, species_map):
                                             ui.linear_progress(
                                                 value=p_display, color=element_color
                                             ).props("rounded")
-                                        except:
+                                        except (ValueError, TypeError):
                                             ui.label(str(prob_raw))
 
                         ui.separator().style("opacity: 0.2")

@@ -222,7 +222,11 @@ class SetupWizard:
                 config = generate_config(annotator_name)
             save_config(config)
 
-            from review_app.app.state import get_active_project_id, init_user_prefs, set_data_provider
+            from review_app.app.state import (
+                get_active_project_id,
+                init_user_prefs,
+                set_data_provider,
+            )
             from review_app.app.utils import switch_project
             from review_app.backend.local_data_provider import LocalDataProvider
 

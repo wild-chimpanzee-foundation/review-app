@@ -313,7 +313,7 @@ def render_annotation_section(
         set_state_val("review_active_id", None)
         set_state_val("pending_blank_confirm", False)
 
-    async def submit_and_next():
+    async def update_annotation():
         if get_state_val("submit_in_progress"):
             return
         set_state_val("submit_in_progress", True)
@@ -321,7 +321,9 @@ def render_annotation_section(
             sels = get_selections()
             is_b = get_state_val("review_is_blank", False)
             if not is_b and not sels:
-                ui.notify(t("no_species_warning"), type="warning")
+                await run.io_bound(
+                    dp.update_manual_review, selected_video_id, [], is_blank=None, labeled_by=None
+                )
                 return
             annotator = get_annotator_name()
             labeled_sels = [{**s, "labeled_by": annotator} for s in sels]
@@ -333,39 +335,21 @@ def render_annotation_section(
                 active_project_id=get_active_project_id(),
             )
             ui.notify(t("review_saved"), type="positive")
-            await _advance_to_next(selected_video_id)
-            _clear_review_state()
-            render_video_section_callback.refresh()
-            render_filter_drawer_callback.refresh()
         finally:
             set_state_val("submit_in_progress", False)
 
+    async def submit_and_next():
+        await update_annotation()
+        await _advance_to_next(selected_video_id)
+        _clear_review_state()
+        render_video_section_callback.refresh()
+        render_filter_drawer_callback.refresh()
+
     async def submit():
-        if get_state_val("submit_in_progress"):
-            return
-        set_state_val("submit_in_progress", True)
-        try:
-            sels = get_selections()
-            is_b = get_state_val("review_is_blank", False)
-            if not is_b and not sels:
-                ui.notify(t("no_species_warning"), type="warning")
-                return
-            annotator = get_annotator_name()
-            labeled_sels = [{**s, "labeled_by": annotator} for s in sels]
-            await run.io_bound(
-                dp.update_manual_review,
-                selected_video_id,
-                labeled_sels,
-                is_blank=is_b,
-                active_project_id=get_active_project_id(),
-            )
-            ui.notify(t("review_saved"), type="positive")
-            # Stay on the same video but reload its data
-            set_state_val("review_state_video_id", None)
-            render_video_section_callback.refresh()
-            render_filter_drawer_callback.refresh()
-        finally:
-            set_state_val("submit_in_progress", False)
+        await update_annotation()
+        set_state_val("review_state_video_id", None)
+        render_video_section_callback.refresh()
+        render_filter_drawer_callback.refresh()
 
     async def mark_review_later():
         if get_state_val("submit_in_progress"):

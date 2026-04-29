@@ -101,3 +101,32 @@ def test_manual_review_update(temp_workspace, monkeypatch):
     assert detail is not None
     assert detail["manual_selections"][0]["species"] == "deer"
     assert detail["manual_selections"][0]["labeled_by"] == "test_user"
+
+
+def test_delete_all_annotations_on_empty_submit(temp_workspace, monkeypatch):
+    _mock_probe(monkeypatch)
+
+    video_dir = temp_workspace["video_dir"]
+    (video_dir / "test.mp4").touch()
+
+    dp = LocalDataProvider(temp_workspace["config_path"])
+    dp.sync_videos(progress_callback=None, video_dir=video_dir)
+
+    queue = dp.get_video_queue({}, active_project_id=None)
+    video_id = queue[0]
+
+    selections = [
+        {"species": "deer", "behavior": "grazing", "start_sec": 0, "end_sec": 5, "labeled_by": "test_user"}
+    ]
+    dp.update_manual_review(video_id, selections)
+
+    detail = dp.get_video_detail(video_id)
+    assert len(detail["manual_selections"]) == 1
+
+    # Simulate submitting with empty species list and not blank — should clear all annotations
+    dp.update_manual_review(video_id, [], is_blank=None)
+
+    detail = dp.get_video_detail(video_id)
+    assert detail is not None
+    assert detail["manual_selections"] == []
+    assert detail["is_blank"] is None

@@ -121,6 +121,15 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
     def _utcnow_dt() -> datetime:
         return datetime.now(timezone.utc)
 
+    def _known_video_ids(self, active_project_id: str | None) -> set[str]:
+        with self.engine.connect() as conn:
+            q = text(
+                "SELECT video_id FROM videos"
+                + (" WHERE project_id = :pid" if active_project_id else "")
+            )
+            p = {"pid": active_project_id} if active_project_id else {}
+            return set(conn.execute(q, p).scalars())
+
     @property
     def _app_config_path(self) -> Path:
         return self.db_dir / "config.json"
@@ -312,59 +321,41 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             return pd.read_sql(select(VideoLabel), conn)
 
     def get_queue_filter_options(self, active_project_id: str | None) -> dict[str, list[str]]:
+        params: dict = {}
+        vid_filter = ""
+        io_exists = ""
+        ma_exists = ""
+        if active_project_id:
+            params["pid"] = active_project_id
+            vid_filter = "AND project_id = :pid"
+            io_exists = "AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = io.video_id AND v.project_id = :pid)"
+            ma_exists = "AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = ma.video_id AND v.project_id = :pid)"
+
         with self.engine.connect() as conn:
-            if active_project_id:
-                df = pd.read_sql(
-                    text("""
-                        SELECT 'camera' AS source, camera_id AS val FROM videos
-                        WHERE camera_id IS NOT NULL AND project_id = :pid GROUP BY camera_id
-                        UNION ALL
-                        SELECT 'species', io.species FROM individual_observations io
-                        WHERE io.species IS NOT NULL AND TRIM(io.species) <> ''
-                          AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = io.video_id AND v.project_id = :pid)
-                        GROUP BY io.species
-                        UNION ALL
-                        SELECT 'behavior', io.behavior FROM individual_observations io
-                        WHERE io.behavior IS NOT NULL AND TRIM(io.behavior) <> ''
-                          AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = io.video_id AND v.project_id = :pid)
-                        GROUP BY io.behavior
-                        UNION ALL
-                        SELECT 'possible_species', ma.value_text FROM model_annotations ma
-                        WHERE ma.annotation_type = 'species' AND ma.value_text IS NOT NULL AND TRIM(ma.value_text) <> ''
-                          AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = ma.video_id AND v.project_id = :pid)
-                        GROUP BY ma.value_text
-                        UNION ALL
-                        SELECT 'model_behavior', ma.value_text FROM model_annotations ma
-                        WHERE ma.annotation_type = 'behavior' AND ma.value_text IS NOT NULL AND TRIM(ma.value_text) <> ''
-                          AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = ma.video_id AND v.project_id = :pid)
-                        GROUP BY ma.value_text
-                    """),
-                    conn,
-                    params={"pid": active_project_id},
-                )
-            else:
-                df = pd.read_sql(
-                    text("""
-                        SELECT 'camera' AS source, camera_id AS val FROM videos
-                        WHERE camera_id IS NOT NULL GROUP BY camera_id
-                        UNION ALL
-                        SELECT 'species', species FROM individual_observations
-                        WHERE species IS NOT NULL AND TRIM(species) <> '' GROUP BY species
-                        UNION ALL
-                        SELECT 'behavior', behavior FROM individual_observations
-                        WHERE behavior IS NOT NULL AND TRIM(behavior) <> '' GROUP BY behavior
-                        UNION ALL
-                        SELECT 'possible_species', value_text FROM model_annotations
-                        WHERE annotation_type = 'species' AND value_text IS NOT NULL AND TRIM(value_text) <> ''
-                        GROUP BY value_text
-                        UNION ALL
-                        SELECT 'model_behavior', value_text FROM model_annotations
-                        WHERE annotation_type = 'behavior' AND value_text IS NOT NULL AND TRIM(value_text) <> ''
-                        GROUP BY value_text
-                    """),
-                    conn,
-                    params={},
-                )
+            df = pd.read_sql(
+                text(f"""
+                    SELECT 'camera' AS source, camera_id AS val FROM videos
+                    WHERE camera_id IS NOT NULL {vid_filter} GROUP BY camera_id
+                    UNION ALL
+                    SELECT 'species', io.species FROM individual_observations io
+                    WHERE io.species IS NOT NULL AND TRIM(io.species) <> '' {io_exists}
+                    GROUP BY io.species
+                    UNION ALL
+                    SELECT 'behavior', io.behavior FROM individual_observations io
+                    WHERE io.behavior IS NOT NULL AND TRIM(io.behavior) <> '' {io_exists}
+                    GROUP BY io.behavior
+                    UNION ALL
+                    SELECT 'possible_species', ma.value_text FROM model_annotations ma
+                    WHERE ma.annotation_type = 'species' AND ma.value_text IS NOT NULL AND TRIM(ma.value_text) <> '' {ma_exists}
+                    GROUP BY ma.value_text
+                    UNION ALL
+                    SELECT 'model_behavior', ma.value_text FROM model_annotations ma
+                    WHERE ma.annotation_type = 'behavior' AND ma.value_text IS NOT NULL AND TRIM(ma.value_text) <> '' {ma_exists}
+                    GROUP BY ma.value_text
+                """),
+                conn,
+                params=params,
+            )
 
         result: dict[str, list[str]] = {
             "camera_values": [],
@@ -891,6 +882,17 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
     ) -> None:
         if selections is None:
             selections = []
+        if selections == [] and is_blank is None:
+            with self.Session() as session:
+                if session.get(VideoLabel, video_id) is not None:
+                    session.query(VideoLabel).filter(VideoLabel.video_id == video_id).update(
+                        {"is_blank": None, "labeled_by": None, "labeled_at": None}
+                    )
+                    session.query(IndividualObservation).filter(
+                        IndividualObservation.video_id == video_id
+                    ).delete(synchronize_session=False)
+                    session.commit()
+            return
 
         now = self._utcnow_dt()
         valid_species = set(self.get_valid_species())
@@ -1140,14 +1142,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         if missing:
             raise ValueError(f"CSV must include columns: {', '.join(sorted(missing))}")
 
-        with self.engine.connect() as _conn:
-            _q = (
-                text("SELECT video_id FROM videos WHERE project_id = :pid")
-                if active_project_id
-                else text("SELECT video_id FROM videos")
-            )
-            _p = {"pid": active_project_id} if active_project_id else {}
-            known_videos = set(_conn.execute(_q, _p).scalars())
+        known_videos = self._known_video_ids(active_project_id)
 
         species_mask = src["annotation_type"].str.strip().str.lower() == "species"
         unique_species = src.loc[species_mask, "value_text"].dropna().str.strip().unique()
@@ -1303,8 +1298,9 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
     # ── Annotation export / import ────────────────────────────────────────────
 
     def export_annotations_csv(self, active_project_id, lang: str = "en") -> pd.DataFrame:
-        pid_clause = "AND v.project_id = :pid" if active_project_id else ""
         params = {"pid": active_project_id} if active_project_id else {}
+        vid_pid = "AND v.project_id = :pid" if active_project_id else ""
+        ma_pid = "AND project_id = :pid" if active_project_id else ""
         with self.engine.connect() as conn:
             base_df = pd.read_sql(
                 text(f"""
@@ -1328,7 +1324,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     FROM videos v
                     LEFT JOIN video_labels vl ON vl.video_id = v.video_id
                     LEFT JOIN individual_observations io ON io.video_id = v.video_id
-                    WHERE 1=1 {pid_clause}
+                    WHERE 1=1 {vid_pid}
                     ORDER BY v.camera_id, v.video_path, io.start_sec
                 """),
                 conn,
@@ -1339,7 +1335,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 text(f"""
                     SELECT video_id, model_name, annotation_type, value_text, probability
                     FROM model_annotations
-                    WHERE 1=1 {pid_clause.replace("v.project_id", "project_id")}
+                    WHERE 1=1 {ma_pid}
                 """),
                 conn,
                 params=params,
@@ -1409,17 +1405,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         if missing:
             raise ValueError(f"Missing required columns: {sorted(missing)}")
 
-        with self.engine.connect() as conn:
-            if active_project_id:
-                known_ids = set(
-                    pd.read_sql(
-                        text("SELECT video_id FROM videos WHERE project_id = :pid"),
-                        conn,
-                        params={"pid": active_project_id},
-                    )["video_id"]
-                )
-            else:
-                known_ids = set(pd.read_sql(text("SELECT video_id FROM videos"), conn)["video_id"])
+        known_ids = self._known_video_ids(active_project_id)
 
         imported = 0
         skipped: list[str] = []
@@ -1473,6 +1459,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         p = {"pid": active_project_id} if active_project_id else {}
         pf = "WHERE project_id = :pid" if active_project_id else ""
         vf = "WHERE v.project_id = :pid" if active_project_id else ""
+        af = "AND project_id = :pid" if active_project_id else ""
 
         with self.engine.connect() as conn:
             stats = {}
@@ -1584,7 +1571,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 FROM model_annotations
                 WHERE annotation_type = 'species'
                 AND value_text IS NOT NULL
-                {"AND project_id = :pid" if active_project_id else ""}
+                {af}
                 GROUP BY model_name, value_text
                 ORDER BY model_name, predictions DESC
             """),
@@ -1592,8 +1579,6 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 params=p,
             ).to_dict(orient="records")
 
-            ma_pid = "AND project_id = :pid" if active_project_id else ""
-            io_pid = "AND project_id = :pid" if active_project_id else ""
             stats["model_human_agreement"] = pd.read_sql(
                 text(f"""
                 WITH top_model AS (
@@ -1606,12 +1591,12 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                             ORDER BY COALESCE(probability, 0) DESC
                         ) AS rn
                     FROM model_annotations
-                    WHERE annotation_type = 'species' {ma_pid}
+                    WHERE annotation_type = 'species' {af}
                 ),
                 manual AS (
                     SELECT DISTINCT video_id, species AS manual_species
                     FROM individual_observations
-                    WHERE 1=1 {io_pid}
+                    WHERE 1=1 {af}
                 )
                 SELECT
                     tm.model_name,

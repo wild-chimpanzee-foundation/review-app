@@ -1,6 +1,6 @@
 from nicegui import run, ui
 
-from review_app.app.state import get_active_project_id
+from review_app.app.state import get_active_project_id, reset_filters, update_filters
 from review_app.app.translations import get_language, t
 from review_app.app.utils import (
     get_or_create_data_provider,
@@ -25,14 +25,38 @@ async def setup_overview():
         with ui.column().classes("w-full q-pa-lg items-center"):
             ui.label(t("no_videos_synced")).classes("text-h6 text-grey-6")
             ui.label(t("no_videos_synced_hint")).classes("text-body2 text-grey-6")
-            ui.button(t("go_to_settings"), on_click=lambda: ui.navigate.to("/settings"), icon="settings")
+            ui.button(
+                t("go_to_settings"), on_click=lambda: ui.navigate.to("/settings"), icon="settings"
+            )
         return
 
     stats = await run.io_bound(dp.get_overview_stats, pid)
 
+    def go_review(**filters):
+        reset_filters()
+        update_filters(**filters)
+        ui.navigate.to("/review")
+
     with ui.column().classes("w-full q-pa-lg").style("max-width: 1600px; margin: 0 auto"):
-        with ui.row().classes("items-center q-mb-lg"):
+        with ui.row().classes("items-center justify-between q-mb-lg"):
             ui.label(t("overview_title")).classes("text-h5 text-primary font-weight-bold")
+            with ui.row().classes("gap-2"):
+                ui.button(
+                    t("quick_review_unannotated"),
+                    icon="rate_review",
+                    color="primary",
+                    on_click=lambda: go_review(
+                        selected_annotation_status="Not Annotated",
+                        selected_needs_review="Needs Review",
+                    ),
+                ).props("outline")
+                ui.space()
+                ui.button(
+                    t("quick_review_later"),
+                    icon="bookmark",
+                    color="orange",
+                    on_click=lambda: go_review(selected_is_review_later=True),
+                ).props("outline")
 
         v = stats.get("videos", {})
         lb = stats.get("labeling", {})
@@ -69,7 +93,9 @@ async def setup_overview():
 
         with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
             with ui.card().classes("col q-pa-md"):
-                ui.label(t("annotation_progress")).classes("text-subtitle1 font-weight-medium q-mb-md")
+                ui.label(t("annotation_progress")).classes(
+                    "text-subtitle1 font-weight-medium q-mb-md"
+                )
                 with ui.element("div").style(
                     "display:flex; width:100%; height:12px; border-radius:6px; overflow:hidden"
                 ):
@@ -137,9 +163,11 @@ async def setup_overview():
                     ui.label(t("no_behavior_yet")).classes("text-grey-5")
 
         # Camera summary table
-        with ui.expansion(t("camera_summary_title"), icon="photo_camera").classes(
-            "full-width q-mb-lg"
-        ).props("content-inset-level=0 header-class='q-pa-md q-py-sm'"):
+        with (
+            ui.expansion(t("camera_summary_title"), icon="photo_camera")
+            .classes("full-width q-mb-lg")
+            .props("content-inset-level=0 header-class='q-pa-md q-py-sm'")
+        ):
             camera_summary = stats.get("camera_summary", [])
             if camera_summary:
                 rows = [
@@ -165,9 +193,11 @@ async def setup_overview():
         model_coverage = stats.get("model_coverage", [])
         model_agreement = stats.get("model_human_agreement", [])
         if model_coverage:
-            with ui.expansion(t("model_annotations"), icon="smart_toy").classes(
-                "full-width q-mb-lg"
-            ).props("content-inset-level=0 header-class='q-pa-md q-py-sm'"):
+            with (
+                ui.expansion(t("model_annotations"), icon="smart_toy")
+                .classes("full-width q-mb-lg")
+                .props("content-inset-level=0 header-class='q-pa-md q-py-sm'")
+            ):
                 with ui.column().classes("w-full gap-md q-pa-sm"):
                     with ui.card().classes("full-width"):
                         ui.label(t("col_coverage")).classes(

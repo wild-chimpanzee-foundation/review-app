@@ -26,7 +26,6 @@ from review_app.app.state import (
 from review_app.app.translations import t
 from review_app.app.utils import (
     get_or_create_data_provider,
-    render_uninitialized_state,
     sync_with_progress,
 )
 from review_app.backend.local_data_provider import LocalDataProvider
