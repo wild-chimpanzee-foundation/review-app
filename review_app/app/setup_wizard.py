@@ -13,7 +13,6 @@ from review_app.app.config import (
     get_default_db_path,
     save_config,
 )
-from review_app.app.media import set_media_dirs
 from review_app.app.translations import t
 from review_app.app.utils import sync_with_progress
 
@@ -223,15 +222,8 @@ class SetupWizard:
                 config = generate_config(annotator_name)
             save_config(config)
 
-            from review_app.app.state import (
-                get_active_project_id,
-                init_user_prefs,
-                set_active_project,
-                set_current_idx,
-                set_data_provider,
-                set_queue,
-                set_selections,
-            )
+            from review_app.app.state import get_active_project_id, init_user_prefs, set_data_provider
+            from review_app.app.utils import switch_project
             from review_app.backend.local_data_provider import LocalDataProvider
 
             init_user_prefs(
@@ -243,16 +235,12 @@ class SetupWizard:
             # Create project in a temporary dp (active_project_id not in config yet)
             _dp_tmp = LocalDataProvider(str(self.config_path))
             project = _dp_tmp.create_project(project_name, video_dir)
-            set_active_project(project.id)
-            set_queue([])
-            set_current_idx(0)
-            set_selections([])
 
             # Reload dp now that active_project_id is in config so project dirs are populated
             dp = LocalDataProvider(str(self.config_path))
             set_data_provider(dp)
+            switch_project(dp, project.id)
 
-            set_media_dirs([Path(d.path) for d in dp.get_project_dirs(get_active_project_id())])
             has_videos = await run.io_bound(dp.has_videos_in_db, get_active_project_id())
 
             if not has_videos:

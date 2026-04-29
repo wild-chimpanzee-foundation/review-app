@@ -40,10 +40,13 @@ async def render_filter_drawer(
             search.value = filters.get("search_query", "")
 
             camera_values = filter_options.get("camera_values", [])
+            selected_camera = filters.get("selected_camera", "All")
+            if selected_camera not in ["All"] + camera_values:
+                selected_camera = "All"
             camera_select = ui.select(
                 label=t("camera_filter"),
                 options={v: v if v != "All" else t("all_option") for v in ["All"] + camera_values},
-                value=filters.get("selected_camera", "All"),
+                value=selected_camera,
                 with_input=True,
             ).props("outlined dense class=full-width")
 
@@ -122,6 +125,9 @@ async def render_filter_drawer(
             ).props("outlined dense class=full-width")
 
             behavior_values = filter_options.get("behavior_values", [])
+            selected_behavior = filters.get("selected_behavior", "All")
+            if selected_behavior not in ["All", "Has Behavior", "No Behavior"] + behavior_values:
+                selected_behavior = "All"
             behavior_filter = ui.select(
                 label=t("manual_behavior_filter"),
                 options={
@@ -130,7 +136,7 @@ async def render_filter_drawer(
                     "No Behavior": t("no_behavior"),
                     **{v: v for v in behavior_values},
                 },
-                value=filters.get("selected_behavior", "All"),
+                value=selected_behavior,
                 with_input=True,
             ).props("outlined dense class=full-width")
 

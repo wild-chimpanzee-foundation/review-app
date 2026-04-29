@@ -42,25 +42,15 @@ class SpeciesMixin:
             )
         return rows
 
-    def _load_species_data(self, cfg: dict[str, Any]) -> None:
+    def _load_species_data(self) -> None:
         from review_app.app.config import get_bundled_species_csv
 
         bundled_path = get_bundled_species_csv()
-        custom_path_raw = str(cfg.get("species_csv_path") or "").strip()
-
-        rows: list[dict] = []
-        if custom_path_raw:
-            custom_p = self._resolve_path(custom_path_raw)
-            if custom_p.exists() and str(custom_p) != str(bundled_path):
-                rows = self._parse_species_csv(custom_p)
-
-        if not rows and bundled_path:
-            rows = self._parse_species_csv(Path(bundled_path))
-
+        if not bundled_path:
+            raise ValueError("Bundled species CSV not found.")
+        rows = self._parse_species_csv(Path(bundled_path))
         if not rows:
-            raise ValueError(
-                "No species found. Ensure a valid species CSV with scientific_name column is configured."
-            )
+            raise ValueError("Bundled species CSV is empty or missing a scientific_name column.")
 
         with self.engine.begin() as conn:
             conn.execute(text("DELETE FROM species"))
@@ -88,15 +78,11 @@ class SpeciesMixin:
         except Exception:
             return []
 
-    def _load_species_behaviors(self, cfg: dict[str, Any]) -> None:
+    def _load_species_behaviors(self) -> None:
         from review_app.app.config import get_bundled_behaviors_csv
 
         bundled_path = get_bundled_behaviors_csv()
-
-        rows: list[dict] = []
-
-        if not rows and bundled_path:
-            rows = self._parse_behaviors_csv(Path(bundled_path))
+        rows = self._parse_behaviors_csv(Path(bundled_path)) if bundled_path else []
 
         with self.engine.begin() as conn:
             conn.execute(text("DELETE FROM species_behavior"))
@@ -147,7 +133,7 @@ class SpeciesMixin:
         if not candidates:
             return False, None
         match, score = process.extractOne(value_lower, candidates)
-        if score >= self._fuzzy_match_threshold:
+        if score >= 80:
             return True, variant_to_sci[match]
 
         return False, None

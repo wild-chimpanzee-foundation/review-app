@@ -133,6 +133,24 @@ def update_filters(**kwargs):
     _get_user_state()["filters"].update(kwargs)
 
 
+def reset_filters() -> None:
+    app.storage.user["filters"] = {
+        "search_query": "",
+        "selected_camera": "All",
+        "selected_species": "All",
+        "selected_possible_species": "All",
+        "selected_manual_blank": "All",
+        "selected_model_blank": "All",
+        "selected_behavior": "All",
+        "selected_model_behavior": "All",
+        "selected_annotation_status": "All",
+        "selected_sort": "camera",
+        "selected_sort_direction": "desc",
+        "web_safe_only": False,
+        "selected_needs_review": "All",
+    }
+
+
 def get_annotator_name():
     return _annotator_name
 

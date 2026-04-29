@@ -52,6 +52,28 @@ def render_uninitialized_state():
         ui.button(t("setup_btn"), on_click=lambda: ui.navigate.to("/setup"), icon="settings")
 
 
+def switch_project(dp, project_id: str) -> None:
+    """Update all session state when activating a project. Caller handles navigation."""
+    from pathlib import Path
+
+    from review_app.app.media import set_media_dirs
+    from review_app.app.state import (
+        reset_filters,
+        set_active_project,
+        set_current_idx,
+        set_queue,
+        set_selections,
+    )
+
+    dp.touch_project(project_id)
+    set_active_project(project_id)
+    reset_filters()
+    set_queue([])
+    set_current_idx(0)
+    set_selections([])
+    set_media_dirs([Path(d.path) for d in dp.get_project_dirs(project_id) or []])
+
+
 async def get_or_create_data_provider():
     from review_app.app.config import get_config_path
     from review_app.app.state import get_data_provider, set_data_provider

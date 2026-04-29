@@ -17,17 +17,15 @@ from review_app.app.state import (  # noqa: E402
     init_user_prefs,
     is_dark_mode,
     set_active_project,
-    set_current_idx,
     set_dark_mode,
     set_data_provider,
-    set_queue,
-    set_selections,
 )
 from review_app.app.theme import apply_theme  # noqa: E402
 from review_app.app.translations import get_language, set_language, t  # noqa: E402
 from review_app.app.utils import (  # noqa: E402
     get_or_create_data_provider,
     render_uninitialized_state,
+    switch_project,
 )
 from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
 
@@ -163,16 +161,9 @@ def shared_header(show_drawer: bool = False):
 
                                     def make_switch(pid):
                                         async def do_switch():
-                                            switch_dp = LocalDataProvider(str(CONFIG_PATH))
-                                            dirs = switch_dp.get_project_dirs(pid)
-                                            switch_dp.touch_project(pid)
                                             new_dp = LocalDataProvider(str(CONFIG_PATH))
                                             set_data_provider(new_dp)
-                                            set_active_project(pid)
-                                            set_queue([])
-                                            set_current_idx(0)
-                                            set_selections([])
-                                            set_media_dirs([Path(d.path) for d in dirs or []])
+                                            switch_project(new_dp, pid)
                                             project_dialog.close()
                                             ui.navigate.to("/overview")
 

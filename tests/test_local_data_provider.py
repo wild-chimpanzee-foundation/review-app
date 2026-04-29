@@ -20,15 +20,10 @@ def temp_workspace(tmp_path, monkeypatch):
     behavior_csv.write_text("Species;Behavior\ndeer;reacts_to_camera\ndeer;grazing\nfox;running\n")
 
     config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        yaml.dump({
-            "species_csv_path": str(species_csv),
-            "behavior_defaults": ["unlabeled", "does_not_react"],
-        })
-    )
+    config_path.write_text(yaml.dump({"behavior_defaults": ["unlabeled", "does_not_react"]}))
 
     monkeypatch.setattr("review_app.backend.local_data_provider.get_user_data_dir", lambda: db_dir)
-    monkeypatch.setattr("review_app.app.config.get_bundled_species_csv", lambda: None)
+    monkeypatch.setattr("review_app.app.config.get_bundled_species_csv", lambda: str(species_csv))
     monkeypatch.setattr("review_app.app.config.get_bundled_behaviors_csv", lambda: str(behavior_csv))
 
     yield {

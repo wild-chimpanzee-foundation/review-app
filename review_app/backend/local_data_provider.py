@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -48,7 +49,6 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             cfg.get("behavior_defaults"), "behavior_defaults"
         )
         self._consensus_min_probability: float = float(cfg.get("consensus_min_probability", 0.0))
-        self._fuzzy_match_threshold: int = int(cfg.get("fuzzy_match_threshold", 80))
 
         db_filename = DEFAULT_DB_FILENAME
 
@@ -68,8 +68,8 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         run_migrations(self.engine)
         self.Session = sessionmaker(bind=self.engine)
 
-        self._load_species_data(cfg)
-        self._load_species_behaviors(cfg)
+        self._load_species_data()
+        self._load_species_behaviors()
 
     # ── Config helpers ────────────────────────────────────────────────────────
 
@@ -156,30 +156,30 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
     # ── Config persistence ────────────────────────────────────────────────────
 
-    def get_config(self) -> dict:
+    def get_app_state(self) -> dict:
         if self._app_config_path.exists():
             with open(self._app_config_path) as f:
                 return json.load(f)
         return {}
 
-    def save_config(self, config: dict) -> None:
+    def save_app_state(self, config: dict) -> None:
         with open(self._app_config_path, "w") as f:
             json.dump(config, f, indent=2)
 
     def get_overrides(self) -> dict:
-        return self.get_config()
+        return self.get_app_state()
 
     # ── Project management ────────────────────────────────────────────────────
 
     def create_project(self, name: str, video_dir: str) -> Project:
-        project = Project(id=str(__import__("uuid").uuid4()), name=name)
+        project = Project(id=str(uuid.uuid4()), name=name)
         with self.Session() as s:
             s.add(project)
             s.flush()
             if video_dir:
                 s.add(
                     ProjectDir(
-                        id=str(__import__("uuid").uuid4()),
+                        id=str(uuid.uuid4()),
                         project_id=project.id,
                         path=str(video_dir),
                         sort_order=0,
@@ -229,7 +229,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             existing = s.query(ProjectDir).filter_by(project_id=project_id).all()
             sort_order = max((d.sort_order for d in existing), default=-1) + 1
             d = ProjectDir(
-                id=str(__import__("uuid").uuid4()),
+                id=str(uuid.uuid4()),
                 project_id=project_id,
                 path=str(path),
                 sort_order=sort_order,
@@ -286,29 +286,59 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             return pd.read_sql(select(VideoLabel), conn)
 
     def get_queue_filter_options(self, active_project_id: str | None) -> dict[str, list[str]]:
-        pid_clause = "AND project_id = :pid" if active_project_id else ""
-        params = {"pid": active_project_id} if active_project_id else {}
         with self.engine.connect() as conn:
-            df = pd.read_sql(
-                text(f"""
-                    SELECT 'camera' AS source, camera_id AS val FROM videos
-                    WHERE camera_id IS NOT NULL {pid_clause} GROUP BY camera_id
-                    UNION ALL
-                    SELECT 'species', species FROM individual_observations
-                    WHERE species IS NOT NULL AND TRIM(species) <> '' {pid_clause} GROUP BY species
-                    UNION ALL
-                    SELECT 'behavior', behavior FROM individual_observations
-                    WHERE behavior IS NOT NULL AND TRIM(behavior) <> '' {pid_clause} GROUP BY behavior
-                    UNION ALL
-                    SELECT 'possible_species', value_text FROM model_annotations
-                    WHERE annotation_type = 'species' AND value_text IS NOT NULL AND TRIM(value_text) <> '' {pid_clause} GROUP BY value_text
-                    UNION ALL
-                    SELECT 'model_behavior', value_text FROM model_annotations
-                    WHERE annotation_type = 'behavior' AND value_text IS NOT NULL AND TRIM(value_text) <> '' {pid_clause} GROUP BY value_text
-                """),
-                conn,
-                params=params,
-            )
+            if active_project_id:
+                df = pd.read_sql(
+                    text("""
+                        SELECT 'camera' AS source, camera_id AS val FROM videos
+                        WHERE camera_id IS NOT NULL AND project_id = :pid GROUP BY camera_id
+                        UNION ALL
+                        SELECT 'species', io.species FROM individual_observations io
+                        WHERE io.species IS NOT NULL AND TRIM(io.species) <> ''
+                          AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = io.video_id AND v.project_id = :pid)
+                        GROUP BY io.species
+                        UNION ALL
+                        SELECT 'behavior', io.behavior FROM individual_observations io
+                        WHERE io.behavior IS NOT NULL AND TRIM(io.behavior) <> ''
+                          AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = io.video_id AND v.project_id = :pid)
+                        GROUP BY io.behavior
+                        UNION ALL
+                        SELECT 'possible_species', ma.value_text FROM model_annotations ma
+                        WHERE ma.annotation_type = 'species' AND ma.value_text IS NOT NULL AND TRIM(ma.value_text) <> ''
+                          AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = ma.video_id AND v.project_id = :pid)
+                        GROUP BY ma.value_text
+                        UNION ALL
+                        SELECT 'model_behavior', ma.value_text FROM model_annotations ma
+                        WHERE ma.annotation_type = 'behavior' AND ma.value_text IS NOT NULL AND TRIM(ma.value_text) <> ''
+                          AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = ma.video_id AND v.project_id = :pid)
+                        GROUP BY ma.value_text
+                    """),
+                    conn,
+                    params={"pid": active_project_id},
+                )
+            else:
+                df = pd.read_sql(
+                    text("""
+                        SELECT 'camera' AS source, camera_id AS val FROM videos
+                        WHERE camera_id IS NOT NULL GROUP BY camera_id
+                        UNION ALL
+                        SELECT 'species', species FROM individual_observations
+                        WHERE species IS NOT NULL AND TRIM(species) <> '' GROUP BY species
+                        UNION ALL
+                        SELECT 'behavior', behavior FROM individual_observations
+                        WHERE behavior IS NOT NULL AND TRIM(behavior) <> '' GROUP BY behavior
+                        UNION ALL
+                        SELECT 'possible_species', value_text FROM model_annotations
+                        WHERE annotation_type = 'species' AND value_text IS NOT NULL AND TRIM(value_text) <> ''
+                        GROUP BY value_text
+                        UNION ALL
+                        SELECT 'model_behavior', value_text FROM model_annotations
+                        WHERE annotation_type = 'behavior' AND value_text IS NOT NULL AND TRIM(value_text) <> ''
+                        GROUP BY value_text
+                    """),
+                    conn,
+                    params={},
+                )
 
         result: dict[str, list[str]] = {
             "camera_values": [],
@@ -836,12 +866,13 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             selections = []
 
         now = self._utcnow_dt()
+        valid_species = set(self.get_valid_species())
 
         normalized: list[dict[str, Any]] = []
         for selection in selections:
             species = str(selection.get("species") or "").strip() or "unknown"
-            if species.lower() == "blank":
-                continue
+            if species not in valid_species:
+                raise ValueError(f"Unknown species: {species!r}")
             behavior = str(selection.get("behavior") or "").strip() or "unlabeled"
             if "start_sec" in selection:
                 start_sec = pd.to_numeric(selection.get("start_sec"), errors="coerce")
@@ -865,12 +896,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             )
 
         if is_blank is None:
-            if not normalized:
-                is_blank = None
-            else:
-                is_blank = (
-                    len(selections) == 1 and str(selections[0].get("species")).lower() == "blank"
-                )
+            is_blank = False if normalized else None
 
         with self.Session() as session:
             label = session.get(VideoLabel, video_id)
@@ -1083,7 +1109,14 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         if missing:
             raise ValueError(f"CSV must include columns: {', '.join(sorted(missing))}")
 
-        known_videos = set(self.get_video_queue(filters={}, active_project_id=active_project_id))
+        with self.engine.connect() as _conn:
+            _q = (
+                text("SELECT video_id FROM videos WHERE project_id = :pid")
+                if active_project_id
+                else text("SELECT video_id FROM videos")
+            )
+            _p = {"pid": active_project_id} if active_project_id else {}
+            known_videos = set(_conn.execute(_q, _p).scalars())
 
         species_mask = src["annotation_type"].str.strip().str.lower() == "species"
         unique_species = src.loc[species_mask, "value_text"].dropna().str.strip().unique()
@@ -1196,39 +1229,45 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         if cleaned_df.empty:
             return {"inserted_rows": 0, "upserted_rows": 0}
 
-        upserted = 0
-        with self.Session() as session:
-            for _, row in cleaned_df.iterrows():
-                existing = (
-                    session.query(ModelAnnotation)
-                    .filter(
-                        ModelAnnotation.video_id == row["video_id"],
-                        ModelAnnotation.model_name == row["model_name"],
-                        ModelAnnotation.annotation_type == row["annotation_type"],
-                    )
-                    .one_or_none()
-                )
+        now = self._utcnow_dt()
+        rows = [
+            {
+                "id": str(uuid.uuid4()),
+                "project_id": active_project_id,
+                "video_id": row["video_id"],
+                "annotation_type": row["annotation_type"],
+                "model_name": row["model_name"],
+                "value_text": row.get("value_text"),
+                "value_num": row.get("value_num"),
+                "probability": row.get("probability"),
+                "t_start_sec": row.get("t_start_sec"),
+                "t_end_sec": row.get("t_end_sec"),
+                "updated_at": now,
+            }
+            for _, row in cleaned_df.iterrows()
+        ]
 
-                if existing is None:
-                    existing = ModelAnnotation(
-                        video_id=row["video_id"],
-                        project_id=active_project_id,
-                        model_name=row["model_name"],
-                        annotation_type=row["annotation_type"],
-                    )
-                    session.add(existing)
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO model_annotations
+                        (id, project_id, video_id, annotation_type, model_name,
+                         value_text, value_num, probability, t_start_sec, t_end_sec, updated_at)
+                    VALUES
+                        (:id, :project_id, :video_id, :annotation_type, :model_name,
+                         :value_text, :value_num, :probability, :t_start_sec, :t_end_sec, :updated_at)
+                    ON CONFLICT(video_id, model_name, annotation_type) DO UPDATE SET
+                        value_text  = excluded.value_text,
+                        value_num   = excluded.value_num,
+                        probability = excluded.probability,
+                        t_start_sec = excluded.t_start_sec,
+                        t_end_sec   = excluded.t_end_sec,
+                        updated_at  = excluded.updated_at
+                """),
+                rows,
+            )
 
-                existing.value_text = row.get("value_text")
-                existing.value_num = row.get("value_num")
-                existing.probability = row.get("probability")
-                existing.t_start_sec = row.get("t_start_sec")
-                existing.t_end_sec = row.get("t_end_sec")
-                existing.updated_at = self._utcnow_dt()
-                upserted += 1
-
-            session.commit()
-
-        return {"inserted_rows": int(len(cleaned_df)), "upserted_rows": int(upserted)}
+        return {"inserted_rows": len(rows), "upserted_rows": len(rows)}
 
     # ── Annotation export / import ────────────────────────────────────────────
 
