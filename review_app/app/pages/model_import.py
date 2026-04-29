@@ -172,6 +172,115 @@ async def setup_model_import():
                     col_opts = {c: c for c in columns}
                     col_opts_none = {"": t("no_columns_col"), **col_opts}
 
+                    # Process ─────────────────────────────────────────────────
+                    async def do_process():
+                        recs = get_state_val("raw_df_records")
+                        if not recs:
+                            ui.notify(t("no_data_import"), type="warning")
+                            return
+
+                        if get_state_val("csv_format") == "long":
+                            loading_dialog.open()
+                            try:
+                                raw_df = pd.DataFrame(recs)
+                                cleaned_df, errors_df, species_mappings, unmapped_species = (
+                                    await run.io_bound(
+                                        dp.validate_model_csv,
+                                        raw_df, None, get_active_project_id(),
+                                    )
+                                )
+                                set_state_val("match_stats", None)
+                                set_state_val("uploaded_df", raw_df.to_dict(orient="records"))
+                                set_state_val(
+                                    "cleaned_df",
+                                    cleaned_df.to_dict(orient="records")
+                                    if cleaned_df is not None else None,
+                                )
+                                set_state_val(
+                                    "errors_df",
+                                    errors_df.to_dict(orient="records")
+                                    if errors_df is not None else None,
+                                )
+                                set_state_val(
+                                    "species_mappings",
+                                    {m["original"]: m.get("mapped_to", "") for m in species_mappings},
+                                )
+                                set_state_val("unmapped_species", unmapped_species)
+                                ui.notify(t("csv_validated"), type="positive")
+                                refresh_results()
+                            except Exception as exc:
+                                ui.notify(f"{t('error')}: {exc}", type="negative")
+                            finally:
+                                loading_dialog.close()
+                            return
+
+                        path_col = get_state_val("path_col") or ""
+                        match_strategy = get_state_val("match_strategy") or "suffix"
+                        ann_maps = get_state_val("ann_mappings") or []
+                        if not path_col:
+                            ui.notify(t("error_no_path_col"), type="warning")
+                            return
+                        if not any(m.get("model_name") for m in ann_maps):
+                            ui.notify(t("error_no_ann_mappings"), type="warning")
+                            return
+
+                        loading_dialog.open()
+                        try:
+                            raw_df = pd.DataFrame(recs)
+                            normalized_df, match_stats = await run.io_bound(
+                                dp.normalize_model_csv_with_mapping,
+                                raw_df, path_col, match_strategy, ann_maps,
+                                get_active_project_id(),
+                            )
+                            set_state_val("match_stats", match_stats)
+                            set_state_val("uploaded_df", normalized_df.to_dict(orient="records"))
+
+                            cleaned_df, errors_df, species_mappings, unmapped_species = (
+                                await run.io_bound(
+                                    dp.validate_model_csv,
+                                    normalized_df, None, get_active_project_id(),
+                                )
+                            )
+
+                            set_state_val(
+                                "cleaned_df",
+                                cleaned_df.to_dict(orient="records")
+                                if cleaned_df is not None else None,
+                            )
+                            set_state_val(
+                                "errors_df",
+                                errors_df.to_dict(orient="records")
+                                if errors_df is not None else None,
+                            )
+                            set_state_val(
+                                "species_mappings",
+                                {m["original"]: m.get("mapped_to", "") for m in species_mappings},
+                            )
+                            set_state_val("unmapped_species", unmapped_species)
+
+                            ui.notify(t("csv_validated"), type="positive")
+                            refresh_results()
+                        except Exception as exc:
+                            ui.notify(f"{t('error')}: {exc}", type="negative")
+                        finally:
+                            loading_dialog.close()
+
+                    if get_state_val("csv_format") == "long":
+                        ui.label(t("configure_import")).classes(
+                            "text-subtitle1 font-weight-medium q-mb-sm"
+                        )
+                        with ui.card().classes("full-width q-mb-md bg-blue-grey-9"):
+                            ui.icon("check_circle", color="positive").classes("q-mb-xs")
+                            ui.label(t("long_format_detected")).classes(
+                                "text-body2 text-positive q-mb-xs"
+                            )
+                            ui.label(t("long_format_desc")).classes("text-caption text-grey-6")
+                        ui.button(
+                            t("process_csv"), icon="play_arrow", on_click=do_process,
+                            color="primary",
+                        ).classes("q-mt-sm")
+                        return
+
                     ui.label(t("configure_import")).classes(
                         "text-subtitle1 font-weight-medium q-mb-sm"
                     )
@@ -325,63 +434,6 @@ async def setup_model_import():
                         ui.button(
                             t("add_annotation_row"), icon="add", on_click=add_row,
                         ).props("flat dense color=primary")
-
-                    # Process ─────────────────────────────────────────────────
-                    async def do_process():
-                        recs = get_state_val("raw_df_records")
-                        if not recs:
-                            ui.notify(t("no_data_import"), type="warning")
-                            return
-                        path_col = get_state_val("path_col") or ""
-                        match_strategy = get_state_val("match_strategy") or "suffix"
-                        ann_maps = get_state_val("ann_mappings") or []
-                        if not path_col:
-                            ui.notify(t("error_no_path_col"), type="warning")
-                            return
-                        if not any(m.get("model_name") for m in ann_maps):
-                            ui.notify(t("error_no_ann_mappings"), type="warning")
-                            return
-
-                        loading_dialog.open()
-                        try:
-                            raw_df = pd.DataFrame(recs)
-                            normalized_df, match_stats = await run.io_bound(
-                                dp.normalize_model_csv_with_mapping,
-                                raw_df, path_col, match_strategy, ann_maps,
-                                get_active_project_id(),
-                            )
-                            set_state_val("match_stats", match_stats)
-                            set_state_val("uploaded_df", normalized_df.to_dict(orient="records"))
-
-                            cleaned_df, errors_df, species_mappings, unmapped_species = (
-                                await run.io_bound(
-                                    dp.validate_model_csv,
-                                    normalized_df, None, get_active_project_id(),
-                                )
-                            )
-
-                            set_state_val(
-                                "cleaned_df",
-                                cleaned_df.to_dict(orient="records")
-                                if cleaned_df is not None else None,
-                            )
-                            set_state_val(
-                                "errors_df",
-                                errors_df.to_dict(orient="records")
-                                if errors_df is not None else None,
-                            )
-                            set_state_val(
-                                "species_mappings",
-                                {m["original"]: m.get("mapped_to", "") for m in species_mappings},
-                            )
-                            set_state_val("unmapped_species", unmapped_species)
-
-                            ui.notify(t("csv_validated"), type="positive")
-                            refresh_results()
-                        except Exception as exc:
-                            ui.notify(f"{t('error')}: {exc}", type="negative")
-                        finally:
-                            loading_dialog.close()
 
                     ui.button(
                         t("process_csv"), icon="play_arrow", on_click=do_process, color="primary",
