@@ -283,7 +283,7 @@ class SetupWizard:
             else:
                 self.on_complete_callback()
 
-        with ui.column().classes("w-full max-w-2xl mx-auto q-pa-lg"):
+        with ui.column().classes("w-full q-pa-lg").style("max-width: 720px; margin: 0 auto"):
             with ui.card().classes("full-width q-mb-lg"):
                 ui.label(t("welcome_setup")).classes("text-h4 text-primary font-weight-bold")
                 ui.label(t("welcome_setup_msg")).classes("text-body1 text-grey-7")

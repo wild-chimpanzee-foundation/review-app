@@ -89,3 +89,40 @@ async def get_or_create_data_provider():
             except Exception:
                 return None
     return dp
+
+
+def get_probability_color(prob: float) -> str:
+    """
+    Map a probability (0.0 to 1.0) to a continuous hex color scale.
+    Red (#c10015) -> Yellow (#f2c037) -> Green (#21ba45)
+    """
+    if prob is None:
+        return "#9e9e9e"  # grey
+
+    # Ensure prob is within [0, 1]
+    try:
+        prob = float(prob)
+    except (ValueError, TypeError):
+        return "#9e9e9e"
+
+    prob = max(0.0, min(1.0, prob))
+
+    # We interpolate between:
+    # 0.0: Red    (193, 0, 21)   #c10015
+    # 0.5: Yellow (242, 192, 55) #f2c037
+    # 1.0: Green  (33, 186, 69)  #21ba45
+
+    if prob < 0.5:
+        # Interpolate Red to Yellow
+        t = prob / 0.5
+        r = int(193 + (242 - 193) * t)
+        g = int(0 + (192 - 0) * t)
+        b = int(21 + (55 - 21) * t)
+    else:
+        # Interpolate Yellow to Green
+        t = (prob - 0.5) / 0.5
+        r = int(242 + (33 - 242) * t)
+        g = int(192 + (186 - 192) * t)
+        b = int(55 + (69 - 55) * t)
+
+    return f"#{r:02x}{g:02x}{b:02x}"

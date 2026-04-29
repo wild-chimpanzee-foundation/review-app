@@ -532,6 +532,6 @@ async def setup_settings():
     if not dp or not await run.io_bound(dp.has_videos_in_db, get_active_project_id()):
         pass
 
-    container = ui.column().classes("w-full q-pa-lg")
+    container = ui.column().classes("w-full q-pa-lg").style("max-width: 1600px; margin: 0 auto")
     container.clear()
     _build_settings_content(container)

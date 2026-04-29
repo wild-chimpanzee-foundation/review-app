@@ -15,6 +15,7 @@ from review_app.app.state import (
     set_state_val,
 )
 from review_app.app.translations import t
+from review_app.app.utils import get_probability_color
 
 
 def _shortcut_badge(key):
@@ -49,6 +50,7 @@ def _init_annotation_state(video, default_species, default_behavior):
                         "start_sec": 0.0,
                         "end_sec": video.get("duration_sec"),
                         "source": "model",
+                        "probability": video.get("max_species_confidence"),
                     }
                 ]
 
@@ -130,13 +132,16 @@ def render_annotation_section(
                             ui.icon("smart_toy", size="xs").classes("text-grey-5")
                             ui.label(t("blank_source_model")).classes("text-caption text-grey-5")
                             if blank_prob is not None:
-                                ui.label(
-                                    t(
-                                        "blank_prob_label",
-                                        prob=f"{blank_prob:.0%}",
-                                        sp=f"{max_sp:.0%}",
-                                    )
-                                ).classes("text-caption text-grey-6")
+                                with ui.row().classes("items-center gap-xs"):
+                                    ui.label(t("blank")).classes("text-caption text-grey-6")
+                                    ui.label(f"{blank_prob:.0%}").style(
+                                        f"color: {get_probability_color(blank_prob)}; font-weight: bold"
+                                    ).classes("text-caption")
+                                    ui.label("·").classes("text-caption text-grey-6")
+                                    ui.label(t("species_label")).classes("text-caption text-grey-6")
+                                    ui.label(f"{max_sp:.0%}").style(
+                                        f"color: {get_probability_color(max_sp)}; font-weight: bold"
+                                    ).classes("text-caption")
                 ui.element("div").classes("col")
                 ui.button(icon="edit", on_click=set_not_blank).props("flat")
     else:
@@ -215,6 +220,11 @@ def render_annotation_section(
                         elif source == "model":
                             ui.icon("smart_toy", size="xs").classes("text-grey-5")
                             ui.label(t("model_suggestion")).classes("text-caption text-grey-5")
+                            prob = sel.get("probability")
+                            if prob is not None:
+                                ui.label(f"{prob:.0%}").style(
+                                    f"color: {get_probability_color(prob)}; font-weight: bold"
+                                ).classes("text-caption")
 
                 def update_sel(idx, sp_el, bp_el, start_el, end_el, tr):
                     new_sels = get_selections()
@@ -416,13 +426,13 @@ def render_annotation_section(
 
     # Secondary row: less-common actions, subtle styling
     with ui.row().classes("w-full gap-sm q-mb-md q-mt-xs"):
-        ui.button(t("submit"), on_click=submit).props("flat").classes("col text-caption")
+        ui.button(t("submit"), on_click=submit).props("outline").classes("col text-caption")
 
-        ui.button(t("blank"), on_click=mark_blank_stay).props("flat").classes("col text-caption")
+        ui.button(t("blank"), on_click=mark_blank_stay).props("outline").classes("col text-caption")
 
         with (
             ui.button(on_click=mark_review_later)
-            .props("flat color=grey")
+            .props("outline color=grey")
             .classes("col text-caption") as review_later_btn
         ):
             with ui.row().classes("items-center gap-xs no-wrap"):

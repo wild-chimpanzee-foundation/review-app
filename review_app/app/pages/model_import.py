@@ -92,7 +92,7 @@ async def setup_model_import():
     import_button_holder: list = [None]
     pending_warning_holder: list = [None]
 
-    with ui.column().classes("w-full q-pa-md"):
+    with ui.column().classes("w-full q-pa-md").style("max-width: 1600px; margin: 0 auto"):
         ui.label(t("nav_import")).classes("text-h5 text-primary font-weight-bold q-mb-lg")
 
         with ui.tabs().classes("w-full") as tabs:

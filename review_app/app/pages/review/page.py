@@ -23,7 +23,11 @@ from review_app.app.state import (
     set_state_val,
 )
 from review_app.app.translations import get_language, t
-from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
+from review_app.app.utils import (
+    get_or_create_data_provider,
+    get_probability_color,
+    render_uninitialized_state,
+)
 from review_app.backend.utils import df_to_records
 
 
@@ -154,7 +158,7 @@ async def render_video_section(dp, species_map):
             next_btn._props["data-shortcut"] = "next"
 
     with ui.row().classes("w-full flex-nowrap gap-md items-start"):
-        with ui.column().style("flex: 3; min-width: 500px; max-width: 1500px"):
+        with ui.column().style("flex: 3; min-width: 460px; max-width: 1280px"):
             with ui.card().classes("full-width q-mb-md"):
                 if video.get("needs_transcode"):
                     attempted = set(get_state_val("transcode_attempted_ids", []))
@@ -231,7 +235,7 @@ async def render_video_section(dp, species_map):
                         )
                     ).classes("text-negative text-caption q-mt-sm")
 
-        with ui.column().style("flex:1;min-width:500px;"):
+        with ui.column().style("flex: 1; min-width: 440px; max-width: 560px;"):
             with ui.card().classes("full-width"):
                 with ui.row().classes("items-center w-full q-mb-sm"):
                     ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium")
@@ -291,14 +295,7 @@ async def render_video_section(dp, species_map):
 
                         if ann_type == "species":
                             value_text = species_map.get(value_text, value_text)
-                            element_color = (
-                                "positive"
-                                if prob_raw > 0.85
-                                else "warning"
-                                if prob_raw > 0.5
-                                else "negative"
-                            )
-
+                            element_color = get_probability_color(prob_raw)
                         else:
                             element_color = "primary"
                         with ui.row().classes("w-full items-center q-py-sm "):
@@ -375,8 +372,28 @@ async def setup_review():
     ui.add_head_html(
         """
         <style>
-            .review-sidebar {
-                background: transparent;
+            .review-sidebar { background: transparent; }
+            .vp-fs-active {
+                position: fixed !important;
+                top: 0 !important; left: 0 !important;
+                width: 100vw !important; height: 100vh !important;
+                z-index: 9999 !important;
+                background: #f8fafc !important;
+                display: flex !important; flex-direction: column !important;
+                overflow-y: auto !important;
+                padding: 8px !important;
+                box-sizing: border-box !important;
+            }
+            body.body--dark .vp-fs-active {
+                background: #0f172a !important;
+            }
+            .vp-fs-active .vp-video-container {
+                flex: 1 !important;
+                min-height: 0 !important;
+            }
+            .vp-fs-active .vp-video-container video {
+                height: 100% !important;
+                object-fit: contain !important;
             }
         </style>
     """,
@@ -390,8 +407,25 @@ async def setup_review():
     with left_drawer:
         await render_filter_drawer(dp, species_map, navigate_to, render_video_section)
 
+    ui.add_head_html(
+        """
+        <style>
+            .filter-toggle-small { display: none !important; }
+            @media (max-width: 800px) {
+                .filter-toggle-small { display: flex !important; }
+            }
+        </style>
+        """,
+        shared=True,
+    )
+
     with ui.column().classes("w-full q-pa-md"):
-        await render_video_section(dp, species_map)
+        with ui.row().classes("filter-toggle-small q-mb-sm"):
+            ui.button(t("filters_label"), icon="tune", on_click=left_drawer.toggle).props(
+                "outline color=primary dense"
+            )
+        with ui.element("div").style("width: 100%; max-width: 1900px; margin: 0 auto"):
+            await render_video_section(dp, species_map)
 
     ui.run_javascript("document.activeElement?.blur()")
 

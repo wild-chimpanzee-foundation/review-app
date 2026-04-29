@@ -2,7 +2,11 @@ from nicegui import run, ui
 
 from review_app.app.state import get_active_project_id
 from review_app.app.translations import get_language, t
-from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
+from review_app.app.utils import (
+    get_or_create_data_provider,
+    get_probability_color,
+    render_uninitialized_state,
+)
 
 
 async def setup_overview():
@@ -26,7 +30,7 @@ async def setup_overview():
 
     stats = await run.io_bound(dp.get_overview_stats, pid)
 
-    with ui.column().classes("w-full q-pa-lg"):
+    with ui.column().classes("w-full q-pa-lg").style("max-width: 1600px; margin: 0 auto"):
         with ui.row().classes("items-center q-mb-lg"):
             ui.label(t("overview_title")).classes("text-h5 text-primary font-weight-bold")
 
@@ -205,16 +209,12 @@ async def setup_overview():
                             ).classes("text-caption text-grey-6 q-mb-sm")
                             for row in model_agreement:
                                 pct = row.get("agreement_pct") or 0
-                                color = (
-                                    "text-positive"
-                                    if pct >= 80
-                                    else "text-warning"
-                                    if pct >= 50
-                                    else "text-negative"
-                                )
+                                color = get_probability_color(pct / 100)
                                 with ui.row().classes("w-full items-center q-mb-sm"):
                                     ui.label(row.get("model_name", "")).classes("col text-body2")
                                     ui.label(
                                         f"{row.get('agreed', 0)}/{row.get('compared', 0)}"
                                     ).classes("text-body2 text-grey-6 q-mr-md")
-                                    ui.label(f"{pct:.0f}%").classes(f"text-body2 {color}")
+                                    ui.label(f"{pct:.0f}%").classes("text-body2").style(
+                                        f"color: {color}; font-weight: bold"
+                                    )

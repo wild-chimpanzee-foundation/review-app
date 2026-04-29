@@ -122,7 +122,7 @@ def shared_header(show_drawer: bool = False):
                 drawer.props("mini")
 
     if show_drawer:
-        drawer = ui.left_drawer(value=True).classes("q-pa-sm")
+        drawer = ui.left_drawer(value=True).classes("q-pa-sm").props("breakpoint=800")
 
         with drawer:
             with ui.row().classes("items-center q-mb-sm"):
@@ -335,7 +335,7 @@ class GUI:
                 render_uninitialized_state()
                 return
 
-            with ui.column().classes("w-full q-pa-lg"):
+            with ui.column().classes("w-full q-pa-lg").style("max-width: 1600px; margin: 0 auto"):
                 with ui.card().classes("full-width q-mb-lg"):
                     ui.label(t("welcome_title")).classes(
                         "text-h5 text-primary font-weight-bold q-mb-md"
