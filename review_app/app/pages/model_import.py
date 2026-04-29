@@ -65,6 +65,10 @@ def _auto_suggest_path_col(columns: list[str], sample: list[dict]) -> str:
     return columns[0] if columns else ""
 
 
+def _is_long_format(columns: list[str]) -> bool:
+    return {"video_uid", "annotation_type", "model_name"}.issubset(set(columns))
+
+
 async def setup_model_import():
     from review_app.app.entry_point import shared_header
 
@@ -80,7 +84,7 @@ async def setup_model_import():
         "raw_df_records", "raw_csv_columns",
         "path_col", "match_strategy", "ann_mappings", "match_preview",
         "uploaded_df", "cleaned_df", "errors_df", "species_mappings", "unmapped_species",
-        "match_stats",
+        "match_stats", "csv_format",
     ):
         set_state_val(key, None)
 
@@ -133,6 +137,7 @@ async def setup_model_import():
                             set_state_val("path_col", _auto_suggest_path_col(columns, sample))
                             set_state_val("match_strategy", "suffix")
                             set_state_val("ann_mappings", _auto_suggest_mappings(columns))
+                            set_state_val("csv_format", "long" if _is_long_format(columns) else "wide")
                             set_state_val("match_preview", None)
                             set_state_val("match_stats", None)
                             set_state_val("uploaded_df", None)
