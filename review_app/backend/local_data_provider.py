@@ -191,11 +191,19 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
     def list_projects(self) -> list[Project]:
         with self.Session() as s:
-            return s.query(Project).order_by(Project.last_opened.desc().nullslast(), Project.created_at).all()
+            return (
+                s.query(Project)
+                .order_by(Project.last_opened.desc().nullslast(), Project.created_at)
+                .all()
+            )
 
     def get_most_recent_project(self) -> Project | None:
         with self.Session() as s:
-            return s.query(Project).order_by(Project.last_opened.desc().nullslast(), Project.created_at).first()
+            return (
+                s.query(Project)
+                .order_by(Project.last_opened.desc().nullslast(), Project.created_at)
+                .first()
+            )
 
     def get_project(self, project_id: str) -> Project | None:
         with self.Session() as s:
@@ -397,6 +405,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         selected_model_behavior = filters.get("selected_model_behavior", "All")
         selected_behavior = filters.get("selected_behavior", "All")
         selected_annotation_status = filters.get("selected_annotation_status", "All")
+        selected_is_review_later = filters.get("selected_is_review_later", False)
         selected_sort = filters.get("selected_sort", "camera")
         selected_sort_direction = filters.get("selected_sort_direction", "desc")
         sort_dir = "DESC" if selected_sort_direction == "desc" else "ASC"
@@ -569,7 +578,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     SELECT 1 FROM video_labels vl2
                     WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
                 )""")
-        elif selected_annotation_status == "Review Later":
+        if selected_is_review_later:
             where.append(
                 "EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.review_later = 1)"
             )
@@ -1092,15 +1101,19 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     probability = None if pd.isna(pv) else float(pv)
 
                 if value_text is not None or probability is not None:
-                    rows.append({
-                        "video_uid": video_id,
-                        "annotation_type": ann_type,
-                        "model_name": model_name,
-                        "value_text": value_text,
-                        "probability": probability,
-                    })
+                    rows.append(
+                        {
+                            "video_uid": video_id,
+                            "annotation_type": ann_type,
+                            "model_name": model_name,
+                            "value_text": value_text,
+                            "probability": probability,
+                        }
+                    )
 
-        empty = pd.DataFrame(columns=["video_uid", "annotation_type", "model_name", "value_text", "probability"])
+        empty = pd.DataFrame(
+            columns=["video_uid", "annotation_type", "model_name", "value_text", "probability"]
+        )
         stats: dict[str, Any] = {
             "total_rows": len(df),
             "matched": matched_suffix + matched_stem,
@@ -1289,11 +1302,11 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
     # ── Annotation export / import ────────────────────────────────────────────
 
-    def export_annotations_csv(self, active_project_id) -> pd.DataFrame:
+    def export_annotations_csv(self, active_project_id, lang: str = "en") -> pd.DataFrame:
         pid_clause = "AND v.project_id = :pid" if active_project_id else ""
         params = {"pid": active_project_id} if active_project_id else {}
         with self.engine.connect() as conn:
-            return pd.read_sql(
+            base_df = pd.read_sql(
                 text(f"""
                     SELECT
                         v.video_id,
@@ -1302,7 +1315,9 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                         v.camera_id,
                         v.created_at              AS recorded_at,
                         v.duration_sec,
-                        CAST(vl.is_blank AS INTEGER) AS is_blank,
+                        CAST(vl.is_blank AS INTEGER)      AS is_blank,
+                        CAST(vl.review_later AS INTEGER)  AS review_later,
+                        CASE WHEN vl.is_blank IS NOT NULL THEN 1 ELSE 0 END AS is_annotated,
                         COALESCE(io.labeled_by, vl.labeled_by) AS annotator,
                         COALESCE(io.labeled_at, vl.labeled_at) AS labeled_at,
                         io.id                     AS observation_id,
@@ -1311,7 +1326,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                         io.start_sec,
                         io.end_sec
                     FROM videos v
-                    JOIN video_labels vl ON vl.video_id = v.video_id
+                    LEFT JOIN video_labels vl ON vl.video_id = v.video_id
                     LEFT JOIN individual_observations io ON io.video_id = v.video_id
                     WHERE 1=1 {pid_clause}
                     ORDER BY v.camera_id, v.video_path, io.start_sec
@@ -1319,6 +1334,72 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 conn,
                 params=params,
             )
+
+            model_df = pd.read_sql(
+                text(f"""
+                    SELECT video_id, model_name, annotation_type, value_text, probability
+                    FROM model_annotations
+                    WHERE 1=1 {pid_clause.replace("v.project_id", "project_id")}
+                """),
+                conn,
+                params=params,
+            )
+
+        if not model_df.empty:
+            model_df["col"] = model_df["model_name"] + "__" + model_df["annotation_type"]
+            value_wide = model_df.pivot_table(
+                index="video_id", columns="col", values="value_text", aggfunc="first"
+            )
+            prob_wide = model_df.pivot_table(
+                index="video_id", columns="col", values="probability", aggfunc="first"
+            )
+            prob_wide.columns = [f"{c}__prob" for c in prob_wide.columns]
+            model_wide = value_wide.join(prob_wide, how="outer").reset_index()
+
+            # needs_review: flag=1 when models disagree on species or blank signal is weak
+            all_video_ids = model_df["video_id"].unique()
+            species_agg = (
+                model_df[model_df["annotation_type"] == "species"]
+                .groupby("video_id")
+                .agg(distinct_top1=("value_text", "nunique"), model_count=("value_text", "count"))
+                .reset_index()
+            )
+            blank_probs = (
+                model_df[
+                    (model_df["annotation_type"] == "blank_non_blank")
+                    & (model_df["value_text"].str.lower().str.strip() == "blank")
+                ]
+                .groupby("video_id")["probability"]
+                .max()
+                .rename("blank_prob")
+                .reset_index()
+            )
+            nr = pd.DataFrame({"video_id": all_video_ids})
+            nr = nr.merge(species_agg, on="video_id", how="left")
+            nr = nr.merge(blank_probs, on="video_id", how="left")
+            nr[["blank_prob", "distinct_top1", "model_count"]] = nr[
+                ["blank_prob", "distinct_top1", "model_count"]
+            ].fillna(0.0)
+            thr = 0.75
+            nr["needs_review"] = (
+                ~(
+                    (nr["blank_prob"] >= thr)
+                    | ((nr["distinct_top1"] == 1) & (nr["model_count"] >= 1))
+                )
+            ).astype(int)
+            model_wide = model_wide.merge(
+                nr[["video_id", "needs_review"]], on="video_id", how="left"
+            )
+
+            base_df = base_df.merge(model_wide, on="video_id", how="left")
+
+        if "species" in base_df.columns:
+            species_map = self.get_species_display_map(lang)
+            base_df["species"] = base_df["species"].map(
+                lambda s: species_map.get(s, s) if pd.notna(s) else s
+            )
+
+        return base_df
 
     def import_annotations_csv(
         self, df: pd.DataFrame, active_project_id: str | None

@@ -719,7 +719,9 @@ async def setup_model_import():
                             try:
                                 content = await e.file.read()
                                 df = pd.read_csv(io.BytesIO(content))
-                                result = await run.io_bound(dp.import_annotations_csv, df)
+                                result = await run.io_bound(
+                                    dp.import_annotations_csv, df, get_active_project_id()
+                                )
                                 msg = f"Imported {result['imported']} videos."
                                 if result["skipped"]:
                                     msg += f" Skipped {len(result['skipped'])} unknown video IDs."
@@ -746,7 +748,7 @@ async def setup_model_import():
                         async def do_export():
                             try:
                                 df = await run.io_bound(
-                                    dp.export_annotations_csv, project_id=get_active_project_id()
+                                    dp.export_annotations_csv, get_active_project_id(), get_language()
                                 )
                                 csv_bytes = df.to_csv(index=False).encode("utf-8")
                                 ui.download(csv_bytes, "annotations.csv")

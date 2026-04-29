@@ -68,22 +68,10 @@ def _get_user_state() -> dict[str, Any]:
             "selected_annotation_status": "All",
             "selected_sort": "camera",
             "selected_sort_direction": "desc",
+            "selected_is_review_later": False,
             "web_safe_only": False,
             "selected_needs_review": "All",
         }
-    else:
-        # Migrate renamed/removed filter keys from older sessions
-        f = app.storage.user["filters"]
-        if "selected_review_status" in f and "selected_annotation_status" not in f:
-            f["selected_annotation_status"] = "All"
-            del f["selected_review_status"]
-        f.pop("blank_threshold", None)
-        f.pop("species_threshold", None)
-        if "selected_blank_non_blank" in f:
-            del f["selected_blank_non_blank"]
-        f.setdefault("selected_manual_blank", "All")
-        f.setdefault("selected_model_blank", "All")
-        f.setdefault("selected_model_behavior", "All")
     if "video_queue" not in app.storage.user:
         app.storage.user["video_queue"] = []
     if "current_video_idx" not in app.storage.user:
@@ -144,6 +132,7 @@ def reset_filters() -> None:
         "selected_behavior": "All",
         "selected_model_behavior": "All",
         "selected_annotation_status": "All",
+        "selected_is_review_later": False,
         "selected_sort": "camera",
         "selected_sort_direction": "desc",
         "web_safe_only": False,

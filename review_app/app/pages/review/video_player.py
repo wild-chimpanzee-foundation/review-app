@@ -32,7 +32,23 @@ def render_custom_video_player(video_url, duration, vid_key):
             except:
                 return "00:00"
 
-        speed_options = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 8.0, 10.0]
+        speed_options = [
+            0.25,
+            0.5,
+            0.75,
+            1.0,
+            1.25,
+            1.5,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            8.0,
+            9.0,
+            10.0,
+        ]
         speed_options_html = "".join(
             f'<option value="{s}" {"selected" if s == float(get_playback_speed().replace("x", "")) else ""}>{s}x</option>'
             for s in speed_options

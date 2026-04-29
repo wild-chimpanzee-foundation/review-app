@@ -163,6 +163,11 @@ async def render_filter_drawer(
                 value=filters.get("selected_annotation_status", "All"),
             ).props("outlined dense class=full-width")
 
+            is_review_later = ui.checkbox(
+                t("review_later_filter"),
+                value=bool(filters.get("selected_is_review_later", False)),
+            ).props("class=full-width")
+
             async def reset_filters():
                 search.value = ""
                 camera_select.value = "All"
@@ -174,6 +179,7 @@ async def render_filter_drawer(
                 behavior_filter.value = "All"
                 manual_blank_filter.value = "All"
                 annotation_filter.value = "All"
+                is_review_later.value = False
                 web_safe_only_cb.value = False
                 sort_select.value = "camera"
                 sort_dir[0] = "desc"
@@ -193,6 +199,7 @@ async def render_filter_drawer(
                     "selected_manual_blank": manual_blank_filter.value,
                     "selected_model_blank": model_blank_filter.value,
                     "selected_annotation_status": annotation_filter.value,
+                    "selected_is_review_later": is_review_later.value,
                     "selected_needs_review": needs_review_filter.value,
                     "web_safe_only": web_safe_only_cb.value,
                 }
@@ -211,8 +218,12 @@ async def render_filter_drawer(
                 ui.run_javascript("document.activeElement?.blur()")
 
             with ui.row().classes("w-full gap-sm"):
-                ui.button(t("apply_filters"), on_click=apply_filters, color="primary").classes("col")
-                ui.button(t("reset_filters"), on_click=lambda: reset_filters(), color="negative").classes("col")
+                ui.button(t("apply_filters"), on_click=apply_filters, color="primary").classes(
+                    "col"
+                )
+                ui.button(
+                    t("reset_filters"), on_click=lambda: reset_filters(), color="negative"
+                ).classes("col")
 
         # ── Sort ─────────────────────────────────────────────────────────
         with ui.card().classes("full-width q-mb-md"):

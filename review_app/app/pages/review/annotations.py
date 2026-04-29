@@ -145,7 +145,7 @@ def render_annotation_section(
                                         f"color: {get_probability_color(max_sp)}; font-weight: bold"
                                     ).classes("text-caption")
                 ui.element("div").classes("col")
-                ui.button(icon="edit", on_click=set_not_blank).props("flat")
+                ui.button(icon="delete", on_click=set_not_blank, color="negative").props("flat")
     else:
         for i, sel in enumerate(selections):
             with (
