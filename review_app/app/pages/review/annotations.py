@@ -165,12 +165,8 @@ def render_annotation_section(
                         with_input=True,
                     ).props("outlined dense class=col")
 
-                    ui.button(icon="delete", on_click=lambda idx=i: delete_selection(idx)).props(
-                        "flat color=negative"
-                    )
-
                     with ui.row().classes(
-                        "w-full gap-sm items-center q-mt-sm no-wrap"
+                        "w-full gap-sm items-center q-mt-sm"
                     ) as time_row:
                         bp = (
                             ui.select(
@@ -180,53 +176,57 @@ def render_annotation_section(
                                 with_input=True,
                             )
                             .props("outlined dense")
-                            .style("flex: 2; min-width: 0;")
+                            .style("flex: 2; min-width: 120px;")
                         )
 
-                        start_in = (
-                            ui.number(
-                                label=t("start_sec"),
-                                value=sel.get("start_sec", 0.0),
-                                step=0.1,
-                                format="%.1f",
+                        with ui.element("div").style("display:flex; gap:8px; flex:1; min-width:170px;"):
+                            start_in = (
+                                ui.number(
+                                    label=t("start_sec"),
+                                    value=sel.get("start_sec", 0.0),
+                                    step=0.1,
+                                    format="%.1f",
+                                )
+                                .props("outlined dense")
+                                .style("flex: 1; min-width: 0;")
                             )
-                            .props("outlined dense")
-                            .style("flex: 1; min-width: 0;")
-                        )
 
-                        end_in = (
-                            ui.number(
-                                label=t("end_sec"),
-                                value=sel.get("end_sec"),
-                                step=0.1,
-                                format="%.1f",
+                            end_in = (
+                                ui.number(
+                                    label=t("end_sec"),
+                                    value=sel.get("end_sec"),
+                                    step=0.1,
+                                    format="%.1f",
+                                )
+                                .props("outlined dense")
+                                .style("flex: 1; min-width: 0;")
                             )
-                            .props("outlined dense")
-                            .style("flex: 1; min-width: 0;")
-                        )
 
                 labeled_by = sel.get("labeled_by")
                 labeled_at = sel.get("labeled_at")
                 source = sel.get("source")
-                if labeled_by or source == "model":
-                    with ui.row().classes("items-center gap-xs q-mt-xs"):
-                        if labeled_by:
-                            ui.icon("person", size="xs").classes("text-grey-5")
-                            date_str = (
-                                str(labeled_at)[:16].replace("T", " ") if labeled_at else None
-                            )
-                            meta = t("labeled_by", name=labeled_by)
-                            if date_str:
-                                meta += f" · {t('labeled_at', date=date_str)}"
-                            ui.label(meta).classes("text-caption text-grey-5")
-                        elif source == "model":
-                            ui.icon("smart_toy", size="xs").classes("text-grey-5")
-                            ui.label(t("model_suggestion")).classes("text-caption text-grey-5")
-                            prob = sel.get("probability")
-                            if prob is not None:
-                                ui.label(f"{prob:.0%}").style(
-                                    f"color: {get_probability_color(prob)}; font-weight: bold"
-                                ).classes("text-caption")
+                with ui.row().classes("items-center gap-xs q-mt-xs w-full"):
+                    if labeled_by:
+                        ui.icon("person", size="xs").classes("text-grey-5")
+                        date_str = (
+                            str(labeled_at)[:16].replace("T", " ") if labeled_at else None
+                        )
+                        meta = t("labeled_by", name=labeled_by)
+                        if date_str:
+                            meta += f" · {t('labeled_at', date=date_str)}"
+                        ui.label(meta).classes("text-caption text-grey-5")
+                    elif source == "model":
+                        ui.icon("smart_toy", size="xs").classes("text-grey-5")
+                        ui.label(t("model_suggestion")).classes("text-caption text-grey-5")
+                        prob = sel.get("probability")
+                        if prob is not None:
+                            ui.label(f"{prob:.0%}").style(
+                                f"color: {get_probability_color(prob)}; font-weight: bold"
+                            ).classes("text-caption")
+                    ui.element("div").classes("col")
+                    ui.button(icon="delete", on_click=lambda idx=i: delete_selection(idx)).props(
+                        "flat color=negative dense"
+                    )
 
                 def update_sel(idx, sp_el, bp_el, start_el, end_el, tr):
                     new_sels = get_selections()
@@ -397,7 +397,7 @@ def render_annotation_section(
         with (
             ui.button(on_click=submit_and_next, color="warning")
             .classes("col")
-            .style("height: 60px; font-weight:700") as submit_next_btn
+            .style("height: 60px; font-weight:700; min-width: 160px;") as submit_next_btn
         ):
             with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
                 ui.label(t("submit_next"))
@@ -408,7 +408,7 @@ def render_annotation_section(
             ui.button(on_click=mark_blank_next, color="primary")
             .props("outline")
             .classes("col")
-            .style("height: 60px;") as blank_next_btn
+            .style("height: 60px; min-width: 160px;") as blank_next_btn
         ):
             with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
                 ui.label(t("mark_blank"))
@@ -421,7 +421,7 @@ def render_annotation_section(
             ui.button(on_click=submit, color="primary")
             .props("outline")
             .classes("col")
-            .style("height: 60px;")
+            .style("height: 60px; min-width: 160px;")
         ):
             with ui.row().classes("items-center justify-center w-full no-wrap"):
                 ui.label(t("submit"))
@@ -430,7 +430,7 @@ def render_annotation_section(
             ui.button(on_click=mark_blank_stay, color="primary")
             .props("outline")
             .classes("col")
-            .style("height: 60px;")
+            .style("height: 60px; min-width: 160px;")
         ):
             with ui.row().classes("items-center justify-center w-full no-wrap"):
                 ui.label(t("blank"))
@@ -439,7 +439,7 @@ def render_annotation_section(
             ui.button(on_click=mark_review_later)
             .props("outline color=grey")
             .classes("col")
-            .style("height: 60px;") as review_later_btn
+            .style("height: 60px; min-width: 160px;") as review_later_btn
         ):
             with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
                 ui.label(t("mark_review_later"))

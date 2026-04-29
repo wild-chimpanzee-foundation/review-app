@@ -66,30 +66,38 @@ def render_custom_video_player(video_url, duration, vid_key):
                     background: var(--q-primary); margin-top: -5px; cursor: pointer;
                 }}
             </style>
-            <div style="display:flex;align-items:center;gap:8px;padding:4px 8px 0;width:100%">
+            <div style="display:flex;align-items:center;gap:8px;padding:4px 8px 0;width:100%;flex-wrap:wrap;">
                 <button id="vp-playpause-{vid_key}" style="flex-shrink:0;width:32px;height:32px;border:none;background:none;cursor:pointer;color:var(--q-primary);">
                     <svg id="vp-play-icon-{vid_key}" viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                     <svg id="vp-pause-icon-{vid_key}" viewBox="0 0 24 24" width="32" height="32" fill="currentColor" style="display:none"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                 </button>
-                <input type="range" id="vp-range-{vid_key}" min="0" max="{duration}" step="0.1" value="0" style="flex:1;cursor:pointer;height:32px;">
-                <span id="vp-time-{vid_key}" style="font-size:16px;color:#888;font-family:monospace">00:00 / {_fmt(duration)}</span>
-                <select id="vp-speed-{vid_key}" style="font-size:15px;font-weight:600;color:var(--q-primary);background:none;border:1px solid var(--q-primary);border-radius:4px;cursor:pointer;padding:2px 4px;">
-                    {speed_options_html}
-                </select>
-                <button id="vp-fs-{vid_key}" title="Toggle fullscreen" style="flex-shrink:0;width:32px;height:32px;border:none;background:none;cursor:pointer;color:var(--q-primary);display:flex;align-items:center;justify-content:center;">
-                    <svg id="vp-fs-enter-{vid_key}" viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
-                    <svg id="vp-fs-exit-{vid_key}" viewBox="0 0 24 24" width="28" height="28" fill="currentColor" style="display:none"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>
-                </button>
+                <input type="range" id="vp-range-{vid_key}" min="0" max="{duration}" step="0.1" value="0" style="flex:1;min-width:80px;cursor:pointer;height:32px;">
+                <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+                    <span id="vp-time-{vid_key}" style="font-size:16px;color:#888;font-family:monospace">00:00 / {_fmt(duration)}</span>
+                    <select id="vp-speed-{vid_key}" style="font-size:15px;font-weight:600;color:var(--q-primary);background:none;border:1px solid var(--q-primary);border-radius:4px;cursor:pointer;padding:2px 4px;">
+                        {speed_options_html}
+                    </select>
+                    <button id="vp-fs-{vid_key}" title="Toggle fullscreen" style="flex-shrink:0;width:32px;height:32px;border:none;background:none;cursor:pointer;color:var(--q-primary);display:flex;align-items:center;justify-content:center;">
+                        <svg id="vp-fs-enter-{vid_key}" viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+                        <svg id="vp-fs-exit-{vid_key}" viewBox="0 0 24 24" width="28" height="28" fill="currentColor" style="display:none"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>
+                    </button>
+                </div>
             </div>
-            <div style="display:flex;align-items:center;gap:8px;padding:4px 8px;width:100%;">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="#888" style="flex-shrink:0" title="Brightness"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>
-                <input type="range" id="vp-brightness-{vid_key}" min="0.5" max="2" step="0.01" value="1" style="flex:1;cursor:pointer;height:28px;">
-                <span id="vp-brightness-val-{vid_key}" style="font-size:14px;color:#888;width:30px;text-align:right;">1.00</span>
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="#888" style="flex-shrink:0;margin-left:4px" title="Contrast"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18V4c4.41 0 8 3.59 8 8s-3.59 8-8 8z"/></svg>
-                <input type="range" id="vp-contrast-{vid_key}" min="0.5" max="2" step="0.01" value="1" style="flex:1;cursor:pointer;height:28px;">
-                <span id="vp-contrast-val-{vid_key}" style="font-size:14px;color:#888;width:30px;text-align:right;">1.00</span>
-                <button id="vp-reset-filters-{vid_key}" style="font-size:13px;color:#888;background:none;border:1px solid #444;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap;margin-left:4px;">{t("reset_filters")}</button>
-                <button id="vp-reset-zoom-{vid_key}" style="font-size:13px;color:#888;background:none;border:1px solid #444;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap;">{t("reset_zoom")}</button>
+            <div style="display:flex;align-items:center;gap:8px;padding:4px 8px;width:100%;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:180px;">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="#888" style="flex-shrink:0" title="Brightness"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>
+                    <input type="range" id="vp-brightness-{vid_key}" min="0.5" max="2" step="0.01" value="1" style="flex:1;cursor:pointer;height:28px;">
+                    <span id="vp-brightness-val-{vid_key}" style="font-size:14px;color:#888;width:30px;text-align:right;flex-shrink:0;">1.00</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:180px;">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="#888" style="flex-shrink:0" title="Contrast"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18V4c4.41 0 8 3.59 8 8s-3.59 8-8 8z"/></svg>
+                    <input type="range" id="vp-contrast-{vid_key}" min="0.5" max="2" step="0.01" value="1" style="flex:1;cursor:pointer;height:28px;">
+                    <span id="vp-contrast-val-{vid_key}" style="font-size:14px;color:#888;width:30px;text-align:right;flex-shrink:0;">1.00</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
+                    <button id="vp-reset-filters-{vid_key}" style="font-size:13px;color:#888;background:none;border:1px solid #444;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap;">{t("reset_filters")}</button>
+                    <button id="vp-reset-zoom-{vid_key}" style="font-size:13px;color:#888;background:none;border:1px solid #444;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap;">{t("reset_zoom")}</button>
+                </div>
             </div>
         ''').classes("full-width")
 
@@ -272,58 +280,94 @@ def render_custom_video_player(video_url, duration, vid_key):
             ui.badge(k).props("outline color=grey-6").classes("text-caption text-grey-6")
 
         with (
-            ui.expansion(t("shortcuts_title"), icon="keyboard", value=True)
+            ui.expansion(t("shortcuts_title"), icon="keyboard", value=False)
             .classes("w-full text-caption text-grey-6")
             .props("dense")
         ):
-            with ui.row().classes("w-full justify-between q-mt-xs"):
-                with ui.column().classes("col items-center gap-xs"):
+            with ui.row().classes("w-full q-mt-xs").style("gap: 4px;"):
+                with (
+                    ui.column()
+                    .classes("items-center gap-xs")
+                    .style("min-width: 80px; flex: 1; padding: 2px 4px;")
+                ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("Space")
                     ui.label(t("shortcut_play_pause")).classes("text-caption text-grey-6")
-                with ui.column().classes("col items-center gap-xs"):
+                with (
+                    ui.column()
+                    .classes("items-center gap-xs")
+                    .style("min-width: 80px; flex: 1; padding: 2px 4px;")
+                ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("←")
                         _key("→")
                     ui.label(f"{t('shortcut_seek_back')} / {t('shortcut_seek_forward')}").classes(
                         "text-caption text-grey-6"
                     )
-                with ui.column().classes("col items-center gap-xs"):
+                with (
+                    ui.column()
+                    .classes("items-center gap-xs")
+                    .style("min-width: 80px; flex: 1; padding: 2px 4px;")
+                ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("S")
                         _key("D")
                     ui.label(f"{t('shortcut_speed_down')} / {t('shortcut_speed_up')}").classes(
                         "text-caption text-grey-6"
                     )
-                with ui.column().classes("col items-center gap-xs").tooltip(t("zoom_tooltip")):
+                with (
+                    ui.column()
+                    .classes("items-center gap-xs")
+                    .style("min-width: 80px; flex: 1; padding: 2px 4px;")
+                    .tooltip(t("zoom_tooltip"))
+                ):
                     with ui.row().classes("items-center gap-xs"):
                         ui.icon("mouse").classes("text-grey-6")
                         ui.label("+").classes("text-grey-6")
                         ui.icon("pan_tool").classes("text-grey-6")
                     ui.label(t("zoom")).classes("text-caption text-grey-6")
                 with (
-                    ui.column().classes("col items-center gap-xs").tooltip(t("reset_zoom_tooltip"))
+                    ui.column()
+                    .classes("items-center gap-xs")
+                    .style("min-width: 80px; flex: 1; padding: 2px 4px;")
+                    .tooltip(t("reset_zoom_tooltip"))
                 ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("Z")
                     ui.label(t("reset_zoom")).classes("text-caption text-grey-6")
 
-            with ui.row().classes("w-full justify-around q-mt-xs"):
-                with ui.column().classes("col items-center gap-xs"):
+            with ui.row().classes("w-full q-mt-xs").style("gap: 4px;"):
+                with (
+                    ui.column()
+                    .classes("items-center gap-xs")
+                    .style("min-width: 90px; flex: 1; padding: 2px 4px;")
+                ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("[")
                         _key("]")
                     ui.label(t("shortcut_brightness")).classes("text-caption text-grey-6")
-                with ui.column().classes("col items-center gap-xs"):
+                with (
+                    ui.column()
+                    .classes("items-center gap-xs")
+                    .style("min-width: 90px; flex: 1; padding: 2px 4px;")
+                ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("{")
                         _key("}")
                     ui.label(t("shortcut_contrast")).classes("text-caption text-grey-6")
-                with ui.column().classes("col items-center gap-xs"):
+                with (
+                    ui.column()
+                    .classes("items-center gap-xs")
+                    .style("min-width: 90px; flex: 1; padding: 2px 4px;")
+                ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("R")
                     ui.label(t("shortcut_reset_filters")).classes("text-caption text-grey-6")
-                with ui.column().classes("col items-center gap-xs"):
+                with (
+                    ui.column()
+                    .classes("items-center gap-xs")
+                    .style("min-width: 90px; flex: 1; padding: 2px 4px;")
+                ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("F")
                     ui.label(t("shortcut_fullscreen")).classes("text-caption text-grey-6")

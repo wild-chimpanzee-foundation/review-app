@@ -157,8 +157,8 @@ async def render_video_section(dp, species_map):
             next_btn = ui.button(icon="chevron_right", on_click=lambda: navigate(1)).props("flat")
             next_btn._props["data-shortcut"] = "next"
 
-    with ui.row().classes("w-full flex-nowrap gap-md items-start"):
-        with ui.column().style("flex: 3; min-width: 460px; max-width: 1280px"):
+    with ui.row().classes("w-full gap-xs items-start"):
+        with ui.column().style("flex: 3; min-width: 320px; max-width: 1280px"):
             with ui.card().classes("full-width q-mb-md"):
                 if video.get("needs_transcode"):
                     attempted = set(get_state_val("transcode_attempted_ids", []))
@@ -235,9 +235,120 @@ async def render_video_section(dp, species_map):
                         )
                     ).classes("text-negative text-caption q-mt-sm")
 
-        with ui.column().style("flex: 1; min-width: 440px; max-width: 560px;"):
+            if model_ann is not None and not model_ann.empty:
+                _species_map = await run.io_bound(dp.get_species_display_map, get_language())
+
+                def _is_number(v: str) -> bool:
+                    try:
+                        float(v)
+                        return True
+                    except (TypeError, ValueError):
+                        return False
+
+                # Grouping structure: { annotation_type: { prediction_value: [list_of_supporting_models] } }
+                groups: dict = {}
+
+                for _row in df_to_records(model_ann, 20):
+                    _ann_type = _row.get("annotation_type", "")
+                    _value = _row.get("value_text", "") or ""
+                    _prob = _row.get("probability")
+
+                    # 1. Logic for Blank/Non-Blank
+                    if _ann_type == "blank_non_blank" and _is_number(_value):
+                        threshold = get_blank_threshold()
+                        if threshold is not None and threshold >= 0 and float(_value) < threshold:
+                            _value = t("non_blank")
+                        else:
+                            _value = t("blank")
+
+                    # 2. Species mapping
+                    elif _ann_type == "species":
+                        _value = _species_map.get(_value, _value)
+
+                    _color = get_probability_color(_prob) if _prob is not None else "grey"
+
+                    # 3. Nesting: Type -> Value -> Models
+                    if _ann_type not in groups:
+                        groups[_ann_type] = {}
+                    if _value not in groups[_ann_type]:
+                        groups[_ann_type][_value] = []
+
+                    groups[_ann_type][_value].append(
+                        {
+                            "model": _row.get("model_name", ""),
+                            "prob": _prob,
+                            "color": _color,
+                        }
+                    )
+
+                    # move higher confidence predictions to the top of the list for each value
+                    groups[_ann_type][_value].sort(
+                        key=lambda x: (x["prob"] is not None, x["prob"]), reverse=True
+                    )
+
+                    # show species before blank/non-blank if both are present, as species is often more informative and blank/non-blank can be a fallback
+                    group_order = ["species", "blank_non_blank"]
+                    groups = dict(
+                        sorted(
+                            groups.items(),
+                            key=lambda x: (
+                                group_order.index(x[0])
+                                if x[0] in group_order
+                                else len(group_order)
+                            ),
+                        )
+                    )
+
+                with ui.card().classes("full-width q-mt-xs q-pa-none bg-transparent no-shadow"):
+                    rename_map = {
+                        "species": t("species_annotations"),
+                        "blank_non_blank": t("blank_annotations"),
+                    }
+
+                    for _ann_type, _predictions in groups.items():
+                        ann_type_display = rename_map.get(_ann_type, _ann_type.capitalize())
+
+                        # Reduced top margin to 'q-mt-xs' and font to 'text-micro'
+                        ui.label(ann_type_display).classes(
+                            "text-micro text-grey-6 text-italic q-mt-xs q-mb-none"
+                        )
+
+                        with ui.column().classes("w-full gap-y-1"):
+                            for _val, _models in _predictions.items():
+                                with ui.row().classes(
+                                    "w-full items-center justify-between q-pa-xs rounded-borders bg-white/5 border border-white/5"
+                                ):
+                                    # Left side: Value
+                                    with ui.row().classes("items-center gap-x-2"):
+                                        ui.label(_val).classes("text-caption text-bold text-white")
+                                        if len(_models) > 1:
+                                            ui.badge(f"{len(_models)}").props(
+                                                "color=blue-6 outline size=xs"
+                                            )
+
+                                    # Right side: Models
+                                    with ui.row().classes("gap-x-1"):
+                                        for _m in _models:
+                                            with ui.element("div").style(
+                                                "display:inline-flex; align-items:center; gap:4px; "
+                                                "background: rgba(128,128,128,0.1); padding: 1px 6px; border-radius: 3px;"
+                                            ):
+                                                ui.label(_m["model"]).classes(
+                                                    "text-micro text-grey-5"
+                                                )
+
+                                                if _m["prob"] is not None:
+                                                    try:
+                                                        _p = float(_m["prob"])
+                                                        ui.label(f"{_p:.0%}").classes(
+                                                            "text-micro text-bold"
+                                                        ).style(f"color: {_m['color']};")
+                                                    except (ValueError, TypeError):
+                                                        pass
+
+        with ui.column().style("flex: 1; min-width: 300px; max-width: 560px;"):
             with ui.card().classes("full-width"):
-                with ui.row().classes("items-center w-full q-mb-sm"):
+                with ui.row().classes("items-center w-full q-mb-none"):
                     ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium")
                     ui.space()
                     ui.button(
@@ -262,73 +373,6 @@ async def render_video_section(dp, species_map):
                     render_video_section,
                     render_filter_drawer,
                 )
-
-            # ── Model annotations ─────────────────────────────────────────────
-            with ui.card().classes("full-width"):
-                ui.label(t("model_annotations")).classes(
-                    "text-subtitle1 font-weight-medium q-mb-sm"
-                )
-
-                def is_number(value: str) -> bool:
-                    try:
-                        float(value)
-                        return True
-                    except (TypeError, ValueError):
-                        return False
-
-                if model_ann is not None and not model_ann.empty:
-                    species_map = await run.io_bound(dp.get_species_display_map, get_language())
-                    for row in df_to_records(model_ann, 10):
-                        model_name = row.get("model_name", "")
-                        ann_type = row.get("annotation_type", "")
-                        value_text = row.get("value_text", "") or ""
-                        if ann_type == "blank_non_blank" and is_number(value_text):
-                            if (
-                                get_blank_threshold() is not None
-                                and get_blank_threshold() >= 0
-                                and float(value_text) < get_blank_threshold()
-                            ):
-                                value_text = t("non_blank")
-                            else:
-                                value_text = t("blank")
-                        prob_raw = row.get("probability", 0.0)
-
-                        if ann_type == "species":
-                            value_text = species_map.get(value_text, value_text)
-                            element_color = get_probability_color(prob_raw)
-                        else:
-                            element_color = "primary"
-                        with ui.row().classes("w-full items-center q-py-sm "):
-                            # 1. Identity Block (Left-aligned, fixed size)
-                            with ui.column().classes("gap-0").style("width: 140px"):
-                                ui.label(model_name).classes("text-bold text-primary").style(
-                                    "font-size: 0.75rem"
-                                )
-                                ui.label(ann_type).classes("text-caption text-grey-6 italic")
-
-                            # 2. Value & Bar Block (Flex-grow to fill space)
-                            with ui.column().classes("col gap-1 px-4"):
-                                # The text value sits right above its bar
-                                ui.label(value_text).classes(
-                                    "text-body2 text-weight-medium"
-                                ).style("line-height: 1")
-
-                                with ui.row().classes("w-full items-center gap-2"):
-                                    if prob_raw is not None:
-                                        try:
-                                            p = float(prob_raw)
-                                            # round to 2 decimals for display
-                                            p_display = round(p, 2)
-                                            ui.linear_progress(
-                                                value=p_display, color=element_color
-                                            ).props("rounded")
-                                        except (ValueError, TypeError):
-                                            ui.label(str(prob_raw))
-
-                        ui.separator().style("opacity: 0.2")
-
-                else:
-                    ui.label(t("no_model_annotations")).classes("text-grey-5")
 
 
 async def setup_review():
@@ -419,8 +463,8 @@ async def setup_review():
         shared=True,
     )
 
-    with ui.column().classes("w-full q-pa-md"):
-        with ui.row().classes("filter-toggle-small q-mb-sm"):
+    with ui.column().classes("w-full q-pa-xs"):
+        with ui.row().classes("filter-toggle-small q-mb-none"):
             ui.button(t("filters_label"), icon="tune", on_click=left_drawer.toggle).props(
                 "outline color=primary dense"
             )
