@@ -1,6 +1,5 @@
 from pathlib import Path
 import nicegui
-from PyInstaller.utils.hooks import collect_submodules
 
 project_root = Path.cwd()
 nicegui_dir = Path(nicegui.__file__).parent
@@ -15,7 +14,6 @@ a = Analysis(
     ],
     hiddenimports=[
         "pygments.lexers",
-        *collect_submodules("webview"),
     ],
     hookspath=[],
     hooksconfig={},

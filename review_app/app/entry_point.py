@@ -1,8 +1,6 @@
 import argparse
 import mimetypes
-import os
 import secrets
-import sys
 from pathlib import Path
 
 from review_app.app.media import set_media_dirs, setup_media_route
@@ -19,14 +17,6 @@ from review_app.app.state import (
 from review_app.app.theme import apply_theme
 from review_app.app.translations import get_language, set_language, t
 from review_app.backend.local_data_provider import LocalDataProvider
-
-# Configure display backends for Wayland/Hyprland/X11 compatibility (Linux only)
-if sys.platform.startswith("linux"):
-    if os.environ.get("XDG_SESSION_TYPE") == "wayland":
-        os.environ.setdefault("GDK_BACKEND", "wayland,x11")
-    else:
-        os.environ.setdefault("GDK_BACKEND", "x11")
-    os.environ.setdefault("QT_QPA_PLATFORM", "xcb;wayland")
 
 # Register video mimetypes for both lower and uppercase extensions (camera traps often use .MP4)
 for _ext, _mime in [
@@ -101,6 +91,7 @@ def shared_header(show_drawer: bool = False):
 
         def _restart_tour():
             from review_app.app.onboarding import show_tour
+
             shortcuts_dialog.close()
             show_tour(t)
 
@@ -302,6 +293,7 @@ class GUI:
         setup_media_route()
 
         from review_app.app.config import get_user_data_dir
+
         _secret_path = get_user_data_dir() / ".storage_secret"
         if _secret_path.exists():
             storage_secret = _secret_path.read_text().strip()
@@ -310,24 +302,11 @@ class GUI:
             get_user_data_dir().mkdir(parents=True, exist_ok=True)
             _secret_path.write_text(storage_secret)
 
-        use_native = not dev_mode and not sys.platform.startswith("linux")
-
-        if use_native:
-            try:
-                import webview  # noqa: F401 — verify pywebview is importable before committing to native mode
-                # Force EdgeChromium (WebView2) on Windows — prevents fallback to the
-                # WinForms backend which requires .NET and fails on machines without it.
-                if sys.platform == "win32":
-                    os.environ.setdefault("PYWEBVIEW_GUI", "edgechromium")
-            except Exception:
-                use_native = False
-
         ui.run(
-            native=use_native,
             title="Video Annotation",
             host="127.0.0.1",
             port=port,
-            show=dev_mode or not use_native,
+            show=True,
             reload=dev_mode,
             storage_secret=storage_secret,
         )
