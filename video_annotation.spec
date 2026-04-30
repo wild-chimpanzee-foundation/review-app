@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 project_root = Path.cwd()
@@ -10,6 +11,8 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(project_root / "review_app"), "review_app"),
+        *collect_data_files("webview"),
+        *collect_data_files("nicegui"),
     ],
     hiddenimports=[
         "nicegui",
@@ -27,6 +30,7 @@ a = Analysis(
         "review_app.app",
         "review_app.backend",
         "review_app.app.pages",
+        *collect_submodules("webview"),
     ],
     hookspath=[],
     hooksconfig={},

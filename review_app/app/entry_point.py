@@ -312,6 +312,16 @@ class GUI:
 
         use_native = not dev_mode and not sys.platform.startswith("linux")
 
+        if use_native:
+            try:
+                import webview  # noqa: F401 — verify pywebview is importable before committing to native mode
+                # Force EdgeChromium (WebView2) on Windows — prevents fallback to the
+                # WinForms backend which requires .NET and fails on machines without it.
+                if sys.platform == "win32":
+                    os.environ.setdefault("PYWEBVIEW_GUI", "edgechromium")
+            except Exception:
+                use_native = False
+
         ui.run(
             native=use_native,
             title="Video Annotation",
