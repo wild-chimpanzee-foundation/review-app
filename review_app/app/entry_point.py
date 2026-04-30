@@ -5,10 +5,10 @@ import secrets
 import sys
 from pathlib import Path
 
-from review_app.app.media import set_media_dirs, setup_media_route  # noqa: E402
-from review_app.app.project_picker import build_project_picker  # noqa: E402
-from review_app.app.setup_wizard import setup_wizard  # noqa: E402
-from review_app.app.state import (  # noqa: E402
+from review_app.app.media import set_media_dirs, setup_media_route
+from review_app.app.project_picker import build_project_picker
+from review_app.app.setup_wizard import setup_wizard
+from review_app.app.state import (
     get_active_project_id,
     is_dark_mode,
     load_settings_from_db,
@@ -16,9 +16,9 @@ from review_app.app.state import (  # noqa: E402
     set_dark_mode,
     set_data_provider,
 )
-from review_app.app.theme import apply_theme  # noqa: E402
-from review_app.app.translations import get_language, set_language, t  # noqa: E402
-from review_app.backend.local_data_provider import LocalDataProvider  # noqa: E402
+from review_app.app.theme import apply_theme
+from review_app.app.translations import get_language, set_language, t
+from review_app.backend.local_data_provider import LocalDataProvider
 
 # Configure display backends for Wayland/Hyprland/X11 compatibility (Linux only)
 if sys.platform.startswith("linux"):
@@ -333,10 +333,10 @@ class GUI:
         )
 
 
-if __name__ in ("__main__", "__mp_main__"):
-    import multiprocessing
+if __name__ == "__main__":
+    from multiprocessing import freeze_support
 
-    multiprocessing.freeze_support()
+    freeze_support()
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--dev", action="store_true", help="Enable dev mode with auto-reload")
@@ -344,4 +344,7 @@ if __name__ in ("__main__", "__mp_main__"):
     args, _ = parser.parse_known_args()
 
     gui = GUI()
-    gui.start(dev_mode=args.dev, port=args.port)
+    try:
+        gui.start(dev_mode=args.dev, port=args.port)
+    except KeyboardInterrupt:
+        pass

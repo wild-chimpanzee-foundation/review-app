@@ -1,9 +1,9 @@
 from pathlib import Path
-import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+import nicegui
+from PyInstaller.utils.hooks import collect_submodules
 
-block_cipher = None
 project_root = Path.cwd()
+nicegui_dir = Path(nicegui.__file__).parent
 
 a = Analysis(
     [str(project_root / "review_app" / "app" / "entry_point.py")],
@@ -11,36 +11,20 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(project_root / "review_app"), "review_app"),
-        *collect_data_files("webview"),
-        *collect_data_files("nicegui"),
+        (str(nicegui_dir), "nicegui"),
     ],
     hiddenimports=[
-        "nicegui",
-        "nicegui.elements",
-        "nicegui.frontends",
-        "pygments",
         "pygments.lexers",
-        "yaml",
-        "pandas",
-        "sqlalchemy",
-        "matplotlib",
-        "plotly",
-        "thefuzz",
-        "review_app",
-        "review_app.app",
-        "review_app.backend",
-        "review_app.app.pages",
         *collect_submodules("webview"),
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz,
@@ -48,15 +32,9 @@ exe = EXE(
     exclude_binaries=True,
     name="VideoAnnotation",
     debug=True,
-    bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=True,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
 )
 
 coll = COLLECT(
@@ -65,7 +43,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name="VideoAnnotation",
 )
