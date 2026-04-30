@@ -301,9 +301,14 @@ class GUI:
 
         setup_media_route()
 
-        storage_secret = os.environ.get("VIDEO_REVIEW_SECRET")
-        if not storage_secret:
+        from review_app.app.config import get_user_data_dir
+        _secret_path = get_user_data_dir() / ".storage_secret"
+        if _secret_path.exists():
+            storage_secret = _secret_path.read_text().strip()
+        else:
             storage_secret = secrets.token_hex(32)
+            get_user_data_dir().mkdir(parents=True, exist_ok=True)
+            _secret_path.write_text(storage_secret)
 
         use_native = not dev_mode and not sys.platform.startswith("linux")
 
