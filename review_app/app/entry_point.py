@@ -312,11 +312,6 @@ class GUI:
 
         use_native = not dev_mode and not sys.platform.startswith("linux")
 
-        if use_native:
-            from nicegui import app as nicegui_app
-
-            nicegui_app.native.start_args["gui"] = "qt"
-
         ui.run(
             native=use_native,
             title="Video Annotation",

@@ -11,7 +11,7 @@ from review_app.app.translations import get_language, t
 from review_app.app.utils import sync_with_progress
 
 FFMPEG_INSTALL_MAC = "brew install ffmpeg"
-FFMPEG_INSTALL_WINDOWS = "winget install ffmpeg"
+FFMPEG_INSTALL_WINDOWS = "winget install ffmpeg OR download from https://ffmpeg.org/download.html"
 FFMPEG_INSTALL_LINUX = "sudo apt install ffmpeg"
 
 
@@ -262,8 +262,9 @@ class SetupWizard:
                         ui.label(t("welcome_setup_msg")).classes("text-body1 text-grey-7")
 
                     def change_language(e):
-                        from review_app.app.translations import set_language
                         from nicegui import ui as _ui
+
+                        from review_app.app.translations import set_language
                         set_language(e.value)
                         _ui.run_javascript("window.location.reload()")
 
