@@ -31,7 +31,7 @@ async def render_filter_drawer(
 
     with ui.element("div").classes("q-mini-drawer-hide full-width"):
         # ── Filters ──────────────────────────────────────────────────
-        with ui.card().classes("full-width q-mb-md"):
+        with ui.card().classes("full-width q-mb-md tour-target-filters"):
             ui.label(t("filter_section_general")).classes("text-caption text-grey-5 q-mt-xs")
 
             search = ui.input(t("search"), placeholder=t("search_placeholder")).props(

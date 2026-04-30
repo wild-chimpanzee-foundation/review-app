@@ -3,21 +3,18 @@ authors = [{ name = "Jonas" }]
 classifiers = ["Programming Language :: Python :: 3"]
 name = "video-review-app"
 version = "0.1.0"
-description = "Standalone review app connected to Postgres"
+description = "Desktop app for reviewing and correcting AI annotations on camera trap footage"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "dotenv>=0.9.9",
-  "matplotlib>=3.10.8",
   "nicegui>=1.4.0",
   "pandas>=2.3.3",
-  "plotly>=6.6.0",
   "pyinstaller>=6.19.0",
   "pywebview>=5.0.0",
   "platformdirs>=4.0.0",
   "pyyaml>=6.0.3",
   "sqlalchemy>=2.0.38",
-  "streamlit>=1.55.0",
   "thefuzz",
 ]
 

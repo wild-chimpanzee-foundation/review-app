@@ -14,6 +14,7 @@ from review_app.app.state import (
     set_selections,
     set_state_val,
 )
+from review_app.app.onboarding import show_info_dialog
 from review_app.app.translations import t
 from review_app.app.utils import get_probability_color
 
@@ -393,7 +394,7 @@ def render_annotation_section(
 
     # ── Action buttons ────────────────────────────────────────────────────────
     # Primary row: the two most-used actions, full-width, visually dominant
-    with ui.row().classes("w-full gap-sm q-mt-sm"):
+    with ui.row().classes("w-full gap-sm q-mt-sm tour-target-action-buttons"):
         with (
             ui.button(on_click=submit_and_next, color="warning")
             .classes("col")
@@ -403,6 +404,7 @@ def render_annotation_section(
                 ui.label(t("submit_next"))
                 _shortcut_badge("↵ Enter")
         submit_next_btn._props["data-shortcut"] = "submit-next"
+        submit_next_btn.tooltip(t("tooltip_submit_next"))
 
         with (
             ui.button(on_click=mark_blank_next, color="primary")
@@ -414,6 +416,7 @@ def render_annotation_section(
                 ui.label(t("mark_blank"))
                 _shortcut_badge("B")
         blank_next_btn._props["data-shortcut"] = "mark-blank"
+        blank_next_btn.tooltip(t("tooltip_mark_blank"))
 
     # Secondary row: less-common actions, subtle styling
     with ui.row().classes("w-full gap-sm q-mb-md q-mt-xs"):
@@ -435,13 +438,21 @@ def render_annotation_section(
             with ui.row().classes("items-center justify-center w-full no-wrap"):
                 ui.label(t("blank"))
 
-        with (
-            ui.button(on_click=mark_review_later)
-            .props("outline color=grey")
-            .classes("col")
-            .style("height: 60px; min-width: 160px;") as review_later_btn
-        ):
-            with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
-                ui.label(t("mark_review_later"))
-                _shortcut_badge("M")
-        review_later_btn._props["data-shortcut"] = "mark-unknown"
+        with ui.row().classes("col items-center gap-xs tour-target-review-later").style("min-width: 160px"):
+            with (
+                ui.button(on_click=mark_review_later)
+                .props("outline color=grey")
+                .classes("col")
+                .style("height: 60px;") as review_later_btn
+            ):
+                with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
+                    ui.label(t("mark_review_later"))
+                    _shortcut_badge("M")
+            review_later_btn._props["data-shortcut"] = "mark-unknown"
+            review_later_btn.tooltip(t("tooltip_review_later_btn"))
+            ui.button(
+                icon="info_outline",
+                on_click=lambda: show_info_dialog(
+                    t("info_review_later_title"), t("info_review_later_body")
+                ),
+            ).props("flat round dense size=xs color=grey-6")

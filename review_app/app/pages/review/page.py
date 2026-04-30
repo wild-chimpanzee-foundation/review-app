@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 from nicegui import run, ui
 
+from review_app.app.onboarding import show_info_dialog, show_tour_if_needed
 from review_app.app.pages.review.annotations import render_annotation_section
 from review_app.app.pages.review.filters import render_filter_drawer  # noqa: F401 (refreshable)
 from review_app.app.pages.review.video_player import render_custom_video_player
@@ -118,8 +119,13 @@ async def render_video_section(dp, species_map):
             ui.label(t("loading_video")).classes("text-grey-6 q-mt-md")
         return
 
-    with ui.column().classes("w-full q-mb-xs gap-0"):
-        queue_label = ui.label().classes("text-caption text-grey-6")
+    with ui.column().classes("w-full q-mb-xs gap-0 tour-target-queue"):
+        with ui.row().classes("items-center gap-xs"):
+            queue_label = ui.label().classes("text-caption text-grey-6")
+            ui.button(
+                icon="info_outline",
+                on_click=lambda: show_info_dialog(t("info_queue_title"), t("info_queue_body")),
+            ).props("flat round dense size=xs color=grey-6")
         slider = (
             ui.slider(min=0, max=max(len(queue) - 1, 1), step=1, value=current_idx)
             .props("dense color=primary")
@@ -299,19 +305,31 @@ async def render_video_section(dp, species_map):
                         )
                     )
 
-                with ui.card().classes("full-width q-mt-xs q-pa-none bg-transparent no-shadow"):
+                with ui.card().classes(
+                    "full-width q-mt-xs q-pa-none bg-transparent no-shadow tour-target-ai-predictions"
+                ):
                     rename_map = {
                         "species": t("species_annotations"),
                         "blank_non_blank": t("blank_annotations"),
                     }
 
+                    first_ann_type = True
                     for _ann_type, _predictions in groups.items():
                         ann_type_display = rename_map.get(_ann_type, _ann_type.capitalize())
 
-                        # Reduced top margin to 'q-mt-xs' and font to 'text-micro'
-                        ui.label(ann_type_display).classes(
-                            "text-micro text-grey-6 text-italic q-mt-xs q-mb-none"
-                        )
+                        with ui.row().classes("items-center gap-xs q-mt-xs q-mb-none"):
+                            ui.label(ann_type_display).classes(
+                                "text-micro text-grey-6 text-italic"
+                            )
+                            if first_ann_type:
+                                ui.button(
+                                    icon="info_outline",
+                                    on_click=lambda: show_info_dialog(
+                                        t("info_ai_predictions_title"),
+                                        t("info_ai_predictions_body"),
+                                    ),
+                                ).props("flat round dense size=xs color=grey-6")
+                                first_ann_type = False
 
                         with ui.column().classes("w-full gap-y-1"):
                             for _val, _models in _predictions.items():
@@ -338,11 +356,16 @@ async def render_video_section(dp, species_map):
                                                 )
 
                                                 if _m["prob"] is not None:
+                                                    if _ann_type == "blank_non_blank":
+                                                        prob_color = None
+
+                                                    else:
+                                                        prob_color = _m["color"]
                                                     try:
                                                         _p = float(_m["prob"])
                                                         ui.label(f"{_p:.0%}").classes(
                                                             "text-micro text-bold"
-                                                        ).style(f"color: {_m['color']};")
+                                                        ).style(f"color: {prob_color};")
                                                     except (ValueError, TypeError):
                                                         pass
 
@@ -472,6 +495,8 @@ async def setup_review():
             await render_video_section(dp, species_map)
 
     ui.run_javascript("document.activeElement?.blur()")
+
+    show_tour_if_needed(t)
 
     ui.add_body_html(
         """

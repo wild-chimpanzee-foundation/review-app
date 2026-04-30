@@ -1,79 +1,89 @@
-# Review App
+# Video Annotation Review App
 
-Video annotation review dashboard for manual classification of camera trap footage.
+A desktop app for manually reviewing camera trap footage and correcting AI model annotations. Built for small wildlife research teams.
+
+## What it does
+
+- **Import model results** — load AI species/behavior/blank predictions from CSV
+- **Review videos** — step through footage with inline annotation controls, video player with brightness/contrast adjustment, and keyboard shortcuts
+- **Correct and label** — confirm, override, or add species and behavior annotations per video
+- **Track progress** — overview dashboard showing annotation coverage, species distributions, and per-camera stats
+- **Export** — save reviewed annotations as CSV
+
+Supports multiple projects, English/French UI, dark mode, and configurable confidence thresholds.
 
 ## Requirements
 
 - Python 3.12+
-- `uv` installed
-- ffmpeg (for video processing)
+- [`uv`](https://github.com/astral-sh/uv) installed
+- `ffmpeg` on PATH (for video transcoding)
 
-## Run
+## Run from source
 
 ```bash
 uv run python review_app/app/entry_point.py --dev
 ```
 
-## Building
+`--dev` enables hot reload. Omit it to run in native window mode (non-Linux).
 
-### Local Build
+## Build standalone executable
 
 ```bash
 # Clean previous builds
 rm -rf dist build
 
-# Build single-file executable
+# Build
 uv run pyinstaller video_annotation.spec
 ```
 
-The executable will be at `dist/VideoAnnotation/VideoAnnotation`.
+Executable: `dist/VideoAnnotation/VideoAnnotation`
 
-### GitHub Actions Release
+### Cross-platform builds via GitHub Actions
 
-Builds are automatically created when you push a version tag:
+Push a version tag to trigger automated builds for Linux, Windows, and macOS:
 
 ```bash
-# Create a release
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-This triggers builds for:
+Executables appear in the **Releases** page after ~5–10 minutes.
 
-- Linux
-- Windows
-- macOS
+## Data storage
 
-After ~5-10 minutes, executables are available in the **Releases** page.
+Config and database are stored in platform-specific user directories:
 
-**View releases:** Repository → Releases
+| Platform | Path |
+|----------|------|
+| Linux | `~/.local/share/VideoAnnotation/` |
+| macOS | `~/Library/Application Support/VideoAnnotation/` |
+| Windows | `%LOCALAPPDATA%\VideoAnnotation\` |
 
-## Configuration
+The SQLite database (`review_data.db`) and `config.yaml` are both written there — nothing is stored next to the executable.
 
-Config is stored in platform-specific directories:
+## Model import CSV format
 
-- **Linux:** `~/.config/video_review_app/config.yaml`
-- **macOS:** `~/Library/Application Support/video_review_app/config.yaml`
-- **Windows:** `%APPDATA%\video_review_app\config.yaml`
+The app expects a CSV with one row per annotation:
 
-Database is stored at:
+```
+video_uid,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec
+CAM01/VIDEO_001.mp4,species,species_model_a,deer,,0.92,0,12.0
+CAM01/VIDEO_001.mp4,behavior,behavior_model_a,reacts_to_camera,,0.83,0,12.0
+CAM01/VIDEO_002.mp4,blank_non_blank,blank_model,blank,,0.98,0,
+```
 
-- **Linux:** `~/.local/share/video_review_app/review_data.db`
-- **macOS:** `~/Library/Application Support/video_review_app/review_data.db`
-- **Windows:** `%LOCALAPPDATA%\video_review_app\review_data.db`
+A template is available in the Import page. Long-format CSVs are auto-detected; wide-format CSVs (one column per model) can be mapped interactively.
 
-## Database & Migrations
+## Keyboard shortcuts
 
-- Sqlite DB path is `db_dir/<db_filename>` from config (`db_filename` defaults to `review_data.db`).
-- The schema is created from scratch using SQLAlchemy table creation for:
-  - `videos`
-  - `video_labels`
-  - `individual_observations`
-  - `model_annotations`
-- Optional destructive reset: set `recreate_db_on_start: true` in config or `REVIEW_APP_RECREATE_DB=1`.
-- Model imports are upserts keyed by `(video_id, model_name, annotation_type)`; model versions are not stored.
-
-## Notes
-
-- Videos remain local and are discovered by recursively scanning `video_dir`.
-- Keep config explicit while schema evolves: set `video_dir`, `db_dir`, `species`, `behaviors`.
+| Key | Action |
+|-----|--------|
+| `Enter` | Submit and go to next |
+| `N` / `P` | Next / previous video |
+| `B` | Mark as blank |
+| `M` | Flag for review later |
+| `Space` | Play / pause |
+| `← →` | Seek |
+| `S` / `D` | Speed up / down |
+| `[` / `]` | Brightness |
+| `{` / `}` | Contrast |

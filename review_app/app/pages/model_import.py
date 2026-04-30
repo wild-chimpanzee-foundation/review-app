@@ -3,6 +3,7 @@ import io
 import pandas as pd
 from nicegui import run, ui
 
+from review_app.app.onboarding import show_info_dialog
 from review_app.app.state import get_active_project_id, get_state_val, set_state_val
 from review_app.app.translations import get_language, t
 from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
@@ -97,7 +98,14 @@ async def setup_model_import():
     pending_warning_holder: list = [None]
 
     with ui.column().classes("w-full q-pa-md").style("max-width: 1600px; margin: 0 auto"):
-        ui.label(t("nav_import")).classes("text-h5 text-primary font-weight-bold q-mb-lg")
+        with ui.row().classes("items-center gap-sm q-mb-lg"):
+            ui.label(t("nav_import")).classes("text-h5 text-primary font-weight-bold")
+            ui.button(
+                icon="info_outline",
+                on_click=lambda: show_info_dialog(
+                    t("info_model_import_title"), t("info_model_import_body")
+                ),
+            ).props("flat round dense color=primary")
 
         with ui.tabs().classes("w-full") as tabs:
             tab_model = ui.tab("model_import", label=t("model_import_title"))

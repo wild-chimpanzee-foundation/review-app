@@ -76,11 +76,46 @@ def shared_header(show_drawer: bool = False):
     # Define shortcuts dialog once per page
     with (
         ui.dialog() as shortcuts_dialog,
-        ui.card().classes("q-pa-lg relative").style("min-width: 400px"),
+        ui.card().classes("q-pa-lg relative").style("min-width: 420px; max-width: 560px"),
     ):
         ui.button(icon="close", on_click=shortcuts_dialog.close).props("flat round").classes(
             "absolute-top-right q-ma-sm"
         )
+        ui.label(t("shortcuts_title")).classes("text-h6 q-mb-md q-mr-lg")
+
+        def _shortcut_row(key: str, label: str):
+            with ui.row().classes("w-full items-center justify-between q-py-xs"):
+                ui.label(label).classes("text-body2")
+                ui.badge(key).props("color=grey-9 outline").classes("text-caption")
+
+        ui.label(t("shortcuts_global")).classes("text-caption text-grey-5 text-uppercase q-mt-sm")
+        ui.separator().classes("q-mb-xs")
+        _shortcut_row("Enter", t("shortcut_submit_next"))
+        _shortcut_row("N", t("shortcut_next_video"))
+        _shortcut_row("P", t("shortcut_prev_video"))
+        _shortcut_row("B", t("shortcut_mark_blank"))
+        _shortcut_row("M", t("review_later"))
+
+        ui.label(t("shortcuts_review")).classes("text-caption text-grey-5 text-uppercase q-mt-md")
+        ui.separator().classes("q-mb-xs")
+        _shortcut_row("Space", t("shortcut_play_pause"))
+        _shortcut_row("← →", t("shortcut_seek"))
+        _shortcut_row("S / D", t("shortcut_speed_up_down"))
+        _shortcut_row("[ / ]", t("shortcut_brightness"))
+        _shortcut_row("{ / }", t("shortcut_contrast"))
+
+        ui.separator().classes("q-mt-md q-mb-sm")
+
+        def _restart_tour():
+            from review_app.app.onboarding import show_tour
+            shortcuts_dialog.close()
+            show_tour(t)
+
+        ui.button(
+            t("tour_restart"),
+            icon="travel_explore",
+            on_click=_restart_tour,
+        ).props("flat color=primary").classes("w-full")
 
     drawer = None
 
