@@ -1,4 +1,6 @@
-from nicegui import app, ui
+from nicegui import ui
+
+from review_app.app.state import is_tour_completed, set_tour_completed
 
 _TOUR_CSS = """
 <style>
@@ -156,12 +158,12 @@ def show_tour(t) -> None:
             update()
         else:
             _clear_highlight()
-            app.storage.user["tour_completed"] = True
+            set_tour_completed(True)
             els["dialog"].close()
 
     def do_skip():
         _clear_highlight()
-        app.storage.user["tour_completed"] = True
+        set_tour_completed(True)
         els["dialog"].close()
 
     with (
@@ -193,5 +195,5 @@ def show_tour(t) -> None:
 
 
 def show_tour_if_needed(t) -> None:
-    if not app.storage.user.get("tour_completed"):
+    if not is_tour_completed():
         show_tour(t)

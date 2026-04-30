@@ -725,7 +725,10 @@ def get_language():
 
 
 def set_language(lang: str):
+    from review_app.app.state import get_data_provider
     set_state_val("language", lang)
+    if dp := get_data_provider():
+        dp.set_setting("language", lang)
 
 
 def t(key: str, **kwargs) -> str:

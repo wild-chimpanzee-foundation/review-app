@@ -35,20 +35,24 @@ def _auto_suggest_mappings(columns: list[str]) -> list[dict]:
     for col in columns:
         if col.startswith("top_1_"):
             model = col[6:]
-            suggestions.append({
-                "model_name": model,
-                "annotation_type": "species",
-                "value_col": col,
-                "prob_col": f"prob_{model}" if f"prob_{model}" in col_set else "",
-            })
+            suggestions.append(
+                {
+                    "model_name": model,
+                    "annotation_type": "species",
+                    "value_col": col,
+                    "prob_col": f"prob_{model}" if f"prob_{model}" in col_set else "",
+                }
+            )
     for blank_col in ("blank", "blank_prob", "p_blank", "prob_blank"):
         if blank_col in col_set:
-            suggestions.append({
-                "model_name": "ensemble",
-                "annotation_type": "blank_non_blank",
-                "value_col": "",
-                "prob_col": blank_col,
-            })
+            suggestions.append(
+                {
+                    "model_name": "ensemble",
+                    "annotation_type": "blank_non_blank",
+                    "value_col": "",
+                    "prob_col": blank_col,
+                }
+            )
             break
     return suggestions
 
@@ -82,10 +86,19 @@ async def setup_model_import():
     shared_header()
 
     for key in (
-        "raw_df_records", "raw_csv_columns",
-        "path_col", "match_strategy", "ann_mappings", "match_preview",
-        "uploaded_df", "cleaned_df", "errors_df", "species_mappings", "unmapped_species",
-        "match_stats", "csv_format",
+        "raw_df_records",
+        "raw_csv_columns",
+        "path_col",
+        "match_strategy",
+        "ann_mappings",
+        "match_preview",
+        "uploaded_df",
+        "cleaned_df",
+        "errors_df",
+        "species_mappings",
+        "unmapped_species",
+        "match_stats",
+        "csv_format",
     ):
         set_state_val(key, None)
 
@@ -124,7 +137,9 @@ async def setup_model_import():
                 with ui.row().classes("items-center q-mb-md"):
                     ui.label(t("csv_template")).classes("text-caption text-grey-6")
                     ui.button(
-                        t("download_template"), icon="download", on_click=download_template,
+                        t("download_template"),
+                        icon="download",
+                        on_click=download_template,
                     ).props("flat dense color=grey-7 size=sm")
 
                 # ── Upload ────────────────────────────────────────────────────
@@ -145,7 +160,9 @@ async def setup_model_import():
                             set_state_val("path_col", _auto_suggest_path_col(columns, sample))
                             set_state_val("match_strategy", "suffix")
                             set_state_val("ann_mappings", _auto_suggest_mappings(columns))
-                            set_state_val("csv_format", "long" if _is_long_format(columns) else "wide")
+                            set_state_val(
+                                "csv_format", "long" if _is_long_format(columns) else "wide"
+                            )
                             set_state_val("match_preview", None)
                             set_state_val("match_stats", None)
                             set_state_val("uploaded_df", None)
@@ -165,8 +182,10 @@ async def setup_model_import():
                             loading_dialog.close()
 
                     ui.upload(
-                        on_upload=handle_upload, multiple=False,
-                        label=t("choose_csv"), auto_upload=True,
+                        on_upload=handle_upload,
+                        multiple=False,
+                        label=t("choose_csv"),
+                        auto_upload=True,
                     )
 
                 # ── Column mapping config ─────────────────────────────────────
@@ -191,27 +210,37 @@ async def setup_model_import():
                             loading_dialog.open()
                             try:
                                 raw_df = pd.DataFrame(recs)
-                                cleaned_df, errors_df, species_mappings, unmapped_species = (
-                                    await run.io_bound(
-                                        dp.validate_model_csv,
-                                        raw_df, None, get_active_project_id(),
-                                    )
+                                (
+                                    cleaned_df,
+                                    errors_df,
+                                    species_mappings,
+                                    unmapped_species,
+                                ) = await run.io_bound(
+                                    dp.validate_model_csv,
+                                    raw_df,
+                                    None,
+                                    get_active_project_id(),
                                 )
                                 set_state_val("match_stats", None)
                                 set_state_val("uploaded_df", raw_df.to_dict(orient="records"))
                                 set_state_val(
                                     "cleaned_df",
                                     cleaned_df.to_dict(orient="records")
-                                    if cleaned_df is not None else None,
+                                    if cleaned_df is not None
+                                    else None,
                                 )
                                 set_state_val(
                                     "errors_df",
                                     errors_df.to_dict(orient="records")
-                                    if errors_df is not None else None,
+                                    if errors_df is not None
+                                    else None,
                                 )
                                 set_state_val(
                                     "species_mappings",
-                                    {m["original"]: m.get("mapped_to", "") for m in species_mappings},
+                                    {
+                                        m["original"]: m.get("mapped_to", "")
+                                        for m in species_mappings
+                                    },
                                 )
                                 set_state_val("unmapped_species", unmapped_species)
                                 ui.notify(t("csv_validated"), type="positive")
@@ -237,28 +266,38 @@ async def setup_model_import():
                             raw_df = pd.DataFrame(recs)
                             normalized_df, match_stats = await run.io_bound(
                                 dp.normalize_model_csv_with_mapping,
-                                raw_df, path_col, match_strategy, ann_maps,
+                                raw_df,
+                                path_col,
+                                match_strategy,
+                                ann_maps,
                                 get_active_project_id(),
                             )
                             set_state_val("match_stats", match_stats)
                             set_state_val("uploaded_df", normalized_df.to_dict(orient="records"))
 
-                            cleaned_df, errors_df, species_mappings, unmapped_species = (
-                                await run.io_bound(
-                                    dp.validate_model_csv,
-                                    normalized_df, None, get_active_project_id(),
-                                )
+                            (
+                                cleaned_df,
+                                errors_df,
+                                species_mappings,
+                                unmapped_species,
+                            ) = await run.io_bound(
+                                dp.validate_model_csv,
+                                normalized_df,
+                                None,
+                                get_active_project_id(),
                             )
 
                             set_state_val(
                                 "cleaned_df",
                                 cleaned_df.to_dict(orient="records")
-                                if cleaned_df is not None else None,
+                                if cleaned_df is not None
+                                else None,
                             )
                             set_state_val(
                                 "errors_df",
                                 errors_df.to_dict(orient="records")
-                                if errors_df is not None else None,
+                                if errors_df is not None
+                                else None,
                             )
                             set_state_val(
                                 "species_mappings",
@@ -277,14 +316,16 @@ async def setup_model_import():
                         ui.label(t("configure_import")).classes(
                             "text-subtitle1 font-weight-medium q-mb-sm"
                         )
-                        with ui.card().classes("full-width q-mb-md bg-blue-grey-9"):
+                        with ui.card().classes("full-width q-mb-md "):
                             ui.icon("check_circle", color="positive").classes("q-mb-xs")
                             ui.label(t("long_format_detected")).classes(
                                 "text-body2 text-positive q-mb-xs"
                             )
                             ui.label(t("long_format_desc")).classes("text-caption text-grey-6")
                         ui.button(
-                            t("process_csv"), icon="play_arrow", on_click=do_process,
+                            t("process_csv"),
+                            icon="play_arrow",
+                            on_click=do_process,
                             color="primary",
                         ).classes("q-mt-sm")
                         return
@@ -294,31 +335,40 @@ async def setup_model_import():
                     )
 
                     # Path matching ───────────────────────────────────────────
-                    with ui.card().classes("full-width q-mb-md bg-grey-9"):
+                    with ui.card().classes("full-width q-mb-md "):
                         ui.label(t("path_matching")).classes("text-subtitle2 q-mb-xs")
                         with ui.row().classes("w-full items-end gap-md q-mb-sm"):
-                            path_sel = ui.select(
-                                label=t("path_col_label"),
-                                options=col_opts,
-                                value=get_state_val("path_col"),
-                            ).props("outlined dense").classes("col")
+                            path_sel = (
+                                ui.select(
+                                    label=t("path_col_label"),
+                                    options=col_opts,
+                                    value=get_state_val("path_col"),
+                                )
+                                .props("outlined dense")
+                                .classes("col")
+                            )
                             path_sel.on_value_change(
                                 lambda: set_state_val("path_col", path_sel.value)
                             )
 
-                            strat_sel = ui.select(
-                                label=t("match_strategy_label"),
-                                options={
-                                    "suffix": t("match_suffix"),
-                                    "stem": t("match_stem"),
-                                },
-                                value=get_state_val("match_strategy") or "suffix",
-                            ).props("outlined dense").classes("col-4")
+                            strat_sel = (
+                                ui.select(
+                                    label=t("match_strategy_label"),
+                                    options={
+                                        "suffix": t("match_suffix"),
+                                        "stem": t("match_stem"),
+                                    },
+                                    value=get_state_val("match_strategy") or "suffix",
+                                )
+                                .props("outlined dense")
+                                .classes("col-4")
+                            )
                             strat_sel.on_value_change(
                                 lambda: set_state_val("match_strategy", strat_sel.value)
                             )
 
                         with ui.row().classes("items-center gap-md"):
+
                             async def do_preview():
                                 recs = get_state_val("raw_df_records")
                                 if not recs:
@@ -340,7 +390,9 @@ async def setup_model_import():
                                     loading_dialog.close()
 
                             ui.button(
-                                t("preview_match"), icon="search", on_click=do_preview,
+                                t("preview_match"),
+                                icon="search",
+                                on_click=do_preview,
                             ).props("flat color=primary dense")
 
                             preview = get_state_val("match_preview")
@@ -354,13 +406,14 @@ async def setup_model_import():
                                 ).classes(f"text-body2 {color}")
                                 if unmatched and preview.get("unmatched_sample"):
                                     with ui.expansion(
-                                        t("wide_format_unmatched", count=unmatched), icon="warning",
+                                        t("wide_format_unmatched", count=unmatched),
+                                        icon="warning",
                                     ).classes("q-mt-xs"):
                                         for up in preview["unmatched_sample"]:
                                             ui.label(up).classes("text-caption text-grey-5")
 
                     # Annotation columns ──────────────────────────────────────
-                    with ui.card().classes("full-width q-mb-md bg-grey-9"):
+                    with ui.card().classes("full-width q-mb-md"):
                         ui.label(t("annotation_columns")).classes("text-subtitle2 q-mb-xs")
                         type_opts = {
                             "species": t("ann_type_species"),
@@ -381,33 +434,50 @@ async def setup_model_import():
 
                         for i, m in enumerate(ann_mappings):
                             with ui.row().classes("w-full items-center gap-sm q-mb-xs"):
-                                name_in = ui.input(
-                                    value=m.get("model_name", "")
-                                ).props("outlined dense").classes("col")
-                                type_sel = ui.select(
-                                    options=type_opts,
-                                    value=m.get("annotation_type", "species"),
-                                ).props("outlined dense").classes("col")
-                                val_sel = ui.select(
-                                    options=col_opts_none,
-                                    value=m.get("value_col", ""),
-                                ).props("outlined dense").classes("col")
-                                prob_sel = ui.select(
-                                    options=col_opts_none,
-                                    value=m.get("prob_col", ""),
-                                ).props("outlined dense").classes("col")
+                                name_in = (
+                                    ui.input(value=m.get("model_name", ""))
+                                    .props("outlined dense")
+                                    .classes("col")
+                                )
+                                type_sel = (
+                                    ui.select(
+                                        options=type_opts,
+                                        value=m.get("annotation_type", "species"),
+                                    )
+                                    .props("outlined dense")
+                                    .classes("col")
+                                )
+                                val_sel = (
+                                    ui.select(
+                                        options=col_opts_none,
+                                        value=m.get("value_col", ""),
+                                    )
+                                    .props("outlined dense")
+                                    .classes("col")
+                                )
+                                prob_sel = (
+                                    ui.select(
+                                        options=col_opts_none,
+                                        value=m.get("prob_col", ""),
+                                    )
+                                    .props("outlined dense")
+                                    .classes("col")
+                                )
 
                                 def make_updater(idx, ni, ts, vs, ps):
                                     def _upd():
                                         ms = get_state_val("ann_mappings") or []
                                         if idx < len(ms):
-                                            ms[idx].update({
-                                                "model_name": ni.value,
-                                                "annotation_type": ts.value,
-                                                "value_col": vs.value or "",
-                                                "prob_col": ps.value or "",
-                                            })
+                                            ms[idx].update(
+                                                {
+                                                    "model_name": ni.value,
+                                                    "annotation_type": ts.value,
+                                                    "value_col": vs.value or "",
+                                                    "prob_col": ps.value or "",
+                                                }
+                                            )
                                             set_state_val("ann_mappings", ms)
+
                                     return _upd
 
                                 upd = make_updater(i, name_in, type_sel, val_sel, prob_sel)
@@ -422,29 +492,37 @@ async def setup_model_import():
                                         ms.pop(idx)
                                         set_state_val("ann_mappings", ms)
                                         config_ui.refresh()
+
                                     return _rem
 
-                                ui.button(
-                                    icon="close", on_click=make_remover(i)
-                                ).props("flat round dense")
+                                ui.button(icon="close", on_click=make_remover(i)).props(
+                                    "flat round dense"
+                                )
 
                         def add_row():
                             ms = get_state_val("ann_mappings") or []
-                            ms.append({
-                                "model_name": "",
-                                "annotation_type": "species",
-                                "value_col": "",
-                                "prob_col": "",
-                            })
+                            ms.append(
+                                {
+                                    "model_name": "",
+                                    "annotation_type": "species",
+                                    "value_col": "",
+                                    "prob_col": "",
+                                }
+                            )
                             set_state_val("ann_mappings", ms)
                             config_ui.refresh()
 
                         ui.button(
-                            t("add_annotation_row"), icon="add", on_click=add_row,
+                            t("add_annotation_row"),
+                            icon="add",
+                            on_click=add_row,
                         ).props("flat dense color=primary")
 
                     ui.button(
-                        t("process_csv"), icon="play_arrow", on_click=do_process, color="primary",
+                        t("process_csv"),
+                        icon="play_arrow",
+                        on_click=do_process,
+                        color="primary",
                     ).classes("q-mt-sm")
 
                 with config_card:
@@ -524,7 +602,7 @@ async def setup_model_import():
                     with results_container:
                         match_stats = get_state_val("match_stats")
                         if match_stats:
-                            with ui.card().classes("full-width q-mb-md bg-blue-grey-9"):
+                            with ui.card().classes("full-width q-mb-md "):
                                 total = match_stats["total_rows"]
                                 matched = match_stats["matched"]
                                 unmatched = match_stats["unmatched"]
@@ -534,12 +612,15 @@ async def setup_model_import():
                                 ).classes(f"text-body2 {color}")
                                 if match_stats.get("matched_by_stem", 0) > 0:
                                     ui.label(
-                                        t("wide_format_stem_fallback",
-                                          count=match_stats["matched_by_stem"])
+                                        t(
+                                            "wide_format_stem_fallback",
+                                            count=match_stats["matched_by_stem"],
+                                        )
                                     ).classes("text-caption text-warning")
                                 if unmatched and match_stats.get("unmatched_sample"):
                                     with ui.expansion(
-                                        t("wide_format_unmatched", count=unmatched), icon="warning",
+                                        t("wide_format_unmatched", count=unmatched),
+                                        icon="warning",
                                     ).classes("q-mt-xs"):
                                         for up in match_stats["unmatched_sample"]:
                                             ui.label(up).classes("text-caption text-grey-5")
@@ -603,6 +684,7 @@ async def setup_model_import():
                                             mappings[o] = sel.value
                                             set_state_val("species_mappings", mappings)
                                             update_import_button()
+
                                         return update_mapping
 
                                     select.on_value_change(make_update_fn(orig, select))
@@ -613,22 +695,29 @@ async def setup_model_import():
                                     uploaded_df = _get_df_from_state("uploaded_df")
                                     mappings = get_state_val("species_mappings", {})
 
-                                    cleaned_df, errors_df, _, unmapped_species = (
-                                        await run.io_bound(
-                                            dp.validate_model_csv,
-                                            uploaded_df, mappings, get_active_project_id(),
-                                        )
+                                    (
+                                        cleaned_df,
+                                        errors_df,
+                                        _,
+                                        unmapped_species,
+                                    ) = await run.io_bound(
+                                        dp.validate_model_csv,
+                                        uploaded_df,
+                                        mappings,
+                                        get_active_project_id(),
                                     )
 
                                     set_state_val(
                                         "cleaned_df",
                                         cleaned_df.to_dict(orient="records")
-                                        if cleaned_df is not None else None,
+                                        if cleaned_df is not None
+                                        else None,
                                     )
                                     set_state_val(
                                         "errors_df",
                                         errors_df.to_dict(orient="records")
-                                        if errors_df is not None else None,
+                                        if errors_df is not None
+                                        else None,
                                     )
                                     set_state_val("unmapped_species", unmapped_species)
 
@@ -649,7 +738,10 @@ async def setup_model_import():
                             )
 
                             ui.button(
-                                t("apply"), icon="refresh", on_click=apply_mappings, color="primary",
+                                t("apply"),
+                                icon="refresh",
+                                on_click=apply_mappings,
+                                color="primary",
                             ).props(f"wide {'disabled' if not can_apply else ''}")
 
                             if pending_unmapped:
@@ -660,9 +752,9 @@ async def setup_model_import():
                     errors_df = _get_df_from_state("errors_df")
                     if errors_df is not None and not errors_df.empty:
                         with results_container:
-                            ui.label(
-                                t("validation_errors_count", count=len(errors_df))
-                            ).classes("text-negative q-mb-sm")
+                            ui.label(t("validation_errors_count", count=len(errors_df))).classes(
+                                "text-negative q-mb-sm"
+                            )
 
                             error_summary = errors_df["error"].value_counts().to_dict()
                             if error_summary:
@@ -690,9 +782,9 @@ async def setup_model_import():
                     unmapped = get_state_val("unmapped_species", [])
                     if unmapped:
                         with results_container:
-                            ui.label(
-                                t("unmapped_species_count", count=len(unmapped))
-                            ).classes("text-warning q-mb-sm")
+                            ui.label(t("unmapped_species_count", count=len(unmapped))).classes(
+                                "text-warning q-mb-sm"
+                            )
 
                     cleaned_df = _get_df_from_state("cleaned_df")
                     species_mappings = get_state_val("species_mappings", {})
@@ -708,7 +800,9 @@ async def setup_model_import():
                         update_import_button()
 
                         import_button_holder[0] = ui.button(
-                            t("import_valid_rows"), on_click=do_import, color="primary",
+                            t("import_valid_rows"),
+                            on_click=do_import,
+                            color="primary",
                         ).props(f"wide {'disabled' if not can_import else ''}")
 
             with ui.tab_panel(tab_annotations):
@@ -756,7 +850,9 @@ async def setup_model_import():
                         async def do_export():
                             try:
                                 df = await run.io_bound(
-                                    dp.export_annotations_csv, get_active_project_id(), get_language()
+                                    dp.export_annotations_csv,
+                                    get_active_project_id(),
+                                    get_language(),
                                 )
                                 csv_bytes = df.to_csv(index=False).encode("utf-8")
                                 ui.download(csv_bytes, "annotations.csv")
