@@ -40,16 +40,16 @@ jobs:
           python-version: "3.12"
 
       - name: Install uv
-        run: pip install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: Install dependencies
         run: uv sync
 
       - name: Build with PyInstaller
         shell: bash
-        run: |
-          uv run pip install pyinstaller
-          uv run pyinstaller video_annotation.spec --clean
+        run: uv run pyinstaller video_annotation.spec --clean
 
       - name: Show dist contents
         shell: bash
