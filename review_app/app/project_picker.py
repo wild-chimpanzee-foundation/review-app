@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from review_app.app.state import get_active_project_id, set_data_provider
 from review_app.app.translations import t
 from review_app.app.utils import switch_project
 from review_app.backend.local_data_provider import LocalDataProvider
 
 
-def build_project_picker(config_path: Path):
+def build_project_picker():
     """Build the project-picker dialog. Returns (dialog, refresh_fn)."""
     from nicegui import ui
 
@@ -18,7 +16,7 @@ def build_project_picker(config_path: Path):
 
         def refresh():
             projects_col.clear()
-            _dp = LocalDataProvider(str(config_path))
+            _dp = LocalDataProvider()
             projects = _dp.list_projects()
             active_id = get_active_project_id()
             with projects_col:
@@ -30,7 +28,7 @@ def build_project_picker(config_path: Path):
 
                         def make_switch(pid):
                             async def do_switch():
-                                new_dp = LocalDataProvider(str(config_path))
+                                new_dp = LocalDataProvider()
                                 set_data_provider(new_dp)
                                 switch_project(new_dp, pid)
                                 dialog.close()
@@ -51,11 +49,11 @@ def build_project_picker(config_path: Path):
                                         )
 
                                     async def confirm():
-                                        del_dp = LocalDataProvider(str(config_path))
+                                        del_dp = LocalDataProvider()
                                         del_dp.delete_project(pid)
                                         confirm_dialog.close()
                                         if pid == get_active_project_id():
-                                            next_dp = LocalDataProvider(str(config_path))
+                                            next_dp = LocalDataProvider()
                                             other = next_dp.get_most_recent_project()
                                             if other:
                                                 set_data_provider(next_dp)

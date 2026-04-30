@@ -129,6 +129,13 @@ class SpeciesBehavior(Base):
     project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
 
 
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=True)
+
+
 Index(
     "idx_individual_video_species", IndividualObservation.video_id, IndividualObservation.species
 )

@@ -37,6 +37,8 @@ async def sync_with_progress(data_provider, progress=None, status=None, video_di
                 status.text = t("scanning_file", filename=filename)
         await asyncio.sleep(0.15)
 
+    if progress is not None:
+        progress.value = 1.0
     if status is not None:
         status.text = t("sync_complete")
 
@@ -75,16 +77,15 @@ def switch_project(dp, project_id: str) -> None:
 
 
 async def get_or_create_data_provider():
-    from review_app.app.config import get_config_path
+    from review_app.app.config import get_default_db_path
     from review_app.app.state import get_data_provider, set_data_provider
     from review_app.backend.local_data_provider import LocalDataProvider
 
     dp = get_data_provider()
     if not dp:
-        config_path = get_config_path()
-        if config_path.exists():
+        if get_default_db_path().exists():
             try:
-                dp = LocalDataProvider(str(config_path))
+                dp = LocalDataProvider()
                 set_data_provider(dp)
             except Exception:
                 return None

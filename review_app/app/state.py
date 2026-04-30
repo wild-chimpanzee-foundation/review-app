@@ -2,10 +2,12 @@ from typing import Any
 
 from nicegui import app
 
-from review_app.app.config import update_config_key
-
-# Data provider is shared across all sessions as it manages the local database connection
 _data_provider = None
+
+_annotator_name: str = "default"
+_blank_threshold: float = 0.75
+_species_threshold: float = 0.75
+_active_project_id: str | None = None
 
 
 def get_data_provider():
@@ -17,36 +19,32 @@ def set_data_provider(dp):
     _data_provider = dp
 
 
-# Persistent user preferences (backed by config.yaml)
-_dark_mode: bool = True
-_language: str = "en"
-_annotator_name: str = "default"
-_blank_threshold: float = 0.75
-_species_threshold: float = 0.75
+def reset_app_state() -> None:
+    """Clear all process-level state after a DB reset. Does not write to DB."""
+    global _annotator_name, _blank_threshold, _species_threshold, _active_project_id
+    _active_project_id = None
+    _annotator_name = "default"
+    _blank_threshold = 0.75
+    _species_threshold = 0.75
+    _data_provider = None
 
-_active_project_id: str | None = None
 
-
-def init_user_prefs(
-    dark_mode: bool,
-    language: str,
-    annotator_name: str,
-    blank_threshold: float = 0.75,
-    species_threshold: float = 0.75,
-) -> None:
-    """Initialize persistent preferences from configuration at startup."""
-    global _dark_mode, _language, _annotator_name, _blank_threshold, _species_threshold
-    _dark_mode = dark_mode
-    _language = language
-    _annotator_name = annotator_name
-    _blank_threshold = blank_threshold
-    _species_threshold = species_threshold
+def load_settings_from_db(dp) -> None:
+    """Initialize process-level settings from DB at startup."""
+    global _annotator_name, _blank_threshold, _species_threshold, _active_project_id
+    _annotator_name = dp.get_setting("annotator_name", "default")
+    raw_blank = dp.get_setting("blank_threshold")
+    _blank_threshold = float(raw_blank) if raw_blank is not None else 0.75
+    raw_species = dp.get_setting("species_threshold")
+    _species_threshold = float(raw_species) if raw_species is not None else 0.75
+    _active_project_id = dp.get_setting("active_project_id")
 
 
 def set_active_project(project_id: str | None) -> None:
     global _active_project_id
     _active_project_id = project_id
-    update_config_key("active_project_id", project_id)
+    if dp := get_data_provider():
+        dp.set_setting("active_project_id", project_id)
 
 
 def get_active_project_id() -> str | None:
@@ -86,6 +84,10 @@ def _get_user_state() -> dict[str, Any]:
         app.storage.user["muted"] = True
     if "auto_transcode" not in app.storage.user:
         app.storage.user["auto_transcode"] = True
+    if "dark_mode" not in app.storage.user:
+        app.storage.user["dark_mode"] = True
+    if "language" not in app.storage.user:
+        app.storage.user["language"] = "en"
     return app.storage.user
 
 
@@ -144,6 +146,13 @@ def get_annotator_name():
     return _annotator_name
 
 
+def set_annotator_name(name: str) -> None:
+    global _annotator_name
+    _annotator_name = name
+    if dp := get_data_provider():
+        dp.set_setting("annotator_name", name)
+
+
 def get_blank_threshold() -> float:
     return _blank_threshold
 
@@ -151,7 +160,8 @@ def get_blank_threshold() -> float:
 def set_blank_threshold(value: float) -> None:
     global _blank_threshold
     _blank_threshold = value
-    update_config_key("blank_threshold", value)
+    if dp := get_data_provider():
+        dp.set_setting("blank_threshold", value)
 
 
 def get_species_threshold() -> float:
@@ -161,7 +171,8 @@ def get_species_threshold() -> float:
 def set_species_threshold(value: float) -> None:
     global _species_threshold
     _species_threshold = value
-    update_config_key("species_threshold", value)
+    if dp := get_data_provider():
+        dp.set_setting("species_threshold", value)
 
 
 def get_playback_speed():
@@ -205,13 +216,11 @@ def set_auto_transcode(enabled: bool):
 
 
 def is_dark_mode():
-    return _dark_mode
+    return _get_user_state().get("dark_mode", True)
 
 
 def set_dark_mode(enabled: bool):
-    global _dark_mode
-    _dark_mode = enabled
-    update_config_key("dark_mode", enabled)
+    _get_user_state()["dark_mode"] = enabled
 
 
 def get_state_val(key: str, default: Any = None) -> Any:

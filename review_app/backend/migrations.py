@@ -17,6 +17,7 @@ MIGRATIONS: list[tuple[int, str]] = [
         WHERE project_id IS NULL
         """,
     ),
+    (3, "CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)"),
 ]
 
 

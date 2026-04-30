@@ -1,5 +1,6 @@
 from nicegui import run, ui
 
+from review_app.app.onboarding import show_info_dialog
 from review_app.app.state import (
     get_active_project_id,
     get_annotator_name,
@@ -14,7 +15,6 @@ from review_app.app.state import (
     set_selections,
     set_state_val,
 )
-from review_app.app.onboarding import show_info_dialog
 from review_app.app.translations import t
 from review_app.app.utils import get_probability_color
 

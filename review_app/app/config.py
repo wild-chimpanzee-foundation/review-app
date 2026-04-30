@@ -2,7 +2,6 @@ import sys
 from pathlib import Path
 
 import platformdirs
-import yaml
 
 APP_NAME = "VideoAnnotation"
 
@@ -42,17 +41,8 @@ def get_app_dir() -> Path:
     return Path(__file__).parents[2]
 
 
-def get_config_path() -> Path:
-    return get_user_data_dir() / "config.yaml"
-
-
 def get_default_db_path() -> Path:
     return get_user_data_dir() / "review_data.db"
-
-
-def get_bundled_default_config_path() -> Path:
-    bundle_dir = Path(__file__).parent.parent / "data"
-    return bundle_dir / "default_config.yaml"
 
 
 def get_bundled_species_csv() -> str | None:
@@ -71,26 +61,3 @@ def get_bundled_behaviors_csv() -> str | None:
     return None
 
 
-def load_config() -> dict:
-    path = get_config_path()
-    if not path.exists():
-        return {}
-    try:
-        with open(path) as f:
-            return yaml.safe_load(f) or {}
-    except Exception as e:
-        print(f"Error loading config at {path}: {e}")
-        return {}
-
-
-def save_config(config: dict) -> None:
-    path = get_config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-
-
-def update_config_key(key: str, value) -> None:
-    config = load_config()
-    config[key] = value
-    save_config(config)

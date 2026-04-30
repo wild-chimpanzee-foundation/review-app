@@ -5,17 +5,13 @@ import secrets
 import sys
 from pathlib import Path
 
-from review_app.app.config import (
-    get_config_path,
-    load_config,
-)  # noqa: E402
 from review_app.app.media import set_media_dirs, setup_media_route  # noqa: E402
 from review_app.app.project_picker import build_project_picker  # noqa: E402
 from review_app.app.setup_wizard import setup_wizard  # noqa: E402
 from review_app.app.state import (  # noqa: E402
     get_active_project_id,
-    init_user_prefs,
     is_dark_mode,
+    load_settings_from_db,
     set_active_project,
     set_dark_mode,
     set_data_provider,
@@ -44,9 +40,6 @@ for _ext, _mime in [
 ]:
     mimetypes.add_type(_mime, _ext)
     mimetypes.add_type(_mime, _ext.upper())
-
-
-CONFIG_PATH = get_config_path()
 
 
 def shared_header(show_drawer: bool = False):
@@ -142,11 +135,11 @@ def shared_header(show_drawer: bool = False):
         with ui.row().classes("w-full items-center q-px-md no-wrap gap-2"):
             _active_pid = get_active_project_id()
             if _active_pid:
-                _header_dp = LocalDataProvider(str(CONFIG_PATH))
+                _header_dp = LocalDataProvider()
                 _active_proj_name = (
                     p.name if (p := _header_dp.get_project(_active_pid)) else _active_pid
                 )
-                project_dialog, refresh_projects = build_project_picker(CONFIG_PATH)
+                project_dialog, refresh_projects = build_project_picker()
                 ui.button(
                     _active_proj_name,
                     icon="folder_special",
@@ -192,7 +185,10 @@ class GUI:
     def main_page(self):
         from nicegui import ui
 
-        ui.navigate.to("/overview")
+        if get_active_project_id():
+            ui.navigate.to("/overview")
+        else:
+            ui.navigate.to("/setup")
 
     async def overview_page(self):
         from review_app.app.pages.overview import setup_overview
@@ -222,7 +218,7 @@ class GUI:
         def on_setup_complete():
             ui.navigate.to("/overview")
 
-        setup_wizard(on_complete_callback=on_setup_complete, config_path=CONFIG_PATH)
+        setup_wizard(on_complete_callback=on_setup_complete)
 
     def _sync_videos(self, data_provider):
         from nicegui import run, ui
@@ -271,38 +267,37 @@ class GUI:
         ui.page("/model-import")(self.model_import_page)
         ui.page("/settings")(self.settings_page)
 
-        # Load config and register media files at startup (before ui.run)
-        if CONFIG_PATH.exists():
-            try:
-                cfg = load_config()
-                init_user_prefs(
-                    dark_mode=cfg.get("dark_mode", True),
-                    language=cfg.get("language", "en"),
-                    annotator_name=cfg.get("annotator_name", "default"),
-                    blank_threshold=cfg.get("blank_threshold", 0.75),
-                    species_threshold=cfg.get("species_threshold", 0.75),
-                )
+        # Initialize data provider only if the DB already exists (i.e. app was set up before).
+        # On fresh install the DB doesn't exist yet — the setup wizard creates it.
+        import tempfile
 
-                dp = LocalDataProvider(str(CONFIG_PATH))
+        transcoded_tmp = Path(tempfile.gettempdir()) / "video_review_transcoded"
+        transcoded_tmp.mkdir(parents=True, exist_ok=True)
+        app.add_media_files("/transcoded", transcoded_tmp)
+
+        from review_app.app.config import get_default_db_path
+
+        if get_default_db_path().exists():
+            try:
+                dp = LocalDataProvider()
                 set_data_provider(dp)
                 self.dp = dp
-                proj = dp.get_most_recent_project()
-                if proj:
-                    set_active_project(proj.id)
-                    dp.touch_project(proj.id)
+                load_settings_from_db(dp)
 
-                # Register all video directories for the active project
-                import tempfile
-
-                transcoded_tmp = Path(tempfile.gettempdir()) / "video_review_transcoded"
-                transcoded_tmp.mkdir(parents=True, exist_ok=True)
-                app.add_media_files("/transcoded", transcoded_tmp)
+                active_pid = get_active_project_id()
+                if active_pid and dp.get_project(active_pid):
+                    dp.touch_project(active_pid)
+                else:
+                    proj = dp.get_most_recent_project()
+                    if proj:
+                        set_active_project(proj.id)
+                        dp.touch_project(proj.id)
 
                 set_media_dirs(
                     [Path(d.path) for d in dp.get_project_dirs(get_active_project_id())]
                 )
             except Exception as e:
-                print(f"Warning: Could not load config at startup: {e}")
+                print(f"Warning: Could not initialize data provider at startup: {e}")
 
         setup_media_route()
 

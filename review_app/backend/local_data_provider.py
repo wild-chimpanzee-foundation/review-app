@@ -7,16 +7,12 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import yaml
-from dotenv import load_dotenv
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import sessionmaker
 
 from review_app.app.config import (
     CSV_TEMPLATES,
     DEFAULT_DB_FILENAME,
-    REPO_ROOT,
-    get_config_path,
     get_user_data_dir,
 )
 from review_app.backend.migrations import run_migrations
@@ -32,27 +28,18 @@ from review_app.backend.species import SpeciesMixin
 from review_app.backend.utils import get_default_species_from_annotations, needs_browser_transcode
 from review_app.backend.video import VideoMixin
 
-load_dotenv()
-
 
 class LocalDataProvider(VideoMixin, SpeciesMixin):
     """SQLite-backed local data provider for manual review + constrained model imports."""
 
-    def __init__(self, config_path: str | Path | None = None) -> None:
-        cfg = self._load_yaml_config(config_path)
-
+    def __init__(self) -> None:
         self.db_dir = get_user_data_dir()
-
         self.db_dir.mkdir(parents=True, exist_ok=True)
 
-        self._behavior_defaults: list[str] = self._normalize_string_list(
-            cfg.get("behavior_defaults"), "behavior_defaults"
-        )
-        self._consensus_min_probability: float = float(cfg.get("consensus_min_probability", 0.0))
+        self._behavior_defaults: list[str] = ["does_not_react", "reacts_to_camera"]
+        self._consensus_min_probability: float = 0.0
 
-        db_filename = DEFAULT_DB_FILENAME
-
-        self._db_path = self.db_dir / db_filename
+        self._db_path = self.db_dir / DEFAULT_DB_FILENAME
 
         self.engine = create_engine(f"sqlite:///{self._db_path}")
 
@@ -71,43 +58,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         self._load_species_data()
         self._load_species_behaviors()
 
-    # ── Config helpers ────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _resolve_path(raw_path: str | Path) -> Path:
-        p = Path(raw_path).expanduser()
-        if p.is_absolute():
-            return p
-        return (REPO_ROOT / p).resolve()
-
-    @staticmethod
-    def _optional_path(raw_path: Any) -> Path | None:
-        if raw_path is None:
-            return None
-        txt = str(raw_path).strip()
-        if not txt:
-            return None
-        return LocalDataProvider._resolve_path(txt)
-
-    @staticmethod
-    def _load_yaml_config(config_path: str | Path | None) -> dict[str, Any]:
-        if config_path is None:
-            config_path = get_config_path()
-        p = LocalDataProvider._resolve_path(config_path)
-        if not p.exists():
-            raise FileNotFoundError(f"Config file not found: `{p}`.")
-        with open(p) as f:
-            loaded = yaml.safe_load(f) or {}
-        if not isinstance(loaded, dict):
-            raise ValueError(f"Config file `{p}` must be a YAML mapping.")
-        return loaded
-
-    @staticmethod
-    def _required_path(cfg: dict[str, Any], key: str) -> Path:
-        raw = cfg.get(key)
-        if not raw:
-            raise ValueError(f"Missing required config key `{key}`.")
-        return LocalDataProvider._resolve_path(raw)
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
     def _normalize_string_list(values: Any, key_name: str) -> list[str]:
@@ -130,9 +81,23 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             p = {"pid": active_project_id} if active_project_id else {}
             return set(conn.execute(q, p).scalars())
 
-    @property
-    def _app_config_path(self) -> Path:
-        return self.db_dir / "config.json"
+    # ── App settings (key-value store in DB) ─────────────────────────────────
+
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT value FROM app_settings WHERE key = :k"), {"k": key}
+            ).fetchone()
+        return row[0] if row else default
+
+    def set_setting(self, key: str, value: Any) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO app_settings (key, value) VALUES (:k, :v) ON CONFLICT(key) DO UPDATE SET value = :v"
+                ),
+                {"k": key, "v": str(value) if value is not None else None},
+            )
 
     # ── Video sync ────────────────────────────────────────────────────────────
 
@@ -162,21 +127,6 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             else:
                 result = conn.execute(text("SELECT COUNT(*) FROM videos")).fetchone()
             return result[0] > 0 if result else False
-
-    # ── Config persistence ────────────────────────────────────────────────────
-
-    def get_app_state(self) -> dict:
-        if self._app_config_path.exists():
-            with open(self._app_config_path) as f:
-                return json.load(f)
-        return {}
-
-    def save_app_state(self, config: dict) -> None:
-        with open(self._app_config_path, "w") as f:
-            json.dump(config, f, indent=2)
-
-    def get_overrides(self) -> dict:
-        return self.get_app_state()
 
     # ── Project management ────────────────────────────────────────────────────
 

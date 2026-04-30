@@ -4,16 +4,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import yaml
 from nicegui import run, ui
 
-from review_app.app.config import (
-    get_bundled_default_config_path,
-    get_config_path,
-    get_default_db_path,
-    save_config,
-)
-from review_app.app.translations import t
+from review_app.app.config import get_default_db_path
+from review_app.app.translations import get_language, t
 from review_app.app.utils import sync_with_progress
 
 FFMPEG_INSTALL_MAC = "brew install ffmpeg"
@@ -21,15 +15,15 @@ FFMPEG_INSTALL_WINDOWS = "winget install ffmpeg"
 FFMPEG_INSTALL_LINUX = "sudo apt install ffmpeg"
 
 
-def validate_video_dir(path: str) -> str | None:
-    """Return an error message if the directory is unsuitable, or None if valid."""
+def validate_video_dir(path: str) -> tuple[str, dict] | None:
+    """Return (error_key, kwargs) if the directory is unsuitable, or None if valid."""
     from review_app.app.config import VIDEO_EXTENSIONS
 
     p = Path(path)
     if not p.exists():
-        return t("video_dir_not_exist")
+        return ("video_dir_not_exist", {})
     if not p.is_dir():
-        return "The selected path is a file, not a directory."
+        return ("video_dir_not_a_dir", {})
     has_files = False
     for child in p.rglob("*"):
         if child.is_file():
@@ -37,9 +31,8 @@ def validate_video_dir(path: str) -> str | None:
             if child.suffix.lower() in VIDEO_EXTENSIONS:
                 return None
     if not has_files:
-        return "The directory is empty — no files were found."
-    exts = ", ".join(sorted(VIDEO_EXTENSIONS))
-    return f"No video files found in this directory. Supported formats: {exts}"
+        return ("video_dir_empty", {})
+    return ("video_dir_no_videos", {"exts": ", ".join(sorted(VIDEO_EXTENSIONS))})
 
 
 def check_ffmpeg() -> bool:
@@ -62,60 +55,32 @@ def get_ffmpeg_install_cmd() -> str:
         return FFMPEG_INSTALL_LINUX
 
 
-def generate_config(annotator_name: str) -> dict:
-    default_path = get_bundled_default_config_path()
-    if default_path.exists():
-        with open(default_path) as f:
-            config = yaml.safe_load(f) or {}
-    else:
-        config = {}
-
-    config["annotator_name"] = annotator_name
-
-    # Resolve bundled CSV paths to absolute paths using __file__,
-    # which works correctly both in dev and inside PyInstaller's _MEIPASS.
-    data_dir = Path(__file__).parent.parent / "data"
-    species_csv = data_dir / "species.csv"
-    behaviors_csv = data_dir / "species_behaviors.csv"
-    if species_csv.exists():
-        config["species_csv_path"] = str(species_csv)
-    if behaviors_csv.exists():
-        config["species_behaviors_csv_path"] = str(behaviors_csv)
-
-    return config
-
-
 class SetupWizard:
-    def __init__(self, on_complete_callback, config_path: Path | str | None = None):
-        if config_path is None:
-            config_path = get_config_path()
+    def __init__(self, on_complete_callback):
         self.on_complete_callback = on_complete_callback
-        self.config_path = Path(config_path)
         self.ffmpeg_ok = False
         self.inputs = {}
-        self.existing_config = self._load_existing_config()
-
-    def _load_existing_config(self) -> dict:
-        if self.config_path.exists():
-            try:
-                with open(self.config_path) as f:
-                    return yaml.safe_load(f) or {}
-            except Exception:
-                pass
-        return {}
 
     def build(self):
-        defaults = self.existing_config
-        default_video = defaults.get("video_dir", "")
-        default_annotator = defaults.get("annotator_name", "")
-        default_project_name = defaults.get("_last_project_name", "")
+        default_video = ""
+        default_annotator = ""
+        default_project_name = ""
 
         submit_button_holder: list = [None]
 
         def update_submit_button():
             btn = submit_button_holder[0]
             if btn is not None:
-                can_submit = bool(self.inputs["video_dir"].value.strip()) and self.ffmpeg_ok
+                # can_submit = bool(self.inputs["video_dir"].value.strip()) and self.ffmpeg_ok
+                can_submit = bool(
+                    self.inputs.get("video_dir")
+                    and self.inputs["video_dir"].value.strip()
+                    and self.inputs.get("project_name")
+                    and self.inputs["project_name"].value.strip()
+                    and self.inputs.get("annotator_name")
+                    and self.inputs["annotator_name"].value.strip()
+                    and self.ffmpeg_ok
+                )
                 btn.set_enabled(can_submit)
 
         def on_video_dir_change(e):
@@ -186,18 +151,20 @@ class SetupWizard:
             submit_button_holder[0].set_enabled(False)
 
             video_dir = self.inputs["video_dir"].value.strip()
-            annotator_name = self.inputs["annotator_name"].value.strip() or "default"
+            annotator_name = self.inputs["annotator_name"].value.strip()
             project_name = (
                 self.inputs["project_name"].value.strip() or Path(video_dir).name or "My Project"
             )
 
+            # Validate inputs before touching the DB
             if not video_dir:
                 ui.notify(t("enter_video_dir"), type="warning")
                 update_submit_button()
                 return
             dir_error = await run.io_bound(validate_video_dir, video_dir)
             if dir_error:
-                ui.notify(dir_error, type="negative", timeout=6000)
+                key, kwargs = dir_error
+                ui.notify(t(key, **kwargs), type="negative", timeout=6000)
                 update_submit_button()
                 return
             if not self.ffmpeg_ok:
@@ -205,44 +172,41 @@ class SetupWizard:
                 update_submit_button()
                 return
 
-            db_path = get_default_db_path()
-            adding_to_existing = bool(self.existing_config.get("active_project_id"))
-            if db_path.exists() and not adding_to_existing:
-                confirmed = await _confirm_existing_db(str(db_path))
-                if confirmed is None:
-                    update_submit_button()
-                    return
-                if confirmed is False:
-                    db_path.unlink()
-
-            if adding_to_existing:
-                config = dict(self.existing_config)
-                config["annotator_name"] = annotator_name
-            else:
-                config = generate_config(annotator_name)
-            save_config(config)
-
             from review_app.app.state import (
                 get_active_project_id,
-                init_user_prefs,
+                load_settings_from_db,
+                set_annotator_name,
                 set_data_provider,
             )
             from review_app.app.utils import switch_project
             from review_app.backend.local_data_provider import LocalDataProvider
 
-            init_user_prefs(
-                dark_mode=config.get("dark_mode", True),
-                language=config.get("language", "en"),
-                annotator_name=config.get("annotator_name", "default"),
-            )
+            # Check for an existing DB before creating any LocalDataProvider,
+            # since DP creation always creates the file via create_all.
+            db_path = get_default_db_path()
+            db_existed = db_path.exists()
 
-            # Create project in a temporary dp (active_project_id not in config yet)
-            _dp_tmp = LocalDataProvider(str(self.config_path))
-            project = _dp_tmp.create_project(project_name, video_dir)
+            if db_existed:
+                _dp_peek = LocalDataProvider()
+                adding_to_existing = bool(_dp_peek.get_most_recent_project())
+                _dp_peek.engine.dispose()
 
-            # Reload dp now that active_project_id is in config so project dirs are populated
-            dp = LocalDataProvider(str(self.config_path))
+                if not adding_to_existing:
+                    confirmed = await _confirm_existing_db(str(db_path))
+                    if confirmed is None:
+                        update_submit_button()
+                        return
+                    if confirmed is False:
+                        db_path.unlink()
+            else:
+                adding_to_existing = False
+
+            dp = LocalDataProvider()
             set_data_provider(dp)
+            load_settings_from_db(dp)
+            set_annotator_name(annotator_name)
+
+            project = dp.create_project(project_name, video_dir)
             switch_project(dp, project.id)
 
             has_videos = await run.io_bound(dp.has_videos_in_db, get_active_project_id())
@@ -269,7 +233,10 @@ class SetupWizard:
 
                 dialog.open()
                 stats = await sync_with_progress(
-                    dp, progress=progress, status=status, video_dir=video_dir,
+                    dp,
+                    progress=progress,
+                    status=status,
+                    video_dir=video_dir,
                     active_project_id=get_active_project_id(),
                 )
                 status.text = t("sync_complete")
@@ -289,8 +256,22 @@ class SetupWizard:
 
         with ui.column().classes("w-full q-pa-lg").style("max-width: 720px; margin: 0 auto"):
             with ui.card().classes("full-width q-mb-lg"):
-                ui.label(t("welcome_setup")).classes("text-h4 text-primary font-weight-bold")
-                ui.label(t("welcome_setup_msg")).classes("text-body1 text-grey-7")
+                with ui.row().classes("w-full items-start justify-between"):
+                    with ui.column().classes("col"):
+                        ui.label(t("welcome_setup")).classes("text-h4 text-primary font-weight-bold")
+                        ui.label(t("welcome_setup_msg")).classes("text-body1 text-grey-7")
+
+                    def change_language(e):
+                        from review_app.app.translations import set_language
+                        from nicegui import ui as _ui
+                        set_language(e.value)
+                        _ui.run_javascript("window.location.reload()")
+
+                    ui.select(
+                        options={"en": t("lang_en"), "fr": t("lang_fr")},
+                        value=get_language(),
+                        on_change=change_language,
+                    ).props("dense outlined").classes("q-mt-xs")
 
             with ui.card().classes("full-width q-mb-md"):
                 ui.label(t("project_name_label")).classes(
@@ -300,6 +281,7 @@ class SetupWizard:
                 self.inputs["project_name"] = ui.input(
                     placeholder=t("project_name_placeholder"), value=default_project_name
                 ).props("outlined dense class=w-full")
+                self.inputs["project_name"].on_value_change(lambda e: update_submit_button())
 
             with ui.card().classes("full-width q-mb-md"):
                 ui.label(t("video_dir_label")).classes("text-subtitle1 font-weight-medium q-mb-xs")
@@ -315,7 +297,7 @@ class SetupWizard:
                 self.inputs["annotator_name"] = ui.input(
                     placeholder=t("annotator_name_placeholder"), value=default_annotator
                 ).props("outlined dense class=w-full")
-
+                self.inputs["annotator_name"].on_value_change(lambda e: update_submit_button())
             with ui.card().classes("full-width q-mb-md"):
                 with ui.row().classes("items-center gap-sm"):
                     ui.label(t("ffmpeg_label")).classes("text-subtitle1 font-weight-medium")
@@ -342,6 +324,6 @@ class SetupWizard:
             ui.timer(0, do_check_ffmpeg, once=True)
 
 
-def setup_wizard(on_complete_callback, config_path: Path | str | None = None):
-    wizard = SetupWizard(on_complete_callback, config_path=config_path)
+def setup_wizard(on_complete_callback):
+    wizard = SetupWizard(on_complete_callback)
     wizard.build()

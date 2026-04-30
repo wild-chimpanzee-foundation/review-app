@@ -3,25 +3,22 @@ from pathlib import Path
 
 from nicegui import run, ui
 
-from review_app.app.config import (
-    get_bundled_behaviors_csv,
-    get_bundled_species_csv,
-    get_config_path,
-    load_config,
-    update_config_key,
-)
+from review_app.app.config import get_default_db_path
 from review_app.app.state import (
     get_active_project_id,
     get_annotator_name,
     get_blank_threshold,
     get_data_provider,
     get_species_threshold,
-    init_user_prefs,
+    reset_app_state,
     set_active_project,
+    set_annotator_name,
+    set_blank_threshold,
     set_current_idx,
     set_data_provider,
     set_queue,
     set_selections,
+    set_species_threshold,
 )
 from review_app.app.translations import t
 from review_app.app.utils import (
@@ -30,24 +27,9 @@ from review_app.app.utils import (
 )
 from review_app.backend.local_data_provider import LocalDataProvider
 
-CONFIG_PATH = get_config_path()
-
 
 def _build_settings_content(container: ui.column):
-    config = load_config()
-    current_db_dir = config.get("db_dir", "")
-    current_db_file = config.get("db_filename", "review_data.db")
-    from review_app.app.config import get_default_db_path
-
-    current_db_path = (
-        Path(current_db_dir) / current_db_file if current_db_dir else get_default_db_path()
-    )
-
-    bundled_species = get_bundled_species_csv()
-    bundled_behaviors = get_bundled_behaviors_csv()
-
-    species_csv_val = config.get("species_csv_path") or bundled_species or ""
-    behaviors_csv_val = config.get("species_behaviors_csv_path") or bundled_behaviors or ""
+    current_db_path = get_default_db_path()
 
     initial_annotator = get_annotator_name()
     initial_blank_threshold = get_blank_threshold()
@@ -59,7 +41,7 @@ def _build_settings_content(container: ui.column):
     stats = {"videos": 0}
     current_video_dirs: list = []
     try:
-        _dp_stats = LocalDataProvider(str(CONFIG_PATH))
+        _dp_stats = LocalDataProvider()
         if active_project_id:
             _proj = _dp_stats.get_project(active_project_id)
             current_project_name = _proj.name if _proj else ""
@@ -111,7 +93,7 @@ def _build_settings_content(container: ui.column):
         return result[0]
 
     def _reinit_dp():
-        new_dp = LocalDataProvider(str(CONFIG_PATH))
+        new_dp = LocalDataProvider()
         set_data_provider(new_dp)
         set_queue([])
         set_current_idx(0)
@@ -137,7 +119,7 @@ def _build_settings_content(container: ui.column):
                         if not name:
                             ui.notify(t("project_name_required"), type="warning")
                             return
-                        _dp = get_data_provider() or LocalDataProvider(str(CONFIG_PATH))
+                        _dp = get_data_provider() or LocalDataProvider()
                         _dp.update_project_name(active_project_id, name)
                         set_active_project(active_project_id)
                         ui.notify(t("project_name_saved"), type="positive")
@@ -173,14 +155,7 @@ def _build_settings_content(container: ui.column):
 
                 def save_annotator():
                     name = annotator_input.value.strip() or "default"
-                    update_config_key("annotator_name", name)
-                    init_user_prefs(
-                        dark_mode=config.get("dark_mode", True),
-                        language=config.get("language", "en"),
-                        annotator_name=name,
-                        blank_threshold=get_blank_threshold(),
-                        species_threshold=get_species_threshold(),
-                    )
+                    set_annotator_name(name)
                     ui.notify(t("settings_saved"), type="positive")
 
                 ui.button(t("save"), icon="check", color="primary", on_click=save_annotator).props(
@@ -203,7 +178,7 @@ def _build_settings_content(container: ui.column):
                 dir_sync_dialog = ui.dialog()
 
                 async def sync_dir():
-                    _dp = get_data_provider() or LocalDataProvider(str(CONFIG_PATH))
+                    _dp = get_data_provider() or LocalDataProvider()
                     dir_sync_dialog.clear()
                     with dir_sync_dialog, ui.card().classes("q-pa-lg").style("min-width: 360px"):
                         ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
@@ -243,148 +218,6 @@ def _build_settings_content(container: ui.column):
             with ui.column().classes("w-full gap-lg q-pa-md"):
                 with ui.card().classes("full-width"):
                     with ui.row().classes("items-center q-mb-sm"):
-                        ui.icon("storage", size="sm").classes("text-primary q-mr-sm")
-                        ui.label(t("database_file")).classes("text-subtitle1 font-weight-medium")
-                    ui.label(t("database_file_desc")).classes("text-caption text-grey-6 q-mb-md")
-                    with ui.row().classes("w-full items-center gap-sm"):
-                        db_path_input = (
-                            ui.input(
-                                placeholder=t("database_file_placeholder"),
-                                value=str(current_db_path) if current_db_path else "",
-                            )
-                            .props("outlined dense")
-                            .classes("col")
-                        )
-
-                        async def save_db_path():
-                            new_db_path = db_path_input.value.strip()
-                            if not new_db_path:
-                                ui.notify(t("database_path_required"), type="warning")
-                                return
-                            db_path_changed = (
-                                new_db_path != str(current_db_path) if current_db_path else True
-                            )
-                            if db_path_changed and Path(new_db_path).exists():
-                                confirmed = await _confirm_existing_db(new_db_path)
-                                if confirmed is None:
-                                    return
-                                if confirmed is False:
-                                    old_dp = get_data_provider()
-                                    if old_dp:
-                                        old_dp.engine.dispose()
-                                    Path(new_db_path).unlink()
-                            update_config_key("db_dir", str(Path(new_db_path).parent))
-                            update_config_key("db_filename", Path(new_db_path).name)
-                            _reinit_dp()
-                            ui.notify(t("settings_saved"), type="positive")
-
-                        ui.button(
-                            t("save"), icon="check", color="primary", on_click=save_db_path
-                        ).props("dense")
-
-                with ui.card().classes("full-width"):
-                    with ui.row().classes("items-center q-mb-sm"):
-                        ui.icon("table_chart", size="sm").classes("text-primary q-mr-sm")
-                        ui.label(t("species_csv")).classes("text-subtitle1 font-weight-medium")
-                    ui.label(t("species_csv_desc")).classes("text-caption text-grey-6 q-mb-md")
-
-                    species_csv_input = ui.input(
-                        label=t("custom_species_csv"),
-                        value=species_csv_val,
-                    ).props("outlined dense class=w-full")
-
-                    with ui.row().classes("w-full items-center mt-2"):
-                        ui.label(t("csv_mode_label") + ":").classes(
-                            "text-caption text-grey-6 q-mr-md"
-                        )
-                        species_csv_mode_radio = ui.radio(
-                            options={"override": t("mode_override"), "append": t("mode_append")},
-                            value="override",
-                        ).props("inline dense")
-
-                    if bundled_species:
-                        with ui.row().classes("w-full items-center mt-1 justify-end"):
-                            ui.label(t("mode_bundled") + ":").classes(
-                                "text-caption text-grey-6 q-mr-sm"
-                            )
-                            ui.button(
-                                Path(bundled_species).name,
-                                on_click=lambda: species_csv_input.set_value(bundled_species),
-                            ).props("flat dense color=primary").classes(
-                                "text-capitalize text-caption"
-                            )
-
-                    with ui.row().classes("w-full justify-end q-mt-sm"):
-
-                        async def save_species_csv():
-                            csv_path = species_csv_input.value.strip()
-                            if not csv_path:
-                                ui.notify(t("custom_species_required"), type="warning")
-                                return
-                            if not Path(csv_path).exists():
-                                ui.notify(t("custom_species_not_exist"), type="negative")
-                                return
-                            update_config_key("species_csv_path", csv_path)
-                            update_config_key("species_csv_mode", species_csv_mode_radio.value)
-                            _reinit_dp()
-                            ui.notify(t("settings_saved"), type="positive")
-
-                        ui.button(
-                            t("save"), icon="check", color="primary", on_click=save_species_csv
-                        ).props("dense")
-
-                with ui.card().classes("full-width"):
-                    with ui.row().classes("items-center q-mb-sm"):
-                        ui.icon("list", size="sm").classes("text-primary q-mr-sm")
-                        ui.label(t("behaviors_csv")).classes("text-subtitle1 font-weight-medium")
-                    ui.label(t("behaviors_csv_desc")).classes("text-caption text-grey-6 q-mb-md")
-
-                    behaviors_csv_input = ui.input(
-                        label=t("custom_behaviors_csv"),
-                        value=behaviors_csv_val,
-                    ).props("outlined dense class=w-full")
-
-                    with ui.row().classes("w-full items-center mt-2"):
-                        ui.label(t("csv_mode_label") + ":").classes(
-                            "text-caption text-grey-6 q-mr-md"
-                        )
-                        behaviors_csv_mode_radio = ui.radio(
-                            options={"override": t("mode_override"), "append": t("mode_append")},
-                            value="override",
-                        ).props("inline dense")
-
-                    if bundled_behaviors:
-                        with ui.row().classes("w-full items-center mt-1 justify-end"):
-                            ui.label(t("mode_bundled") + ":").classes(
-                                "text-caption text-grey-6 q-mr-sm"
-                            )
-                            ui.button(
-                                Path(bundled_behaviors).name,
-                                on_click=lambda: behaviors_csv_input.set_value(bundled_behaviors),
-                            ).props("flat dense color=primary").classes(
-                                "text-capitalize text-caption"
-                            )
-
-                    with ui.row().classes("w-full justify-end q-mt-sm"):
-
-                        async def save_behaviors_csv():
-                            csv_path = behaviors_csv_input.value.strip()
-                            if csv_path and not Path(csv_path).exists():
-                                ui.notify(t("custom_behaviors_not_exist"), type="negative")
-                                return
-                            update_config_key("species_behaviors_csv_path", csv_path)
-                            update_config_key(
-                                "species_behaviors_csv_mode", behaviors_csv_mode_radio.value
-                            )
-                            _reinit_dp()
-                            ui.notify(t("settings_saved"), type="positive")
-
-                        ui.button(
-                            t("save"), icon="check", color="primary", on_click=save_behaviors_csv
-                        ).props("dense")
-
-                with ui.card().classes("full-width"):
-                    with ui.row().classes("items-center q-mb-sm"):
                         ui.icon("tune", size="sm").classes("text-primary q-mr-sm")
                         ui.label(t("blank_detection")).classes("text-subtitle1 font-weight-medium")
                     ui.label(t("blank_detection_desc")).classes("text-caption text-grey-6 q-mb-md")
@@ -404,15 +237,8 @@ def _build_settings_content(container: ui.column):
                     with ui.row().classes("w-full justify-end q-mt-sm"):
 
                         def save_thresholds():
-                            update_config_key("blank_threshold", blank_threshold_slider.value)
-                            update_config_key("species_threshold", species_threshold_slider.value)
-                            init_user_prefs(
-                                dark_mode=config.get("dark_mode", True),
-                                language=config.get("language", "en"),
-                                annotator_name=get_annotator_name(),
-                                blank_threshold=blank_threshold_slider.value,
-                                species_threshold=species_threshold_slider.value,
-                            )
+                            set_blank_threshold(blank_threshold_slider.value)
+                            set_species_threshold(species_threshold_slider.value)
                             ui.notify(t("settings_saved"), type="positive")
 
                         ui.button(
@@ -435,7 +261,7 @@ def _build_settings_content(container: ui.column):
                         async def open_sync_dialog():
                             _dp = get_data_provider()
                             if not _dp:
-                                _dp = LocalDataProvider(str(CONFIG_PATH))
+                                _dp = LocalDataProvider()
                                 set_data_provider(_dp)
                             sync_dialog.clear()
                             with (
@@ -496,9 +322,9 @@ def _build_settings_content(container: ui.column):
                                 old_dp.engine.dispose()
                             if current_db_path and current_db_path.exists():
                                 current_db_path.unlink()
-                            _reinit_dp()
+                            reset_app_state()
                             ui.notify(t("database_reset"), type="positive")
-                            ui.navigate.to("/")
+                            ui.navigate.to("/setup")
 
                         with reset_dialog, ui.card().classes("q-pa-lg"):
                             ui.label(t("reset_confirm")).classes("text-h6 q-mb-sm")

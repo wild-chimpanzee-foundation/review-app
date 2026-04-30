@@ -200,11 +200,19 @@ class VideoMixin:
             new_rows = scanned[~scanned["video_path"].isin(existing)]
             existing_df = scanned[scanned["video_path"].isin(existing)]
 
+            total_scanned = len(scanned)
             probe_results: dict[Path, tuple] = {}
             if not new_rows.empty:
+                n_new = len(new_rows)
+                n_existing = total_scanned - n_new
+
+                def _offset_callback(current, total, filename):
+                    if progress_callback:
+                        progress_callback(n_existing + current, total_scanned, filename)
+
                 probe_results = _probe_many(
                     [Path(r) for r in new_rows["video_path"]],
-                    progress_callback=progress_callback,
+                    progress_callback=_offset_callback,
                 )
 
             if not new_rows.empty:
@@ -259,6 +267,9 @@ class VideoMixin:
                 )
 
             session.commit()
+
+        if progress_callback:
+            progress_callback(total_scanned, total_scanned, "")
 
         return {
             "scanned": len(scanned),

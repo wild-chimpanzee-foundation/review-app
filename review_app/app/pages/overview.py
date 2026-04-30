@@ -50,13 +50,6 @@ async def setup_overview():
                         selected_needs_review="Needs Review",
                     ),
                 ).props("outline")
-                ui.space()
-                ui.button(
-                    t("quick_review_later"),
-                    icon="bookmark",
-                    color="orange",
-                    on_click=lambda: go_review(selected_is_review_later=True),
-                ).props("outline")
 
         v = stats.get("videos", {})
         lb = stats.get("labeling", {})
