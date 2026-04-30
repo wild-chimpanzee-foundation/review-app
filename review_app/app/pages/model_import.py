@@ -126,7 +126,7 @@ async def setup_model_import():
 
         with ui.tab_panels(tabs, value=tab_model).classes("w-full"):
             with ui.tab_panel(tab_model):
-                ui.label(t("model_import_desc")).classes("text-body2 text-grey-7 q-mb-md")
+                ui.label(t("model_import_desc")).classes("text-body2  q-mb-md")
 
                 templates = await run.io_bound(dp.get_csv_templates)
                 csv_content = templates["model_annotations"]
@@ -135,17 +135,17 @@ async def setup_model_import():
                     ui.download(csv_content.encode("utf-8"), "model_annotations_template.csv")
 
                 with ui.row().classes("items-center q-mb-md"):
-                    ui.label(t("csv_template")).classes("text-caption text-grey-6")
+                    ui.label(t("csv_template")).classes("text-caption")
                     ui.button(
                         t("download_template"),
                         icon="download",
                         on_click=download_template,
-                    ).props("flat dense color=grey-7 size=sm")
+                    ).props("flat dense size=sm")
 
                 # ── Upload ────────────────────────────────────────────────────
                 with ui.card().classes("full-width q-mb-lg"):
                     ui.label(t("upload_csv")).classes("text-subtitle1 font-weight-medium q-mb-md")
-                    upload_result = ui.label(t("upload_csv_msg")).classes("text-body2 text-grey-6")
+                    upload_result = ui.label(t("upload_csv_msg")).classes("text-body2")
 
                     async def handle_upload(e):
                         loading_dialog.open()
@@ -321,7 +321,7 @@ async def setup_model_import():
                             ui.label(t("long_format_detected")).classes(
                                 "text-body2 text-positive q-mb-xs"
                             )
-                            ui.label(t("long_format_desc")).classes("text-caption text-grey-6")
+                            ui.label(t("long_format_desc")).classes("text-caption")
                         ui.button(
                             t("process_csv"),
                             icon="play_arrow",
@@ -410,7 +410,7 @@ async def setup_model_import():
                                         icon="warning",
                                     ).classes("q-mt-xs"):
                                         for up in preview["unmatched_sample"]:
-                                            ui.label(up).classes("text-caption text-grey-5")
+                                            ui.label(up).classes("text-caption")
 
                     # Annotation columns ──────────────────────────────────────
                     with ui.card().classes("full-width q-mb-md"):
@@ -429,7 +429,7 @@ async def setup_model_import():
                                     t("ann_col_value"),
                                     t("ann_col_prob"),
                                 ):
-                                    ui.label(lbl).classes("col text-caption text-grey-6")
+                                    ui.label(lbl).classes("col text-caption")
                                 ui.element("div").style("min-width:32px")
 
                         for i, m in enumerate(ann_mappings):
@@ -623,7 +623,7 @@ async def setup_model_import():
                                         icon="warning",
                                     ).classes("q-mt-xs"):
                                         for up in match_stats["unmatched_sample"]:
-                                            ui.label(up).classes("text-caption text-grey-5")
+                                            ui.label(up).classes("text-caption ")
 
                         ui.label(t("validation_result")).classes(
                             "text-subtitle1 font-weight-medium q-mb-md"
@@ -639,12 +639,12 @@ async def setup_model_import():
                                 ui.label(str(valid_count)).classes(
                                     "text-h5 font-weight-bold text-positive"
                                 )
-                                ui.label(t("valid_rows")).classes("text-caption text-grey-6")
+                                ui.label(t("valid_rows")).classes("text-caption ")
                             with ui.card().classes("text-center q-pa-md"):
                                 ui.label(str(invalid_count)).classes(
                                     "text-h5 font-weight-bold text-negative"
                                 )
-                                ui.label(t("invalid_rows")).classes("text-caption text-grey-6")
+                                ui.label(t("invalid_rows")).classes("text-caption ")
 
                     with mappings_container:
                         all_mappings = dict(get_state_val("species_mappings", {}))
@@ -656,9 +656,7 @@ async def setup_model_import():
                             ui.label(t("species_mappings")).classes(
                                 "text-subtitle1 font-weight-medium q-mb-sm"
                             )
-                            ui.label(t("edit_mappings_desc")).classes(
-                                "text-caption text-grey-6 q-mb-md"
-                            )
+                            ui.label(t("edit_mappings_desc")).classes("text-caption  q-mb-md")
 
                             species_map = dp.get_species_display_map(get_language())
                             select_options = {"": ""}
@@ -811,11 +809,9 @@ async def setup_model_import():
                         ui.label(t("upload_csv")).classes(
                             "text-subtitle2 font-weight-medium q-mb-xs"
                         )
-                        ui.label(t("annotation_import_desc")).classes(
-                            "text-caption text-grey-6 q-mb-md"
-                        )
+                        ui.label(t("annotation_import_desc")).classes("text-caption  q-mb-md")
 
-                        annotation_import_status = ui.label("").classes("text-body2 text-grey-6")
+                        annotation_import_status = ui.label("").classes("text-body2 ")
 
                         async def handle_annotation_upload(e):
                             try:
@@ -843,9 +839,7 @@ async def setup_model_import():
                         ui.label(t("export_annotations")).classes(
                             "text-subtitle2 font-weight-medium q-mb-xs"
                         )
-                        ui.label(t("annotation_export_desc")).classes(
-                            "text-caption text-grey-6 q-mb-md"
-                        )
+                        ui.label(t("annotation_export_desc")).classes("text-caption q-mb-md")
 
                         async def do_export():
                             try:

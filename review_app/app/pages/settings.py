@@ -167,12 +167,12 @@ def _build_settings_content(container: ui.column):
                 with ui.row().classes("items-center q-mb-sm"):
                     ui.icon("folder_open", size="sm").classes("text-primary q-mr-sm")
                     ui.label(t("video_dir_label")).classes("text-subtitle1 font-weight-medium")
-                ui.label(t("video_dir_desc")).classes("text-caption text-grey-6 q-mb-md")
+                ui.label(t("video_dir_desc")).classes("text-caption  q-mb-md")
 
                 video_dir = current_video_dirs[0] if current_video_dirs else None
                 dir_label = str(video_dir) if video_dir else t("not_available")
                 ui.label(dir_label).classes(
-                    "text-body2 text-grey-5 q-pa-xs bg-grey-9 rounded-borders full-width q-mb-sm"
+                    "text-body2  q-pa-xs rounded-borders full-width q-mb-sm"
                 )
 
                 dir_sync_dialog = ui.dialog()

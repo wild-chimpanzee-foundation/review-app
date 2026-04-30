@@ -152,6 +152,18 @@ def shared_header(show_drawer: bool = False):
                 ui.button(t("nav_settings"), on_click=lambda: ui.navigate.to("/settings")).props(
                     "flat color=white"
                 ).classes("gt-sm")
+                with ui.button(icon="menu").props("flat round color=white").classes("lt-md"):
+                    with ui.menu().props("auto-close"):
+                        ui.menu_item(
+                            t("nav_overview"), on_click=lambda: ui.navigate.to("/overview")
+                        )
+                        ui.menu_item(t("nav_review"), on_click=lambda: ui.navigate.to("/review"))
+                        ui.menu_item(
+                            t("nav_import"), on_click=lambda: ui.navigate.to("/model-import")
+                        )
+                        ui.menu_item(
+                            t("nav_settings"), on_click=lambda: ui.navigate.to("/settings")
+                        )
 
             ui.space()
 
@@ -312,7 +324,7 @@ class GUI:
         )
 
 
-if __name__ == "__main__":
+if __name__ in {"__main__", "__mp_main__"}:
     from multiprocessing import freeze_support
 
     freeze_support()

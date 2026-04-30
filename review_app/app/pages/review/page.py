@@ -338,7 +338,7 @@ async def render_video_section(dp, species_map):
                                 ):
                                     # Left side: Value
                                     with ui.row().classes("items-center gap-x-2"):
-                                        ui.label(_val).classes("text-caption text-bold text-white")
+                                        ui.label(_val).classes("text-caption text-bold")
                                         if len(_models) > 1:
                                             ui.badge(f"{len(_models)}").props(
                                                 "color=blue-6 outline size=xs"
