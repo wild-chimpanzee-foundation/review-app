@@ -21,8 +21,8 @@ class MockDataProvider(LocalDataProvider):
         from datetime import datetime
         now = datetime.now()
         with self.engine.begin() as conn:
-            conn.execute(text("INSERT INTO species (id, scientific_name, name_en, name_fr) VALUES ('s1', 'Deer', 'Deer', 'Cerf'), ('s2', 'Fox', 'Fox', 'Renard')"))
-            conn.execute(text("INSERT INTO behaviors (id, key, name_en, name_fr) VALUES ('b1', 'walking', 'Walking', 'Marche'), ('b2', 'eating', 'Eating', 'Mange')"))
+            conn.execute(text("INSERT INTO species (id, scientific_name, name_en, name_fr, is_custom) VALUES ('s1', 'Deer', 'Deer', 'Cerf', 0), ('s2', 'Fox', 'Fox', 'Renard', 0)"))
+            conn.execute(text("INSERT INTO behaviors (id, key, name_en, name_fr, is_custom) VALUES ('b1', 'walking', 'Walking', 'Marche', 0), ('b2', 'eating', 'Eating', 'Mange', 0)"))
             conn.execute(text("INSERT INTO species_behaviors (species_id, behavior_id) VALUES ('s1', 'b1'), ('s2', 'b2')"))
             conn.execute(text("INSERT INTO projects (id, name, created_at) VALUES ('p1', 'Project 1', :now), ('p2', 'Project 2', :now)"), {"now": now})
 

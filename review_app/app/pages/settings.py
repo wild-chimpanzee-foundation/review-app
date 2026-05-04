@@ -347,10 +347,13 @@ def _build_settings_content(container: ui.column):
                                 if not all([key.value, n_en.value]):
                                     ui.notify(t("all_fields_required"), type="warning")
                                     return
-                                await run.io_bound(
+                                success = await run.io_bound(
                                     _dp.add_custom_behavior,
                                     key.value, n_en.value, n_fr.value or None,
                                 )
+                                if not success:
+                                    ui.notify(t("behavior_exists"), type="warning")
+                                    return
                                 ui.notify(t("behavior_added"), type="positive")
                                 dialog.close()
                                 nonlocal behavior_display_map

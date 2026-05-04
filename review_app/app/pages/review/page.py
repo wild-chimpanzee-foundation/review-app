@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 from nicegui import run, ui
 
+from review_app.app.config import DEFAULT_BEHAVIOR_KEY
 from review_app.app.onboarding import show_info_dialog, show_tour_if_needed
 from review_app.app.pages.review.annotations import render_annotation_section
 from review_app.app.pages.review.filters import render_filter_drawer  # noqa: F401 (refreshable)
@@ -14,6 +15,7 @@ from review_app.app.state import (
     get_blank_threshold,
     get_current_idx,
     get_filters,
+    get_language,
     get_queue,
     get_species_threshold,
     get_state_val,
@@ -22,7 +24,6 @@ from review_app.app.state import (
     set_queue,
     set_selections,
     set_state_val,
-    get_language,
 )
 from review_app.app.translations import t
 from review_app.app.utils import (
@@ -64,7 +65,7 @@ def navigate_to(idx: int):
 
 
 @ui.refreshable
-async def render_video_section(dp, species_map):
+async def render_video_section(dp, species_map, global_species_map):
     queue = get_queue()
     if not queue:
         ui.label(t("no_videos_match")).classes("text-h6 text-grey-5")
@@ -84,7 +85,7 @@ async def render_video_section(dp, species_map):
     model_ann_task = run.io_bound(dp.get_model_annotations, selected_video_id)
     video, model_ann = await asyncio.gather(video_task, model_ann_task)
 
-    default_behavior = "does_not_react"
+    default_behavior = DEFAULT_BEHAVIOR_KEY
     if model_ann is not None and not model_ann.empty:
         behavior_rows = model_ann[
             (model_ann["annotation_type"] == "behavior")
@@ -243,7 +244,7 @@ async def render_video_section(dp, species_map):
                     ).classes("text-negative text-caption q-mt-sm")
 
             if model_ann is not None and not model_ann.empty:
-                _species_map = await run.io_bound(dp.get_species_display_map, get_language())
+                _species_map = global_species_map
 
                 def _is_number(v: str) -> bool:
                     try:
@@ -426,6 +427,8 @@ async def setup_review():
     if not species_map:
         species_map = {"unknown": "unknown"}
 
+    global_species_map = await run.io_bound(dp.get_species_display_map, get_language())
+
     filters = get_filters()
     queue = get_queue()
 
@@ -489,7 +492,7 @@ async def setup_review():
 
     with ui.column().classes("w-full q-pa-xs"):
         with ui.element("div").style("width: 100%; max-width: 1900px; margin: 0 auto"):
-            await render_video_section(dp, species_map)
+            await render_video_section(dp, species_map, global_species_map)
 
     ui.run_javascript("document.activeElement?.blur()")
 

@@ -105,8 +105,8 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             scientific_name, name_en, name_fr, group_en, group_fr, iucn
         )
 
-    def add_custom_behavior(self, key: str, name_en: str, name_fr: str | None = None) -> None:
-        super().add_custom_behavior(key, name_en, name_fr)
+    def add_custom_behavior(self, key: str, name_en: str, name_fr: str | None = None) -> bool:
+        return super().add_custom_behavior(key, name_en, name_fr)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -934,7 +934,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             return
 
         now = self._utcnow_dt()
-        valid_species = set(self.get_valid_species())
+        valid_species = set(self.get_valid_species(active_project_id))
 
         with self.engine.connect() as conn:
             species_id_map = {
@@ -1444,6 +1444,12 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             species_map = self.get_species_display_map(lang)
             base_df["species"] = base_df["species"].map(
                 lambda s: species_map.get(s, s) if pd.notna(s) else s
+            )
+
+        if "behavior" in base_df.columns:
+            behavior_map = self.get_behavior_display_map(lang=lang)
+            base_df["behavior"] = base_df["behavior"].map(
+                lambda b: behavior_map.get(b, b) if pd.notna(b) else b
             )
 
         return base_df

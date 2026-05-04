@@ -23,6 +23,8 @@ DEFAULT_BEHAVIORS: list[dict[str, str]] = [
     {"key": "reacts_to_camera", "name_en": "Reacts to camera", "name_fr": "Réagit à la caméra"},
 ]
 
+DEFAULT_BEHAVIOR_KEY: str = DEFAULT_BEHAVIORS[0]["key"]
+
 if getattr(sys, "frozen", False):
     REPO_ROOT = Path(sys.executable).parent
 else:

@@ -56,9 +56,7 @@ class SpeciesMixin:
             # Preserve existing IDs so FK references in individual_observations remain valid.
             existing = {
                 r[0]: r[1]
-                for r in conn.execute(
-                    text("SELECT scientific_name, id FROM species")
-                ).fetchall()
+                for r in conn.execute(text("SELECT scientific_name, id FROM species")).fetchall()
             }
             for row in rows:
                 row["id"] = existing.get(row["scientific_name"]) or str(uuid.uuid4())
@@ -79,16 +77,18 @@ class SpeciesMixin:
                 rows,
             )
             # Remove species no longer in the CSV that have no observations.
-            valid = ", ".join(f"'{r['scientific_name']}'" for r in rows)
+            placeholders = ", ".join(f":sn{i}" for i in range(len(rows)))
+            params = {f"sn{i}": r["scientific_name"] for i, r in enumerate(rows)}
             conn.execute(
                 text(
                     f"""
                     DELETE FROM species
-                    WHERE scientific_name NOT IN ({valid})
+                    WHERE scientific_name NOT IN ({placeholders})
                     AND is_custom = 0
                     AND id NOT IN (SELECT DISTINCT species_id FROM individual_observations WHERE species_id IS NOT NULL)
                     """
-                )
+                ),
+                params,
             )
 
     @staticmethod
@@ -107,7 +107,8 @@ class SpeciesMixin:
                         {"scientific_name": species, "behavior": behavior, "behavior_fr": name_fr}
                     )
             return rows
-        except Exception:
+        except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as exc:
+            print("Failed to parse behaviors CSV %s: %s", path, exc)
             return []
 
     def _load_species_behaviors(self) -> None:
@@ -121,13 +122,15 @@ class SpeciesMixin:
             b["key"]: {"name_en": b["name_en"], "name_fr": b["name_fr"]} for b in DEFAULT_BEHAVIORS
         }
         for row in csv_rows:
-            behavior_meta[row["behavior"]] = {"name_en": row["behavior"], "name_fr": row.get("behavior_fr")}
+            behavior_meta[row["behavior"]] = {
+                "name_en": row["behavior"],
+                "name_fr": row.get("behavior_fr"),
+            }
 
         with self.engine.begin() as conn:
             # Upsert behaviors — preserve existing IDs.
             existing_beh = {
-                r[0]: r[1]
-                for r in conn.execute(text("SELECT key, id FROM behaviors")).fetchall()
+                r[0]: r[1] for r in conn.execute(text("SELECT key, id FROM behaviors")).fetchall()
             }
             behavior_rows = [
                 {
@@ -135,14 +138,15 @@ class SpeciesMixin:
                     "key": key,
                     "name_en": meta["name_en"],
                     "name_fr": meta["name_fr"],
+                    "is_custom": 0,
                 }
                 for key, meta in behavior_meta.items()
             ]
             conn.execute(
                 text(
                     """
-                    INSERT INTO behaviors (id, key, name_en, name_fr)
-                    VALUES (:id, :key, :name_en, :name_fr)
+                    INSERT INTO behaviors (id, key, name_en, name_fr, is_custom)
+                    VALUES (:id, :key, :name_en, :name_fr, :is_custom)
                     ON CONFLICT(key) DO UPDATE SET
                         name_en = excluded.name_en,
                         name_fr = excluded.name_fr
@@ -151,31 +155,31 @@ class SpeciesMixin:
                 behavior_rows,
             )
 
-            # Rebuild global species_behaviors from defaults + CSV.
-            conn.execute(text("DELETE FROM species_behaviors"))
-
+            # Insert or update all bundled species-behavior mappings.
+            # Then remove stale bundled mappings (for non-custom species)
+            # that are no longer in the bundled data.
             species_map = {
                 r[0]: r[1]
-                for r in conn.execute(
-                    text("SELECT scientific_name, id FROM species")
-                ).fetchall()
+                for r in conn.execute(text("SELECT scientific_name, id FROM species")).fetchall()
             }
             behavior_id_map = {
-                r[0]: r[1]
-                for r in conn.execute(text("SELECT key, id FROM behaviors")).fetchall()
+                r[0]: r[1] for r in conn.execute(text("SELECT key, id FROM behaviors")).fetchall()
             }
 
+            desired: set[tuple[str, str]] = set()
             to_insert: dict[tuple, dict] = {}
             for sci, sp_id in species_map.items():
                 for b_key in behavior_meta.keys():
                     b_id = behavior_id_map.get(b_key)
-                    if b_id:
+                    if sp_id and b_id:
                         to_insert[(sp_id, b_id)] = {"species_id": sp_id, "behavior_id": b_id}
+                        desired.add((sp_id, b_id))
             for row in csv_rows:
                 sp_id = species_map.get(row["scientific_name"])
                 b_id = behavior_id_map.get(row["behavior"])
                 if sp_id and b_id:
                     to_insert[(sp_id, b_id)] = {"species_id": sp_id, "behavior_id": b_id}
+                    desired.add((sp_id, b_id))
 
             if to_insert:
                 placeholders = ", ".join(f"(:sid{i}, :bid{i})" for i in range(len(to_insert)))
@@ -189,6 +193,76 @@ class SpeciesMixin:
                     ),
                     params,
                 )
+
+            # Remove bundled species-behavior pairs that are no longer in
+            # the bundled data.  Mappings involving custom species or
+            # custom behaviors are preserved since users may have
+            # added them manually.
+            bundled_species_ids = {
+                r[0]
+                for r in conn.execute(
+                    text("SELECT id FROM species WHERE is_custom = 0")
+                ).fetchall()
+            }
+            custom_behavior_ids = {
+                r[0]
+                for r in conn.execute(
+                    text("SELECT id FROM behaviors WHERE is_custom = 1")
+                ).fetchall()
+            }
+
+            # Build a temp table of desired bundled mappings so we can
+            # efficiently delete stale rows without SQLite-incompatible
+            # row-value syntax.
+            conn.execute(
+                text(
+                    "CREATE TEMP TABLE IF NOT EXISTS _desired_sb"
+                    " (species_id TEXT NOT NULL, behavior_id TEXT NOT NULL)"
+                )
+            )
+            conn.execute(text("DELETE FROM _desired_sb"))
+            if desired:
+                desired_rows = [{"species_id": sid, "behavior_id": bid} for sid, bid in desired]
+                conn.execute(
+                    text(
+                        "INSERT INTO _desired_sb (species_id, behavior_id)"
+                        " VALUES (:species_id, :behavior_id)"
+                    ),
+                    desired_rows,
+                )
+
+            # Delete stale bundled mappings — rows where the species is
+            # bundled (not custom), the behavior is bundled (not custom),
+            # and the pair is not in the desired set.
+            if bundled_species_ids:
+                sp_ids_ph = ", ".join(f":sp{i}" for i in range(len(bundled_species_ids)))
+                sp_params: dict[str, str] = {}
+                for i, sp_id in enumerate(bundled_species_ids):
+                    sp_params[f"sp{i}"] = sp_id
+
+                where_behavior = ""
+                params = {**sp_params}
+                if custom_behavior_ids:
+                    cb_ids_ph = ", ".join(f":cb{i}" for i in range(len(custom_behavior_ids)))
+                    for i, cb_id in enumerate(custom_behavior_ids):
+                        params[f"cb{i}"] = cb_id
+                    where_behavior = f"AND behavior_id NOT IN ({cb_ids_ph})"
+
+                conn.execute(
+                    text(
+                        f"""
+                        DELETE FROM species_behaviors
+                        WHERE species_id IN ({sp_ids_ph})
+                        {where_behavior}
+                        AND (species_id, behavior_id) NOT IN (
+                            SELECT species_id, behavior_id FROM _desired_sb
+                        )
+                        """
+                    ),
+                    params,
+                )
+
+            conn.execute(text("DROP TABLE IF EXISTS _desired_sb"))
 
     def _build_species_variant_map(self) -> dict[str, str]:
         """Return {lowercase_variant -> scientific_name} for all species names/aliases."""
@@ -214,7 +288,9 @@ class SpeciesMixin:
             return False, None
 
         value_lower = str(value_text).strip().lower()
-        variant_to_sci = variant_map if variant_map is not None else self._build_species_variant_map()
+        variant_to_sci = (
+            variant_map if variant_map is not None else self._build_species_variant_map()
+        )
 
         if value_lower in variant_to_sci:
             return True, variant_to_sci[value_lower]
@@ -255,7 +331,9 @@ class SpeciesMixin:
             ).fetchall()
         return [r[0] for r in rows]
 
-    def get_species_display_map(self, lang: str = "en", project_id: str | None = None) -> dict[str, str]:
+    def get_species_display_map(
+        self, lang: str = "en", project_id: str | None = None
+    ) -> dict[str, str]:
         col = "name_en" if lang == "en" else "name_fr"
         with self.engine.connect() as conn:
             if project_id:
@@ -282,7 +360,9 @@ class SpeciesMixin:
             ).fetchall()
         return {sci: f"{name} ({sci})" if name else sci for sci, name in rows}
 
-    def get_behaviors_for_species(self, species_name: str, project_id: str | None = None) -> list[str]:
+    def get_behaviors_for_species(
+        self, species_name: str, project_id: str | None = None
+    ) -> list[str]:
         with self.engine.connect() as conn:
             if project_id:
                 # Try project-specific species behaviors first
@@ -313,7 +393,11 @@ class SpeciesMixin:
                 {"s": species_name},
             ).fetchall()
         result = [r[0] for r in rows]
-        return result or ["does_not_react"]
+        if result:
+            return result
+        from review_app.app.config import DEFAULT_BEHAVIOR_KEY
+
+        return [DEFAULT_BEHAVIOR_KEY]
 
     def get_all_behaviors(self) -> list[dict]:
         with self.engine.connect() as conn:
@@ -322,20 +406,20 @@ class SpeciesMixin:
             ).fetchall()
         return [{"key": r[0], "name_en": r[1], "name_fr": r[2]} for r in rows]
 
-    def add_custom_behavior(self, key: str, name_en: str, name_fr: str | None = None) -> None:
+    def add_custom_behavior(self, key: str, name_en: str, name_fr: str | None = None) -> bool:
+        if self.behavior_exists(key):
+            return False
         with self.engine.begin() as conn:
             conn.execute(
                 text(
                     """
-                    INSERT INTO behaviors (id, key, name_en, name_fr)
-                    VALUES (:id, :key, :name_en, :name_fr)
-                    ON CONFLICT(key) DO UPDATE SET
-                        name_en = excluded.name_en,
-                        name_fr = excluded.name_fr
+                    INSERT INTO behaviors (id, key, name_en, name_fr, is_custom)
+                    VALUES (:id, :key, :name_en, :name_fr, 1)
                     """
                 ),
                 {"id": str(uuid.uuid4()), "key": key, "name_en": name_en, "name_fr": name_fr},
             )
+        return True
 
     def get_behavior_display_map(
         self, lang: str = "en", species_name: str | None = None, project_id: str | None = None
@@ -357,6 +441,7 @@ class SpeciesMixin:
                 rows = conn.execute(text(f"SELECT key, {col} FROM behaviors")).fetchall()
 
         return {key: name or key for key, name in rows}
+
     def get_project_species(self, project_id: str) -> list[str]:
         with self.engine.connect() as conn:
             rows = conn.execute(
@@ -444,10 +529,21 @@ class SpeciesMixin:
             ).fetchone()
         return exists is not None
 
+    def behavior_exists(self, key: str) -> bool:
+        with self.engine.connect() as conn:
+            exists = conn.execute(
+                text("SELECT 1 FROM behaviors WHERE key = :k"), {"k": key}
+            ).fetchone()
+        return exists is not None
+
     def get_existing_groups(self) -> dict[str, list[str]]:
         with self.engine.connect() as conn:
-            en_rows = conn.execute(text("SELECT DISTINCT group_en FROM species WHERE group_en IS NOT NULL")).fetchall()
-            fr_rows = conn.execute(text("SELECT DISTINCT group_fr FROM species WHERE group_fr IS NOT NULL")).fetchall()
+            en_rows = conn.execute(
+                text("SELECT DISTINCT group_en FROM species WHERE group_en IS NOT NULL")
+            ).fetchall()
+            fr_rows = conn.execute(
+                text("SELECT DISTINCT group_fr FROM species WHERE group_fr IS NOT NULL")
+            ).fetchall()
         return {
             "en": [r[0] for r in en_rows],
             "fr": [r[0] for r in fr_rows],
@@ -455,7 +551,9 @@ class SpeciesMixin:
 
     def get_existing_iucn(self) -> list[str]:
         with self.engine.connect() as conn:
-            rows = conn.execute(text("SELECT DISTINCT iucn FROM species WHERE iucn IS NOT NULL")).fetchall()
+            rows = conn.execute(
+                text("SELECT DISTINCT iucn FROM species WHERE iucn IS NOT NULL")
+            ).fetchall()
         return [r[0] for r in rows]
 
     def add_custom_species(
@@ -469,7 +567,7 @@ class SpeciesMixin:
     ) -> bool:
         if self.species_exists(scientific_name):
             return False
-            
+
         with self.engine.begin() as conn:
             conn.execute(
                 text(
