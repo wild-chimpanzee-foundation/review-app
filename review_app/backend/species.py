@@ -473,8 +473,8 @@ class SpeciesMixin:
             conn.execute(
                 text(
                     """
-                    INSERT INTO species (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn)
-                    VALUES (:id, :scientific_name, :name_en, :name_fr, :group_en, :group_fr, :iucn)
+                    INSERT INTO species (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn, is_custom)
+                    VALUES (:id, :scientific_name, :name_en, :name_fr, :group_en, :group_fr, :iucn, 1)
                     """
                 ),
                 {
