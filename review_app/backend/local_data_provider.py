@@ -952,9 +952,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         supported = {"blank_non_blank", "species", "behavior"}
         normalized = (annotation_type or "").strip().lower()
         if normalized not in supported:
-            raise ValueError(
-                f"Unsupported annotation_type `{annotation_type}`. Use one of {sorted(supported)}"
-            )
+            raise ValueError("error_invalid_annotation_type")
         return normalized
 
     def _build_video_path_lookup(
@@ -1135,12 +1133,12 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             raw_type = str(row.get("annotation_type", "")).strip()
 
             if not video_id:
-                errors.append({"row_number": row_num, "error": "Missing path"})
+                errors.append({"row_number": row_num, "error": "error_missing_path"})
                 continue
             video_path = video_map.get(video_id, video_id)
             if video_id not in known_videos:
                 errors.append(
-                    {"row_number": row_num, "video_path": video_path, "error": "Unknown path"}
+                    {"row_number": row_num, "video_path": video_path, "error": "error_unknown_path"}
                 )
                 continue
             if not model_name:
@@ -1148,7 +1146,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     {
                         "row_number": row_num,
                         "video_path": video_path,
-                        "error": "Missing model_name",
+                        "error": "error_missing_model_name",
                     }
                 )
                 continue
@@ -1166,7 +1164,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     {
                         "row_number": row_num,
                         "video_path": video_path,
-                        "error": "probability must be in [0, 1]",
+                        "error": "error_invalid_probability",
                     }
                 )
                 continue
@@ -1194,7 +1192,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                             {
                                 "row_number": row_num,
                                 "video_path": video_path,
-                                "error": f"Species name '{original_value}' needs mapping",
+                                "error": "error_species_needs_mapping",
                             }
                         )
                         continue

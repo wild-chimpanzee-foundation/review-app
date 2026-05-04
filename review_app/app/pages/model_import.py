@@ -798,7 +798,7 @@ async def setup_model_import():
                             if error_summary:
                                 ui.label(t("error_summary")).classes("text-body2 q-mt-sm")
                                 for err, count in error_summary.items():
-                                    ui.label(t("error_summary_item", err=err, count=count)).classes("text-body2")
+                                    ui.label(t("error_summary_item", err=t(err), count=count)).classes("text-body2")
 
                             with ui.expansion(
                                 t("show_detailed_errors"), icon="table_rows"
