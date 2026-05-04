@@ -240,8 +240,15 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             if project is None:
                 return {"deleted": False}
             video_count = len(project.videos)
+            transcoded_paths = [
+                Path(v.transcoded_path)
+                for v in project.videos
+                if v.transcoded_path is not None
+            ]
             s.delete(project)
             s.commit()
+        for p in transcoded_paths:
+            p.unlink(missing_ok=True)
         return {"deleted": True, "videos_removed": video_count}
 
     # ── CSV templates ─────────────────────────────────────────────────────────
