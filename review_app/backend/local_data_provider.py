@@ -252,16 +252,14 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
         if not videos_df.empty:
             sample_paths = videos_df["video_path"].tolist()
-            rows = [
-                f"{p},species,species_model_a,deer,,0.92,0,12.0" for p in sample_paths[:3]
-            ]
+            rows = [f"{p},species,species_model_a,deer,,0.92,0,12.0" for p in sample_paths[:3]]
             rows.append(
                 f"{sample_paths[0] if sample_paths else 'path/to/video.mp4'},behavior,behavior_model_a,reacts_to_camera,,0.83,0,12.0"
             )
             rows.append(
                 f"{sample_paths[1] if len(sample_paths) > 1 else 'path/to/video2.mp4'},blank_non_blank,blank_model,blank,,0.98,0,"
             )
-            template = "video_uid,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec\n"
+            template = "path,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec\n"
             template += "\n".join(rows)
         else:
             template = CSV_TEMPLATES["model_annotations"]
@@ -992,7 +990,6 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         by_stem = {s: vid for s, vid in stem_to_id.items() if stem_count[s] == 1}
         return by_suffix, by_stem
 
-
     def normalize_model_csv_with_mapping(
         self,
         df: pd.DataFrame,
@@ -1021,9 +1018,8 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
             video_id: str | None = None
             if match_strategy == "suffix":
-                video_id = (
-                    by_suffix.get(f"{p.parent.name}/{p.name}".lower())
-                    or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
+                video_id = by_suffix.get(f"{p.parent.name}/{p.name}".lower()) or by_suffix.get(
+                    f"{p.parent.name}/{p.stem}".lower()
                 )
                 if video_id:
                     matched_suffix += 1
@@ -1062,7 +1058,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 if value_text is not None or probability is not None:
                     rows.append(
                         {
-                            "video_uid": video_id,
+                            "path": video_id,
                             "annotation_type": ann_type,
                             "model_name": model_name,
                             "value_text": value_text,
@@ -1071,7 +1067,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     )
 
         empty = pd.DataFrame(
-            columns=["video_uid", "annotation_type", "model_name", "value_text", "probability"]
+            columns=["path", "annotation_type", "model_name", "value_text", "probability"]
         )
         stats: dict[str, Any] = {
             "total_rows": len(df),
@@ -1094,7 +1090,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
         mappings = mappings or {}
 
-        required = {"video_uid", "annotation_type", "model_name"}
+        required = {"path", "annotation_type", "model_name"}
         missing = required - set(src.columns)
         if missing:
             raise ValueError(f"CSV must include columns: {', '.join(sorted(missing))}")
@@ -1102,10 +1098,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         video_map = self._known_video_map(active_project_id)
         known_videos = set(video_map.keys())
 
-        # Resolve file paths in video_uid to UUIDs using the same path lookup as wide format
+        # Resolve file paths in the path column to UUIDs
         by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
 
-        def _resolve_video_uid(raw: str) -> str:
+        def _resolve_path(raw: str) -> str:
             if raw in known_videos:
                 return raw
             p = Path(raw)
@@ -1116,7 +1112,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 or raw
             )
 
-        src["video_uid"] = src["video_uid"].astype(str).str.strip().map(_resolve_video_uid)
+        src["path"] = src["path"].astype(str).str.strip().map(_resolve_path)
 
         species_mask = src["annotation_type"].str.strip().str.lower() == "species"
         unique_species = src.loc[species_mask, "value_text"].dropna().str.strip().unique()
@@ -1134,22 +1130,26 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
         for idx, row in src.iterrows():
             row_num = int(idx) + 1
-            video_uid = str(row.get("video_uid", "")).strip()
+            video_id = str(row.get("path", "")).strip()
             model_name = str(row.get("model_name", "")).strip()
             raw_type = str(row.get("annotation_type", "")).strip()
 
-            if not video_uid:
-                errors.append({"row_number": row_num, "error": "Missing video_uid"})
+            if not video_id:
+                errors.append({"row_number": row_num, "error": "Missing path"})
                 continue
-            video_path = video_map.get(video_uid, video_uid)
-            if video_uid not in known_videos:
+            video_path = video_map.get(video_id, video_id)
+            if video_id not in known_videos:
                 errors.append(
-                    {"row_number": row_num, "video_path": video_path, "error": "Unknown video_uid"}
+                    {"row_number": row_num, "video_path": video_path, "error": "Unknown path"}
                 )
                 continue
             if not model_name:
                 errors.append(
-                    {"row_number": row_num, "video_path": video_path, "error": "Missing model_name"}
+                    {
+                        "row_number": row_num,
+                        "video_path": video_path,
+                        "error": "Missing model_name",
+                    }
                 )
                 continue
 
@@ -1206,7 +1206,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
             prepared_rows.append(
                 {
-                    "video_id": video_uid,
+                    "video_id": video_id,
                     "video_path": video_path,
                     "annotation_type": annotation_type,
                     "model_name": model_name,

@@ -79,7 +79,7 @@ def _auto_suggest_path_col(columns: list[str], sample: list[dict]) -> str:
 
 
 def _is_long_format(columns: list[str]) -> bool:
-    return {"video_uid", "annotation_type", "model_name"}.issubset(set(columns))
+    return {"path", "annotation_type", "model_name"}.issubset(set(columns))
 
 
 async def setup_model_import():
@@ -803,7 +803,7 @@ async def setup_model_import():
                             with ui.expansion(
                                 t("show_detailed_errors"), icon="table_rows"
                             ).classes("full-width q-mt-sm"):
-                                err_display_cols = [c for c in errors_df.columns if c not in ("video_id", "video_uid")]
+                                err_display_cols = [c for c in errors_df.columns if c != "video_id"]
                                 ui.aggrid(
                                     {
                                         "columnDefs": [{"field": c, "headerName": c} for c in err_display_cols],
