@@ -6,6 +6,12 @@ from review_app.app.utils import switch_project
 from review_app.backend.local_data_provider import LocalDataProvider
 
 
+def _warn_missing_dirs(missing: list[str]) -> None:
+    from nicegui import ui
+    for path in missing:
+        ui.notify(t("dir_not_found", path=path), type="warning", timeout=0)
+
+
 def build_project_picker():
     """Build the project-picker dialog. Returns (dialog, refresh_fn)."""
     from nicegui import ui
@@ -30,7 +36,8 @@ def build_project_picker():
                             async def do_switch():
                                 new_dp = LocalDataProvider()
                                 set_data_provider(new_dp)
-                                switch_project(new_dp, pid)
+                                missing = switch_project(new_dp, pid)
+                                _warn_missing_dirs(missing)
                                 dialog.close()
                                 ui.navigate.to("/overview")
                             return do_switch
@@ -57,7 +64,8 @@ def build_project_picker():
                                             other = next_dp.get_most_recent_project()
                                             if other:
                                                 set_data_provider(next_dp)
-                                                switch_project(next_dp, other.id)
+                                                missing = switch_project(next_dp, other.id)
+                                                _warn_missing_dirs(missing)
                                                 dialog.close()
                                                 ui.navigate.to("/overview")
                                             else:

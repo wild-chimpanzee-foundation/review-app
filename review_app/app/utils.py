@@ -73,7 +73,11 @@ def switch_project(dp, project_id: str) -> None:
     set_queue([])
     set_current_idx(0)
     set_selections([])
-    set_media_dirs([Path(d.path) for d in dp.get_project_dirs(project_id) or []])
+
+    dirs = dp.get_project_dirs(project_id) or []
+    missing = [d.path for d in dirs if not Path(d.path).exists()]
+    set_media_dirs([Path(d.path) for d in dirs])
+    return missing
 
 
 async def get_or_create_data_provider():
