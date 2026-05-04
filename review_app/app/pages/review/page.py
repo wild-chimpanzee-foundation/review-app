@@ -579,7 +579,10 @@ async def setup_review():
                         const newRate = speedSteps[Math.min(best + 1, speedSteps.length - 1)];
                         videoEl.playbackRate = newRate;
                         const speedSel = document.querySelector('[id^="vp-speed-"]');
-                        if (speedSel) speedSel.value = Number.isInteger(newRate) ? newRate.toFixed(1) : String(newRate);
+                        if (speedSel) {
+                            speedSel.value = Number.isInteger(newRate) ? newRate.toFixed(1) : String(newRate);
+                            speedSel.dispatchEvent(new Event('change'));
+                        }
                         videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRate }));
                     } else if (e.key === 's' || e.key === 'S') {
                         e.preventDefault();
@@ -589,7 +592,10 @@ async def setup_review():
                         const newRate = speedSteps[Math.max(best - 1, 0)];
                         videoEl.playbackRate = newRate;
                         const speedSel = document.querySelector('[id^="vp-speed-"]');
-                        if (speedSel) speedSel.value = Number.isInteger(newRate) ? newRate.toFixed(1) : String(newRate);
+                        if (speedSel) {
+                            speedSel.value = Number.isInteger(newRate) ? newRate.toFixed(1) : String(newRate);
+                            speedSel.dispatchEvent(new Event('change'));
+                        }
                         videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRate }));
                     } else if (e.key === ']') {
                         e.preventDefault();

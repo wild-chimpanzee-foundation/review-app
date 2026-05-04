@@ -8,12 +8,10 @@ from review_app.app.state import (
     is_auto_transcode,
     is_autoplay,
     is_muted,
-    is_reset_speed_on_seek,
     set_auto_transcode,
     set_autoplay,
     set_muted,
     set_queue,
-    set_reset_speed_on_seek,
     update_filters,
 )
 from review_app.app.translations import t
@@ -277,18 +275,6 @@ async def render_filter_drawer(
         with ui.card().classes("full-width q-mb-md"):
             ui.label(t("playback_settings")).classes("text-subtitle2 text-grey-7 q-mb-xs")
 
-            ui.run_javascript(
-                f"window._resetSpeedOnSeek = {str(is_reset_speed_on_seek()).lower()};"
-            )
-
-            ui.checkbox(
-                t("reset_speed_on_seek"),
-                value=is_reset_speed_on_seek(),
-                on_change=lambda e: (
-                    set_reset_speed_on_seek(e.value),
-                    ui.run_javascript(f"window._resetSpeedOnSeek = {str(e.value).lower()};"),
-                ),
-            )
             ui.checkbox(
                 t("autoplay"),
                 value=is_autoplay(),

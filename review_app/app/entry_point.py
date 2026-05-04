@@ -44,7 +44,6 @@ def shared_header(show_drawer: bool = False):
 
     ui.on("navigate", handle_navigate)
 
-    # Dark mode is now session-safe via state functions (app.storage.user)
     dark = ui.dark_mode(value=is_dark_mode())
 
     def toggle_dark():

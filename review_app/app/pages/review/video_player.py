@@ -101,10 +101,14 @@ def render_custom_video_player(video_url, duration, vid_key):
             </div>
         ''').classes("full-width")
 
-        _speed_sync = ui.number(value=float(get_playback_speed().replace("x", ""))).style(
-            "display:none"
-        )
-        _speed_sync.on_value_change(lambda e: set_playback_speed(f"{round(e.value, 2)}x"))
+        def _persist_speed(e):
+            try:
+                rate = float(e.args)
+            except (TypeError, ValueError):
+                return
+            set_playback_speed(f"{round(rate, 2)}x")
+
+        ui.on(f"vp_speed_change_{vid_key}", _persist_speed)
 
         ui.run_javascript(f"""
             (function setup() {{
@@ -255,7 +259,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                 speedSel.addEventListener('change', () => {{
                     const rate = parseFloat(speedSel.value);
                     videoEl.playbackRate = rate;
-                    getElement({_speed_sync.id}).value = rate;
+                    emitEvent('vp_speed_change_{vid_key}', rate);
                 }});
 
                 videoEl.addEventListener('timeupdate', () => {{

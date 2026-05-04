@@ -1,4 +1,3 @@
-from review_app.app.state import get_state_val, set_state_val
 
 TRANSLATIONS = {
     "en": {
@@ -122,7 +121,6 @@ TRANSLATIONS = {
         "zoom_tooltip": "Scroll to zoom, drag to pan",
         "reset_zoom": "Reset Zoom",
         "reset_zoom_tooltip": "Reset zoom and pan to default",
-        "reset_speed_on_seek": "Reset speed to 1x on seek",
         "autoplay": "Autoplay",
         "muted": "Muted",
         "auto_transcode": "Auto-transcode incompatible videos",
@@ -521,7 +519,6 @@ TRANSLATIONS = {
         "zoom_tooltip": "Faites défiler pour zoomer, faites glisser pour déplacer",
         "reset_zoom": "Réinitialiser le Zoom",
         "reset_zoom_tooltip": "Réinitialiser le zoom et le déplacement par défaut",
-        "reset_speed_on_seek": "Réinitialiser la vitesse à 1x lors du défilement",
         "autoplay": "Lecture Automatique",
         "muted": "Muet",
         "auto_transcode": "Transcodage automatique des vidéos incompatibles",
@@ -801,14 +798,15 @@ TRANSLATIONS = {
 
 
 def get_language():
-    return get_state_val("language", "en")
+    from review_app.app.state import get_language as _get_language
+
+    return _get_language()
 
 
 def set_language(lang: str):
-    from review_app.app.state import get_data_provider
-    set_state_val("language", lang)
-    if dp := get_data_provider():
-        dp.set_setting("language", lang)
+    from review_app.app.state import set_language as _set_language
+
+    _set_language(lang)
 
 
 def t(key: str, **kwargs) -> str:
