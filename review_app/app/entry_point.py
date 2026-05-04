@@ -272,13 +272,11 @@ class GUI:
 
         # Initialize data provider only if the DB already exists (i.e. app was set up before).
         # On fresh install the DB doesn't exist yet — the setup wizard creates it.
-        import tempfile
+        from review_app.app.config import get_default_db_path, get_user_data_dir
 
-        transcoded_tmp = Path(tempfile.gettempdir()) / "video_review_transcoded"
-        transcoded_tmp.mkdir(parents=True, exist_ok=True)
-        app.add_media_files("/transcoded", transcoded_tmp)
-
-        from review_app.app.config import get_default_db_path
+        transcoded_cache = get_user_data_dir() / "transcoded_cache"
+        transcoded_cache.mkdir(parents=True, exist_ok=True)
+        app.add_media_files("/transcoded", transcoded_cache)
 
         if get_default_db_path().exists():
             try:
