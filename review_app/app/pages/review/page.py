@@ -480,30 +480,14 @@ async def setup_review():
         shared=True,
     )
 
-    left_drawer = shared_header(show_drawer=True)
+    left_drawer, toggle_mini = shared_header(show_drawer=True)
     assert left_drawer is not None
     left_drawer.classes("review-sidebar")
 
     with left_drawer:
         await render_filter_drawer(dp, species_map, navigate_to, render_video_section)
 
-    ui.add_head_html(
-        """
-        <style>
-            .filter-toggle-small { display: none !important; }
-            @media (max-width: 800px) {
-                .filter-toggle-small { display: flex !important; }
-            }
-        </style>
-        """,
-        shared=True,
-    )
-
     with ui.column().classes("w-full q-pa-xs"):
-        with ui.row().classes("filter-toggle-small q-mb-none"):
-            ui.button(t("filters_label"), icon="tune", on_click=left_drawer.toggle).props(
-                "outline color=primary dense"
-            )
         with ui.element("div").style("width: 100%; max-width: 1900px; margin: 0 auto"):
             await render_video_section(dp, species_map)
 

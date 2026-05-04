@@ -8,12 +8,12 @@ from review_app.app.project_picker import build_project_picker
 from review_app.app.setup_wizard import setup_wizard
 from review_app.app.state import (
     get_active_project_id,
+    get_language,
     is_dark_mode,
     load_settings_from_db,
     set_active_project,
     set_dark_mode,
     set_data_provider,
-    get_language,
     set_language,
 )
 from review_app.app.theme import apply_theme
@@ -38,7 +38,6 @@ def shared_header(show_drawer: bool = False):
     from nicegui import ui
 
     apply_theme()
-    ui.query(".q-layout").props('view="hHh Lpr lFf"')
 
     # Register navigate handler per-page
     def handle_navigate(e):
@@ -112,11 +111,11 @@ def shared_header(show_drawer: bool = False):
                 drawer.props("mini")
 
     if show_drawer:
-        drawer = ui.left_drawer(value=True).classes("q-pa-sm")
+        drawer = ui.left_drawer(value=True).props("behavior=desktop").classes("q-pa-sm")
 
         with drawer:
             with ui.row().classes("items-center q-mb-sm"):
-                ui.button(icon="tune", on_click=toggle_drawer).props(
+                ui.button(icon="menu", on_click=toggle_drawer).props(
                     "flat round color=primary"
                 ).tooltip(t("filters_label"))
                 ui.label(t("filters_label")).classes(
@@ -179,7 +178,7 @@ def shared_header(show_drawer: bool = False):
                 )
                 ui.button(icon="dark_mode", on_click=toggle_dark).props("flat round color=white")
 
-    return drawer
+    return drawer, toggle_drawer
 
 
 class GUI:
