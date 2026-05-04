@@ -150,7 +150,11 @@ async def setup_model_import():
                         on_click=download_template,
                     ).props("flat dense size=sm")
 
-                # ── Upload ────────────────────────────────────────────────────
+                # ── Step 1: Upload ────────────────────────────────────────────
+                with ui.row().classes("items-center gap-sm q-mb-sm"):
+                    ui.label("1").classes("text-caption font-weight-bold bg-primary text-white q-px-sm q-py-xs rounded-borders")
+                    ui.label(t("step_upload")).classes("text-subtitle1 font-weight-bold")
+
                 with ui.card().classes("full-width q-mb-lg"):
                     ui.label(t("upload_csv")).classes("text-subtitle1 font-weight-medium q-mb-md")
                     upload_result = ui.label(t("upload_csv_msg")).classes("text-body2")
@@ -180,9 +184,10 @@ async def setup_model_import():
                             set_state_val("unmapped_species", [])
 
                             upload_result.text = t("loaded_rows", count=len(raw_df))
+                            step2_header.visible = True
                             config_card.visible = True
+                            step3_header.visible = False
                             results_container.visible = False
-                            mappings_container.visible = False
                             config_ui.refresh()
                         except Exception as exc:
                             ui.notify(f"{t('error')}: {exc}", type="negative")
@@ -196,7 +201,13 @@ async def setup_model_import():
                         auto_upload=True,
                     )
 
-                # ── Column mapping config ─────────────────────────────────────
+                # ── Step 2: Configure & Validate ─────────────────────────────
+                step2_header = ui.row().classes("items-center gap-sm q-mb-sm")
+                step2_header.visible = False
+                with step2_header:
+                    ui.label("2").classes("text-caption font-weight-bold bg-primary text-white q-px-sm q-py-xs rounded-borders")
+                    ui.label(t("step_configure_validate")).classes("text-subtitle1 font-weight-bold")
+
                 config_card = ui.card().classes("full-width q-mb-lg")
                 config_card.visible = False
 
@@ -253,6 +264,7 @@ async def setup_model_import():
                                 set_state_val("unmapped_species", unmapped_species)
                                 ui.notify(t("csv_validated"), type="positive")
                                 refresh_results()
+                                await ui.run_javascript('setTimeout(()=>document.getElementById("import-step3")?.scrollIntoView({behavior:"smooth",block:"start"}),100)')
                             except Exception as exc:
                                 ui.notify(f"{t('error')}: {exc}", type="negative")
                             finally:
@@ -315,6 +327,7 @@ async def setup_model_import():
 
                             ui.notify(t("csv_validated"), type="positive")
                             refresh_results()
+                            await ui.run_javascript('setTimeout(()=>document.getElementById("import-step3")?.scrollIntoView({behavior:"smooth",block:"start"}),100)')
                         except Exception as exc:
                             ui.notify(f"{t('error')}: {exc}", type="negative")
                         finally:
@@ -331,7 +344,7 @@ async def setup_model_import():
                             )
                             ui.label(t("long_format_desc")).classes("text-caption")
                         ui.button(
-                            t("process_csv"),
+                            t("validate_csv"),
                             icon="play_arrow",
                             on_click=do_process,
                             color="primary",
@@ -383,11 +396,12 @@ async def setup_model_import():
                                     return
                                 loading_dialog.open()
                                 try:
-                                    stats = await run.io_bound(
-                                        dp.preview_path_match,
+                                    _, stats = await run.io_bound(
+                                        dp.normalize_model_csv_with_mapping,
                                         pd.DataFrame(recs),
                                         get_state_val("path_col") or "",
                                         get_state_val("match_strategy") or "suffix",
+                                        get_state_val("ann_mappings") or [],
                                         get_active_project_id(),
                                     )
                                     set_state_val("match_preview", stats)
@@ -527,7 +541,7 @@ async def setup_model_import():
                         ).props("flat dense color=primary")
 
                     ui.button(
-                        t("process_csv"),
+                        t("validate_csv"),
                         icon="play_arrow",
                         on_click=do_process,
                         color="primary",
@@ -536,11 +550,15 @@ async def setup_model_import():
                 with config_card:
                     config_ui()
 
-                # ── Results ───────────────────────────────────────────────────
+                # ── Step 3: Review & Import ───────────────────────────────────
+                step3_header = ui.row().classes("items-center gap-sm q-mb-sm").props("id=import-step3")
+                step3_header.visible = False
+                with step3_header:
+                    ui.label("3").classes("text-caption font-weight-bold bg-primary text-white q-px-sm q-py-xs rounded-borders")
+                    ui.label(t("step_review_import")).classes("text-subtitle1 font-weight-bold")
+
                 results_container = ui.card().classes("full-width q-mb-lg")
                 results_container.visible = False
-                mappings_container = ui.card().classes("full-width q-mb-lg")
-                mappings_container.visible = False
 
                 async def do_import():
                     loading_dialog.open()
@@ -573,8 +591,6 @@ async def setup_model_import():
                         set_state_val("unmapped_species", [])
                         results_container.clear()
                         results_container.visible = False
-                        mappings_container.clear()
-                        mappings_container.visible = False
                     except Exception as exc:
                         ui.notify(t("import_failed", error=str(exc)), type="negative")
                     finally:
@@ -602,15 +618,15 @@ async def setup_model_import():
                             warning.visible = False
 
                 def refresh_results():
+                    step3_header.visible = True
                     results_container.clear()
                     results_container.visible = True
-                    mappings_container.clear()
-                    mappings_container.visible = True
 
                     with results_container:
+                        # ── Match stats ───────────────────────────────────────
                         match_stats = get_state_val("match_stats")
                         if match_stats:
-                            with ui.card().classes("full-width q-mb-md "):
+                            with ui.card().classes("full-width q-mb-md"):
                                 total = match_stats["total_rows"]
                                 matched = match_stats["matched"]
                                 unmatched = match_stats["unmatched"]
@@ -631,8 +647,9 @@ async def setup_model_import():
                                         icon="warning",
                                     ).classes("q-mt-xs"):
                                         for up in match_stats["unmatched_sample"]:
-                                            ui.label(up).classes("text-caption ")
+                                            ui.label(up).classes("text-caption")
 
+                        # ── Valid / invalid counts ─────────────────────────────
                         ui.label(t("validation_result")).classes(
                             "text-subtitle1 font-weight-medium q-mb-md"
                         )
@@ -647,24 +664,25 @@ async def setup_model_import():
                                 ui.label(str(valid_count)).classes(
                                     "text-h5 font-weight-bold text-positive"
                                 )
-                                ui.label(t("valid_rows")).classes("text-caption ")
+                                ui.label(t("valid_rows")).classes("text-caption")
                             with ui.card().classes("text-center q-pa-md"):
                                 ui.label(str(invalid_count)).classes(
                                     "text-h5 font-weight-bold text-negative"
                                 )
-                                ui.label(t("invalid_rows")).classes("text-caption ")
+                                ui.label(t("invalid_rows")).classes("text-caption")
 
-                    with mappings_container:
+                        # ── Species mappings ──────────────────────────────────
                         all_mappings = dict(get_state_val("species_mappings", {}))
                         unmapped = get_state_val("unmapped_species", [])
                         unmapped_origs = {u["original"] for u in unmapped}
                         all_species = set(all_mappings.keys()) | unmapped_origs
 
                         if all_species:
+                            ui.separator().classes("q-my-md")
                             ui.label(t("species_mappings")).classes(
                                 "text-subtitle1 font-weight-medium q-mb-sm"
                             )
-                            ui.label(t("edit_mappings_desc")).classes("text-caption  q-mb-md")
+                            ui.label(t("edit_mappings_desc")).classes("text-caption q-mb-md")
 
                             species_map = dp.get_species_display_map(get_language())
                             select_options = {"": ""}
@@ -755,9 +773,10 @@ async def setup_model_import():
                                     t("map_all_to_import", list=", ".join(pending_unmapped))
                                 ).classes("text-warning text-caption q-mt-sm")
 
-                    errors_df = _get_df_from_state("errors_df")
-                    if errors_df is not None and not errors_df.empty:
-                        with results_container:
+                        # ── Error details ─────────────────────────────────────
+                        errors_df = _get_df_from_state("errors_df")
+                        if errors_df is not None and not errors_df.empty:
+                            ui.separator().classes("q-my-md")
                             ui.label(t("validation_errors_count", count=len(errors_df))).classes(
                                 "text-negative q-mb-sm"
                             )
@@ -766,7 +785,7 @@ async def setup_model_import():
                             if error_summary:
                                 ui.label(t("error_summary")).classes("text-body2 q-mt-sm")
                                 for err, count in error_summary.items():
-                                    ui.label(f"  • {err}: {count} rows").classes("text-body2")
+                                    ui.label(t("error_summary_item", err=err, count=count)).classes("text-body2")
 
                             with ui.expansion(
                                 t("show_detailed_errors"), icon="table_rows"
@@ -785,22 +804,21 @@ async def setup_model_import():
                                     }
                                 ).classes("h-64")
 
-                    unmapped = get_state_val("unmapped_species", [])
-                    if unmapped:
-                        with results_container:
+                        if unmapped:
                             ui.label(t("unmapped_species_count", count=len(unmapped))).classes(
                                 "text-warning q-mb-sm"
                             )
 
-                    cleaned_df = _get_df_from_state("cleaned_df")
-                    species_mappings = get_state_val("species_mappings", {})
-                    can_import = (
-                        cleaned_df is not None
-                        and not cleaned_df.empty
-                        and all(v for v in species_mappings.values())
-                    )
+                        # ── Import button ─────────────────────────────────────
+                        ui.separator().classes("q-my-md")
+                        cleaned_df = _get_df_from_state("cleaned_df")
+                        species_mappings = get_state_val("species_mappings", {})
+                        can_import = (
+                            cleaned_df is not None
+                            and not cleaned_df.empty
+                            and all(v for v in species_mappings.values())
+                        )
 
-                    with results_container:
                         pending_warning_holder[0] = ui.label("").classes("text-warning q-mb-sm")
                         pending_warning_holder[0].visible = False
                         update_import_button()
@@ -828,13 +846,13 @@ async def setup_model_import():
                                 result = await run.io_bound(
                                     dp.import_annotations_csv, df, get_active_project_id()
                                 )
-                                msg = f"Imported {result['imported']} videos."
+                                msg = t("imported_annotations", count=result["imported"])
                                 if result["skipped"]:
-                                    msg += f" Skipped {len(result['skipped'])} unknown video IDs."
+                                    msg += t("skipped_annotations", count=len(result["skipped"]))
                                 annotation_import_status.set_text(msg)
                                 ui.notify(msg, type="positive")
                             except Exception as exc:
-                                ui.notify(f"Import failed: {exc}", type="negative")
+                                ui.notify(t("import_failed", error=str(exc)), type="negative")
 
                         ui.upload(
                             on_upload=handle_annotation_upload,
@@ -859,7 +877,7 @@ async def setup_model_import():
                                 csv_bytes = df.to_csv(index=False).encode("utf-8")
                                 ui.download(csv_bytes, "annotations.csv")
                             except Exception as exc:
-                                ui.notify(f"Export failed: {exc}", type="negative")
+                                ui.notify(t("export_failed", error=str(exc)), type="negative")
 
                         ui.button(
                             t("export_annotations"), icon="download", on_click=do_export

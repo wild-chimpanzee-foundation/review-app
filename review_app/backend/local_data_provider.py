@@ -236,18 +236,18 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
     def get_csv_templates(self) -> dict[str, str]:
         with self.engine.connect() as conn:
-            videos_df = pd.read_sql(text("SELECT video_id FROM videos LIMIT 10"), conn)
+            videos_df = pd.read_sql(text("SELECT video_path FROM videos LIMIT 10"), conn)
 
         if not videos_df.empty:
-            sample_video_ids = videos_df["video_id"].tolist()
+            sample_paths = videos_df["video_path"].tolist()
             rows = [
-                f"{vid},species,species_model_a,deer,,0.92,0,12.0" for vid in sample_video_ids[:3]
+                f"{p},species,species_model_a,deer,,0.92,0,12.0" for p in sample_paths[:3]
             ]
             rows.append(
-                f"{sample_video_ids[0] if sample_video_ids else 'VIDEO_001'},behavior,behavior_model_a,reacts_to_camera,,0.83,0,12.0"
+                f"{sample_paths[0] if sample_paths else 'path/to/video.mp4'},behavior,behavior_model_a,reacts_to_camera,,0.83,0,12.0"
             )
             rows.append(
-                f"{sample_video_ids[1] if len(sample_video_ids) > 1 else 'VIDEO_002'},blank_non_blank,blank_model,blank,,0.98,0,"
+                f"{sample_paths[1] if len(sample_paths) > 1 else 'path/to/video2.mp4'},blank_non_blank,blank_model,blank,,0.98,0,"
             )
             template = "video_uid,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec\n"
             template += "\n".join(rows)
@@ -951,9 +951,11 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         self, active_project_id: str | None
     ) -> tuple[dict[str, str], dict[str, str]]:
         """
-        Build two lookups for matching CSV file paths to DB video_ids:
-        - by_suffix: {(parent_dir/stem).lower() -> video_id}  — precise
-        - by_stem:   {stem.lower() -> video_id}               — fallback, only for unambiguous stems
+        Build two lookups for matching CSV file paths to DB video_ids.
+        by_suffix keys include both parent/name (with ext) and parent/stem (without ext)
+        so that CSV paths match regardless of whether the extension is present or differs.
+        - by_suffix: {(parent_dir/name).lower() -> video_id, (parent_dir/stem).lower() -> video_id}
+        - by_stem:   {stem.lower() -> video_id}  — fallback, only for unambiguous stems
         """
         with self.engine.connect() as conn:
             df = pd.read_sql(
@@ -970,6 +972,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         for _, row in df.iterrows():
             p = Path(str(row["video_path"]))
             vid = str(row["video_id"])
+            by_suffix[f"{p.parent.name}/{p.name}".lower()] = vid
             by_suffix[f"{p.parent.name}/{p.stem}".lower()] = vid
             stem = p.stem.lower()
             stem_to_id[stem] = vid
@@ -977,35 +980,6 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         by_stem = {s: vid for s, vid in stem_to_id.items() if stem_count[s] == 1}
         return by_suffix, by_stem
 
-    def preview_path_match(
-        self,
-        df: pd.DataFrame,
-        path_col: str,
-        match_strategy: str,
-        active_project_id: str | None,
-    ) -> dict[str, Any]:
-        """Return match stats for a given path column and strategy without producing annotations."""
-        by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
-        matched = 0
-        unmatched: list[str] = []
-        for _, src_row in df.iterrows():
-            raw_path = str(src_row.get(path_col, "")).strip()
-            p = Path(raw_path)
-            video_id = None
-            if match_strategy == "suffix":
-                video_id = by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
-            elif match_strategy == "stem":
-                video_id = by_stem.get(p.stem.lower())
-            if video_id:
-                matched += 1
-            else:
-                unmatched.append(raw_path)
-        return {
-            "total_rows": len(df),
-            "matched": matched,
-            "unmatched": len(unmatched),
-            "unmatched_sample": unmatched[:10],
-        }
 
     def normalize_model_csv_with_mapping(
         self,
@@ -1035,7 +1009,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
             video_id: str | None = None
             if match_strategy == "suffix":
-                video_id = by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
+                video_id = (
+                    by_suffix.get(f"{p.parent.name}/{p.name}".lower())
+                    or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
+                )
                 if video_id:
                     matched_suffix += 1
             elif match_strategy == "stem":
@@ -1120,7 +1097,8 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 return raw
             p = Path(raw)
             return (
-                by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
+                by_suffix.get(f"{p.parent.name}/{p.name}".lower())
+                or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
                 or by_stem.get(p.stem.lower())
                 or raw
             )

@@ -170,17 +170,22 @@ class SetupWizard:
                     ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
                     progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
                     status = ui.label(t("starting")).classes("text-caption text-grey-6 q-mt-sm")
-                    go_btn = (
+                    post_sync = ui.column().classes("w-full q-mt-md gap-sm")
+                    post_sync.visible = False
+                    with post_sync:
+                        ui.separator()
+                        ui.label(t("wizard_import_suggestion")).classes("text-body2 q-mt-xs")
+                        ui.button(
+                            t("wizard_go_to_import_btn"),
+                            icon="upload_file",
+                            color="primary",
+                            on_click=lambda: (dialog.close(), ui.navigate.to("/model-import")),
+                        ).props("size=lg").classes("full-width")
                         ui.button(
                             t("go_to_overview_btn"),
                             icon="play_arrow",
-                            color="primary",
                             on_click=lambda: (dialog.close(), self.on_complete_callback()),
-                        )
-                        .props("size=lg")
-                        .classes("full-width q-mt-md")
-                    )
-                    go_btn.visible = False
+                        ).props("size=lg flat").classes("full-width")
 
                 dialog.open()
                 stats = await sync_with_progress(
@@ -201,18 +206,16 @@ class SetupWizard:
                     ui.label(t("sync_stat_updated", n=stats["updated"])).classes(
                         "text-caption text-grey-6"
                     )
-                go_btn.visible = True
+                post_sync.visible = True
             else:
                 self.on_complete_callback()
 
         # ── Layout ────────────────────────────────────────────────────────────
 
         with ui.column().classes("w-full q-pa-lg").style("max-width: 720px; margin: 0 auto"):
-
             if not adding_to_existing:
                 # ── Step 1: language, annotator, ffmpeg ───────────────────────
                 with ui.column().classes("w-full gap-0") as step1:
-
                     with ui.card().classes("full-width q-mb-lg"):
                         with ui.row().classes("w-full items-start justify-between"):
                             with ui.column().classes("col"):
@@ -223,6 +226,7 @@ class SetupWizard:
 
                             def change_language(e):
                                 from review_app.app.translations import set_language
+
                                 set_language(e.value)
                                 ui.run_javascript("window.location.reload()")
 
@@ -248,7 +252,9 @@ class SetupWizard:
 
                     with ui.card().classes("full-width q-mb-md"):
                         with ui.row().classes("items-center gap-sm"):
-                            ui.label(t("ffmpeg_label")).classes("text-subtitle1 font-weight-medium")
+                            ui.label(t("ffmpeg_label")).classes(
+                                "text-subtitle1 font-weight-medium"
+                            )
                             ffmpeg_status_label = ui.label(t("ffmpeg_checking")).classes(
                                 "text-caption text-grey-6"
                             )
@@ -279,9 +285,7 @@ class SetupWizard:
                     step2.visible = False
 
                     with ui.card().classes("full-width q-mb-lg"):
-                        ui.label(t("new_project")).classes(
-                            "text-h5 text-primary font-weight-bold"
-                        )
+                        ui.label(t("new_project")).classes("text-h5 text-primary font-weight-bold")
 
                     with ui.card().classes("full-width q-mb-md"):
                         ui.label(t("project_name_label")).classes(
