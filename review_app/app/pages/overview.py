@@ -1,7 +1,7 @@
 from nicegui import run, ui
 
-from review_app.app.state import get_active_project_id, reset_filters, update_filters
-from review_app.app.translations import get_language, t
+from review_app.app.state import get_active_project_id, get_language, reset_filters, update_filters
+from review_app.app.translations import t
 from review_app.app.utils import (
     get_or_create_data_provider,
     get_probability_color,

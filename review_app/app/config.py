@@ -18,6 +18,11 @@ CSV_TEMPLATES: dict[str, str] = {
     )
 }
 
+DEFAULT_BEHAVIORS: list[dict[str, str]] = [
+    {"key": "does_not_react", "name_en": "Does not react", "name_fr": "Ne réagit pas"},
+    {"key": "reacts_to_camera", "name_en": "Reacts to camera", "name_fr": "Réagit à la caméra"},
+]
+
 if getattr(sys, "frozen", False):
     REPO_ROOT = Path(sys.executable).parent
 else:

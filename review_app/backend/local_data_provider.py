@@ -38,7 +38,6 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         self.db_dir = get_user_data_dir()
         self.db_dir.mkdir(parents=True, exist_ok=True)
 
-        self._behavior_defaults: list[str] = ["does_not_react", "reacts_to_camera"]
         self._consensus_min_probability: float = 0.0
 
         self._db_path = self.db_dir / DEFAULT_DB_FILENAME

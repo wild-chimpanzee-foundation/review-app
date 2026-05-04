@@ -4,8 +4,8 @@ import pandas as pd
 from nicegui import run, ui
 
 from review_app.app.onboarding import show_info_dialog
-from review_app.app.state import get_active_project_id, get_state_val, set_state_val
-from review_app.app.translations import get_language, t
+from review_app.app.state import get_active_project_id, get_state_val, set_state_val, get_language
+from review_app.app.translations import t
 from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
 from review_app.backend.utils import df_to_records
 
@@ -36,7 +36,12 @@ def _auto_suggest_mappings(columns: list[str]) -> list[dict]:
     # Try per-model blank columns first (blank_{model} or {model}_blank)
     blank_found = False
     for model in detected_models:
-        for pattern in (f"blank_{model}", f"{model}_blank", f"p_blank_{model}", f"prob_blank_{model}"):
+        for pattern in (
+            f"blank_{model}",
+            f"{model}_blank",
+            f"p_blank_{model}",
+            f"prob_blank_{model}",
+        ):
             if pattern in col_set:
                 suggestions.append(
                     {
@@ -152,7 +157,9 @@ async def setup_model_import():
 
                 # ── Step 1: Upload ────────────────────────────────────────────
                 with ui.row().classes("items-center gap-sm q-mb-sm"):
-                    ui.label("1").classes("text-caption font-weight-bold bg-primary text-white q-px-sm q-py-xs rounded-borders")
+                    ui.label("1").classes(
+                        "text-caption font-weight-bold bg-primary text-white q-px-sm q-py-xs rounded-borders"
+                    )
                     ui.label(t("step_upload")).classes("text-subtitle1 font-weight-bold")
 
                 with ui.card().classes("full-width q-mb-lg"):
@@ -205,8 +212,12 @@ async def setup_model_import():
                 step2_header = ui.row().classes("items-center gap-sm q-mb-sm")
                 step2_header.visible = False
                 with step2_header:
-                    ui.label("2").classes("text-caption font-weight-bold bg-primary text-white q-px-sm q-py-xs rounded-borders")
-                    ui.label(t("step_configure_validate")).classes("text-subtitle1 font-weight-bold")
+                    ui.label("2").classes(
+                        "text-caption font-weight-bold bg-primary text-white q-px-sm q-py-xs rounded-borders"
+                    )
+                    ui.label(t("step_configure_validate")).classes(
+                        "text-subtitle1 font-weight-bold"
+                    )
 
                 config_card = ui.card().classes("full-width q-mb-lg")
                 config_card.visible = False
@@ -264,7 +275,9 @@ async def setup_model_import():
                                 set_state_val("unmapped_species", unmapped_species)
                                 ui.notify(t("csv_validated"), type="positive")
                                 refresh_results()
-                                await ui.run_javascript('setTimeout(()=>document.getElementById("import-step3")?.scrollIntoView({behavior:"smooth",block:"start"}),100)')
+                                await ui.run_javascript(
+                                    'setTimeout(()=>document.getElementById("import-step3")?.scrollIntoView({behavior:"smooth",block:"start"}),100)'
+                                )
                             except Exception as exc:
                                 ui.notify(f"{t('error')}: {exc}", type="negative")
                             finally:
@@ -327,7 +340,9 @@ async def setup_model_import():
 
                             ui.notify(t("csv_validated"), type="positive")
                             refresh_results()
-                            await ui.run_javascript('setTimeout(()=>document.getElementById("import-step3")?.scrollIntoView({behavior:"smooth",block:"start"}),100)')
+                            await ui.run_javascript(
+                                'setTimeout(()=>document.getElementById("import-step3")?.scrollIntoView({behavior:"smooth",block:"start"}),100)'
+                            )
                         except Exception as exc:
                             ui.notify(f"{t('error')}: {exc}", type="negative")
                         finally:
@@ -551,10 +566,14 @@ async def setup_model_import():
                     config_ui()
 
                 # ── Step 3: Review & Import ───────────────────────────────────
-                step3_header = ui.row().classes("items-center gap-sm q-mb-sm").props("id=import-step3")
+                step3_header = (
+                    ui.row().classes("items-center gap-sm q-mb-sm").props("id=import-step3")
+                )
                 step3_header.visible = False
                 with step3_header:
-                    ui.label("3").classes("text-caption font-weight-bold bg-primary text-white q-px-sm q-py-xs rounded-borders")
+                    ui.label("3").classes(
+                        "text-caption font-weight-bold bg-primary text-white q-px-sm q-py-xs rounded-borders"
+                    )
                     ui.label(t("step_review_import")).classes("text-subtitle1 font-weight-bold")
 
                 results_container = ui.card().classes("full-width q-mb-lg")
@@ -673,11 +692,17 @@ async def setup_model_import():
 
                         if cleaned_df is not None and not cleaned_df.empty:
                             display_cols = [c for c in cleaned_df.columns if c != "video_id"]
-                            with ui.expansion(t("show_valid_rows"), icon="table_rows").classes("full-width q-mt-sm"):
+                            with ui.expansion(t("show_valid_rows"), icon="table_rows").classes(
+                                "full-width q-mt-sm"
+                            ):
                                 ui.aggrid(
                                     {
-                                        "columnDefs": [{"field": c, "headerName": c} for c in display_cols],
-                                        "rowData": df_to_records(cleaned_df[display_cols], limit=500),
+                                        "columnDefs": [
+                                            {"field": c, "headerName": c} for c in display_cols
+                                        ],
+                                        "rowData": df_to_records(
+                                            cleaned_df[display_cols], limit=500
+                                        ),
                                         "columnSize": "responsive",
                                         "pagination": True,
                                         "paginationPageSize": 50,
@@ -798,16 +823,24 @@ async def setup_model_import():
                             if error_summary:
                                 ui.label(t("error_summary")).classes("text-body2 q-mt-sm")
                                 for err, count in error_summary.items():
-                                    ui.label(t("error_summary_item", err=t(err), count=count)).classes("text-body2")
+                                    ui.label(
+                                        t("error_summary_item", err=t(err), count=count)
+                                    ).classes("text-body2")
 
                             with ui.expansion(
                                 t("show_detailed_errors"), icon="table_rows"
                             ).classes("full-width q-mt-sm"):
-                                err_display_cols = [c for c in errors_df.columns if c != "video_id"]
+                                err_display_cols = [
+                                    c for c in errors_df.columns if c != "video_id"
+                                ]
                                 ui.aggrid(
                                     {
-                                        "columnDefs": [{"field": c, "headerName": c} for c in err_display_cols],
-                                        "rowData": df_to_records(errors_df[err_display_cols], limit=500),
+                                        "columnDefs": [
+                                            {"field": c, "headerName": c} for c in err_display_cols
+                                        ],
+                                        "rowData": df_to_records(
+                                            errors_df[err_display_cols], limit=500
+                                        ),
                                         "columnSize": "responsive",
                                         "rowSelection": "single",
                                         "pagination": True,

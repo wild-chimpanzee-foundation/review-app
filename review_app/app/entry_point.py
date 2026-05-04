@@ -13,9 +13,11 @@ from review_app.app.state import (
     set_active_project,
     set_dark_mode,
     set_data_provider,
+    get_language,
+    set_language,
 )
 from review_app.app.theme import apply_theme
-from review_app.app.translations import get_language, set_language, t
+from review_app.app.translations import t
 from review_app.backend.local_data_provider import LocalDataProvider
 
 # Register video mimetypes for both lower and uppercase extensions (camera traps often use .MP4)

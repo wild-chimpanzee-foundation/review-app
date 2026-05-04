@@ -110,15 +110,17 @@ class SpeciesMixin:
             return []
 
     def _load_species_behaviors(self) -> None:
-        from review_app.app.config import get_bundled_behaviors_csv
+        from review_app.app.config import DEFAULT_BEHAVIORS, get_bundled_behaviors_csv
 
         bundled_path = get_bundled_behaviors_csv()
         csv_rows = self._parse_behaviors_csv(Path(bundled_path)) if bundled_path else []
 
         # Collect all behavior keys with optional French names.
-        behavior_meta: dict[str, str | None] = {k: None for k in self._behavior_defaults}
+        behavior_meta: dict[str, dict[str, str | None]] = {
+            b["key"]: {"name_en": b["name_en"], "name_fr": b["name_fr"]} for b in DEFAULT_BEHAVIORS
+        }
         for row in csv_rows:
-            behavior_meta[row["behavior"]] = row.get("behavior_fr")
+            behavior_meta[row["behavior"]] = {"name_en": row["behavior"], "name_fr": row.get("behavior_fr")}
 
         with self.engine.begin() as conn:
             # Upsert behaviors — preserve existing IDs.
@@ -130,10 +132,10 @@ class SpeciesMixin:
                 {
                     "id": existing_beh.get(key) or str(uuid.uuid4()),
                     "key": key,
-                    "name_en": key,
-                    "name_fr": name_fr,
+                    "name_en": meta["name_en"],
+                    "name_fr": meta["name_fr"],
                 }
-                for key, name_fr in behavior_meta.items()
+                for key, meta in behavior_meta.items()
             ]
             conn.execute(
                 text(
@@ -164,7 +166,7 @@ class SpeciesMixin:
 
             to_insert: dict[tuple, dict] = {}
             for sci, sp_id in species_map.items():
-                for b_key in self._behavior_defaults:
+                for b_key in behavior_meta.keys():
                     b_id = behavior_id_map.get(b_key)
                     if b_id:
                         to_insert[(sp_id, b_id)] = {"species_id": sp_id, "behavior_id": b_id}
@@ -175,12 +177,16 @@ class SpeciesMixin:
                     to_insert[(sp_id, b_id)] = {"species_id": sp_id, "behavior_id": b_id}
 
             if to_insert:
+                placeholders = ", ".join(f"(:sid{i}, :bid{i})" for i in range(len(to_insert)))
+                params = {}
+                for i, ((sid, bid), _) in enumerate(to_insert.items()):
+                    params[f"sid{i}"] = sid
+                    params[f"bid{i}"] = bid
                 conn.execute(
                     text(
-                        "INSERT OR IGNORE INTO species_behaviors (species_id, behavior_id) "
-                        "VALUES (:species_id, :behavior_id)"
+                        f"INSERT OR IGNORE INTO species_behaviors (species_id, behavior_id) VALUES {placeholders}"
                     ),
-                    list(to_insert.values()),
+                    params,
                 )
 
     def _build_species_variant_map(self) -> dict[str, str]:
@@ -399,6 +405,27 @@ class SpeciesMixin:
             ).fetchall()
         return [r[0] for r in rows]
 
+    def species_exists(self, scientific_name: str) -> bool:
+        with self.engine.connect() as conn:
+            exists = conn.execute(
+                text("SELECT 1 FROM species WHERE scientific_name = :s"), {"s": scientific_name}
+            ).fetchone()
+        return exists is not None
+
+    def get_existing_groups(self) -> dict[str, list[str]]:
+        with self.engine.connect() as conn:
+            en_rows = conn.execute(text("SELECT DISTINCT group_en FROM species WHERE group_en IS NOT NULL")).fetchall()
+            fr_rows = conn.execute(text("SELECT DISTINCT group_fr FROM species WHERE group_fr IS NOT NULL")).fetchall()
+        return {
+            "en": [r[0] for r in en_rows],
+            "fr": [r[0] for r in fr_rows],
+        }
+
+    def get_existing_iucn(self) -> list[str]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(text("SELECT DISTINCT iucn FROM species WHERE iucn IS NOT NULL")).fetchall()
+        return [r[0] for r in rows]
+
     def add_custom_species(
         self,
         scientific_name: str,
@@ -407,19 +434,16 @@ class SpeciesMixin:
         group_en: str,
         group_fr: str,
         iucn: str | None = None,
-    ) -> None:
+    ) -> bool:
+        if self.species_exists(scientific_name):
+            return False
+            
         with self.engine.begin() as conn:
             conn.execute(
                 text(
                     """
                     INSERT INTO species (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn)
                     VALUES (:id, :scientific_name, :name_en, :name_fr, :group_en, :group_fr, :iucn)
-                    ON CONFLICT(scientific_name) DO UPDATE SET
-                        name_en  = excluded.name_en,
-                        name_fr  = excluded.name_fr,
-                        group_en = excluded.group_en,
-                        group_fr = excluded.group_fr,
-                        iucn     = excluded.iucn
                     """
                 ),
                 {
@@ -432,3 +456,4 @@ class SpeciesMixin:
                     "iucn": iucn,
                 },
             )
+        return True

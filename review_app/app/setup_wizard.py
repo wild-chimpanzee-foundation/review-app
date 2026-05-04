@@ -7,7 +7,8 @@ from pathlib import Path
 from nicegui import run, ui
 
 from review_app.app.config import get_default_db_path
-from review_app.app.translations import get_language, t
+from review_app.app.state import get_language
+from review_app.app.translations import t
 from review_app.app.utils import sync_with_progress
 
 FFMPEG_INSTALL_MAC = "brew install ffmpeg"
