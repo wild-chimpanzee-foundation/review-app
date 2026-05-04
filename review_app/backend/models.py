@@ -28,7 +28,7 @@ class Project(Base):
     last_opened = Column(DateTime, nullable=True)
     dirs = relationship("ProjectDir", backref="project", cascade="all, delete-orphan")
     videos = relationship("Video", cascade="all, delete-orphan")
-    species = relationship("Species", cascade="all, delete-orphan")
+    project_species = relationship("ProjectSpecies", cascade="all, delete-orphan")
 
 
 class ProjectDir(Base):
@@ -71,14 +71,58 @@ class VideoLabel(Base):
     review_later = Column(Boolean, nullable=True, default=False)
 
 
+class Species(Base):
+    __tablename__ = "species"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    scientific_name = Column(String, nullable=False, unique=True)
+    name_en = Column(String, nullable=True)
+    name_fr = Column(String, nullable=True)
+    group_en = Column(String, nullable=True)
+    group_fr = Column(String, nullable=True)
+    iucn = Column(String, nullable=True)
+    behaviors = relationship("SpeciesBehavior", cascade="all, delete-orphan")
+
+
+class Behavior(Base):
+    __tablename__ = "behaviors"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    key = Column(String, nullable=False, unique=True)
+    name_en = Column(String, nullable=False)
+    name_fr = Column(String, nullable=True)
+
+
+class SpeciesBehavior(Base):
+    __tablename__ = "species_behaviors"
+
+    species_id = Column(String, ForeignKey("species.id"), primary_key=True)
+    behavior_id = Column(String, ForeignKey("behaviors.id"), primary_key=True)
+
+
+class ProjectSpecies(Base):
+    __tablename__ = "project_species"
+
+    project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
+    species_id = Column(String, ForeignKey("species.id"), primary_key=True)
+
+
+class ProjectSpeciesBehavior(Base):
+    __tablename__ = "project_species_behaviors"
+
+    project_id = Column(String, ForeignKey("projects.id"), primary_key=True)
+    species_id = Column(String, ForeignKey("species.id"), primary_key=True)
+    behavior_id = Column(String, ForeignKey("behaviors.id"), primary_key=True)
+
+
 class IndividualObservation(Base):
     __tablename__ = "individual_observations"
 
     video_id = Column(String, ForeignKey("videos.video_id"), primary_key=True)
     id = Column(Integer, primary_key=True)
     project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
-    species = Column(String, nullable=False)
-    behavior = Column(String, nullable=False)
+    species_id = Column(String, ForeignKey("species.id"), nullable=True, index=True)
+    behavior_id = Column(String, ForeignKey("behaviors.id"), nullable=True, index=True)
     start_sec = Column(Float, nullable=False, default=0.0)
     end_sec = Column(Float, nullable=True)
     labeled_by = Column(String, nullable=True)
@@ -108,27 +152,6 @@ class ModelAnnotation(Base):
     )
 
 
-class Species(Base):
-    __tablename__ = "species"
-
-    scientific_name = Column(String, primary_key=True)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
-    name_en = Column(String, nullable=True)
-    name_fr = Column(String, nullable=True)
-    group_en = Column(String, nullable=True)
-    group_fr = Column(String, nullable=True)
-    iucn = Column(String, nullable=True)
-    behaviors = relationship("SpeciesBehavior", backref="species", cascade="all, delete-orphan")
-
-
-class SpeciesBehavior(Base):
-    __tablename__ = "species_behavior"
-
-    scientific_name = Column(String, ForeignKey("species.scientific_name"), primary_key=True)
-    behavior = Column(String, primary_key=True)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
-
-
 class AppSetting(Base):
     __tablename__ = "app_settings"
 
@@ -136,11 +159,9 @@ class AppSetting(Base):
     value = Column(String, nullable=True)
 
 
+Index("idx_individual_video_species", IndividualObservation.video_id, IndividualObservation.species_id)
 Index(
-    "idx_individual_video_species", IndividualObservation.video_id, IndividualObservation.species
-)
-Index(
-    "idx_individual_video_behavior", IndividualObservation.video_id, IndividualObservation.behavior
+    "idx_individual_video_behavior", IndividualObservation.video_id, IndividualObservation.behavior_id
 )
 Index("idx_individual_video_time", IndividualObservation.video_id, IndividualObservation.start_sec)
 Index("idx_videos_is_valid", Video.is_valid)
@@ -159,9 +180,9 @@ Index(
     ModelAnnotation.video_id,
     ModelAnnotation.probability,
 )
-# Covers: WHERE video_id=? AND behavior=?  (behavior filter EXISTS)
+# Covers: WHERE video_id=? AND behavior_id=?  (behavior filter EXISTS)
 Index(
     "idx_individual_behavior_video",
-    IndividualObservation.behavior,
+    IndividualObservation.behavior_id,
     IndividualObservation.video_id,
 )

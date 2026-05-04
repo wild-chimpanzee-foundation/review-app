@@ -1,10 +1,133 @@
 from __future__ import annotations
 
+from typing import Callable
+
 from sqlalchemy import text
 
-# Add tuples of (version: int, sql: str) to apply schema changes to existing DBs.
+# Each entry is (version: int, sql: str | list[str] | Callable[[conn], None]).
+# Use a callable for migrations that need conditional logic (e.g. idempotent DDL).
 # Versions must be contiguous starting at 1. Never modify or remove existing entries.
-MIGRATIONS: list[tuple[int, str]] = [
+
+
+def _migration_v4(conn) -> None:
+    """Migrate to surrogate-ID species/behaviors schema. Idempotent — safe to re-run."""
+
+    def _tables() -> set[str]:
+        return {
+            r[0]
+            for r in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            ).fetchall()
+        }
+
+    def _columns(table: str) -> set[str]:
+        return {r[1] for r in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()}
+
+    # ── 1. Populate behaviors from all historic behavior strings ─────────────
+    # behaviors table was created empty by create_all; source tables may still exist.
+    sources = []
+    if "species_behavior" in _tables():
+        sources.append("SELECT DISTINCT behavior AS b FROM species_behavior WHERE behavior IS NOT NULL")
+    if "behavior" in _columns("individual_observations"):
+        sources.append(
+            "SELECT DISTINCT behavior AS b FROM individual_observations"
+            " WHERE behavior IS NOT NULL AND TRIM(behavior) <> ''"
+        )
+    if sources:
+        conn.execute(
+            text(
+                f"""
+                INSERT OR IGNORE INTO behaviors (id, key, name_en)
+                SELECT lower(hex(randomblob(16))), b, b FROM ({" UNION ".join(sources)})
+                """
+            )
+        )
+
+    # ── 2. Recreate species table with surrogate id ──────────────────────────
+    tables = _tables()
+    if "species_new" not in tables and "id" not in _columns("species"):
+        conn.execute(
+            text(
+                """
+                CREATE TABLE species_new (
+                    id TEXT PRIMARY KEY,
+                    scientific_name TEXT UNIQUE NOT NULL,
+                    name_en TEXT, name_fr TEXT, group_en TEXT, group_fr TEXT, iucn TEXT
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO species_new (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn)
+                SELECT lower(hex(randomblob(16))), scientific_name, name_en, name_fr,
+                       group_en, group_fr, iucn
+                FROM species
+                """
+            )
+        )
+    elif "species_new" not in tables:
+        # id column already exists on species (partial previous run); nothing to do here.
+        pass
+
+    # ── 3. Populate species_behaviors from old junction table ─────────────────
+    if "species_behavior" in _tables():
+        src = "species_new" if "species_new" in _tables() else "species"
+        conn.execute(
+            text(
+                f"""
+                INSERT OR IGNORE INTO species_behaviors (species_id, behavior_id)
+                SELECT sn.id, b.id
+                FROM species_behavior sb
+                JOIN {src} sn ON sn.scientific_name = sb.scientific_name
+                JOIN behaviors b ON b.key = sb.behavior
+                """
+            )
+        )
+        conn.execute(text("DROP TABLE species_behavior"))
+
+    # ── 4. Swap species_new → species ─────────────────────────────────────────
+    if "species_new" in _tables():
+        conn.execute(text("DROP TABLE species"))
+        conn.execute(text("ALTER TABLE species_new RENAME TO species"))
+
+    # ── 5. Add FK columns to individual_observations ─────────────────────────
+    io_cols = _columns("individual_observations")
+    if "species_id" not in io_cols:
+        conn.execute(
+            text("ALTER TABLE individual_observations ADD COLUMN species_id TEXT REFERENCES species(id)")
+        )
+    if "behavior_id" not in io_cols:
+        conn.execute(
+            text("ALTER TABLE individual_observations ADD COLUMN behavior_id TEXT REFERENCES behaviors(id)")
+        )
+
+    # ── 6. Backfill FK columns from old string columns ────────────────────────
+    io_cols = _columns("individual_observations")
+    if "species" in io_cols:
+        conn.execute(
+            text(
+                """
+                UPDATE individual_observations
+                SET species_id = (SELECT id FROM species WHERE scientific_name = individual_observations.species)
+                WHERE species_id IS NULL
+                """
+            )
+        )
+    if "behavior" in io_cols:
+        conn.execute(
+            text(
+                """
+                UPDATE individual_observations
+                SET behavior_id = (SELECT id FROM behaviors WHERE key = individual_observations.behavior)
+                WHERE behavior_id IS NULL
+                """
+            )
+        )
+
+
+MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
         2,
@@ -18,6 +141,7 @@ MIGRATIONS: list[tuple[int, str]] = [
         """,
     ),
     (3, "CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)"),
+    (4, _migration_v4),
 ]
 
 
@@ -30,8 +154,13 @@ def run_migrations(engine) -> None:
             conn.execute(text("INSERT INTO _schema_version VALUES (:v)"), {"v": len(MIGRATIONS)})
             return
         current = row[0]
-        for version, sql in MIGRATIONS:
+        for version, migration in MIGRATIONS:
             if version > current:
-                conn.execute(text(sql))
+                if callable(migration):
+                    migration(conn)
+                else:
+                    stmts = migration if isinstance(migration, list) else [migration]
+                    for stmt in stmts:
+                        conn.execute(text(stmt))
         conn.execute(text("DELETE FROM _schema_version"))
         conn.execute(text("INSERT INTO _schema_version VALUES (:v)"), {"v": len(MIGRATIONS)})

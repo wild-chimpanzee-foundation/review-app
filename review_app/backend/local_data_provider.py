@@ -23,6 +23,8 @@ from review_app.backend.models import (
     Project,
     ProjectDir,
     VideoLabel,
+    Species,
+    Behavior,
 )
 from review_app.backend.species import SpeciesMixin
 from review_app.backend.utils import needs_browser_transcode
@@ -241,9 +243,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 return {"deleted": False}
             video_count = len(project.videos)
             transcoded_paths = [
-                Path(v.transcoded_path)
-                for v in project.videos
-                if v.transcoded_path is not None
+                Path(v.transcoded_path) for v in project.videos if v.transcoded_path is not None
             ]
             s.delete(project)
             s.commit()
@@ -304,13 +304,15 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     SELECT 'camera' AS source, camera_id AS val FROM videos
                     WHERE camera_id IS NOT NULL {vid_filter} GROUP BY camera_id
                     UNION ALL
-                    SELECT 'species', io.species FROM individual_observations io
-                    WHERE io.species IS NOT NULL AND TRIM(io.species) <> '' {io_exists}
-                    GROUP BY io.species
+                    SELECT 'species', s.scientific_name FROM individual_observations io
+                    JOIN species s ON s.id = io.species_id
+                    WHERE io.species_id IS NOT NULL {io_exists}
+                    GROUP BY s.scientific_name
                     UNION ALL
-                    SELECT 'behavior', io.behavior FROM individual_observations io
-                    WHERE io.behavior IS NOT NULL AND TRIM(io.behavior) <> '' {io_exists}
-                    GROUP BY io.behavior
+                    SELECT 'behavior', b.key FROM individual_observations io
+                    JOIN behaviors b ON b.id = io.behavior_id
+                    WHERE io.behavior_id IS NOT NULL {io_exists}
+                    GROUP BY b.key
                     UNION ALL
                     SELECT 'possible_species', ma.value_text FROM model_annotations ma
                     WHERE ma.annotation_type = 'species' AND ma.value_text IS NOT NULL AND TRIM(ma.value_text) <> '' {ma_exists}
@@ -451,7 +453,8 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             where.append("""
                 EXISTS (
                     SELECT 1 FROM individual_observations io
-                    WHERE io.video_id = v.video_id AND io.species = :species
+                    JOIN species s ON s.id = io.species_id
+                    WHERE io.video_id = v.video_id AND s.scientific_name = :species
                 )""")
 
         if selected_possible_species != "All":
@@ -488,22 +491,21 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             where.append("""
                 EXISTS (
                     SELECT 1 FROM individual_observations io
-                    WHERE io.video_id = v.video_id
-                    AND io.behavior IS NOT NULL AND TRIM(io.behavior) <> ''
+                    WHERE io.video_id = v.video_id AND io.behavior_id IS NOT NULL
                 )""")
         elif selected_behavior == "No Behavior":
             where.append("""
                 NOT EXISTS (
                     SELECT 1 FROM individual_observations io
-                    WHERE io.video_id = v.video_id
-                    AND io.behavior IS NOT NULL AND TRIM(io.behavior) <> ''
+                    WHERE io.video_id = v.video_id AND io.behavior_id IS NOT NULL
                 )""")
         elif selected_behavior not in ("All", "Has Behavior", "No Behavior"):
             params["behavior"] = selected_behavior
             where.append("""
                 EXISTS (
                     SELECT 1 FROM individual_observations io
-                    WHERE io.video_id = v.video_id AND io.behavior = :behavior
+                    JOIN behaviors b ON b.id = io.behavior_id
+                    WHERE io.video_id = v.video_id AND b.key = :behavior
                 )""")
 
         if selected_model_behavior != "All":
@@ -685,9 +687,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     manual_summary AS (
                         SELECT
                             io.video_id,
-                            GROUP_CONCAT(DISTINCT io.behavior) AS behavior_prediction,
+                            GROUP_CONCAT(DISTINCT b.key) AS behavior_prediction,
                             COUNT(*) AS individual_count
                         FROM individual_observations io
+                        LEFT JOIN behaviors b ON b.id = io.behavior_id
                         GROUP BY io.video_id
                     ),
                     review_state AS (
@@ -750,10 +753,13 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             manual_rows = pd.read_sql(
                 text(
                     """
-                    SELECT species, behavior, start_sec, end_sec, labeled_by, labeled_at
-                    FROM individual_observations
-                    WHERE video_id = :video_id
-                    ORDER BY COALESCE(start_sec, 0.0), species
+                    SELECT s.scientific_name AS species, b.key AS behavior,
+                           io.start_sec, io.end_sec, io.labeled_by, io.labeled_at
+                    FROM individual_observations io
+                    LEFT JOIN species s ON s.id = io.species_id
+                    LEFT JOIN behaviors b ON b.id = io.behavior_id
+                    WHERE io.video_id = :video_id
+                    ORDER BY COALESCE(io.start_sec, 0.0), s.scientific_name
                     """
                 ),
                 conn,
@@ -882,6 +888,15 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         now = self._utcnow_dt()
         valid_species = set(self.get_valid_species())
 
+        with self.engine.connect() as conn:
+            species_id_map = {
+                r[0]: r[1]
+                for r in conn.execute(text("SELECT scientific_name, id FROM species")).fetchall()
+            }
+            behavior_id_map = {
+                r[0]: r[1] for r in conn.execute(text("SELECT key, id FROM behaviors")).fetchall()
+            }
+
         normalized: list[dict[str, Any]] = []
         for selection in selections:
             species = str(selection.get("species") or "").strip() or "unknown"
@@ -901,8 +916,8 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
             normalized.append(
                 {
-                    "species": species,
-                    "behavior": behavior,
+                    "species_id": species_id_map.get(species),
+                    "behavior_id": behavior_id_map.get(behavior),
                     "start_sec": float(start_sec),
                     "end_sec": end_sec_val,
                     "labeled_by": selection.get("labeled_by"),
@@ -934,8 +949,8 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                             video_id=video_id,
                             id=obs_id,
                             project_id=active_project_id,
-                            species=row["species"],
-                            behavior=row["behavior"],
+                            species_id=row["species_id"],
+                            behavior_id=row["behavior_id"],
                             start_sec=row["start_sec"],
                             end_sec=row["end_sec"],
                             labeled_by=row.get("labeled_by"),
@@ -1145,7 +1160,11 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             video_path = video_map.get(video_id, video_id)
             if video_id not in known_videos:
                 errors.append(
-                    {"row_number": row_num, "video_path": video_path, "error": "error_unknown_path"}
+                    {
+                        "row_number": row_num,
+                        "video_path": video_path,
+                        "error": "error_unknown_path",
+                    }
                 )
                 continue
             if not model_name:
@@ -1299,13 +1318,15 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                         COALESCE(io.labeled_by, vl.labeled_by) AS annotator,
                         COALESCE(io.labeled_at, vl.labeled_at) AS labeled_at,
                         io.id                     AS observation_id,
-                        io.species,
-                        io.behavior,
+                        s.scientific_name         AS species,
+                        b.key                     AS behavior,
                         io.start_sec,
                         io.end_sec
                     FROM videos v
                     LEFT JOIN video_labels vl ON vl.video_id = v.video_id
                     LEFT JOIN individual_observations io ON io.video_id = v.video_id
+                    LEFT JOIN species s ON s.id = io.species_id
+                    LEFT JOIN behaviors b ON b.id = io.behavior_id
                     WHERE 1=1 {vid_pid}
                     ORDER BY v.camera_id, v.video_path, io.start_sec
                 """),

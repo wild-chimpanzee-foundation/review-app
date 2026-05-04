@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 import pandas as pd
@@ -7,7 +8,7 @@ from sqlalchemy import text
 
 
 class SpeciesMixin:
-    """Species and behavior loading and queries. Requires self.engine, self._resolve_path, self._behavior_defaults, self._fuzzy_match_threshold."""
+    """Species and behavior loading and queries. Requires self.engine, self._behavior_defaults."""
 
     @staticmethod
     def _parse_species_csv(path: Path) -> list[dict]:
@@ -52,13 +53,41 @@ class SpeciesMixin:
             raise ValueError("Bundled species CSV is empty or missing a scientific_name column.")
 
         with self.engine.begin() as conn:
-            conn.execute(text("DELETE FROM species"))
+            # Preserve existing IDs so FK references in individual_observations remain valid.
+            existing = {
+                r[0]: r[1]
+                for r in conn.execute(
+                    text("SELECT scientific_name, id FROM species")
+                ).fetchall()
+            }
+            for row in rows:
+                row["id"] = existing.get(row["scientific_name"]) or str(uuid.uuid4())
+
             conn.execute(
                 text(
-                    "INSERT INTO species (scientific_name, name_en, name_fr, group_en, group_fr, iucn) "
-                    "VALUES (:scientific_name, :name_en, :name_fr, :group_en, :group_fr, :iucn)"
+                    """
+                    INSERT INTO species (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn)
+                    VALUES (:id, :scientific_name, :name_en, :name_fr, :group_en, :group_fr, :iucn)
+                    ON CONFLICT(scientific_name) DO UPDATE SET
+                        name_en  = excluded.name_en,
+                        name_fr  = excluded.name_fr,
+                        group_en = excluded.group_en,
+                        group_fr = excluded.group_fr,
+                        iucn     = excluded.iucn
+                    """
                 ),
                 rows,
+            )
+            # Remove species no longer in the CSV that have no observations.
+            valid = ", ".join(f"'{r['scientific_name']}'" for r in rows)
+            conn.execute(
+                text(
+                    f"""
+                    DELETE FROM species
+                    WHERE scientific_name NOT IN ({valid})
+                    AND id NOT IN (SELECT DISTINCT species_id FROM individual_observations WHERE species_id IS NOT NULL)
+                    """
+                )
             )
 
     @staticmethod
@@ -71,8 +100,11 @@ class SpeciesMixin:
             for _, row in df.iterrows():
                 species = str(row["Species"]).strip()
                 behavior = str(row["Behavior"]).strip()
+                name_fr = str(row.get("behavior_fr", "") or "").strip() or None
                 if species and behavior:
-                    rows.append({"scientific_name": species, "behavior": behavior})
+                    rows.append(
+                        {"scientific_name": species, "behavior": behavior, "behavior_fr": name_fr}
+                    )
             return rows
         except Exception:
             return []
@@ -81,25 +113,72 @@ class SpeciesMixin:
         from review_app.app.config import get_bundled_behaviors_csv
 
         bundled_path = get_bundled_behaviors_csv()
-        rows = self._parse_behaviors_csv(Path(bundled_path)) if bundled_path else []
+        csv_rows = self._parse_behaviors_csv(Path(bundled_path)) if bundled_path else []
+
+        # Collect all behavior keys with optional French names.
+        behavior_meta: dict[str, str | None] = {k: None for k in self._behavior_defaults}
+        for row in csv_rows:
+            behavior_meta[row["behavior"]] = row.get("behavior_fr")
 
         with self.engine.begin() as conn:
-            conn.execute(text("DELETE FROM species_behavior"))
-            all_species = [
-                r[0] for r in conn.execute(text("SELECT scientific_name FROM species")).fetchall()
+            # Upsert behaviors — preserve existing IDs.
+            existing_beh = {
+                r[0]: r[1]
+                for r in conn.execute(text("SELECT key, id FROM behaviors")).fetchall()
+            }
+            behavior_rows = [
+                {
+                    "id": existing_beh.get(key) or str(uuid.uuid4()),
+                    "key": key,
+                    "name_en": key,
+                    "name_fr": name_fr,
+                }
+                for key, name_fr in behavior_meta.items()
             ]
-            default_rows = [
-                {"scientific_name": sci, "behavior": b}
-                for sci in all_species
-                for b in self._behavior_defaults
-            ]
-            to_insert = {(r["scientific_name"], r["behavior"]): r for r in default_rows}
-            to_insert.update({(r["scientific_name"], r["behavior"]): r for r in rows})
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO behaviors (id, key, name_en, name_fr)
+                    VALUES (:id, :key, :name_en, :name_fr)
+                    ON CONFLICT(key) DO UPDATE SET
+                        name_en = excluded.name_en,
+                        name_fr = excluded.name_fr
+                    """
+                ),
+                behavior_rows,
+            )
+
+            # Rebuild global species_behaviors from defaults + CSV.
+            conn.execute(text("DELETE FROM species_behaviors"))
+
+            species_map = {
+                r[0]: r[1]
+                for r in conn.execute(
+                    text("SELECT scientific_name, id FROM species")
+                ).fetchall()
+            }
+            behavior_id_map = {
+                r[0]: r[1]
+                for r in conn.execute(text("SELECT key, id FROM behaviors")).fetchall()
+            }
+
+            to_insert: dict[tuple, dict] = {}
+            for sci, sp_id in species_map.items():
+                for b_key in self._behavior_defaults:
+                    b_id = behavior_id_map.get(b_key)
+                    if b_id:
+                        to_insert[(sp_id, b_id)] = {"species_id": sp_id, "behavior_id": b_id}
+            for row in csv_rows:
+                sp_id = species_map.get(row["scientific_name"])
+                b_id = behavior_id_map.get(row["behavior"])
+                if sp_id and b_id:
+                    to_insert[(sp_id, b_id)] = {"species_id": sp_id, "behavior_id": b_id}
+
             if to_insert:
                 conn.execute(
                     text(
-                        "INSERT INTO species_behavior (scientific_name, behavior) "
-                        "VALUES (:scientific_name, :behavior)"
+                        "INSERT OR IGNORE INTO species_behaviors (species_id, behavior_id) "
+                        "VALUES (:species_id, :behavior_id)"
                     ),
                     list(to_insert.values()),
                 )
@@ -160,7 +239,14 @@ class SpeciesMixin:
     def get_behaviors_for_species(self, species_name: str) -> list[str]:
         with self.engine.connect() as conn:
             rows = conn.execute(
-                text("SELECT behavior FROM species_behavior WHERE scientific_name = :s"),
+                text(
+                    """
+                    SELECT b.key FROM behaviors b
+                    JOIN species_behaviors sb ON sb.behavior_id = b.id
+                    JOIN species s ON s.id = sb.species_id
+                    WHERE s.scientific_name = :s
+                    """
+                ),
                 {"s": species_name},
             ).fetchall()
         result = [r[0] for r in rows]
