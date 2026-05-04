@@ -66,8 +66,8 @@ class SpeciesMixin:
             conn.execute(
                 text(
                     """
-                    INSERT INTO species (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn)
-                    VALUES (:id, :scientific_name, :name_en, :name_fr, :group_en, :group_fr, :iucn)
+                    INSERT INTO species (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn, is_custom)
+                    VALUES (:id, :scientific_name, :name_en, :name_fr, :group_en, :group_fr, :iucn, 0)
                     ON CONFLICT(scientific_name) DO UPDATE SET
                         name_en  = excluded.name_en,
                         name_fr  = excluded.name_fr,
@@ -85,6 +85,7 @@ class SpeciesMixin:
                     f"""
                     DELETE FROM species
                     WHERE scientific_name NOT IN ({valid})
+                    AND is_custom = 0
                     AND id NOT IN (SELECT DISTINCT species_id FROM individual_observations WHERE species_id IS NOT NULL)
                     """
                 )
