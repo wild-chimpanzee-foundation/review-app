@@ -1,3 +1,4 @@
+from review_app.app.state import get_language
 
 TRANSLATIONS = {
     "en": {
@@ -302,7 +303,30 @@ TRANSLATIONS = {
         "ffmpeg_checking": "Checking...",
         "ffmpeg_not_found_title": "ffmpeg Not Found",
         "ffmpeg_install_instructions": "Install ffmpeg using the command below, then restart the app.",
-        "advanced_settings": "Advanced Settings",
+        "project_species_settings": "Project Species & Behaviors",
+        "project_species_desc": "Configure which species and behaviors are available for this project.",
+        "enable_species": "Enable Species",
+        "global_species": "Global Species List",
+        "project_species": "Project Species",
+        "configure_behaviors": "Configure Behaviors",
+        "all_behaviors": "All available behaviors",
+        "species_behaviors": "Behaviors for {species}",
+        "no_project_species_hint": "No species configured for this project. All global species are available by default.",
+        "add_custom_species_title": "Add Custom Species",
+        "scientific_name": "Scientific Name",
+        "name_en_label": "English Name",
+        "name_fr_label": "French Name",
+        "group_en_label": "English Group",
+        "group_fr_label": "French Group",
+        "iucn_label": "IUCN Status",
+        "add_species_btn": "Add Species",
+        "select_all": "Select All",
+        "all_fields_required": "All fields are required.",
+        "species_added": "Species added successfully.",
+        "apply_changes": "Apply Changes",
+        "add_custom_behavior_title": "Add Custom Behavior",
+        "behavior_key": "Behavior Key (e.g. 'climbing')",
+        "behavior_added": "Behavior added successfully.",
         "annotator_setup_desc": "Your name will be recorded with each annotation.",
         "annotator_name_placeholder": "Your name",
         "brightness": "Brightness",
@@ -700,6 +724,26 @@ TRANSLATIONS = {
         "ffmpeg_checking": "Vérification...",
         "ffmpeg_not_found_title": "ffmpeg Introuvable",
         "ffmpeg_install_instructions": "Installez ffmpeg avec la commande ci-dessous, puis redémarrez l'application.",
+        "project_species_settings": "Espèces et comportements du projet",
+        "project_species_desc": "Configurez les espèces et les comportements disponibles pour ce projet.",
+        "enable_species": "Activer les espèces",
+        "global_species": "Liste mondiale des espèces",
+        "project_species": "Espèces du projet",
+        "configure_behaviors": "Configurer les comportements",
+        "all_behaviors": "Tous les comportements disponibles",
+        "species_behaviors": "Comportements pour {species}",
+        "no_project_species_hint": "Aucune espèce configurée pour ce projet. Toutes les espèces mondiales sont disponibles par défaut.",
+        "add_custom_species_title": "Ajouter une espèce personnalisée",
+        "scientific_name": "Nom scientifique",
+        "name_en_label": "Nom anglais",
+        "name_fr_label": "Nom français",
+        "group_en_label": "Groupe anglais",
+        "group_fr_label": "Groupe français",
+        "iucn_label": "Statut UICN",
+        "add_species_btn": "Ajouter l'espèce",
+        "select_all": "Tout sélectionner",
+        "all_fields_required": "Tous les champs sont obligatoires.",
+        "species_added": "Espèce ajoutée avec succès.",
         "advanced_settings": "Paramètres Avancés",
         "annotator_setup_desc": "Votre nom sera enregistré avec chaque annotation.",
         "annotator_name_placeholder": "Votre nom",
@@ -795,18 +839,6 @@ TRANSLATIONS = {
         "tooltip_review_later_btn": "Marquer ce clip pour le revoir plus tard — le retrouver via la page Aperçu",
     },
 }
-
-
-def get_language():
-    from review_app.app.state import get_language as _get_language
-
-    return _get_language()
-
-
-def set_language(lang: str):
-    from review_app.app.state import set_language as _set_language
-
-    _set_language(lang)
 
 
 def t(key: str, **kwargs) -> str:

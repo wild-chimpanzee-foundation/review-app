@@ -9,6 +9,7 @@ from review_app.app.state import (
     get_annotator_name,
     get_blank_threshold,
     get_data_provider,
+    get_language,
     get_species_threshold,
     reset_app_state,
     set_active_project,
@@ -212,6 +213,154 @@ def _build_settings_content(container: ui.column):
                 ui.button(
                     t("sync_videos_label"), icon="sync", color="primary", on_click=sync_dir
                 ).props("dense")
+
+        # Project Species & Behaviors Section
+        if active_project_id:
+            with ui.expansion(t("project_species_settings"), icon="pets").classes(
+                "full-width q-mb-lg"
+            ):
+                with ui.column().classes("w-full gap-md q-pa-md"):
+                    ui.label(t("project_species_desc")).classes("text-caption text-grey-6")
+
+                    _dp = get_data_provider() or LocalDataProvider()
+                    lang = get_language()
+                    all_species_map = _dp.get_species_display_map(lang=lang)
+                    project_species = _dp.get_project_species(active_project_id)
+                    behavior_display_map = _dp.get_behavior_display_map(lang=lang)
+
+                    if not project_species:
+                        ui.label(t("no_project_species_hint")).classes("text-caption text-warning")
+
+                    with ui.row().classes("w-full items-center gap-sm"):
+                        species_select = ui.select(
+                            options=all_species_map,
+                            value=project_species,
+                            label=t("enable_species"),
+                            multiple=True,
+                            with_input=True,
+                        ).props("outlined use-chips full-width").classes("col")
+
+                        ui.button(
+                            t("select_all"),
+                            on_click=lambda: species_select.set_value(list(all_species_map.keys())),
+                        ).props("flat dense")
+
+                    with ui.row().classes("w-full justify-end q-mt-sm"):
+                        ui.button(
+                            t("apply_changes"),
+                            on_click=lambda: [_dp.set_project_species(active_project_id, species_select.value), _render_behaviors(), ui.notify(t("settings_saved"), type="positive")],
+                        ).props("unelevated color=primary")
+
+                    async def _add_custom_species_dialog():
+                        dialog = ui.dialog()
+                        with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
+                            ui.label(t("add_custom_species_title")).classes("text-h6 q-mb-md")
+                            sci = ui.input(t("scientific_name")).props("outlined dense full-width")
+                            n_en = ui.input(t("name_en_label")).props("outlined dense full-width")
+                            n_fr = ui.input(t("name_fr_label")).props("outlined dense full-width")
+                            g_en = ui.input(t("group_en_label")).props("outlined dense full-width")
+                            g_fr = ui.input(t("group_fr_label")).props("outlined dense full-width")
+                            iucn = ui.input(t("iucn_label")).props("outlined dense full-width")
+
+                            async def _do_add():
+                                if not all([sci.value, n_en.value, n_fr.value, g_en.value, g_fr.value]):
+                                    ui.notify(t("all_fields_required"), type="warning")
+                                    return
+                                await run.io_bound(
+                                    _dp.add_custom_species,
+                                    sci.value,
+                                    n_en.value,
+                                    n_fr.value,
+                                    g_en.value,
+                                    g_fr.value,
+                                    iucn.value or None,
+                                )
+                                ui.notify(t("species_added"), type="positive")
+                                dialog.close()
+                                # Refresh species list
+                                new_map = _dp.get_species_display_map(lang=lang)
+                                species_select.options = new_map
+                                species_select.update()
+
+                            with ui.row().classes("w-full justify-end q-mt-md"):
+                                ui.button(t("cancel"), on_click=dialog.close).props("flat")
+                                ui.button(t("add_species_btn"), on_click=_do_add).props("unelevated")
+                        dialog.open()
+
+                    async def _add_custom_behavior_dialog():
+                        dialog = ui.dialog()
+                        with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
+                            ui.label(t("add_custom_behavior_title")).classes("text-h6 q-mb-md")
+                            key = ui.input(t("behavior_key")).props("outlined dense full-width")
+                            n_en = ui.input(t("name_en_label")).props("outlined dense full-width")
+                            n_fr = ui.input(t("name_fr_label")).props("outlined dense full-width")
+
+                            async def _do_add():
+                                if not all([key.value, n_en.value]):
+                                    ui.notify(t("all_fields_required"), type="warning")
+                                    return
+                                await run.io_bound(
+                                    _dp.add_custom_behavior,
+                                    key.value,
+                                    n_en.value,
+                                    n_fr.value or None,
+                                )
+                                ui.notify(t("behavior_added"), type="positive")
+                                dialog.close()
+                                _render_behaviors()
+                            
+                            with ui.row().classes("w-full justify-end q-mt-md"):
+                                ui.button(t("cancel"), on_click=dialog.close).props("flat")
+                                ui.button(t("add_species_btn"), on_click=_do_add).props("unelevated")
+                        dialog.open()
+
+                    with ui.row().classes("q-mt-sm"):
+                        ui.button(
+                            t("add_custom_species_title"),
+                            icon="add",
+                            on_click=_add_custom_species_dialog,
+                        ).props("flat dense")
+                        ui.button(
+                            t("add_custom_behavior_title"),
+                            icon="add",
+                            on_click=_add_custom_behavior_dialog,
+                        ).props("flat dense")
+
+                    with ui.column().classes("w-full gap-sm") as behaviors_container:
+                        ui.label(t("configure_behaviors")).classes("text-subtitle2")
+
+                        def _render_behaviors():
+                            behaviors_container.clear()
+                            ui.label(t("configure_behaviors")).classes("text-subtitle2")
+                            selected_species = species_select.value or []
+                            for spec in selected_species:
+                                current_behaviors = _dp.get_project_species_behaviors(
+                                    active_project_id, spec
+                                )
+                                spec_display = all_species_map.get(spec, spec)
+                                with ui.row().classes("w-full items-center gap-sm no-wrap"):
+                                    ui.label(spec_display).classes("text-caption").style(
+                                        "width: 150px"
+                                    )
+                                    ui.select(
+                                        options=behavior_display_map,
+                                        value=current_behaviors,
+                                        multiple=True,
+                                        label=t("species_behaviors", species=spec_display),
+                                    ).props("outlined dense use-chips").classes("col").on(
+                                        "update:model-value",
+                                        lambda e, s=spec: _dp.set_project_species_behaviors(
+                                            active_project_id, s, e.args
+                                        ),
+                                    )
+
+                        _render_behaviors()
+
+                    def _on_species_change():
+                        _dp.set_project_species(active_project_id, species_select.value)
+                        _render_behaviors()
+
+                    species_select.on("update:model-value", _on_species_change)
 
         # Advanced Section
         with ui.expansion(t("advanced_settings"), icon="settings").classes("full-width q-mb-lg"):

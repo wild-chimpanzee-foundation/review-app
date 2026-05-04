@@ -15,7 +15,7 @@ from review_app.app.state import (
     set_selections,
     set_state_val,
 )
-from review_app.app.translations import t
+from review_app.app.translations import get_language, t
 from review_app.app.utils import get_probability_color
 
 
@@ -155,9 +155,20 @@ def render_annotation_section(
                 .style("border: 2px solid var(--q-primary)")
             ):
                 with ui.row().classes("w-full gap-sm items-center"):
-                    behaviors = dp.get_behaviors_for_species(sel["species"])
+                    active_project_id = get_active_project_id()
+                    behaviors_map = dp.get_behavior_display_map(
+                        lang=get_language(),
+                        species_name=sel["species"],
+                        project_id=active_project_id,
+                    )
                     sp_value = sel["species"] if sel["species"] in species_map else None
-                    bp_value = sel["behavior"] if sel["behavior"] in behaviors else behaviors[0]
+                    bp_value = (
+                        sel["behavior"]
+                        if sel["behavior"] in behaviors_map
+                        else list(behaviors_map.keys())[0]
+                        if behaviors_map
+                        else None
+                    )
 
                     sp = ui.select(
                         label=t("species_label"),
@@ -172,7 +183,7 @@ def render_annotation_section(
                         bp = (
                             ui.select(
                                 label=t("behavior_label"),
-                                options=behaviors,
+                                options=behaviors_map,
                                 value=bp_value,
                                 with_input=True,
                             )

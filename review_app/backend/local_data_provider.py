@@ -1519,12 +1519,13 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             stats["species_counts"] = pd.read_sql(
                 text(f"""
                 SELECT
-                    species,
+                    s.scientific_name     AS species,
                     COUNT(*)              AS observations,
-                    COUNT(DISTINCT video_id) AS videos
-                FROM individual_observations
-                {pf}
-                GROUP BY species
+                    COUNT(DISTINCT io.video_id) AS videos
+                FROM individual_observations io
+                JOIN species s ON s.id = io.species_id
+                {pf.replace("project_id", "io.project_id") if pf else ""}
+                GROUP BY s.scientific_name
                 ORDER BY observations DESC
             """),
                 conn,
@@ -1534,12 +1535,13 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             stats["behavior_counts"] = pd.read_sql(
                 text(f"""
                 SELECT
-                    behavior,
+                    b.key                 AS behavior,
                     COUNT(*)              AS observations,
-                    COUNT(DISTINCT video_id) AS videos
-                FROM individual_observations
-                {pf}
-                GROUP BY behavior
+                    COUNT(DISTINCT io.video_id) AS videos
+                FROM individual_observations io
+                JOIN behaviors b ON b.id = io.behavior_id
+                {pf.replace("project_id", "io.project_id") if pf else ""}
+                GROUP BY b.key
                 ORDER BY observations DESC
             """),
                 conn,
@@ -1597,9 +1599,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                     WHERE annotation_type = 'species' {af}
                 ),
                 manual AS (
-                    SELECT DISTINCT video_id, species AS manual_species
-                    FROM individual_observations
-                    WHERE 1=1 {af}
+                    SELECT DISTINCT io.video_id, s.scientific_name AS manual_species
+                    FROM individual_observations io
+                    JOIN species s ON s.id = io.species_id
+                    WHERE 1=1 {af.replace("project_id", "io.project_id") if af else ""}
                 )
                 SELECT
                     tm.model_name,

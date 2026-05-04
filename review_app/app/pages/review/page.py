@@ -22,8 +22,9 @@ from review_app.app.state import (
     set_queue,
     set_selections,
     set_state_val,
+    get_language,
 )
-from review_app.app.translations import get_language, t
+from review_app.app.translations import t
 from review_app.app.utils import (
     get_or_create_data_provider,
     get_probability_color,
@@ -267,7 +268,9 @@ async def render_video_section(dp, species_map):
                         elif _prob is not None:
                             _value = t("non_blank") if _prob < threshold else t("blank")
                         else:
-                            _value = t("blank") if str(_value).lower() == "blank" else t("non_blank")
+                            _value = (
+                                t("blank") if str(_value).lower() == "blank" else t("non_blank")
+                            )
 
                     # 2. Species mapping
                     elif _ann_type == "species":
@@ -392,9 +395,8 @@ async def render_video_section(dp, species_map):
                     ).tooltip(t("review_later"))
                 consensus = video.get("classification_consensus")
                 default_species = (
-                    (consensus if consensus and consensus != "UNKNOWN" else None)
-                    or (list(species_map.keys())[0] if species_map else "unknown")
-                )
+                    consensus if consensus and consensus != "UNKNOWN" else None
+                ) or (list(species_map.keys())[0] if species_map else "unknown")
 
                 render_annotation_section(
                     video,
@@ -418,7 +420,9 @@ async def setup_review():
         render_uninitialized_state()
         return
 
-    species_map = await run.io_bound(dp.get_species_display_map, get_language())
+    species_map = await run.io_bound(
+        dp.get_species_display_map, get_language(), project_id=get_active_project_id()
+    )
     if not species_map:
         species_map = {"unknown": "unknown"}
 
