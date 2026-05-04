@@ -390,6 +390,37 @@ class SpeciesMixin:
                     params,
                 )
 
+    def set_project_species_behaviors(
+        self, project_id: str, species_name: str, behavior_keys: list[str]
+    ) -> None:
+        with self.engine.begin() as conn:
+            # Get species ID
+            sp_id = conn.execute(
+                text("SELECT id FROM species WHERE scientific_name = :s"), {"s": species_name}
+            ).scalar()
+            if not sp_id:
+                return
+
+            conn.execute(
+                text(
+                    "DELETE FROM project_species_behaviors WHERE project_id = :pid AND species_id = :sid"
+                ),
+                {"pid": project_id, "sid": sp_id},
+            )
+            if behavior_keys:
+                placeholders = ", ".join(f":k{i}" for i in range(len(behavior_keys)))
+                params = {f"k{i}": key for i, key in enumerate(behavior_keys)}
+                params.update({"pid": project_id, "sid": sp_id})
+                conn.execute(
+                    text(
+                        f"""
+                        INSERT INTO project_species_behaviors (project_id, species_id, behavior_id)
+                        SELECT :pid, :sid, id FROM behaviors WHERE key IN ({placeholders})
+                        """
+                    ),
+                    params,
+                )
+
     def get_project_species_behaviors(self, project_id: str, species_name: str) -> list[str]:
         with self.engine.connect() as conn:
             rows = conn.execute(

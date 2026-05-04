@@ -81,6 +81,7 @@ class Species(Base):
     group_en = Column(String, nullable=True)
     group_fr = Column(String, nullable=True)
     iucn = Column(String, nullable=True)
+    is_custom = Column(Boolean, nullable=False, default=False)
     behaviors = relationship("SpeciesBehavior", cascade="all, delete-orphan")
 
 
@@ -91,6 +92,7 @@ class Behavior(Base):
     key = Column(String, nullable=False, unique=True)
     name_en = Column(String, nullable=False)
     name_fr = Column(String, nullable=True)
+    is_custom = Column(Boolean, nullable=False, default=False)
 
 
 class SpeciesBehavior(Base):

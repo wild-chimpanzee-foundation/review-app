@@ -98,6 +98,14 @@ def _migration_v4(conn) -> None:
         conn.execute(
             text("ALTER TABLE individual_observations ADD COLUMN species_id TEXT REFERENCES species(id)")
         )
+    
+    species_cols = _columns("species")
+    if "is_custom" not in species_cols:
+        conn.execute(text("ALTER TABLE species ADD COLUMN is_custom BOOLEAN NOT NULL DEFAULT 0"))
+
+    behavior_cols = _columns("behaviors")
+    if "is_custom" not in behavior_cols:
+        conn.execute(text("ALTER TABLE behaviors ADD COLUMN is_custom BOOLEAN NOT NULL DEFAULT 0"))
     if "behavior_id" not in io_cols:
         conn.execute(
             text("ALTER TABLE individual_observations ADD COLUMN behavior_id TEXT REFERENCES behaviors(id)")
