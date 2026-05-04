@@ -5,7 +5,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -337,7 +336,8 @@ class VideoMixin:
             if not input_path.exists():
                 raise FileNotFoundError(f"Video file not found: {input_path}")
 
-            tmp_dir = Path(tempfile.gettempdir()) / "video_review_transcoded"
+            from review_app.app.config import get_user_data_dir
+            tmp_dir = get_user_data_dir() / "transcoded_cache"
             tmp_dir.mkdir(parents=True, exist_ok=True)
             safe_name = video_id.replace("/", "_").replace("\\", "_").replace(":", "_")
             sidecar_path = tmp_dir / f"{safe_name}.mp4"
