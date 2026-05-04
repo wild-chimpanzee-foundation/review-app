@@ -59,6 +59,55 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         self._load_species_data()
         self._load_species_behaviors()
 
+    # ── Species/Behavior management ──────────────────────────────────────────
+
+    def get_valid_species(self, project_id: str | None = None) -> list[str]:
+        return super().get_valid_species(project_id)
+
+    def get_species_display_map(self, lang: str = "en", project_id: str | None = None) -> dict[str, str]:
+        return super().get_species_display_map(lang, project_id)
+
+    def get_behaviors_for_species(self, species_name: str, project_id: str | None = None) -> list[str]:
+        return super().get_behaviors_for_species(species_name, project_id)
+
+    def get_behavior_display_map(
+        self, lang: str = "en", species_name: str | None = None, project_id: str | None = None
+    ) -> dict[str, str]:
+        return super().get_behavior_display_map(lang, species_name, project_id)
+
+    def get_all_behaviors(self) -> list[dict]:
+        return super().get_all_behaviors()
+
+    def get_project_species(self, project_id: str) -> list[str]:
+        return super().get_project_species(project_id)
+
+    def set_project_species(self, project_id: str, species_names: list[str]) -> None:
+        super().set_project_species(project_id, species_names)
+
+    def get_project_species_behaviors(self, project_id: str, species_name: str) -> list[str]:
+        return super().get_project_species_behaviors(project_id, species_name)
+
+    def set_project_species_behaviors(
+        self, project_id: str, species_name: str, behavior_keys: list[str]
+    ) -> None:
+        super().set_project_species_behaviors(project_id, species_name, behavior_keys)
+
+    def add_custom_species(
+        self,
+        scientific_name: str,
+        name_en: str,
+        name_fr: str,
+        group_en: str,
+        group_fr: str,
+        iucn: str | None = None,
+    ) -> bool:
+        return super().add_custom_species(
+            scientific_name, name_en, name_fr, group_en, group_fr, iucn
+        )
+
+    def add_custom_behavior(self, key: str, name_en: str, name_fr: str | None = None) -> None:
+        super().add_custom_behavior(key, name_en, name_fr)
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
