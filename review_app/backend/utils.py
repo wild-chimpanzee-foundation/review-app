@@ -48,33 +48,3 @@ def needs_browser_transcode(video_row: dict) -> bool:
     # ws is None (not yet probed): use extension as heuristic
     ext = Path(video_row.get("video_path", "")).suffix.lower()
     return ext in _BROWSER_UNSAFE_EXTS
-
-
-def get_default_species_from_annotations(
-    model_ann: pd.DataFrame, valid_species: list[str], fallback_species: str
-) -> str:
-    """Pick a default species from model annotations based on highest probability sum."""
-    if model_ann is None or model_ann.empty:
-        return fallback_species
-    if "annotation_type" not in model_ann.columns or "value_text" not in model_ann.columns:
-        return fallback_species
-
-    species_rows = model_ann[
-        (model_ann["annotation_type"] == "species")
-        & model_ann["value_text"].notna()
-        & (model_ann["value_text"].astype(str).str.strip() != "")
-    ].copy()
-    if species_rows.empty:
-        return fallback_species
-
-    if "probability" not in species_rows.columns:
-        return fallback_species
-
-    species_rows["probability"] = species_rows["probability"].fillna(0.0).astype(float)
-    probs = species_rows.groupby("value_text", as_index=False)["probability"].sum()
-    probs = probs.sort_values("probability", ascending=False)
-    if probs.empty:
-        return fallback_species
-
-    candidate = str(probs.iloc[0]["value_text"]).strip()
-    return candidate if candidate in valid_species else fallback_species

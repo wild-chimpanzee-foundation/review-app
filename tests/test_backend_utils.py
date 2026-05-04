@@ -5,7 +5,6 @@ import pytest
 
 from review_app.backend.utils import (
     df_to_records,
-    get_default_species_from_annotations,
     get_video_mime,
     make_serializable,
     needs_browser_transcode,
@@ -59,49 +58,4 @@ def test_needs_browser_transcode():
     # web_safe is None, extension is unsafe
     assert (
         needs_browser_transcode({"is_web_safe": None, "video_path": "test.avi"}) is True
-    )
-
-
-def test_get_default_species_from_annotations():
-    valid_species = ["deer", "fox", "human"]
-    fallback = "unknown"
-
-    # Empty
-    assert get_default_species_from_annotations(None, valid_species, fallback) == fallback
-
-    # One species
-    df = pd.DataFrame(
-        [
-            {
-                "annotation_type": "species",
-                "value_text": "deer",
-                "probability": 0.9,
-            }
-        ]
-    )
-    assert (
-        get_default_species_from_annotations(df, valid_species, fallback) == "deer"
-    )
-
-    # Multiple, pick highest sum
-    df = pd.DataFrame(
-        [
-            {"annotation_type": "species", "value_text": "deer", "probability": 0.6},
-            {"annotation_type": "species", "value_text": "fox", "probability": 0.8},
-            {"annotation_type": "species", "value_text": "deer", "probability": 0.3},
-        ]
-    )
-    # deer sum = 0.9, fox sum = 0.8 -> deer
-    assert (
-        get_default_species_from_annotations(df, valid_species, fallback) == "deer"
-    )
-
-    # Invalid species in result
-    df = pd.DataFrame(
-        [
-            {"annotation_type": "species", "value_text": "alien", "probability": 0.99},
-        ]
-    )
-    assert (
-        get_default_species_from_annotations(df, valid_species, fallback) == fallback
     )

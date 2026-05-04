@@ -104,19 +104,12 @@ class SpeciesMixin:
                     list(to_insert.values()),
                 )
 
-    def _validate_species_fuzzy(self, value_text: str) -> tuple[bool, str | None]:
-        from thefuzz import process
-
-        if not value_text:
-            return False, None
-
-        value_lower = str(value_text).strip().lower()
-
+    def _build_species_variant_map(self) -> dict[str, str]:
+        """Return {lowercase_variant -> scientific_name} for all species names/aliases."""
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text("SELECT scientific_name, name_en, name_fr FROM species")
             ).fetchall()
-
         variant_to_sci: dict[str, str] = {}
         for sci, name_en, name_fr in rows:
             variant_to_sci[sci.lower()] = sci
@@ -124,6 +117,18 @@ class SpeciesMixin:
                 variant_to_sci[name_en.lower()] = sci
             if name_fr:
                 variant_to_sci[name_fr.lower()] = sci
+        return variant_to_sci
+
+    def _validate_species_fuzzy(
+        self, value_text: str, variant_map: dict[str, str] | None = None
+    ) -> tuple[bool, str | None]:
+        from thefuzz import process
+
+        if not value_text:
+            return False, None
+
+        value_lower = str(value_text).strip().lower()
+        variant_to_sci = variant_map if variant_map is not None else self._build_species_variant_map()
 
         if value_lower in variant_to_sci:
             return True, variant_to_sci[value_lower]

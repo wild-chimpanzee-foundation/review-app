@@ -260,12 +260,14 @@ async def render_video_section(dp, species_map):
                     _prob = _row.get("probability")
 
                     # 1. Logic for Blank/Non-Blank
-                    if _ann_type == "blank_non_blank" and _is_number(_value):
-                        threshold = get_blank_threshold()
-                        if threshold is not None and threshold >= 0 and float(_value) < threshold:
-                            _value = t("non_blank")
+                    if _ann_type == "blank_non_blank":
+                        threshold = get_blank_threshold() or 0.0
+                        if _is_number(_value):
+                            _value = t("non_blank") if float(_value) < threshold else t("blank")
+                        elif _prob is not None:
+                            _value = t("non_blank") if _prob < threshold else t("blank")
                         else:
-                            _value = t("blank")
+                            _value = t("blank") if str(_value).lower() == "blank" else t("non_blank")
 
                     # 2. Species mapping
                     elif _ann_type == "species":
@@ -332,7 +334,15 @@ async def render_video_section(dp, species_map):
                                 first_ann_type = False
 
                         with ui.column().classes("w-full gap-y-1"):
-                            for _val, _models in _predictions.items():
+                            for _val, _models in sorted(
+                                _predictions.items(),
+                                key=lambda x: (
+                                    sum(m["prob"] for m in x[1] if m["prob"] is not None)
+                                    / max(sum(1 for m in x[1] if m["prob"] is not None), 1),
+                                    len(x[1]),
+                                ),
+                                reverse=True,
+                            ):
                                 with ui.row().classes(
                                     "w-full items-center justify-between q-pa-xs rounded-borders bg-white/5 border border-white/5"
                                 ):
@@ -380,12 +390,11 @@ async def render_video_section(dp, species_map):
                     ).props(
                         f"flat round dense {'color=orange' if is_review_later else 'color=grey-6'}"
                     ).tooltip(t("review_later"))
-                default_species = video.get("default_species")
-                if not default_species:
-                    fallback_species = video.get("classification_consensus", "unknown")
-                    if not fallback_species or fallback_species == "UNKNOWN":
-                        fallback_species = list(species_map.keys())[0]
-                    default_species = fallback_species
+                consensus = video.get("classification_consensus")
+                default_species = (
+                    (consensus if consensus and consensus != "UNKNOWN" else None)
+                    or (list(species_map.keys())[0] if species_map else "unknown")
+                )
 
                 render_annotation_section(
                     video,

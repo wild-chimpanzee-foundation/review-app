@@ -7,21 +7,7 @@ from review_app.app.onboarding import show_info_dialog
 from review_app.app.state import get_active_project_id, get_state_val, set_state_val
 from review_app.app.translations import get_language, t
 from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
-
-
-def _make_serializable(val):
-    if val is None:
-        return None
-    if hasattr(val, "isoformat"):
-        return val.isoformat()
-    return val
-
-
-def _df_to_records(df: pd.DataFrame) -> list[dict]:
-    records = []
-    for _, row in df.head(500).iterrows():
-        records.append({k: _make_serializable(v) for k, v in row.items()})
-    return records
+from review_app.backend.utils import df_to_records
 
 
 def _get_df_from_state(key: str) -> pd.DataFrame | None:
@@ -32,9 +18,12 @@ def _get_df_from_state(key: str) -> pd.DataFrame | None:
 def _auto_suggest_mappings(columns: list[str]) -> list[dict]:
     col_set = set(columns)
     suggestions: list[dict] = []
+    detected_models: list[str] = []
+
     for col in columns:
         if col.startswith("top_1_"):
             model = col[6:]
+            detected_models.append(model)
             suggestions.append(
                 {
                     "model_name": model,
@@ -43,17 +32,36 @@ def _auto_suggest_mappings(columns: list[str]) -> list[dict]:
                     "prob_col": f"prob_{model}" if f"prob_{model}" in col_set else "",
                 }
             )
-    for blank_col in ("blank", "blank_prob", "p_blank", "prob_blank"):
-        if blank_col in col_set:
-            suggestions.append(
-                {
-                    "model_name": "ensemble",
-                    "annotation_type": "blank_non_blank",
-                    "value_col": "",
-                    "prob_col": blank_col,
-                }
-            )
-            break
+
+    # Try per-model blank columns first (blank_{model} or {model}_blank)
+    blank_found = False
+    for model in detected_models:
+        for pattern in (f"blank_{model}", f"{model}_blank", f"p_blank_{model}", f"prob_blank_{model}"):
+            if pattern in col_set:
+                suggestions.append(
+                    {
+                        "model_name": model,
+                        "annotation_type": "blank_non_blank",
+                        "value_col": "",
+                        "prob_col": pattern,
+                    }
+                )
+                blank_found = True
+
+    # Fall back to a generic blank column, using the column name as model name
+    if not blank_found:
+        for blank_col in ("blank", "blank_prob", "p_blank", "prob_blank"):
+            if blank_col in col_set:
+                suggestions.append(
+                    {
+                        "model_name": blank_col,
+                        "annotation_type": "blank_non_blank",
+                        "value_col": "",
+                        "prob_col": blank_col,
+                    }
+                )
+                break
+
     return suggestions
 
 
@@ -769,7 +777,7 @@ async def setup_model_import():
                                 ui.aggrid(
                                     {
                                         "columnDefs": error_cols,
-                                        "rowData": _df_to_records(errors_df),
+                                        "rowData": df_to_records(errors_df, limit=500),
                                         "columnSize": "responsive",
                                         "rowSelection": "single",
                                         "pagination": True,

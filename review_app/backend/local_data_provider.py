@@ -25,7 +25,7 @@ from review_app.backend.models import (
     VideoLabel,
 )
 from review_app.backend.species import SpeciesMixin
-from review_app.backend.utils import get_default_species_from_annotations, needs_browser_transcode
+from review_app.backend.utils import needs_browser_transcode
 from review_app.backend.video import VideoMixin
 
 
@@ -613,23 +613,37 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                         WHERE ma.annotation_type = 'blank_non_blank'
                     ),
                     model_species_consensus AS (
-                        SELECT
-                            ma.video_id,
-                            CASE
-                                WHEN COUNT(DISTINCT ma.value_text) = 1 THEN MAX(ma.value_text)
-                                ELSE 'UNKNOWN'
-                            END AS classification_consensus
-                        FROM model_annotations ma
-                        WHERE ma.annotation_type = 'species'
-                          AND COALESCE(ma.probability, 0.0) >= :min_prob
-                          AND ma.value_text IS NOT NULL
-                          AND TRIM(ma.value_text) <> ''
-                        GROUP BY ma.video_id
+                        SELECT video_id, value_text AS classification_consensus
+                        FROM (
+                            SELECT
+                                video_id,
+                                value_text,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY video_id
+                                    ORDER BY avg_prob DESC, model_count DESC
+                                ) AS rn
+                            FROM (
+                                SELECT video_id, value_text,
+                                       AVG(COALESCE(probability, 0.0)) AS avg_prob,
+                                       COUNT(*) AS model_count
+                                FROM model_annotations
+                                WHERE annotation_type = 'species'
+                                  AND COALESCE(probability, 0.0) >= :min_prob
+                                  AND value_text IS NOT NULL
+                                  AND TRIM(value_text) <> ''
+                                GROUP BY video_id, value_text
+                            ) species_avgs
+                        ) ranked
+                        WHERE rn = 1
                     ),
                     max_species_conf AS (
-                        SELECT video_id, MAX(COALESCE(probability, 0.0)) AS max_species_confidence
-                        FROM model_annotations
-                        WHERE annotation_type = 'species'
+                        SELECT video_id, MAX(prob_sum) AS max_species_confidence
+                        FROM (
+                            SELECT video_id, AVG(COALESCE(probability, 0.0)) AS prob_sum
+                            FROM model_annotations
+                            WHERE annotation_type = 'species'
+                            GROUP BY video_id, value_text
+                        ) _sp
                         GROUP BY video_id
                     ),
                     model_behavior AS (
@@ -732,17 +746,25 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         if detail_df.empty:
             return None
 
-        row = detail_df.iloc[0].to_dict()
+        return self._build_video_detail_row(
+            detail_df.iloc[0].to_dict(), manual_rows, blank_threshold, species_threshold
+        )
+
+    def _build_video_detail_row(
+        self,
+        row: dict,
+        manual_rows: pd.DataFrame,
+        blank_threshold: float,
+        species_threshold: float,
+    ) -> dict:
         selections = []
         for _, manual in manual_rows.iterrows():
             selections.append(
                 {
-                    "species": str(manual.get("species") or "unknown"),
-                    "behavior": str(manual.get("behavior") or "unlabeled"),
-                    "start_sec": float(manual.get("start_sec") or 0.0),
-                    "end_sec": None
-                    if pd.isna(manual.get("end_sec"))
-                    else float(manual.get("end_sec")),
+                    "species": str(manual.get("species")),
+                    "behavior": str(manual.get("behavior")),
+                    "start_sec": float(manual.get("start_sec")),
+                    "end_sec": float(manual.get("end_sec")),
                     "labeled_by": manual.get("labeled_by"),
                     "labeled_at": manual.get("labeled_at"),
                 }
@@ -772,10 +794,6 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             True if row.get("is_video_valid") is None else bool(row.get("is_video_valid"))
         )
         row["needs_transcode"] = needs_browser_transcode(row)
-        model_ann = self.get_model_annotations(video_id)
-        row["default_species"] = get_default_species_from_annotations(
-            model_ann, self.get_valid_species(), None
-        )
 
         blank_prob = row.get("blank_model_probability") or 0.0
         max_sp = row.get("max_species_confidence") or 0.0
@@ -1098,9 +1116,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         unique_species = src.loc[species_mask, "value_text"].dropna().str.strip().unique()
         unique_species = {str(s) for s in unique_species if str(s).strip()}
 
-        species_fuzzy_cache: dict[str, tuple[bool, str | None]] = {}
-        for species_val in unique_species:
-            species_fuzzy_cache[species_val] = self._validate_species_fuzzy(species_val)
+        variant_map = self._build_species_variant_map()
+        species_fuzzy_cache: dict[str, tuple[bool, str | None]] = {
+            s: self._validate_species_fuzzy(s, variant_map) for s in unique_species
+        }
 
         prepared_rows: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
@@ -1203,7 +1222,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         self, cleaned_df: pd.DataFrame, active_project_id: str | None
     ) -> dict[str, Any]:
         if cleaned_df.empty:
-            return {"inserted_rows": 0, "upserted_rows": 0}
+            return {"inserted_rows": 0}
 
         now = self._utcnow_dt()
         rows = [
@@ -1243,7 +1262,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 rows,
             )
 
-        return {"inserted_rows": len(rows), "upserted_rows": len(rows)}
+        return {"inserted_rows": len(rows)}
 
     # ── Annotation export / import ────────────────────────────────────────────
 
