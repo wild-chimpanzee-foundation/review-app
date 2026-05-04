@@ -1112,6 +1112,21 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
         known_videos = self._known_video_ids(active_project_id)
 
+        # Resolve file paths in video_uid to UUIDs using the same path lookup as wide format
+        by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
+
+        def _resolve_video_uid(raw: str) -> str:
+            if raw in known_videos:
+                return raw
+            p = Path(raw)
+            return (
+                by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
+                or by_stem.get(p.stem.lower())
+                or raw
+            )
+
+        src["video_uid"] = src["video_uid"].astype(str).str.strip().map(_resolve_video_uid)
+
         species_mask = src["annotation_type"].str.strip().str.lower() == "species"
         unique_species = src.loc[species_mask, "value_text"].dropna().str.strip().unique()
         unique_species = {str(s) for s in unique_species if str(s).strip()}
