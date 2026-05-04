@@ -671,6 +671,19 @@ async def setup_model_import():
                                 )
                                 ui.label(t("invalid_rows")).classes("text-caption")
 
+                        if cleaned_df is not None and not cleaned_df.empty:
+                            display_cols = [c for c in cleaned_df.columns if c != "video_id"]
+                            with ui.expansion(t("show_valid_rows"), icon="table_rows").classes("full-width q-mt-sm"):
+                                ui.aggrid(
+                                    {
+                                        "columnDefs": [{"field": c, "headerName": c} for c in display_cols],
+                                        "rowData": df_to_records(cleaned_df[display_cols], limit=500),
+                                        "columnSize": "responsive",
+                                        "pagination": True,
+                                        "paginationPageSize": 50,
+                                    }
+                                ).classes("h-64")
+
                         # ── Species mappings ──────────────────────────────────
                         all_mappings = dict(get_state_val("species_mappings", {}))
                         unmapped = get_state_val("unmapped_species", [])
@@ -790,13 +803,11 @@ async def setup_model_import():
                             with ui.expansion(
                                 t("show_detailed_errors"), icon="table_rows"
                             ).classes("full-width q-mt-sm"):
-                                error_cols = [
-                                    {"field": c, "headerName": c} for c in errors_df.columns
-                                ]
+                                err_display_cols = [c for c in errors_df.columns if c not in ("video_id", "video_uid")]
                                 ui.aggrid(
                                     {
-                                        "columnDefs": error_cols,
-                                        "rowData": df_to_records(errors_df, limit=500),
+                                        "columnDefs": [{"field": c, "headerName": c} for c in err_display_cols],
+                                        "rowData": df_to_records(errors_df[err_display_cols], limit=500),
                                         "columnSize": "responsive",
                                         "rowSelection": "single",
                                         "pagination": True,

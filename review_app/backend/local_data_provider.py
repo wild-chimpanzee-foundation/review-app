@@ -81,6 +81,18 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             p = {"pid": active_project_id} if active_project_id else {}
             return set(conn.execute(q, p).scalars())
 
+    def _known_video_map(self, active_project_id: str | None) -> dict[str, str]:
+        """Returns {video_id: video_path} for all videos in the project."""
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT video_id, video_path FROM videos"
+                    + (" WHERE project_id = :pid" if active_project_id else "")
+                ),
+                {"pid": active_project_id} if active_project_id else {},
+            ).fetchall()
+        return {str(r[0]): str(r[1]) for r in rows}
+
     # ── App settings (key-value store in DB) ─────────────────────────────────
 
     def get_setting(self, key: str, default: Any = None) -> Any:
@@ -1087,7 +1099,8 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         if missing:
             raise ValueError(f"CSV must include columns: {', '.join(sorted(missing))}")
 
-        known_videos = self._known_video_ids(active_project_id)
+        video_map = self._known_video_map(active_project_id)
+        known_videos = set(video_map.keys())
 
         # Resolve file paths in video_uid to UUIDs using the same path lookup as wide format
         by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
@@ -1128,21 +1141,22 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             if not video_uid:
                 errors.append({"row_number": row_num, "error": "Missing video_uid"})
                 continue
+            video_path = video_map.get(video_uid, video_uid)
             if video_uid not in known_videos:
                 errors.append(
-                    {"row_number": row_num, "video_uid": video_uid, "error": "Unknown video_uid"}
+                    {"row_number": row_num, "video_path": video_path, "error": "Unknown video_uid"}
                 )
                 continue
             if not model_name:
                 errors.append(
-                    {"row_number": row_num, "video_uid": video_uid, "error": "Missing model_name"}
+                    {"row_number": row_num, "video_path": video_path, "error": "Missing model_name"}
                 )
                 continue
 
             try:
                 annotation_type = self._normalize_annotation_type(raw_type)
             except ValueError as exc:
-                errors.append({"row_number": row_num, "video_uid": video_uid, "error": str(exc)})
+                errors.append({"row_number": row_num, "video_path": video_path, "error": str(exc)})
                 continue
 
             probability = pd.to_numeric(row.get("probability"), errors="coerce")
@@ -1151,7 +1165,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 errors.append(
                     {
                         "row_number": row_num,
-                        "video_uid": video_uid,
+                        "video_path": video_path,
                         "error": "probability must be in [0, 1]",
                     }
                 )
@@ -1179,7 +1193,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                         errors.append(
                             {
                                 "row_number": row_num,
-                                "video_uid": video_uid,
+                                "video_path": video_path,
                                 "error": f"Species name '{original_value}' needs mapping",
                             }
                         )
@@ -1193,6 +1207,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
             prepared_rows.append(
                 {
                     "video_id": video_uid,
+                    "video_path": video_path,
                     "annotation_type": annotation_type,
                     "model_name": model_name,
                     "value_text": value_text,
