@@ -16,6 +16,7 @@ import pandas as pd
 from sqlalchemy import select, text
 
 from review_app.app.config import VIDEO_EXTENSIONS
+from review_app.backend.errors import VideoError
 from review_app.backend.models import ProjectDir, Video
 
 logger = logging.getLogger(__name__)
@@ -299,7 +300,10 @@ class VideoMixin:
         with self.Session() as session:
             video = session.get(Video, video_id)
             if video is None:
-                raise ValueError(f"Unknown video_id: {video_id!r}")
+                raise VideoError(
+                    user_message_key="video_error_not_found",
+                    detail=f"Unknown video_id: {video_id!r}",
+                )
             duration, is_valid, is_web_safe, validation_error = _probe_video(
                 Path(video.video_path)
             )
@@ -349,11 +353,17 @@ class VideoMixin:
         with self.Session() as session:
             video = session.get(Video, video_id)
             if video is None:
-                raise ValueError(f"Unknown video_id: {video_id!r}")
+                raise VideoError(
+                    user_message_key="video_error_not_found",
+                    detail=f"Unknown video_id: {video_id!r}",
+                )
 
             input_path = Path(video.video_path)
             if not input_path.exists():
-                raise FileNotFoundError(f"Video file not found: {input_path}")
+                raise VideoError(
+                    user_message_key="video_error_file_not_found",
+                    detail=f"Video file not found: {input_path}",
+                )
 
             from review_app.app.config import get_user_data_dir
 

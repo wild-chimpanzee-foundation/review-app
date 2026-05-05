@@ -6,7 +6,12 @@ from nicegui import run, ui
 from review_app.app.onboarding import show_info_dialog
 from review_app.app.state import get_active_project_id, get_language, get_state_val, set_state_val
 from review_app.app.translations import t
-from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
+from review_app.app.utils import (
+    get_or_create_data_provider,
+    render_uninitialized_state,
+    user_error_message,
+)
+from review_app.backend.errors import DataImportError
 from review_app.backend.utils import df_to_records
 
 
@@ -197,7 +202,7 @@ async def setup_model_import():
                             results_container.visible = False
                             config_ui.refresh()
                         except Exception as exc:
-                            ui.notify(f"{t('error')}: {exc}", type="negative")
+                            ui.notify(f"{t('error')}: {user_error_message(exc)}", type="negative")
                         finally:
                             loading_dialog.close()
 
@@ -279,7 +284,9 @@ async def setup_model_import():
                                     'setTimeout(()=>document.getElementById("import-step3")?.scrollIntoView({behavior:"smooth",block:"start"}),100)'
                                 )
                             except Exception as exc:
-                                ui.notify(f"{t('error')}: {exc}", type="negative")
+                                ui.notify(
+                                    f"{t('error')}: {user_error_message(exc)}", type="negative"
+                                )
                             finally:
                                 loading_dialog.close()
                             return
@@ -584,7 +591,7 @@ async def setup_model_import():
                     try:
                         cleaned_df = _get_df_from_state("cleaned_df")
                         if cleaned_df is None or cleaned_df.empty:
-                            raise ValueError(t("no_data_import"))
+                            raise DataImportError(user_message_key="no_data_import")
 
                         df_to_import = cleaned_df.copy()
                         mappings = get_state_val("species_mappings", {})
@@ -611,7 +618,9 @@ async def setup_model_import():
                         results_container.clear()
                         results_container.visible = False
                     except Exception as exc:
-                        ui.notify(t("import_failed", error=str(exc)), type="negative")
+                        ui.notify(
+                            t("import_failed", error=user_error_message(exc)), type="negative"
+                        )
                     finally:
                         loading_dialog.close()
 
@@ -786,7 +795,10 @@ async def setup_model_import():
                                     ui.notify(t("mappings_applied"), type="positive")
                                     refresh_results()
                                 except Exception as exc:
-                                    ui.notify(t("mapping_failed", error=str(exc)), type="negative")
+                                    ui.notify(
+                                        t("mapping_failed", error=user_error_message(exc)),
+                                        type="negative",
+                                    )
                                 finally:
                                     loading_dialog.close()
 
@@ -896,7 +908,10 @@ async def setup_model_import():
                                 annotation_import_status.set_text(msg)
                                 ui.notify(msg, type="positive")
                             except Exception as exc:
-                                ui.notify(t("import_failed", error=str(exc)), type="negative")
+                                ui.notify(
+                                    t("import_failed", error=user_error_message(exc)),
+                                    type="negative",
+                                )
 
                         ui.upload(
                             on_upload=handle_annotation_upload,
@@ -921,7 +936,10 @@ async def setup_model_import():
                                 csv_bytes = df.to_csv(index=False).encode("utf-8")
                                 ui.download(csv_bytes, "annotations.csv")
                             except Exception as exc:
-                                ui.notify(t("export_failed", error=str(exc)), type="negative")
+                                ui.notify(
+                                    t("export_failed", error=user_error_message(exc)),
+                                    type="negative",
+                                )
 
                         ui.button(
                             t("export_annotations"), icon="download", on_click=do_export

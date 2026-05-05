@@ -5,6 +5,7 @@ and CSV-driven project import.
 """
 
 import pytest
+from review_app.backend.errors import DataImportError, SpeciesError
 from review_app.backend.local_data_provider import LocalDataProvider
 from review_app.backend.species import SpeciesMixin
 
@@ -45,7 +46,7 @@ def test_parse_species_csv_skips_na_rows(tmp_path):
 def test_parse_species_csv_missing_required_column_raises(tmp_path):
     f = tmp_path / "s.csv"
     f.write_text("english_name\nRed Deer\n")
-    with pytest.raises(ValueError, match="scientific_name"):
+    with pytest.raises(SpeciesError, match="scientific_name"):
         SpeciesMixin._parse_species_csv(str(f))
 
 
@@ -258,7 +259,7 @@ def test_import_project_species_upserts_new_species(provider_with_project):
 
 def test_import_project_species_empty_csv_raises(provider_with_project):
     dp, project, _ = provider_with_project
-    with pytest.raises(ValueError, match="No valid rows"):
+    with pytest.raises(DataImportError, match="No valid rows"):
         dp.import_project_species_from_csv(project.id, "scientific_name\n")
 
 
@@ -293,5 +294,5 @@ def test_import_project_behaviors_species_specific(provider_with_project):
 
 def test_import_project_behaviors_empty_csv_raises(provider_with_project):
     dp, project, _ = provider_with_project
-    with pytest.raises(ValueError, match="No valid rows"):
+    with pytest.raises(DataImportError, match="No valid rows"):
         dp.import_project_behaviors_from_csv(project.id, "scientific_name;key\n")

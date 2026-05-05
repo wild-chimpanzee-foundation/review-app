@@ -4,6 +4,7 @@ Tests for delete_project, import_annotations_csv, and get_overview_stats.
 
 import pandas as pd
 import pytest
+from review_app.backend.errors import DataImportError
 from review_app.backend.local_data_provider import LocalDataProvider
 
 # ---------------------------------------------------------------------------
@@ -214,14 +215,14 @@ def test_import_mixed_known_and_unknown(clean_provider):
 def test_import_raises_without_video_identifier(clean_provider):
     dp = clean_provider
     df = pd.DataFrame([{"is_blank": 1, "species": "deer"}])
-    with pytest.raises(ValueError, match="video_path"):
+    with pytest.raises(DataImportError, match="video_path"):
         dp.import_annotations_csv(df, active_project_id=None)
 
 
 def test_import_raises_without_is_blank(clean_provider):
     dp = clean_provider
     df = pd.DataFrame([{"video_path": "/some/path.mp4", "species": "deer"}])
-    with pytest.raises(ValueError, match="is_blank"):
+    with pytest.raises(DataImportError, match="is_blank"):
         dp.import_annotations_csv(df, active_project_id=None)
 
 

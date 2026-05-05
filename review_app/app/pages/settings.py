@@ -1,9 +1,10 @@
 import asyncio
+import uuid
 from pathlib import Path
 
 from nicegui import run, ui
 
-from review_app.app.config import get_default_db_path
+from review_app.app.config import get_default_db_path, get_user_data_dir
 from review_app.app.state import (
     get_active_project_id,
     get_annotator_name,
@@ -26,8 +27,15 @@ from review_app.app.translations import t
 from review_app.app.utils import (
     get_or_create_data_provider,
     sync_with_progress,
+    user_error_message,
 )
-from review_app.backend.backup import BackupError, create_backup, list_backups, restore_backup
+from review_app.backend.backup import (
+    BackupError,
+    create_backup,
+    get_backup_dir,
+    list_backups,
+    restore_backup,
+)
 from review_app.backend.local_data_provider import LocalDataProvider
 
 
@@ -643,7 +651,10 @@ def _build_settings_content(container: ui.column):
                                 )
                                 _render_behaviors()
                             except Exception as exc:
-                                ui.notify(t("csv_import_error", error=str(exc)), type="negative")
+                                ui.notify(
+                                    t("csv_import_error", error=user_error_message(exc)),
+                                    type="negative",
+                                )
 
                         async def _handle_behaviors_upload(e):
                             content = (await e.file.read()).decode("utf-8", errors="replace")
@@ -660,7 +671,10 @@ def _build_settings_content(container: ui.column):
                                 behavior_display_map = _dp.get_behavior_display_map(lang=lang)
                                 _render_behaviors()
                             except Exception as exc:
-                                ui.notify(t("csv_import_error", error=str(exc)), type="negative")
+                                ui.notify(
+                                    t("csv_import_error", error=user_error_message(exc)),
+                                    type="negative",
+                                )
 
                         # Hidden uploaders — triggered programmatically by buttons below.
                         species_uploader = (
@@ -779,7 +793,10 @@ def _build_settings_content(container: ui.column):
                                 )
                                 return
                             except Exception as exc:
-                                ui.notify(t("restore_failed", error=str(exc)), type="negative")
+                                ui.notify(
+                                    t("restore_failed", error=user_error_message(exc)),
+                                    type="negative",
+                                )
                                 return
                             reset_app_state()
                             new_dp = LocalDataProvider()
@@ -822,6 +839,38 @@ def _build_settings_content(container: ui.column):
                                                 icon="restore",
                                                 on_click=_make_restore(b["path"]),
                                             ).props("flat dense align-left").classes("w-full")
+                                with ui.row().classes("w-full gap-sm items-center q-mt-md"):
+                                    ui.separator().classes("col")
+                                    ui.label(t("upload_backup")).classes(
+                                        "text-caption text-grey-6"
+                                    )
+                                    ui.separator().classes("col")
+
+                                async def _handle_backup_upload(e):
+                                    content = await e.file.read()
+                                    tmp_path = (
+                                        get_backup_dir()
+                                        / f"uploaded_restore_{uuid.uuid4().hex}.db"
+                                    )
+                                    tmp_path.write_bytes(content)
+                                    await do_restore(tmp_path)
+                                    tmp_path.unlink(missing_ok=True)
+
+                                backup_uploader = (
+                                    ui.upload(on_upload=_handle_backup_upload, auto_upload=True)
+                                    .props("accept=.db")
+                                    .style("display: none")
+                                )
+                                ui.button(
+                                    t("upload_backup_btn"),
+                                    icon="upload_file",
+                                    on_click=lambda: ui.run_javascript(
+                                        f"document.getElementById('c{backup_uploader.id}').querySelector('.q-uploader__input').click()"
+                                    ),
+                                ).props(
+                                    f"flat dense align-left {'color=primary' if not backups else ''}"
+                                ).classes("w-full")
+
                                 with ui.row().classes("w-full justify-end"):
                                     ui.button(t("cancel"), on_click=restore_dialog.close).props(
                                         "flat"
@@ -936,6 +985,22 @@ def _build_settings_content(container: ui.column):
                             color="negative",
                             on_click=reset_dialog.open,
                         )
+
+                with ui.row().classes("w-full items-center q-mb-md"):
+                    log_path = get_user_data_dir() / "app.log"
+                    ui.label(t("download_log_label")).classes("text-body2")
+                    ui.space()
+                    if log_path.exists():
+                        ui.button(
+                            t("download_log_btn"),
+                            icon="description",
+                            on_click=lambda: ui.download(log_path, filename="app.log"),
+                        ).props("flat color=primary dense")
+                    else:
+                        ui.button(
+                            t("download_log_btn"),
+                            icon="description",
+                        ).props("flat dense").classes("disabled").tooltip(t("log_not_available"))
 
 
 async def setup_settings():

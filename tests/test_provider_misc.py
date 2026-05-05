@@ -5,6 +5,7 @@ _normalize_annotation_type, get_csv_templates.
 """
 
 import pytest
+from review_app.backend.errors import DataImportError
 from review_app.backend.local_data_provider import LocalDataProvider
 
 # ---------------------------------------------------------------------------
@@ -152,7 +153,7 @@ def test_normalize_annotation_type_valid(tmp_db):
 
 def test_normalize_annotation_type_invalid_raises(tmp_db):
     dp = LocalDataProvider()
-    with pytest.raises(ValueError, match="error_invalid_annotation_type"):
+    with pytest.raises(DataImportError, match="Invalid annotation type"):
         dp._normalize_annotation_type("unknown_type")
 
 

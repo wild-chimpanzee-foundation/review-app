@@ -16,6 +16,7 @@ from review_app.app.config import (
     DEFAULT_DB_FILENAME,
     get_user_data_dir,
 )
+from review_app.backend.errors import DataImportError, SpeciesError
 from review_app.backend.migrations import run_migrations
 from review_app.backend.models import (
     Base,
@@ -908,7 +909,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         for selection in selections:
             species = str(selection.get("species") or "").strip() or "unknown"
             if species not in valid_species:
-                raise ValueError(f"Unknown species: {species!r}")
+                raise SpeciesError(
+                    user_message_key="species_error_unknown",
+                    detail=f"Unknown species: {species!r}",
+                )
             behavior = str(selection.get("behavior") or "").strip() or "unlabeled"
             if "start_sec" in selection:
                 start_sec = pd.to_numeric(selection.get("start_sec"), errors="coerce")
@@ -981,7 +985,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         supported = {"blank_non_blank", "species", "behavior"}
         normalized = (annotation_type or "").strip().lower()
         if normalized not in supported:
-            raise ValueError("error_invalid_annotation_type")
+            raise DataImportError(
+                user_message_key="error_invalid_annotation_type",
+                detail=f"Invalid annotation type: {normalized!r}",
+            )
         return normalized
 
     def _build_video_path_lookup(
@@ -1120,7 +1127,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         required = {"path", "annotation_type", "model_name"}
         missing = required - set(src.columns)
         if missing:
-            raise ValueError(f"CSV must include columns: {', '.join(sorted(missing))}")
+            raise DataImportError(
+                user_message_key="csv_error_missing_columns",
+                detail=f"CSV must include columns: {', '.join(sorted(missing))}",
+            )
 
         video_map = self._known_video_map(active_project_id)
         known_videos = set(video_map.keys())
@@ -1186,8 +1196,14 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
             try:
                 annotation_type = self._normalize_annotation_type(raw_type)
-            except ValueError as exc:
-                errors.append({"row_number": row_num, "video_path": video_path, "error": str(exc)})
+            except DataImportError as exc:
+                errors.append(
+                    {
+                        "row_number": row_num,
+                        "video_path": video_path,
+                        "error": exc.user_message_key,
+                    }
+                )
                 continue
 
             probability = pd.to_numeric(row.get("probability"), errors="coerce")
@@ -1427,9 +1443,15 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         has_path = "video_path" in df.columns
         has_id = "video_id" in df.columns
         if not has_path and not has_id:
-            raise ValueError("Missing required column: video_path (or video_id)")
+            raise DataImportError(
+                user_message_key="csv_error_missing_column_video_path",
+                detail="Missing required column: video_path (or video_id)",
+            )
         if "is_blank" not in df.columns:
-            raise ValueError("Missing required column: is_blank")
+            raise DataImportError(
+                user_message_key="csv_error_missing_column_is_blank",
+                detail="Missing required column: is_blank",
+            )
 
         path_to_id = {v: k for k, v in self._known_video_map(active_project_id).items()}
         known_ids = self._known_video_ids(active_project_id)

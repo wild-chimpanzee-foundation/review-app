@@ -10,17 +10,18 @@ from typing import Any
 from sqlalchemy import text
 
 from review_app.app.config import DEFAULT_DB_FILENAME, get_user_data_dir
+from review_app.backend.errors import AppError
 
 logger = logging.getLogger(__name__)
 
 _BACKUP_TS_RE = re.compile(r"^review_backup_(\d{8}_\d{6})(?:_\d+)?\.db$")
 
-MAX_AUTO_BACKUPS = 5
-DAILY_RETENTION_DAYS = 7
+MAX_AUTO_BACKUPS = 10
+DAILY_RETENTION_DAYS = 14
 BACKUP_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 
 
-class BackupError(Exception):
+class BackupError(AppError):
     user_message_key: str = "backup_failed"
 
     def __init__(self, detail: str = ""):
@@ -58,7 +59,7 @@ def get_backup_dir() -> Path:
     return backup_dir
 
 
-def create_backup(engine, reason: str = "auto") -> Path:
+def create_backup(engine, reason: str = "auto", auto_prune: bool = True) -> Path:
     db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
     if not db_path.exists():
         raise BackupDBNotFoundError(str(db_path))
@@ -78,14 +79,16 @@ def create_backup(engine, reason: str = "auto") -> Path:
         with engine.connect() as conn:
             conn.execute(text(f"VACUUM INTO '{escaped}'"))
         logger.info("Backup created (%s): %s", reason, backup_path)
-        prune_backups()
+        if auto_prune:
+            prune_backups()
         return backup_path
     except Exception:
         logger.exception("VACUUM INTO failed, falling back to file copy")
         try:
             _fallback_copy(db_path, backup_path)
             logger.info("Fallback copy backup created (%s): %s", reason, backup_path)
-            prune_backups()
+            if auto_prune:
+                prune_backups()
             return backup_path
         except Exception as copy_exc:
             logger.exception("Fallback copy also failed")
@@ -174,7 +177,7 @@ def restore_backup(backup_path: Path, engine) -> None:
     if not backup_path.exists():
         raise RestoreFileNotFoundError(str(backup_path))
 
-    create_backup(engine, reason="pre_restore")
+    create_backup(engine, reason="pre_restore", auto_prune=False)
 
     engine.dispose()
 

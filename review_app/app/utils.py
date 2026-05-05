@@ -3,6 +3,12 @@ import asyncio
 from review_app.app.translations import t
 
 
+def user_error_message(exc: Exception) -> str:
+    if hasattr(exc, "user_message_key"):
+        return t(exc.user_message_key)
+    return str(exc)
+
+
 async def sync_with_progress(
     data_provider, progress=None, status=None, video_dir=None, active_project_id=None
 ):

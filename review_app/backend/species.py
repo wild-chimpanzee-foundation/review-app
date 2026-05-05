@@ -6,6 +6,8 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import text
 
+from review_app.backend.errors import DataImportError, SpeciesError
+
 
 class SpeciesMixin:
     """Species and behavior loading and queries. Requires self.engine."""
@@ -14,7 +16,10 @@ class SpeciesMixin:
     def _parse_species_csv(path) -> list[dict]:
         df = pd.read_csv(path, sep=";")
         if "scientific_name" not in df.columns:
-            raise ValueError(f"Species CSV at `{path}` must have a `scientific_name` column.")
+            raise SpeciesError(
+                user_message_key="species_error_csv_format",
+                detail=f"Species CSV at `{path}` must have a `scientific_name` column.",
+            )
         rows = []
         for _, row in df.iterrows():
             sci = str(row.get("scientific_name", "") or "").strip()
@@ -47,10 +52,16 @@ class SpeciesMixin:
 
         bundled_path = get_bundled_species_csv()
         if not bundled_path:
-            raise ValueError("Bundled species CSV not found.")
+            raise SpeciesError(
+                user_message_key="species_error_csv_not_found",
+                detail="Bundled species CSV not found.",
+            )
         rows = self._parse_species_csv(Path(bundled_path))
         if not rows:
-            raise ValueError("Bundled species CSV is empty or missing a scientific_name column.")
+            raise SpeciesError(
+                user_message_key="species_error_csv_empty",
+                detail="Bundled species CSV is empty or missing a scientific_name column.",
+            )
 
         with self.engine.begin() as conn:
             # Preserve existing IDs so FK references in individual_observations remain valid.
@@ -630,8 +641,9 @@ class SpeciesMixin:
 
         rows = self._parse_species_csv(io.StringIO(content))
         if not rows:
-            raise ValueError(
-                "No valid rows found. Ensure the CSV uses ';' as separator and has a 'scientific_name' column."
+            raise DataImportError(
+                user_message_key="csv_error_no_valid_rows",
+                detail="No valid rows found. Ensure the CSV uses ';' as separator and has a 'scientific_name' column.",
             )
 
         for row in rows:
@@ -652,8 +664,9 @@ class SpeciesMixin:
 
         rows = self._parse_behaviors_csv(io.StringIO(content))
         if not rows:
-            raise ValueError(
-                "No valid rows found. Ensure the CSV uses ';' as separator and has 'scientific_name' and 'key' columns."
+            raise DataImportError(
+                user_message_key="csv_error_no_valid_rows",
+                detail="No valid rows found. Ensure the CSV uses ';' as separator and has 'scientific_name' and 'key' columns.",
             )
 
         for row in rows:

@@ -20,5 +20,8 @@ format:
 run:
 	uv run python -m review_app.app.entry_point
 
+dev:
+	uv run python -m review_app.app.entry_point --dev
+
 build:
 	uv run pyinstaller video_annotation.spec --clean

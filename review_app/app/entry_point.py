@@ -283,10 +283,12 @@ class GUI:
         def custom_error_page(exception: Exception):
             from traceback import format_exc
 
+            from review_app.app.utils import user_error_message
+
             with ui.column().classes("w-full h-screen items-center justify-center"):
                 ui.icon("error_outline", size="xl").classes("text-negative q-mb-md")
                 ui.label(t("something_wrong")).classes("text-h5 text-negative q-mb-sm")
-                ui.label(str(exception)).classes("text-body1 q-mb-lg")
+                ui.label(user_error_message(exception)).classes("text-body1 q-mb-lg")
                 if dev_mode:
                     ui.code(format_exc(chain=False)).classes("q-pa-md")
                 ui.button(t("go_home_btn"), on_click=lambda: ui.navigate.to("/"), icon="home")
