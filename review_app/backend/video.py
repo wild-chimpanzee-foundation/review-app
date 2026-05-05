@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -16,6 +17,8 @@ from sqlalchemy import select, text
 
 from review_app.app.config import VIDEO_EXTENSIONS
 from review_app.backend.models import ProjectDir, Video
+
+logger = logging.getLogger(__name__)
 
 _FFPROBE_MAX_WORKERS: int = int(os.getenv("FFPROBE_MAX_WORKERS", "16"))
 _FFPROBE_TIMEOUT_SEC: int = int(os.getenv("FFPROBE_TIMEOUT_SEC", "10"))
@@ -49,6 +52,7 @@ def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
     """
     ffprobe = _find_ffprobe()
     if ffprobe is None:
+        logger.error("ffprobe not found on PATH — video probing unavailable")
         return None, False, False, "ffprobe executable not found"
 
     cmd = [
@@ -71,12 +75,15 @@ def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
             env=_subprocess_env(),
         )
     except subprocess.TimeoutExpired:
+        logger.warning("ffprobe timed out after %ds on %s", _FFPROBE_TIMEOUT_SEC, path)
         return None, False, False, f"ffprobe timed out after {_FFPROBE_TIMEOUT_SEC}s"
     except OSError as exc:
+        logger.error("ffprobe OS error on %s: %s", path, exc)
         return None, False, False, f"ffprobe OS error: {exc}"
 
     if result.returncode != 0:
         stderr_text = result.stderr.strip()
+        logger.warning("ffprobe non-zero exit for %s: %s", path, stderr_text[:200])
         return None, False, False, stderr_text[:200] or "ffprobe returned non-zero exit code"
 
     try:
@@ -99,6 +106,7 @@ def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
         is_web_safe = bool(formats & safe_formats) and video_codec in safe_codecs
 
     except (json.JSONDecodeError, ValueError, TypeError):
+        logger.warning("ffprobe returned unparseable JSON for %s", path)
         return None, False, False, "ffprobe returned unparseable JSON"
 
     return raw_duration, True, is_web_safe, None
@@ -122,6 +130,7 @@ def _probe_many(
             try:
                 results[path] = future.result()
             except Exception as exc:  # pragma: no cover
+                logger.error("Unexpected error probing %s: %s", path, exc)
                 results[path] = (None, False, False, str(exc))
             if progress_callback:
                 progress_callback(i + 1, total, path.name)
@@ -272,11 +281,19 @@ class VideoMixin:
         if progress_callback:
             progress_callback(total_scanned, total_scanned, "")
 
-        return {
+        result = {
             "scanned": len(scanned),
             "added": len(new_rows),
             "updated": len(existing_df),
         }
+        logger.info(
+            "Video sync complete: scanned=%d added=%d updated=%d (project=%s)",
+            result["scanned"],
+            result["added"],
+            result["updated"],
+            active_project_id,
+        )
+        return result
 
     def reprobe_video(self, video_id: str) -> None:
         with self.Session() as session:
@@ -370,6 +387,7 @@ class VideoMixin:
                 str(sidecar_path),
             ]
 
+            logger.info("Transcoding %s -> %s", input_path, sidecar_path)
             try:
                 subprocess.run(
                     cmd, capture_output=True, text=True, check=True, env=_subprocess_env()
@@ -377,10 +395,12 @@ class VideoMixin:
             except subprocess.CalledProcessError as exc:
                 if sidecar_path.exists():
                     sidecar_path.unlink()
+                logger.error("ffmpeg failed for %s: %s", input_path, exc.stderr[:500])
                 return {"success": False, "error": f"ffmpeg failed: {exc.stderr}"}
 
             video.transcoded_path = str(sidecar_path)
             video.is_web_safe = True
             session.commit()
 
+            logger.info("Transcode complete: %s", sidecar_path)
             return {"success": True, "new_path": str(sidecar_path)}

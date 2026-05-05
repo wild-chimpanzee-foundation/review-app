@@ -1,6 +1,8 @@
 import argparse
+import logging
 import mimetypes
 import secrets
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from review_app.app.media import set_media_dirs, setup_media_route
@@ -19,6 +21,26 @@ from review_app.app.state import (
 from review_app.app.theme import apply_theme
 from review_app.app.translations import t
 from review_app.backend.local_data_provider import LocalDataProvider
+
+logger = logging.getLogger(__name__)
+
+
+def _setup_logging(user_data_dir: Path, dev_mode: bool) -> None:
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG if dev_mode else logging.INFO)
+    fmt = logging.Formatter(
+        "%(asctime)s %(levelname)-8s %(name)s: %(message)s", datefmt="%Y-%m-%dT%H:%M:%S"
+    )
+    fh = RotatingFileHandler(
+        user_data_dir / "app.log", maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    fh.setFormatter(fmt)
+    root.addHandler(fh)
+    if dev_mode:
+        sh = logging.StreamHandler()
+        sh.setFormatter(fmt)
+        root.addHandler(sh)
+
 
 # Register video mimetypes for both lower and uppercase extensions (camera traps often use .MP4)
 for _ext, _mime in [
@@ -251,6 +273,12 @@ class GUI:
     def start(self, dev_mode=False, port=8000):
         from nicegui import app, ui
 
+        from review_app.app.config import get_user_data_dir as _get_udd
+
+        _udd = _get_udd()
+        _udd.mkdir(parents=True, exist_ok=True)
+        _setup_logging(_udd, dev_mode)
+
         @app.on_page_exception
         def custom_error_page(exception: Exception):
             from traceback import format_exc
@@ -305,7 +333,7 @@ class GUI:
                     [Path(d.path) for d in dp.get_project_dirs(get_active_project_id())]
                 )
             except Exception as e:
-                print(f"Warning: Could not initialize data provider at startup: {e}")
+                logger.warning("Could not initialize data provider at startup: %s", e)
 
         setup_media_route()
 

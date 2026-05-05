@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,8 @@ from review_app.backend.models import (
 from review_app.backend.species import SpeciesMixin
 from review_app.backend.utils import needs_browser_transcode
 from review_app.backend.video import VideoMixin
+
+logger = logging.getLogger(__name__)
 
 
 class LocalDataProvider(VideoMixin, SpeciesMixin):
@@ -353,6 +356,9 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         return result
 
     def get_video_queue(self, filters: dict, active_project_id: str | None) -> list[str]:
+        # Safety invariant: only hardcoded SQL fragments and pre-validated keywords (ASC/DESC)
+        # are interpolated into the query via f-strings. All user-supplied values must go
+        # through bind params (the `params` dict). Do not interpolate filter values directly.
         search_raw = (filters.get("search_query") or "").strip().lower()
         selected_camera = filters.get("selected_camera", "All")
         selected_species = filters.get("selected_species", "All")
@@ -367,6 +373,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         selected_sort_direction = filters.get("selected_sort_direction", "desc")
         sort_dir = "DESC" if selected_sort_direction == "desc" else "ASC"
         sort_dir_inv = "ASC" if selected_sort_direction == "desc" else "DESC"
+        assert sort_dir in ("ASC", "DESC") and sort_dir_inv in (
+            "ASC",
+            "DESC",
+        )  # interpolated into SQL
         web_safe_only = bool(filters.get("web_safe_only", False))
         selected_needs_review = filters.get("selected_needs_review", "All")
         blank_threshold = float(filters.get("blank_threshold", 0.75))
@@ -1253,6 +1263,10 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
         if cleaned_df.empty:
             return {"inserted_rows": 0}
 
+        logger.info(
+            "Importing %d model annotation rows (project=%s)", len(cleaned_df), active_project_id
+        )
+
         now = self._utcnow_dt()
         rows = [
             {
@@ -1291,6 +1305,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 rows,
             )
 
+        logger.info("Model CSV import complete: %d rows upserted", len(rows))
         return {"inserted_rows": len(rows)}
 
     # ── Annotation export / import ────────────────────────────────────────────
@@ -1408,6 +1423,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
     def import_annotations_csv(
         self, df: pd.DataFrame, active_project_id: str | None
     ) -> dict[str, Any]:
+        logger.info("Importing annotations CSV: %d rows (project=%s)", len(df), active_project_id)
         has_path = "video_path" in df.columns
         has_id = "video_id" in df.columns
         if not has_path and not has_id:
@@ -1467,6 +1483,16 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
 
             imported += 1
 
+        if skipped:
+            logger.warning(
+                "Annotations CSV: %d videos not found in DB (project=%s): %s",
+                len(skipped),
+                active_project_id,
+                skipped[:10],
+            )
+        logger.info(
+            "Annotations CSV import complete: imported=%d skipped=%d", imported, len(skipped)
+        )
         return {"imported": imported, "skipped": skipped}
 
     # ── Stats ─────────────────────────────────────────────────────────────────

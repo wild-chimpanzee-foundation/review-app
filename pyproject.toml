@@ -34,4 +34,8 @@ build-backend = "flit_core.buildapi"
 name = "review_app"
 
 [dependency-groups]
-dev = ["pytest>=9.0.2"]
+dev = [
+    "pre-commit>=4.2.0",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
+]
