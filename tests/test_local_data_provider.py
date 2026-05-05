@@ -16,7 +16,7 @@ def temp_workspace(tmp_path, monkeypatch):
     species_csv.write_text("scientific_name;english_name\ndeer;Red Deer\nfox;Red Fox\n")
 
     behavior_csv = tmp_path / "behaviors.csv"
-    behavior_csv.write_text("Species;Behavior\ndeer;reacts_to_camera\ndeer;grazing\nfox;running\n")
+    behavior_csv.write_text("scientific_name;key;name_en;name_fr\n*;does_not_react;Does not react;\ndeer;reacts_to_camera;Reacts to camera;\ndeer;grazing;Grazing;\nfox;running;Running;\n")
 
     monkeypatch.setattr("review_app.backend.local_data_provider.get_user_data_dir", lambda: db_dir)
     monkeypatch.setattr("review_app.app.config.get_bundled_species_csv", lambda: str(species_csv))

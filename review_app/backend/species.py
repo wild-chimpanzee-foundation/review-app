@@ -143,18 +143,19 @@ class SpeciesMixin:
                 }
                 for key, meta in behavior_meta.items()
             ]
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO behaviors (id, key, name_en, name_fr, is_custom)
-                    VALUES (:id, :key, :name_en, :name_fr, :is_custom)
-                    ON CONFLICT(key) DO UPDATE SET
-                        name_en = excluded.name_en,
-                        name_fr = excluded.name_fr
-                    """
-                ),
-                behavior_rows,
-            )
+            if behavior_rows:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO behaviors (id, key, name_en, name_fr, is_custom)
+                        VALUES (:id, :key, :name_en, :name_fr, :is_custom)
+                        ON CONFLICT(key) DO UPDATE SET
+                            name_en = excluded.name_en,
+                            name_fr = excluded.name_fr
+                        """
+                    ),
+                    behavior_rows,
+                )
 
             # Insert or update all bundled species-behavior mappings.
             # Then remove stale bundled mappings (for non-custom species)
