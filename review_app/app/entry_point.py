@@ -285,6 +285,12 @@ class GUI:
                 self.dp = dp
                 load_settings_from_db(dp)
 
+                from review_app.backend.backup import BackupError, create_backup
+                try:
+                    create_backup(dp.engine, reason="startup")
+                except BackupError:
+                    pass
+
                 active_pid = get_active_project_id()
                 if active_pid and dp.get_project(active_pid):
                     dp.touch_project(active_pid)
@@ -311,6 +317,15 @@ class GUI:
             storage_secret = secrets.token_hex(32)
             get_user_data_dir().mkdir(parents=True, exist_ok=True)
             _secret_path.write_text(storage_secret)
+
+        @app.on_shutdown
+        def _backup_on_shutdown():
+            if self.dp and self.dp.engine:
+                from review_app.backend.backup import BackupError, create_backup
+                try:
+                    create_backup(self.dp.engine, reason="shutdown")
+                except BackupError:
+                    pass
 
         ui.run(
             title="Video Annotation",

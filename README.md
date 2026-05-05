@@ -61,6 +61,17 @@ Config and database are stored in platform-specific user directories:
 
 The SQLite database (`review_data.db`) and `config.yaml` are both written there — nothing is stored next to the executable.
 
+## Database Management
+
+The app includes a built-in backup and restore system found under **Settings → Database Management**.
+
+- **Automatic Backups** — Backups are created automatically on application startup, shutdown, and before risky operations (database reset, project deletion, or restoration).
+- **Manual Backups** — Trigger a backup at any time and download the `.db` file directly.
+- **Restoration** — Restore the database from a list of local backups. A safety backup of the current state is always created before restoration.
+- **Retention** — The app keeps the last 5 backups plus one daily milestone for each of the last 7 days.
+
+Backups are stored in the `backups/` subdirectory of the data folder.
+
 ## Model import CSV format
 
 The app expects a CSV with one row per annotation:

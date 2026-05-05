@@ -3,6 +3,7 @@ from __future__ import annotations
 from review_app.app.state import get_active_project_id, set_data_provider
 from review_app.app.translations import t
 from review_app.app.utils import switch_project
+from review_app.backend.backup import BackupError, create_backup
 from review_app.backend.local_data_provider import LocalDataProvider
 
 
@@ -57,6 +58,13 @@ def build_project_picker():
 
                                     async def confirm():
                                         del_dp = LocalDataProvider()
+                                        try:
+                                            create_backup(del_dp.engine, reason="delete_project")
+                                        except BackupError as exc:
+                                            ui.notify(
+                                                t("backup_failed_proceed", error=t(exc.user_message_key)),
+                                                type="warning",
+                                            )
                                         del_dp.delete_project(pid)
                                         confirm_dialog.close()
                                         if pid == get_active_project_id():

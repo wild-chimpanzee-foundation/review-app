@@ -11,6 +11,7 @@ from review_app.app.state import (
     get_data_provider,
     get_language,
     get_species_threshold,
+    load_settings_from_db,
     reset_app_state,
     set_active_project,
     set_annotator_name,
@@ -26,6 +27,7 @@ from review_app.app.utils import (
     get_or_create_data_provider,
     sync_with_progress,
 )
+from review_app.backend.backup import BackupError, create_backup, list_backups, restore_backup
 from review_app.backend.local_data_provider import LocalDataProvider
 
 
@@ -569,6 +571,104 @@ def _build_settings_content(container: ui.column):
 
                 with ui.expansion(t("database_management"), icon="storage").classes("full-width"):
                     with ui.row().classes("w-full items-center q-mb-md"):
+                        ui.label(t("backup_download_label")).classes("text-body2")
+                        ui.space()
+
+                        async def do_backup_download():
+                            _dp = get_data_provider()
+                            if not _dp:
+                                _dp = LocalDataProvider()
+                            try:
+                                backup_path = await run.io_bound(
+                                    create_backup, _dp.engine, reason="manual"
+                                )
+                            except BackupError as exc:
+                                ui.notify(t("backup_failed", error=t(exc.user_message_key)), type="negative")
+                                return
+                            ui.download(backup_path, filename=backup_path.name)
+                            ui.notify(t("backup_created"), type="positive")
+
+                        ui.button(
+                            t("backup_download_btn"),
+                            icon="download",
+                            color="primary",
+                            on_click=do_backup_download,
+                        )
+
+                    with ui.row().classes("w-full items-center q-mb-md"):
+                        ui.label(t("restore_backup_label")).classes("text-body2")
+                        ui.space()
+
+                        restore_dialog = ui.dialog().props("persistent")
+
+                        async def do_restore(selected_backup_path):
+                            restore_dialog.close()
+                            _dp = get_data_provider() or LocalDataProvider()
+                            try:
+                                await run.io_bound(
+                                    restore_backup, selected_backup_path, _dp.engine
+                                )
+                            except BackupError as exc:
+                                ui.notify(t("restore_failed", error=t(exc.user_message_key)), type="negative")
+                                return
+                            except Exception as exc:
+                                ui.notify(t("restore_failed", error=str(exc)), type="negative")
+                                return
+                            reset_app_state()
+                            new_dp = LocalDataProvider()
+                            set_data_provider(new_dp)
+                            load_settings_from_db(new_dp)
+                            ui.notify(t("restore_success"), type="positive")
+                            await asyncio.sleep(0.5)
+                            ui.navigate.to("/overview")
+
+                        async def open_restore_dialog():
+                            backups = list_backups()
+                            restore_dialog.clear()
+                            with (
+                                restore_dialog,
+                                ui.card().classes("q-pa-lg").style("min-width: 420px"),
+                            ):
+                                if not backups:
+                                    ui.label(t("no_backups")).classes("text-body2 text-grey-6")
+                                else:
+                                    ui.label(t("restore_confirm")).classes(
+                                        "text-subtitle1 q-mb-md"
+                                    )
+                                    with ui.column().classes(
+                                        "w-full gap-xs q-mb-lg"
+                                    ).style("max-height: 300px; overflow-y: auto"):
+                                        for b in backups:
+                                            ts = b["timestamp"].strftime(
+                                                "%Y-%m-%d %H:%M:%S"
+                                            )
+                                            label = f"{ts}  ({b['size_mb']} MB)"
+
+                                            def _make_restore(p):
+                                                async def _do():
+                                                    await do_restore(p)
+                                                return _do
+
+                                            ui.button(
+                                                label,
+                                                icon="restore",
+                                                on_click=_make_restore(b["path"]),
+                                            ).props("flat dense align-left").classes(
+                                                "w-full"
+                                            )
+                                with ui.row().classes("w-full justify-end"):
+                                    ui.button(
+                                        t("cancel"), on_click=restore_dialog.close
+                                    ).props("flat")
+                            restore_dialog.open()
+
+                        ui.button(
+                            t("restore_backup_btn"),
+                            icon="restore",
+                            on_click=open_restore_dialog,
+                        )
+
+                    with ui.row().classes("w-full items-center q-mb-md"):
                         ui.label(t("sync_videos_label")).classes("text-body2")
                         ui.space()
 
@@ -633,11 +733,19 @@ def _build_settings_content(container: ui.column):
 
                         async def do_reset():
                             reset_dialog.close()
-                            old_dp = get_data_provider()
-                            if old_dp:
-                                old_dp.engine.dispose()
+                            old_dp = get_data_provider() or LocalDataProvider()
                             if current_db_path and current_db_path.exists():
+                                try:
+                                    create_backup(old_dp.engine, reason="reset_database")
+                                except BackupError as exc:
+                                    ui.notify(
+                                        t("backup_failed_proceed", error=t(exc.user_message_key)),
+                                        type="warning",
+                                    )
+                                old_dp.engine.dispose()
                                 current_db_path.unlink()
+                            else:
+                                old_dp.engine.dispose()
                             reset_app_state()
                             ui.notify(t("database_reset"), type="positive")
                             ui.navigate.to("/setup")
