@@ -94,7 +94,7 @@ make lint      # check only
 make format    # fix in place
 ```
 
-CI enforces both on every push to `main` and on pull requests.
+Pre-commit hooks enforce both on every commit. Run `make ci` before pushing to catch anything the hooks missed.
 
 ## Building a release
 
