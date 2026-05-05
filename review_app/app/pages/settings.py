@@ -245,7 +245,7 @@ def _build_settings_content(container: ui.column):
                                 ui.label(t("configure_behaviors")).classes(
                                     "text-subtitle2 q-mt-md"
                                 )
-                                for spec in species_select.value or []:
+                                for spec in sorted(species_select.value or []):
                                     current_behaviors = _dp.get_project_species_behaviors(
                                         active_project_id, spec
                                     )
@@ -306,35 +306,55 @@ def _build_settings_content(container: ui.column):
                             dialog = ui.dialog()
                             groups = _dp.get_existing_groups()
                             iucn_options = _dp.get_existing_iucn()
-                            with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
+                            existing_sci_names = list(all_species_map.keys())
+                            existing_sci_names_lower = {n.lower() for n in existing_sci_names}
+                            existing_sp_en = list(_dp.get_species_display_map(lang="en").values())
+                            existing_sp_fr = list(_dp.get_species_display_map(lang="fr").values())
+                            def _fuzzy_matches(val, candidates, threshold=50):
+                                from thefuzz import process
+                                if not val or not candidates:
+                                    return []
+                                return [m for m, score in process.extract(val, candidates, limit=4) if score >= threshold]
+
+                            with dialog, ui.card().classes("q-pa-lg").style("width: 480px; max-height: 90vh; display: flex; flex-direction: column;"):
                                 ui.label(t("add_custom_species_title")).classes("text-h6 q-mb-md")
-                                sci = ui.input(t("scientific_name")).props(
-                                    "outlined dense full-width"
-                                )
-                                n_en = ui.input(t("name_en_label")).props(
-                                    "outlined dense full-width"
-                                )
-                                n_fr = ui.input(t("name_fr_label")).props(
-                                    "outlined dense full-width"
-                                )
-                                g_en = ui.select(
-                                    options=groups["en"],
-                                    label=t("group_en_label"),
-                                    with_input=True,
-                                    new_value_mode="add",
-                                ).props("outlined dense full-width")
-                                g_fr = ui.select(
-                                    options=groups["fr"],
-                                    label=t("group_fr_label"),
-                                    with_input=True,
-                                    new_value_mode="add",
-                                ).props("outlined dense full-width")
-                                iucn = ui.select(
-                                    options=iucn_options,
-                                    label=t("iucn_label"),
-                                    with_input=True,
-                                    new_value_mode="add",
-                                ).props("outlined dense full-width")
+                                with ui.column().classes("w-full gap-xs").style("overflow-y: auto; flex: 1;"):
+                                    sci = ui.input(t("scientific_name")).props("outlined dense").classes("w-full")
+                                    sci_hint = ui.label("").classes("text-caption q-mb-xs").style("min-height: 1em; white-space: nowrap; overflow-x: auto;")
+
+                                    def _update_sci_hint(e):
+                                        val = (e.value or "").strip()
+                                        if not val:
+                                            sci_hint.text = ""
+                                            return
+                                        if val.lower() in existing_sci_names_lower:
+                                            sci_hint.text = t("species_exists")
+                                            sci_hint.style("color: var(--q-negative); white-space: nowrap; overflow-x: auto;")
+                                        else:
+                                            matches = _fuzzy_matches(val, existing_sci_names)
+                                            sci_hint.text = ("Similar: " + " · ".join(matches)) if matches else ""
+                                            sci_hint.style("color: var(--q-on-surface, inherit); white-space: nowrap; overflow-x: auto;")
+
+                                    sci.on_value_change(_update_sci_hint)
+                                    n_en = ui.input(t("name_en_label")).props("outlined dense").classes("w-full")
+                                    n_en_hint = ui.label("").classes("text-caption text-grey-6 q-mb-xs").style("min-height: 1em; white-space: nowrap; overflow-x: auto;")
+
+                                    def _update_n_en_hint(e):
+                                        matches = _fuzzy_matches((e.value or "").strip(), existing_sp_en)
+                                        n_en_hint.text = ("Similar: " + " · ".join(matches)) if matches else ""
+
+                                    n_en.on_value_change(_update_n_en_hint)
+                                    n_fr = ui.input(t("name_fr_label")).props("outlined dense").classes("w-full")
+                                    n_fr_hint = ui.label("").classes("text-caption text-grey-6 q-mb-xs").style("min-height: 1em; white-space: nowrap; overflow-x: auto;")
+
+                                    def _update_n_fr_hint(e):
+                                        matches = _fuzzy_matches((e.value or "").strip(), existing_sp_fr)
+                                        n_fr_hint.text = ("Similar: " + " · ".join(matches)) if matches else ""
+
+                                    n_fr.on_value_change(_update_n_fr_hint)
+                                    g_en = ui.select(options=groups["en"], label=t("group_en_label"), with_input=True, new_value_mode="add").props("outlined dense").classes("w-full")
+                                    g_fr = ui.select(options=groups["fr"], label=t("group_fr_label"), with_input=True, new_value_mode="add").props("outlined dense").classes("w-full")
+                                    iucn = ui.select(options=iucn_options, label=t("iucn_label"), with_input=True, new_value_mode="add").props("outlined dense").classes("w-full")
 
                                 async def _do_add_species():
                                     if not all(
@@ -364,24 +384,57 @@ def _build_settings_content(container: ui.column):
 
                                 with ui.row().classes("w-full justify-end q-mt-md"):
                                     ui.button(t("cancel"), on_click=dialog.close).props("flat")
-                                    ui.button(
-                                        t("add_species_btn"), on_click=_do_add_species
-                                    ).props("unelevated")
+                                    ui.button(t("add_species_btn"), on_click=_do_add_species).props("unelevated")
                             dialog.open()
 
                         async def _add_custom_behavior_dialog():
                             dialog = ui.dialog()
-                            with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
+                            existing_behavior_keys = [b["key"] for b in _dp.get_all_behaviors()]
+                            existing_behavior_keys_lower = {k.lower() for k in existing_behavior_keys}
+                            existing_beh_en = list(_dp.get_behavior_display_map(lang="en").values())
+                            existing_beh_fr = list(_dp.get_behavior_display_map(lang="fr").values())
+                            def _fuzzy_matches(val, candidates, threshold=50):
+                                from thefuzz import process
+                                if not val or not candidates:
+                                    return []
+                                return [m for m, score in process.extract(val, candidates, limit=4) if score >= threshold]
+
+                            with dialog, ui.card().classes("q-pa-lg").style("width: 480px; max-height: 90vh; display: flex; flex-direction: column;"):
                                 ui.label(t("add_custom_behavior_title")).classes("text-h6 q-mb-md")
-                                key = ui.input(t("behavior_key")).props(
-                                    "outlined dense full-width"
-                                )
-                                n_en = ui.input(t("name_en_label")).props(
-                                    "outlined dense full-width"
-                                )
-                                n_fr = ui.input(t("name_fr_label")).props(
-                                    "outlined dense full-width"
-                                )
+                                with ui.column().classes("w-full gap-xs").style("overflow-y: auto; flex: 1;"):
+                                    key = ui.input(t("behavior_key")).props("outlined dense").classes("w-full")
+                                    key_hint = ui.label("").classes("text-caption q-mb-xs").style("min-height: 1em; white-space: nowrap; overflow-x: auto;")
+
+                                    def _update_key_hint(e):
+                                        val = (e.value or "").strip()
+                                        if not val:
+                                            key_hint.text = ""
+                                            return
+                                        if val.lower() in existing_behavior_keys_lower:
+                                            key_hint.text = t("behavior_exists")
+                                            key_hint.style("color: var(--q-negative); white-space: nowrap; overflow-x: auto;")
+                                        else:
+                                            matches = _fuzzy_matches(val, existing_behavior_keys)
+                                            key_hint.text = ("Similar: " + " · ".join(matches)) if matches else ""
+                                            key_hint.style("color: var(--q-on-surface, inherit); white-space: nowrap; overflow-x: auto;")
+
+                                    key.on_value_change(_update_key_hint)
+                                    n_en = ui.input(t("name_en_label")).props("outlined dense").classes("w-full")
+                                    n_en_hint = ui.label("").classes("text-caption text-grey-6 q-mb-xs").style("min-height: 1em; white-space: nowrap; overflow-x: auto;")
+
+                                    def _update_beh_en_hint(e):
+                                        matches = _fuzzy_matches((e.value or "").strip(), existing_beh_en)
+                                        n_en_hint.text = ("Similar: " + " · ".join(matches)) if matches else ""
+
+                                    n_en.on_value_change(_update_beh_en_hint)
+                                    n_fr = ui.input(t("name_fr_label")).props("outlined dense").classes("w-full")
+                                    n_fr_hint = ui.label("").classes("text-caption text-grey-6 q-mb-xs").style("min-height: 1em; white-space: nowrap; overflow-x: auto;")
+
+                                    def _update_beh_fr_hint(e):
+                                        matches = _fuzzy_matches((e.value or "").strip(), existing_beh_fr)
+                                        n_fr_hint.text = ("Similar: " + " · ".join(matches)) if matches else ""
+
+                                    n_fr.on_value_change(_update_beh_fr_hint)
 
                                 async def _do_add_behavior():
                                     if not all([key.value, n_en.value]):

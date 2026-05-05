@@ -74,6 +74,44 @@ CAM01/VIDEO_002.mp4,blank_non_blank,blank_model,blank,,0.98,0,
 
 A template is available in the Import page. Long-format CSVs are auto-detected; wide-format CSVs (one column per model) can be mapped interactively.
 
+## Species and behavior configuration
+
+By default all species and behaviors from the bundled CSVs (`review_app/data/species.csv` and `review_app/data/behaviors.csv`) are available app-wide. Per-project overrides can be configured in **Settings → Advanced → Project Species & Behaviors**.
+
+### Per-project species list
+
+Select which species are available for annotation in a given project. When a project has a species list configured, only those species appear in the annotation dropdowns and filters. Other projects are unaffected.
+
+### Per-project behaviors
+
+For each species in the project, you can override which behavior options appear. If no override is set for a species, the global behaviors from `behaviors.csv` apply.
+
+### Custom species and behaviors
+
+Add one-off species or behaviors via the **+ Add** buttons. Custom entries are marked `is_custom = 1` in the database and are never overwritten by the bundled CSVs on restart.
+
+### Bulk import via CSV
+
+Upload a CSV to replace the project's species list or behavior assignments:
+
+**Species CSV** — semicolon-separated, requires a `scientific_name` column:
+
+```
+scientific_name;name_en;name_fr;group_en;group_fr;iucn
+Capreolus capreolus;Roe deer;Chevreuil;Deer;Cervidés;LC
+```
+
+**Behaviors CSV** — semicolon-separated, requires `scientific_name` and `key` columns. Use `*` as `scientific_name` to apply a behavior to every species in the project:
+
+```
+scientific_name;key;name_en;name_fr
+*;does_not_react;Does not react;Ne réagit pas
+*;reacts_to_camera;Reacts to camera;Réagit à la caméra
+Capreolus capreolus;grazing;Grazing;Pâturage
+```
+
+Rows with a specific `scientific_name` are applied on top of any `*` rows for that species only.
+
 ## Keyboard shortcuts
 
 | Key | Action |

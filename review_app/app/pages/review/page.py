@@ -5,7 +5,6 @@ from urllib.parse import quote
 
 from nicegui import run, ui
 
-from review_app.app.config import DEFAULT_BEHAVIOR_KEY
 from review_app.app.onboarding import show_info_dialog, show_tour_if_needed
 from review_app.app.pages.review.annotations import render_annotation_section
 from review_app.app.pages.review.filters import render_filter_drawer  # noqa: F401 (refreshable)
@@ -85,7 +84,7 @@ async def render_video_section(dp, species_map, global_species_map):
     model_ann_task = run.io_bound(dp.get_model_annotations, selected_video_id)
     video, model_ann = await asyncio.gather(video_task, model_ann_task)
 
-    default_behavior = DEFAULT_BEHAVIOR_KEY
+    default_behavior = None
     if model_ann is not None and not model_ann.empty:
         behavior_rows = model_ann[
             (model_ann["annotation_type"] == "behavior")

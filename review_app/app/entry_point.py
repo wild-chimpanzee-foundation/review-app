@@ -314,6 +314,7 @@ class GUI:
 
         ui.run(
             title="Video Annotation",
+            favicon=Path(__file__).parent.parent / "data" / "logo.png",
             host="127.0.0.1",
             port=port,
             show=True,

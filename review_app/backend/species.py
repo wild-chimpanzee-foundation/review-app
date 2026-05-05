@@ -109,11 +109,11 @@ class SpeciesMixin:
                     )
             return rows
         except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as exc:
-            print("Failed to parse behaviors CSV %s: %s", path, exc)
+            print(f"Failed to parse behaviors CSV {path}: {exc}")
             return []
 
     def _load_species_behaviors(self) -> None:
-        from review_app.app.config import DEFAULT_BEHAVIORS, get_bundled_behaviors_csv
+        from review_app.app.config import get_bundled_behaviors_csv
 
         bundled_path = get_bundled_behaviors_csv()
         csv_rows = self._parse_behaviors_csv(Path(bundled_path)) if bundled_path else []
@@ -121,15 +121,12 @@ class SpeciesMixin:
         global_rows = [r for r in csv_rows if r["scientific_name"] == "*"]
         specific_rows = [r for r in csv_rows if r["scientific_name"] != "*"]
 
-        # Behaviors assigned to every species: CSV global rows if present, else code defaults.
-        all_species_behaviors = global_rows if global_rows else DEFAULT_BEHAVIORS
+        all_species_behaviors = global_rows
 
-        # Collect all behavior keys with display names for the behaviors table.
         behavior_meta: dict[str, dict[str, str | None]] = {
-            b["key"]: {"name_en": b["name_en"], "name_fr": b["name_fr"]} for b in DEFAULT_BEHAVIORS
+            row["key"]: {"name_en": row["name_en"], "name_fr": row["name_fr"]}
+            for row in csv_rows
         }
-        for row in csv_rows:
-            behavior_meta[row["key"]] = {"name_en": row["name_en"], "name_fr": row["name_fr"]}
 
         with self.engine.begin() as conn:
             # Upsert behaviors — preserve existing IDs.
@@ -339,7 +336,7 @@ class SpeciesMixin:
     def get_species_display_map(
         self, lang: str = "en", project_id: str | None = None
     ) -> dict[str, str]:
-        col = "name_en" if lang == "en" else "name_fr"
+        col = {"en": "name_en", "fr": "name_fr"}.get(lang, "name_en")
         with self.engine.connect() as conn:
             if project_id:
                 has_proj_sp = conn.execute(
@@ -353,7 +350,7 @@ class SpeciesMixin:
                             SELECT s.scientific_name, s.{col} FROM species s
                             JOIN project_species ps ON ps.species_id = s.id
                             WHERE ps.project_id = :pid
-                            ORDER BY s.{col}, s.scientific_name
+                            ORDER BY s.scientific_name
                             """
                         ),
                         {"pid": project_id},
@@ -361,7 +358,7 @@ class SpeciesMixin:
                     return {sci: f"{name} ({sci})" if name else sci for sci, name in rows}
 
             rows = conn.execute(
-                text(f"SELECT scientific_name, {col} FROM species ORDER BY {col}, scientific_name")
+                text(f"SELECT scientific_name, {col} FROM species ORDER BY scientific_name")
             ).fetchall()
         return {sci: f"{name} ({sci})" if name else sci for sci, name in rows}
 
@@ -398,11 +395,7 @@ class SpeciesMixin:
                 {"s": species_name},
             ).fetchall()
         result = [r[0] for r in rows]
-        if result:
-            return result
-        from review_app.app.config import DEFAULT_BEHAVIOR_KEY
-
-        return [DEFAULT_BEHAVIOR_KEY]
+        return result
 
     def get_all_behaviors(self) -> list[dict]:
         with self.engine.connect() as conn:
@@ -429,7 +422,7 @@ class SpeciesMixin:
     def get_behavior_display_map(
         self, lang: str = "en", species_name: str | None = None, project_id: str | None = None
     ) -> dict[str, str]:
-        col = "name_en" if lang == "en" else "name_fr"
+        col = {"en": "name_en", "fr": "name_fr"}.get(lang, "name_en")
         keys = []
         if species_name:
             keys = self.get_behaviors_for_species(species_name, project_id=project_id)
