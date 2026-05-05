@@ -6,7 +6,6 @@ from review_app.backend.models import Base
 class MockDataProvider(LocalDataProvider):
     def __init__(self, tmp_path):
         self.db_dir = tmp_path
-        self._behavior_defaults = ["does_not_react", "reacts_to_camera"]
         self._db_path = self.db_dir / "test.db"
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker

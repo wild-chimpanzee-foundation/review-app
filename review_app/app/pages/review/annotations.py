@@ -162,13 +162,7 @@ def render_annotation_section(
                         project_id=active_project_id,
                     )
                     sp_value = sel["species"] if sel["species"] in species_map else None
-                    bp_value = (
-                        sel["behavior"]
-                        if sel["behavior"] in behaviors_map
-                        else list(behaviors_map.keys())[0]
-                        if behaviors_map
-                        else None
-                    )
+                    bp_value = sel["behavior"] if sel["behavior"] in behaviors_map else None
 
                     sp = ui.select(
                         label=t("species_label"),
@@ -235,6 +229,14 @@ def render_annotation_section(
                             ui.label(f"{prob:.0%}").style(
                                 f"color: {get_probability_color(prob)}; font-weight: bold"
                             ).classes("text-caption")
+                    if sp_value is None and sel.get("species"):
+                        ui.label(t("predicted_species", species=sel["species"])).classes(
+                            "text-caption text-warning"
+                        ).tooltip(t("predicted_not_in_list_tooltip"))
+                    if bp_value is None and sel.get("behavior"):
+                        ui.label(t("predicted_behavior", behavior=sel["behavior"])).classes(
+                            "text-caption text-warning"
+                        ).tooltip(t("predicted_not_in_list_tooltip"))
                     ui.element("div").classes("col")
                     ui.button(icon="delete", on_click=lambda idx=i: delete_selection(idx)).props(
                         "flat color=negative dense"
@@ -251,11 +253,18 @@ def render_annotation_section(
                         }
                         set_selections(new_sels)
 
-                sp.on_value_change(
-                    lambda _, s=sp, b=bp, st=start_in, en=end_in, tr=time_row, idx=i: update_sel(
-                        idx, s, b, st, en, tr
+                def on_species_change(_, s=sp, b=bp, st=start_in, en=end_in, tr=time_row, idx=i):
+                    new_behaviors = dp.get_behavior_display_map(
+                        lang=get_language(),
+                        species_name=s.value,
+                        project_id=get_active_project_id(),
                     )
-                )
+                    b.options = new_behaviors
+                    b.value = b.value if b.value in new_behaviors else (list(new_behaviors.keys())[0] if new_behaviors else None)
+                    b.update()
+                    update_sel(idx, s, b, st, en, tr)
+
+                sp.on_value_change(on_species_change)
                 bp.on_value_change(
                     lambda _, s=sp, b=bp, st=start_in, en=end_in, tr=time_row, idx=i: update_sel(
                         idx, s, b, st, en, tr

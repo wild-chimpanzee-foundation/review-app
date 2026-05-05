@@ -8,10 +8,10 @@ from sqlalchemy import text
 
 
 class SpeciesMixin:
-    """Species and behavior loading and queries. Requires self.engine, self._behavior_defaults."""
+    """Species and behavior loading and queries. Requires self.engine."""
 
     @staticmethod
-    def _parse_species_csv(path: Path) -> list[dict]:
+    def _parse_species_csv(path) -> list[dict]:
         df = pd.read_csv(path, sep=";")
         if "scientific_name" not in df.columns:
             raise ValueError(f"Species CSV at `{path}` must have a `scientific_name` column.")
@@ -92,19 +92,20 @@ class SpeciesMixin:
             )
 
     @staticmethod
-    def _parse_behaviors_csv(path: Path) -> list[dict]:
+    def _parse_behaviors_csv(path) -> list[dict]:
         try:
             df = pd.read_csv(path, sep=";")
-            if "Species" not in df.columns or "Behavior" not in df.columns:
+            if "scientific_name" not in df.columns or "key" not in df.columns:
                 return []
             rows = []
             for _, row in df.iterrows():
-                species = str(row["Species"]).strip()
-                behavior = str(row["Behavior"]).strip()
-                name_fr = str(row.get("behavior_fr", "") or "").strip() or None
-                if species and behavior:
+                sci = str(row["scientific_name"]).strip()
+                key = str(row["key"]).strip()
+                name_en = str(row.get("name_en", "") or "").strip() or key
+                name_fr = str(row.get("name_fr", "") or "").strip() or None
+                if sci and key:
                     rows.append(
-                        {"scientific_name": species, "behavior": behavior, "behavior_fr": name_fr}
+                        {"scientific_name": sci, "key": key, "name_en": name_en, "name_fr": name_fr}
                     )
             return rows
         except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as exc:
@@ -117,15 +118,18 @@ class SpeciesMixin:
         bundled_path = get_bundled_behaviors_csv()
         csv_rows = self._parse_behaviors_csv(Path(bundled_path)) if bundled_path else []
 
-        # Collect all behavior keys with optional French names.
+        global_rows = [r for r in csv_rows if r["scientific_name"] == "*"]
+        specific_rows = [r for r in csv_rows if r["scientific_name"] != "*"]
+
+        # Behaviors assigned to every species: CSV global rows if present, else code defaults.
+        all_species_behaviors = global_rows if global_rows else DEFAULT_BEHAVIORS
+
+        # Collect all behavior keys with display names for the behaviors table.
         behavior_meta: dict[str, dict[str, str | None]] = {
             b["key"]: {"name_en": b["name_en"], "name_fr": b["name_fr"]} for b in DEFAULT_BEHAVIORS
         }
         for row in csv_rows:
-            behavior_meta[row["behavior"]] = {
-                "name_en": row["behavior"],
-                "name_fr": row.get("behavior_fr"),
-            }
+            behavior_meta[row["key"]] = {"name_en": row["name_en"], "name_fr": row["name_fr"]}
 
         with self.engine.begin() as conn:
             # Upsert behaviors — preserve existing IDs.
@@ -168,19 +172,20 @@ class SpeciesMixin:
 
             desired: set[tuple[str, str]] = set()
             to_insert: dict[tuple, dict] = {}
-            for sci, sp_id in species_map.items():
-                for b_key in behavior_meta.keys():
-                    b_id = behavior_id_map.get(b_key)
+            # Global behaviors (from * rows or code defaults) apply to every species.
+            for sp_id in species_map.values():
+                for b in all_species_behaviors:
+                    b_id = behavior_id_map.get(b["key"])
                     if sp_id and b_id:
                         to_insert[(sp_id, b_id)] = {"species_id": sp_id, "behavior_id": b_id}
                         desired.add((sp_id, b_id))
-            for row in csv_rows:
+            # Species-specific CSV rows assign behaviors to their named species only.
+            for row in specific_rows:
                 sp_id = species_map.get(row["scientific_name"])
-                b_id = behavior_id_map.get(row["behavior"])
+                b_id = behavior_id_map.get(row["key"])
                 if sp_id and b_id:
                     to_insert[(sp_id, b_id)] = {"species_id": sp_id, "behavior_id": b_id}
                     desired.add((sp_id, b_id))
-
             if to_insert:
                 placeholders = ", ".join(f"(:sid{i}, :bid{i})" for i in range(len(to_insert)))
                 params = {}
@@ -212,8 +217,8 @@ class SpeciesMixin:
             }
 
             # Build a temp table of desired bundled mappings so we can
-            # efficiently delete stale rows without SQLite-incompatible
-            # row-value syntax.
+            # delete stale rows via a subquery instead of an unbounded
+            # parameterised IN clause.
             conn.execute(
                 text(
                     "CREATE TEMP TABLE IF NOT EXISTS _desired_sb"
@@ -437,6 +442,8 @@ class SpeciesMixin:
                     text(f"SELECT key, {col} FROM behaviors WHERE key IN ({placeholders})"),
                     params,
                 ).fetchall()
+                lookup = {key: name or key for key, name in rows}
+                return {k: lookup[k] for k in keys if k in lookup}
             else:
                 rows = conn.execute(text(f"SELECT key, {col} FROM behaviors")).fetchall()
 
@@ -587,3 +594,86 @@ class SpeciesMixin:
                 },
             )
         return True
+
+    def _upsert_species(self, row: dict) -> None:
+        """Insert or update a species from a user-supplied CSV. Marks as custom so the
+        bundled-data reload on startup cannot overwrite it."""
+        sci = row["scientific_name"]
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO species (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn, is_custom)
+                    VALUES (:id, :sci, :name_en, :name_fr, :group_en, :group_fr, :iucn, 1)
+                    ON CONFLICT(scientific_name) DO UPDATE SET
+                        name_en   = COALESCE(excluded.name_en,  species.name_en),
+                        name_fr   = COALESCE(excluded.name_fr,  species.name_fr),
+                        group_en  = COALESCE(excluded.group_en, species.group_en),
+                        group_fr  = COALESCE(excluded.group_fr, species.group_fr),
+                        iucn      = COALESCE(excluded.iucn,     species.iucn),
+                        is_custom = 1
+                    """
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "sci": sci,
+                    "name_en": row["name_en"] or sci,
+                    "name_fr": row["name_fr"] or sci,
+                    "group_en": row["group_en"] or "",
+                    "group_fr": row["group_fr"] or "",
+                    "iucn": row["iucn"],
+                },
+            )
+
+    def import_project_species_from_csv(self, project_id: str, content: str) -> int:
+        """Parse species CSV content, upsert non-custom species, and overwrite
+        the project's species list. Returns the number of species set."""
+        import io
+
+        rows = self._parse_species_csv(io.StringIO(content))
+        if not rows:
+            raise ValueError("No valid rows found. Ensure the CSV uses ';' as separator and has a 'scientific_name' column.")
+
+        for row in rows:
+            self._upsert_species(row)
+
+        names = [r["scientific_name"] for r in rows]
+        self.set_project_species(project_id, names)
+        return len(names)
+
+    def import_project_behaviors_from_csv(self, project_id: str, content: str) -> int:
+        """Parse behaviors CSV content, add any unknown behaviors as custom, and overwrite
+        per-species behavior lists for each species in the project.
+
+        Rows with scientific_name='*' apply to every project species.
+        Rows with a specific scientific_name apply to that species only.
+        Returns the number of species whose behavior lists were updated."""
+        import io
+
+        rows = self._parse_behaviors_csv(io.StringIO(content))
+        if not rows:
+            raise ValueError("No valid rows found. Ensure the CSV uses ';' as separator and has 'scientific_name' and 'key' columns.")
+
+        for row in rows:
+            if not self.behavior_exists(row["key"]):
+                self.add_custom_behavior(row["key"], row["name_en"], row["name_fr"])
+
+        global_keys = [r["key"] for r in rows if r["scientific_name"] == "*"]
+        by_species: dict[str, list[str]] = {}
+        for row in rows:
+            if row["scientific_name"] != "*":
+                by_species.setdefault(row["scientific_name"], []).append(row["key"])
+
+        project_species = self.get_project_species(project_id)
+        updated = 0
+        # Apply to all project species: global keys + any species-specific keys.
+        for sci in project_species:
+            keys = global_keys + by_species.get(sci, [])
+            self.set_project_species_behaviors(project_id, sci, keys)
+            updated += 1
+        # Also apply to species named in the CSV that aren't in the project species list.
+        for sci, keys in by_species.items():
+            if sci not in project_species and self.species_exists(sci):
+                self.set_project_species_behaviors(project_id, sci, global_keys + keys)
+                updated += 1
+        return updated

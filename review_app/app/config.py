@@ -62,7 +62,7 @@ def get_bundled_species_csv() -> str | None:
 
 def get_bundled_behaviors_csv() -> str | None:
     bundle_dir = Path(__file__).parent.parent / "data"
-    bundled = bundle_dir / "species_behaviors.csv"
+    bundled = bundle_dir / "behaviors.csv"
     if bundled.exists():
         return str(bundled)
     return None

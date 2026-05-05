@@ -526,6 +526,10 @@ async def setup_review():
 
                 // Global keyboard listener that targets the active video or UI elements
                 document.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') {
+                        document.activeElement?.blur();
+                        return;
+                    }
                     const tag = e.target.tagName.toLowerCase();
                     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
                     if (e.target.isContentEditable) return;

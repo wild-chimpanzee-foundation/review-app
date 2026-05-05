@@ -214,168 +214,281 @@ def _build_settings_content(container: ui.column):
                     t("sync_videos_label"), icon="sync", color="primary", on_click=sync_dir
                 ).props("dense")
 
-        # Project Species & Behaviors Section
-        if active_project_id:
-            with ui.expansion(t("project_species_settings"), icon="pets").classes(
-                "full-width q-mb-lg"
-            ):
-                with ui.column().classes("w-full gap-md q-pa-md"):
-                    ui.label(t("project_species_desc")).classes("text-caption text-grey-6")
-
-                    _dp = get_data_provider() or LocalDataProvider()
-                    lang = get_language()
-                    all_species_map = _dp.get_species_display_map(lang=lang)
-                    project_species = _dp.get_project_species(active_project_id)
-                    behavior_display_map = _dp.get_behavior_display_map(lang=lang)
-
-                    # Behavior configuration container
-                    with ui.column().classes("w-full gap-sm") as behaviors_container:
-                        pass # Initial placeholder
-                    
-                    behavior_selects: dict = {}
-
-                    def _render_behaviors():
-                        behaviors_container.clear()
-                        behavior_selects.clear()
-                        with behaviors_container:
-                            ui.label(t("configure_behaviors")).classes("text-subtitle2 q-mt-md")
-                            selected_species = species_select.value or []
-                            for spec in selected_species:
-                                current_behaviors = _dp.get_project_species_behaviors(
-                                    active_project_id, spec
-                                )
-                                spec_display = all_species_map.get(spec, spec)
-                                with ui.row().classes("w-full items-center gap-sm no-wrap"):
-                                    ui.label(spec_display).classes("text-caption").style("width: 150px")
-                                    # Behavior select for project-specific configuration
-                                    behavior_select = ui.select(
-                                        options=behavior_display_map,
-                                        value=current_behaviors,
-                                        multiple=True,
-                                        label=t("species_behaviors", species=spec_display),
-                                    ).props("outlined dense use-chips").classes("col")
-                                    behavior_selects[spec] = behavior_select
-
-                    # Species Selection
-                    with ui.row().classes("w-full items-center gap-sm"):
-                        species_select = ui.select(
-                            options=all_species_map,
-                            value=project_species,
-                            label=t("enable_species"),
-                            multiple=True,
-                            with_input=True,
-                        ).props("outlined use-chips full-width").classes("col").on("update:model-value", _render_behaviors)
-
-                        ui.button(
-                            t("select_all"),
-                            on_click=lambda: [species_select.set_value(list(all_species_map.keys())), _render_behaviors()],
-                        ).props("flat dense")
-                        ui.button(
-                            t("deselect_all"),
-                            on_click=lambda: [species_select.set_value([]), _render_behaviors()],
-                        ).props("flat dense")
-
-                    _render_behaviors()
-
-                    async def _apply_all():
-                        # Save species
-                        _dp.set_project_species(active_project_id, species_select.value)
-                        # Save behaviors for each selected species
-                        for spec, select_el in behavior_selects.items():
-                            keys = select_el.value
-                            _dp.set_project_species_behaviors(active_project_id, spec, keys)
-                        ui.notify(t("settings_saved"), type="positive")
-
-                    with ui.row().classes("w-full justify-end q-mt-sm"):
-                        ui.button(t("apply_changes"), on_click=_apply_all).props("unelevated color=primary")
-
-                    # Add Buttons
-                    async def _add_custom_species_dialog():
-                        dialog = ui.dialog()
-                        groups = _dp.get_existing_groups()
-                        iucn_options = _dp.get_existing_iucn()
-                        
-                        with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
-                            ui.label(t("add_custom_species_title")).classes("text-h6 q-mb-md")
-                            sci = ui.input(t("scientific_name")).props("outlined dense full-width")
-                            n_en = ui.input(t("name_en_label")).props("outlined dense full-width")
-                            n_fr = ui.input(t("name_fr_label")).props("outlined dense full-width")
-                            g_en = ui.select(options=groups["en"], label=t("group_en_label"), with_input=True, new_value_mode='add').props("outlined dense full-width")
-                            g_fr = ui.select(options=groups["fr"], label=t("group_fr_label"), with_input=True, new_value_mode='add').props("outlined dense full-width")
-                            iucn = ui.select(options=iucn_options, label=t("iucn_label"), with_input=True, new_value_mode='add').props("outlined dense full-width")
-
-                            async def _do_add():
-                                if not all([sci.value, n_en.value, n_fr.value, g_en.value, g_fr.value]):
-                                    ui.notify(t("all_fields_required"), type="warning")
-                                    return
-                                success = await run.io_bound(
-                                    _dp.add_custom_species,
-                                    sci.value, n_en.value, n_fr.value, g_en.value, g_fr.value, iucn.value or None,
-                                )
-                                if not success:
-                                    ui.notify(t("species_exists"), type="warning")
-                                    return
-                                    
-                                ui.notify(t("species_added"), type="positive")
-                                dialog.close()
-                                
-                                # Refresh data from the DP
-                                nonlocal all_species_map, species_select
-                                all_species_map = _dp.get_species_display_map(lang=lang)
-                                
-                                # Update select options and re-render
-                                species_select.options = all_species_map
-                                species_select.update()
-                                
-                                # Explicitly re-render behaviors to include new species if needed
-                                _render_behaviors()
-
-                            with ui.row().classes("w-full justify-end q-mt-md"):
-                                ui.button(t("cancel"), on_click=dialog.close).props("flat")
-                                ui.button(t("add_species_btn"), on_click=_do_add).props("unelevated")
-                        dialog.open()
-
-                    async def _add_custom_behavior_dialog():
-                        dialog = ui.dialog()
-                        with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
-                            ui.label(t("add_custom_behavior_title")).classes("text-h6 q-mb-md")
-                            key = ui.input(t("behavior_key")).props("outlined dense full-width")
-                            n_en = ui.input(t("name_en_label")).props("outlined dense full-width")
-                            n_fr = ui.input(t("name_fr_label")).props("outlined dense full-width")
-
-                            async def _do_add():
-                                if not all([key.value, n_en.value]):
-                                    ui.notify(t("all_fields_required"), type="warning")
-                                    return
-                                success = await run.io_bound(
-                                    _dp.add_custom_behavior,
-                                    key.value, n_en.value, n_fr.value or None,
-                                )
-                                if not success:
-                                    ui.notify(t("behavior_exists"), type="warning")
-                                    return
-                                ui.notify(t("behavior_added"), type="positive")
-                                dialog.close()
-                                nonlocal behavior_display_map
-                                behavior_display_map = _dp.get_behavior_display_map(lang=lang)
-                                _render_behaviors()
-                            
-                            with ui.row().classes("w-full justify-end q-mt-md"):
-                                ui.button(t("cancel"), on_click=dialog.close).props("flat")
-                                ui.button(t("add_species_btn"), on_click=_do_add).props("unelevated")
-                        dialog.open()
-
-                    with ui.row().classes("q-mt-sm"):
-                        ui.button(t("add_custom_species_title"), icon="add", on_click=_add_custom_species_dialog).props("flat dense")
-                        ui.button(t("add_custom_behavior_title"), icon="add", on_click=_add_custom_behavior_dialog).props("flat dense")
-
         # Advanced Section
         with ui.expansion(t("advanced_settings"), icon="settings").classes("full-width q-mb-lg"):
             with ui.column().classes("w-full gap-lg q-pa-md"):
-                with ui.card().classes("full-width"):
-                    with ui.row().classes("items-center q-mb-sm"):
-                        ui.icon("tune", size="sm").classes("text-primary q-mr-sm")
-                        ui.label(t("blank_detection")).classes("text-subtitle1 font-weight-medium")
+                # Project Species & Behaviors
+                if active_project_id:
+                    with ui.expansion(t("project_species_settings"), icon="pets").classes(
+                        "full-width"
+                    ):
+                        ui.label(t("project_species_desc")).classes(
+                            "text-caption text-grey-6 q-mb-md"
+                        )
+
+                        _dp = get_data_provider() or LocalDataProvider()
+                        lang = get_language()
+                        all_species_map = _dp.get_species_display_map(lang=lang)
+                        project_species = _dp.get_project_species(active_project_id)
+                        behavior_display_map = _dp.get_behavior_display_map(lang=lang)
+
+                        with (
+                            ui.column()
+                            .classes("w-full gap-sm")
+                            .style("max-height: 400px; overflow-y: auto") as behaviors_container
+                        ):
+                            pass
+
+                        def _render_behaviors():
+                            behaviors_container.clear()
+                            with behaviors_container:
+                                ui.label(t("configure_behaviors")).classes(
+                                    "text-subtitle2 q-mt-md"
+                                )
+                                for spec in species_select.value or []:
+                                    current_behaviors = _dp.get_project_species_behaviors(
+                                        active_project_id, spec
+                                    )
+                                    spec_display = all_species_map.get(spec, spec)
+                                    with ui.row().classes("w-full items-center gap-sm no-wrap"):
+                                        ui.label(spec_display).classes("text-caption").style(
+                                            "width: 150px"
+                                        )
+
+                                        def _make_behavior_save(s):
+                                            def _save(ev):
+                                                _dp.set_project_species_behaviors(
+                                                    active_project_id, s, ev.value or []
+                                                )
+
+                                            return _save
+
+                                        ui.select(
+                                            options=behavior_display_map,
+                                            value=current_behaviors,
+                                            multiple=True,
+                                            label=t("species_behaviors", species=spec_display),
+                                        ).props("outlined dense use-chips").classes(
+                                            "col"
+                                        ).on_value_change(_make_behavior_save(spec))
+
+                        def _save_and_render(ev):
+                            _dp.set_project_species(active_project_id, ev.value or [])
+                            _render_behaviors()
+
+                        with ui.row().classes("w-full items-center gap-sm"):
+                            species_select = (
+                                ui.select(
+                                    options=all_species_map,
+                                    value=project_species,
+                                    label=t("enable_species"),
+                                    multiple=True,
+                                    with_input=True,
+                                )
+                                .props("outlined use-chips full-width")
+                                .classes("col")
+                                .on_value_change(_save_and_render)
+                            )
+                            ui.button(
+                                t("select_all"),
+                                on_click=lambda: species_select.set_value(
+                                    list(all_species_map.keys())
+                                ),
+                            ).props("flat dense")
+                            ui.button(
+                                t("deselect_all"),
+                                on_click=lambda: species_select.set_value([]),
+                            ).props("flat dense")
+
+                        _render_behaviors()
+
+                        async def _add_custom_species_dialog():
+                            dialog = ui.dialog()
+                            groups = _dp.get_existing_groups()
+                            iucn_options = _dp.get_existing_iucn()
+                            with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
+                                ui.label(t("add_custom_species_title")).classes("text-h6 q-mb-md")
+                                sci = ui.input(t("scientific_name")).props(
+                                    "outlined dense full-width"
+                                )
+                                n_en = ui.input(t("name_en_label")).props(
+                                    "outlined dense full-width"
+                                )
+                                n_fr = ui.input(t("name_fr_label")).props(
+                                    "outlined dense full-width"
+                                )
+                                g_en = ui.select(
+                                    options=groups["en"],
+                                    label=t("group_en_label"),
+                                    with_input=True,
+                                    new_value_mode="add",
+                                ).props("outlined dense full-width")
+                                g_fr = ui.select(
+                                    options=groups["fr"],
+                                    label=t("group_fr_label"),
+                                    with_input=True,
+                                    new_value_mode="add",
+                                ).props("outlined dense full-width")
+                                iucn = ui.select(
+                                    options=iucn_options,
+                                    label=t("iucn_label"),
+                                    with_input=True,
+                                    new_value_mode="add",
+                                ).props("outlined dense full-width")
+
+                                async def _do_add_species():
+                                    if not all(
+                                        [sci.value, n_en.value, n_fr.value, g_en.value, g_fr.value]
+                                    ):
+                                        ui.notify(t("all_fields_required"), type="warning")
+                                        return
+                                    success = await run.io_bound(
+                                        _dp.add_custom_species,
+                                        sci.value,
+                                        n_en.value,
+                                        n_fr.value,
+                                        g_en.value,
+                                        g_fr.value,
+                                        iucn.value or None,
+                                    )
+                                    if not success:
+                                        ui.notify(t("species_exists"), type="warning")
+                                        return
+                                    ui.notify(t("species_added"), type="positive")
+                                    dialog.close()
+                                    nonlocal all_species_map
+                                    all_species_map = _dp.get_species_display_map(lang=lang)
+                                    species_select.options = all_species_map
+                                    species_select.update()
+                                    _render_behaviors()
+
+                                with ui.row().classes("w-full justify-end q-mt-md"):
+                                    ui.button(t("cancel"), on_click=dialog.close).props("flat")
+                                    ui.button(
+                                        t("add_species_btn"), on_click=_do_add_species
+                                    ).props("unelevated")
+                            dialog.open()
+
+                        async def _add_custom_behavior_dialog():
+                            dialog = ui.dialog()
+                            with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
+                                ui.label(t("add_custom_behavior_title")).classes("text-h6 q-mb-md")
+                                key = ui.input(t("behavior_key")).props(
+                                    "outlined dense full-width"
+                                )
+                                n_en = ui.input(t("name_en_label")).props(
+                                    "outlined dense full-width"
+                                )
+                                n_fr = ui.input(t("name_fr_label")).props(
+                                    "outlined dense full-width"
+                                )
+
+                                async def _do_add_behavior():
+                                    if not all([key.value, n_en.value]):
+                                        ui.notify(t("all_fields_required"), type="warning")
+                                        return
+                                    success = await run.io_bound(
+                                        _dp.add_custom_behavior,
+                                        key.value,
+                                        n_en.value,
+                                        n_fr.value or None,
+                                    )
+                                    if not success:
+                                        ui.notify(t("behavior_exists"), type="warning")
+                                        return
+                                    ui.notify(t("behavior_added"), type="positive")
+                                    dialog.close()
+                                    nonlocal behavior_display_map
+                                    behavior_display_map = _dp.get_behavior_display_map(lang=lang)
+                                    _render_behaviors()
+
+                                with ui.row().classes("w-full justify-end q-mt-md"):
+                                    ui.button(t("cancel"), on_click=dialog.close).props("flat")
+                                    ui.button(
+                                        t("add_behavior_btn"), on_click=_do_add_behavior
+                                    ).props("unelevated")
+                            dialog.open()
+
+                        async def _handle_species_upload(e):
+                            content = (await e.file.read()).decode("utf-8", errors="replace")
+                            try:
+                                count = await run.io_bound(
+                                    _dp.import_project_species_from_csv, active_project_id, content
+                                )
+                                ui.notify(
+                                    t("species_import_success", count=count), type="positive"
+                                )
+                                nonlocal all_species_map
+                                all_species_map = _dp.get_species_display_map(lang=lang)
+                                species_select.options = all_species_map
+                                species_select.update()
+                                species_select.set_value(
+                                    _dp.get_project_species(active_project_id)
+                                )
+                                _render_behaviors()
+                            except Exception as exc:
+                                ui.notify(t("csv_import_error", error=str(exc)), type="negative")
+
+                        async def _handle_behaviors_upload(e):
+                            content = (await e.file.read()).decode("utf-8", errors="replace")
+                            try:
+                                count = await run.io_bound(
+                                    _dp.import_project_behaviors_from_csv,
+                                    active_project_id,
+                                    content,
+                                )
+                                ui.notify(
+                                    t("behaviors_import_success", count=count), type="positive"
+                                )
+                                nonlocal behavior_display_map
+                                behavior_display_map = _dp.get_behavior_display_map(lang=lang)
+                                _render_behaviors()
+                            except Exception as exc:
+                                ui.notify(t("csv_import_error", error=str(exc)), type="negative")
+
+                        # Hidden uploaders — triggered programmatically by buttons below.
+                        species_uploader = (
+                            ui.upload(on_upload=_handle_species_upload, auto_upload=True)
+                            .props("accept=.csv")
+                            .style("display: none")
+                        )
+                        behaviors_uploader = (
+                            ui.upload(on_upload=_handle_behaviors_upload, auto_upload=True)
+                            .props("accept=.csv")
+                            .style("display: none")
+                        )
+
+                        with ui.row().classes("items-center gap-xs"):
+                            ui.label(t("add_custom_label")).classes("text-caption text-grey-6")
+                            ui.button(
+                                t("add_custom_species_title"),
+                                icon="add",
+                                on_click=_add_custom_species_dialog,
+                            ).props("flat dense")
+                            ui.button(
+                                t("add_custom_behavior_title"),
+                                icon="add",
+                                on_click=_add_custom_behavior_dialog,
+                            ).props("flat dense")
+                        ui.separator().classes("q-mt-md")
+                        with ui.row().classes("items-center gap-xs"):
+                            ui.label(t("import_csv_label")).classes("text-caption text-grey-6")
+                            ui.button(
+                                t("upload_species_csv"),
+                                icon="upload_file",
+                                on_click=lambda: ui.run_javascript(
+                                    f"document.getElementById('c{species_uploader.id}').querySelector('.q-uploader__input').click()"
+                                ),
+                            ).props("flat dense")
+                            ui.button(
+                                t("upload_behaviors_csv"),
+                                icon="upload_file",
+                                on_click=lambda: ui.run_javascript(
+                                    f"document.getElementById('c{behaviors_uploader.id}').querySelector('.q-uploader__input').click()"
+                                ),
+                            ).props("flat dense")
+
+                with ui.expansion(t("blank_detection"), icon="tune").classes("full-width"):
                     ui.label(t("blank_detection_desc")).classes("text-caption text-grey-6 q-mb-md")
                     ui.label(t("blank_threshold_label")).classes(
                         "text-caption text-grey-6 q-mb-xs"
@@ -401,13 +514,7 @@ def _build_settings_content(container: ui.column):
                             t("save"), icon="check", color="primary", on_click=save_thresholds
                         ).props("dense")
 
-                with ui.card().classes("full-width"):
-                    with ui.row().classes("items-center q-mb-sm"):
-                        ui.icon("storage", size="sm").classes("text-primary q-mr-sm")
-                        ui.label(t("database_management")).classes(
-                            "text-subtitle1 font-weight-medium"
-                        )
-
+                with ui.expansion(t("database_management"), icon="storage").classes("full-width"):
                     with ui.row().classes("w-full items-center q-mb-md"):
                         ui.label(t("sync_videos_label")).classes("text-body2")
                         ui.space()
