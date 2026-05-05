@@ -23,8 +23,6 @@ from review_app.backend.models import (
     Project,
     ProjectDir,
     VideoLabel,
-    Species,
-    Behavior,
 )
 from review_app.backend.species import SpeciesMixin
 from review_app.backend.utils import needs_browser_transcode

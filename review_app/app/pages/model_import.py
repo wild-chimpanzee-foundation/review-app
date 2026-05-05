@@ -4,7 +4,7 @@ import pandas as pd
 from nicegui import run, ui
 
 from review_app.app.onboarding import show_info_dialog
-from review_app.app.state import get_active_project_id, get_state_val, set_state_val, get_language
+from review_app.app.state import get_active_project_id, get_language, get_state_val, set_state_val
 from review_app.app.translations import t
 from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
 from review_app.backend.utils import df_to_records

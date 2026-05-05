@@ -19,13 +19,13 @@ _TOUR_CSS = """
 
 # CSS selector for each step (None = no highlight, dialog centers itself)
 _STEP_TARGETS = [
-    None,                            # 0: Welcome
-    ".tour-target-queue",            # 1: Review Queue
-    ".tour-target-filters",          # 2: Filters
-    ".tour-target-ai-predictions",   # 3: AI Predictions
-    ".tour-target-action-buttons",   # 4: Blank vs Non-blank
-    ".tour-target-review-later",     # 5: Review Later
-    None,                            # 6: Done
+    None,  # 0: Welcome
+    ".tour-target-queue",  # 1: Review Queue
+    ".tour-target-filters",  # 2: Filters
+    ".tour-target-ai-predictions",  # 3: AI Predictions
+    ".tour-target-action-buttons",  # 4: Blank vs Non-blank
+    ".tour-target-review-later",  # 5: Review Later
+    None,  # 6: Done
 ]
 
 # Highlights the target element and repositions the tour dialog near it.
@@ -178,8 +178,8 @@ def show_tour(t) -> None:
             ui.space()
             ui.icon("school", size="sm").classes("text-amber-6")
         els["title"] = ui.label().classes("text-h6 q-mb-sm")
-        els["body"] = ui.label().classes("text-body2").style(
-            "white-space: pre-wrap; line-height: 1.6"
+        els["body"] = (
+            ui.label().classes("text-body2").style("white-space: pre-wrap; line-height: 1.6")
         )
 
         with ui.row().classes("w-full q-mt-lg items-center"):

@@ -3,9 +3,13 @@ from pathlib import Path
 import pandas as pd
 
 _MIME_BY_EXT = {
-    ".mp4": "video/mp4", ".avi": "video/x-msvideo", ".mov": "video/quicktime",
-    ".mkv": "video/x-matroska", ".webm": "video/webm",
-    ".wmv": "video/x-ms-wmv", ".flv": "video/x-flv",
+    ".mp4": "video/mp4",
+    ".avi": "video/x-msvideo",
+    ".mov": "video/quicktime",
+    ".mkv": "video/x-matroska",
+    ".webm": "video/webm",
+    ".wmv": "video/x-ms-wmv",
+    ".flv": "video/x-flv",
 }
 
 # Extensions browsers can never play natively — transcode even when is_web_safe is NULL

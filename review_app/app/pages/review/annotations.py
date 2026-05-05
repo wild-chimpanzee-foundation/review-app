@@ -171,9 +171,7 @@ def render_annotation_section(
                         with_input=True,
                     ).props("outlined dense class=col")
 
-                    with ui.row().classes(
-                        "w-full gap-sm items-center q-mt-sm"
-                    ) as time_row:
+                    with ui.row().classes("w-full gap-sm items-center q-mt-sm") as time_row:
                         bp = (
                             ui.select(
                                 label=t("behavior_label"),
@@ -185,7 +183,9 @@ def render_annotation_section(
                             .style("flex: 2; min-width: 120px;")
                         )
 
-                        with ui.element("div").style("display:flex; gap:8px; flex:1; min-width:170px;"):
+                        with ui.element("div").style(
+                            "display:flex; gap:8px; flex:1; min-width:170px;"
+                        ):
                             start_in = (
                                 ui.number(
                                     label=t("start_sec"),
@@ -214,9 +214,7 @@ def render_annotation_section(
                 with ui.row().classes("items-center gap-xs q-mt-xs w-full"):
                     if labeled_by:
                         ui.icon("person", size="xs").classes("text-grey-5")
-                        date_str = (
-                            str(labeled_at)[:16].replace("T", " ") if labeled_at else None
-                        )
+                        date_str = str(labeled_at)[:16].replace("T", " ") if labeled_at else None
                         meta = t("labeled_by", name=labeled_by)
                         if date_str:
                             meta += f" · {t('labeled_at', date=date_str)}"
@@ -260,7 +258,11 @@ def render_annotation_section(
                         project_id=get_active_project_id(),
                     )
                     b.options = new_behaviors
-                    b.value = b.value if b.value in new_behaviors else (list(new_behaviors.keys())[0] if new_behaviors else None)
+                    b.value = (
+                        b.value
+                        if b.value in new_behaviors
+                        else (list(new_behaviors.keys())[0] if new_behaviors else None)
+                    )
                     b.update()
                     update_sel(idx, s, b, st, en, tr)
 
@@ -458,7 +460,11 @@ def render_annotation_section(
             with ui.row().classes("items-center justify-center w-full no-wrap"):
                 ui.label(t("blank"))
 
-        with ui.row().classes("col items-center gap-xs tour-target-review-later").style("min-width: 160px"):
+        with (
+            ui.row()
+            .classes("col items-center gap-xs tour-target-review-later")
+            .style("min-width: 160px")
+        ):
             with (
                 ui.button(on_click=mark_review_later)
                 .props("outline color=grey")

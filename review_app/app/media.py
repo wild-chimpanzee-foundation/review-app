@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from fastapi.responses import Response
 
 _video_dirs: list[Path] = []

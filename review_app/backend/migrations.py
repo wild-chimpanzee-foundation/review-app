@@ -27,7 +27,9 @@ def _migration_v4(conn) -> None:
     # behaviors table was created empty by create_all; source tables may still exist.
     sources = []
     if "species_behavior" in _tables():
-        sources.append("SELECT DISTINCT behavior AS b FROM species_behavior WHERE behavior IS NOT NULL")
+        sources.append(
+            "SELECT DISTINCT behavior AS b FROM species_behavior WHERE behavior IS NOT NULL"
+        )
     if "behavior" in _columns("individual_observations"):
         sources.append(
             "SELECT DISTINCT behavior AS b FROM individual_observations"
@@ -96,9 +98,11 @@ def _migration_v4(conn) -> None:
     io_cols = _columns("individual_observations")
     if "species_id" not in io_cols:
         conn.execute(
-            text("ALTER TABLE individual_observations ADD COLUMN species_id TEXT REFERENCES species(id)")
+            text(
+                "ALTER TABLE individual_observations ADD COLUMN species_id TEXT REFERENCES species(id)"
+            )
         )
-    
+
     species_cols = _columns("species")
     if "is_custom" not in species_cols:
         conn.execute(text("ALTER TABLE species ADD COLUMN is_custom BOOLEAN NOT NULL DEFAULT 0"))
@@ -108,7 +112,9 @@ def _migration_v4(conn) -> None:
         conn.execute(text("ALTER TABLE behaviors ADD COLUMN is_custom BOOLEAN NOT NULL DEFAULT 0"))
     if "behavior_id" not in io_cols:
         conn.execute(
-            text("ALTER TABLE individual_observations ADD COLUMN behavior_id TEXT REFERENCES behaviors(id)")
+            text(
+                "ALTER TABLE individual_observations ADD COLUMN behavior_id TEXT REFERENCES behaviors(id)"
+            )
         )
 
     # ── 6. Backfill FK columns from old string columns ────────────────────────

@@ -2,10 +2,10 @@ from nicegui import ui
 
 # Modern color palette
 COLORS = {
-    "primary": "#3b82f6",    # Modern Blue
+    "primary": "#3b82f6",  # Modern Blue
     "secondary": "#10b981",  # Emerald
-    "accent": "#6366f1",     # Indigo
-    "dark": "#0f172a",       # Slate 900
+    "accent": "#6366f1",  # Indigo
+    "dark": "#0f172a",  # Slate 900
     "positive": "#22c55e",
     "negative": "#ef4444",
     "info": "#3b82f6",
@@ -31,7 +31,9 @@ def apply_theme():
         """
         <style>
             :root {
-                --q-primary: """ + COLORS["primary"] + """;
+                --q-primary: """
+        + COLORS["primary"]
+        + """;
             }
             
             body {

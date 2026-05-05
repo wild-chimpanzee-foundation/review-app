@@ -132,7 +132,9 @@ def _probe_many(
 class VideoMixin:
     """Video scanning, probing, and transcoding. Requires self.engine, self.Session."""
 
-    def _scan_videos(self, video_dir: Path | None = None, active_project_id: str | None = None) -> pd.DataFrame:
+    def _scan_videos(
+        self, video_dir: Path | None = None, active_project_id: str | None = None
+    ) -> pd.DataFrame:
         if video_dir is not None:
             scan_dirs = [video_dir]
         elif active_project_id:
@@ -337,6 +339,7 @@ class VideoMixin:
                 raise FileNotFoundError(f"Video file not found: {input_path}")
 
             from review_app.app.config import get_user_data_dir
+
             tmp_dir = get_user_data_dir() / "transcoded_cache"
             tmp_dir.mkdir(parents=True, exist_ok=True)
             safe_name = video_id.replace("/", "_").replace("\\", "_").replace(":", "_")

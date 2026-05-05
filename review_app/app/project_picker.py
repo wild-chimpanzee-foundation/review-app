@@ -9,6 +9,7 @@ from review_app.backend.local_data_provider import LocalDataProvider
 
 def _warn_missing_dirs(missing: list[str]) -> None:
     from nicegui import ui
+
     for path in missing:
         ui.notify(t("dir_not_found", path=path), type="warning", timeout=0)
 
@@ -41,12 +42,18 @@ def build_project_picker():
                                 _warn_missing_dirs(missing)
                                 dialog.close()
                                 ui.navigate.to("/overview")
+
                             return do_switch
 
                         def make_delete(pid, pname, count):
                             def do_delete():
-                                with ui.dialog() as confirm_dialog, ui.card().classes("q-pa-lg").style("min-width: 360px"):
-                                    ui.label(t("delete_project_confirm_title", name=pname)).classes("text-h6 q-mb-sm")
+                                with (
+                                    ui.dialog() as confirm_dialog,
+                                    ui.card().classes("q-pa-lg").style("min-width: 360px"),
+                                ):
+                                    ui.label(
+                                        t("delete_project_confirm_title", name=pname)
+                                    ).classes("text-h6 q-mb-sm")
                                     if count > 0:
                                         ui.label(
                                             t("delete_project_confirm_body", count=count)
@@ -62,7 +69,10 @@ def build_project_picker():
                                             create_backup(del_dp.engine, reason="delete_project")
                                         except BackupError as exc:
                                             ui.notify(
-                                                t("backup_failed_proceed", error=t(exc.user_message_key)),
+                                                t(
+                                                    "backup_failed_proceed",
+                                                    error=t(exc.user_message_key),
+                                                ),
                                                 type="warning",
                                             )
                                         del_dp.delete_project(pid)
@@ -86,10 +96,9 @@ def build_project_picker():
                                         ui.button(
                                             t("cancel"), on_click=confirm_dialog.close
                                         ).props("flat")
-                                        ui.button(
-                                            t("delete"), color="negative", on_click=confirm
-                                        )
+                                        ui.button(t("delete"), color="negative", on_click=confirm)
                                 confirm_dialog.open()
+
                             return do_delete
 
                         ui.button(
@@ -101,9 +110,12 @@ def build_project_picker():
                         )
                         if is_active:
                             ui.icon("check_circle", color="positive", size="sm")
-                        ui.button(icon="delete_outline", on_click=make_delete(proj.id, proj.name, vid_count)).props(
-                            "flat round dense color=negative"
-                        ).tooltip(t("delete_project_tooltip"))
+                        ui.button(
+                            icon="delete_outline",
+                            on_click=make_delete(proj.id, proj.name, vid_count),
+                        ).props("flat round dense color=negative").tooltip(
+                            t("delete_project_tooltip")
+                        )
 
         refresh()
 

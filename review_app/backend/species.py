@@ -105,7 +105,12 @@ class SpeciesMixin:
                 name_fr = str(row.get("name_fr", "") or "").strip() or None
                 if sci and key:
                     rows.append(
-                        {"scientific_name": sci, "key": key, "name_en": name_en, "name_fr": name_fr}
+                        {
+                            "scientific_name": sci,
+                            "key": key,
+                            "name_en": name_en,
+                            "name_fr": name_fr,
+                        }
                     )
             return rows
         except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as exc:
@@ -124,8 +129,7 @@ class SpeciesMixin:
         all_species_behaviors = global_rows
 
         behavior_meta: dict[str, dict[str, str | None]] = {
-            row["key"]: {"name_en": row["name_en"], "name_fr": row["name_fr"]}
-            for row in csv_rows
+            row["key"]: {"name_en": row["name_en"], "name_fr": row["name_fr"]} for row in csv_rows
         }
 
         with self.engine.begin() as conn:
@@ -626,7 +630,9 @@ class SpeciesMixin:
 
         rows = self._parse_species_csv(io.StringIO(content))
         if not rows:
-            raise ValueError("No valid rows found. Ensure the CSV uses ';' as separator and has a 'scientific_name' column.")
+            raise ValueError(
+                "No valid rows found. Ensure the CSV uses ';' as separator and has a 'scientific_name' column."
+            )
 
         for row in rows:
             self._upsert_species(row)
@@ -646,7 +652,9 @@ class SpeciesMixin:
 
         rows = self._parse_behaviors_csv(io.StringIO(content))
         if not rows:
-            raise ValueError("No valid rows found. Ensure the CSV uses ';' as separator and has 'scientific_name' and 'key' columns.")
+            raise ValueError(
+                "No valid rows found. Ensure the CSV uses ';' as separator and has 'scientific_name' and 'key' columns."
+            )
 
         for row in rows:
             if not self.behavior_exists(row["key"]):

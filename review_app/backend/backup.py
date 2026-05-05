@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -147,7 +147,6 @@ def prune_backups() -> int:
     for b in backups[:MAX_AUTO_BACKUPS]:
         keep.add(b["path"])
 
-
     to_delete = [b for b in backups if b["path"] not in keep]
     count = 0
     for b in to_delete:
@@ -194,4 +193,3 @@ def restore_backup(backup_path: Path, engine) -> None:
         logger.exception("Failed to copy backup %s to %s", backup_path, db_path)
         raise RestoreCopyError(f"{backup_path} -> {db_path}") from exc
     logger.info("Database restored from backup: %s", backup_path)
-

@@ -286,6 +286,7 @@ class GUI:
                 load_settings_from_db(dp)
 
                 from review_app.backend.backup import BackupError, create_backup
+
                 try:
                     create_backup(dp.engine, reason="startup")
                 except BackupError:
@@ -322,6 +323,7 @@ class GUI:
         def _backup_on_shutdown():
             if self.dp and self.dp.engine:
                 from review_app.backend.backup import BackupError, create_backup
+
                 try:
                     create_backup(self.dp.engine, reason="shutdown")
                 except BackupError:

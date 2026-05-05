@@ -161,9 +161,15 @@ class AppSetting(Base):
     value = Column(String, nullable=True)
 
 
-Index("idx_individual_video_species", IndividualObservation.video_id, IndividualObservation.species_id)
 Index(
-    "idx_individual_video_behavior", IndividualObservation.video_id, IndividualObservation.behavior_id
+    "idx_individual_video_species",
+    IndividualObservation.video_id,
+    IndividualObservation.species_id,
+)
+Index(
+    "idx_individual_video_behavior",
+    IndividualObservation.video_id,
+    IndividualObservation.behavior_id,
 )
 Index("idx_individual_video_time", IndividualObservation.video_id, IndividualObservation.start_sec)
 Index("idx_videos_is_valid", Video.is_valid)
