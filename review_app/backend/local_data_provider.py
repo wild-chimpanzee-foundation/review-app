@@ -1304,7 +1304,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 text(f"""
                     SELECT
                         v.video_id,
-                        v.project_id,
+                        p.name                    AS project_name,
                         v.video_path,
                         v.camera_id,
                         v.created_at              AS recorded_at,
@@ -1320,6 +1320,7 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                         io.start_sec,
                         io.end_sec
                     FROM videos v
+                    LEFT JOIN projects p ON p.id = v.project_id
                     LEFT JOIN video_labels vl ON vl.video_id = v.video_id
                     LEFT JOIN individual_observations io ON io.video_id = v.video_id
                     LEFT JOIN species s ON s.id = io.species_id
@@ -1401,24 +1402,33 @@ class LocalDataProvider(VideoMixin, SpeciesMixin):
                 lambda b: behavior_map.get(b, b) if pd.notna(b) else b
             )
 
+        base_df = base_df.drop(columns=["video_id"], errors="ignore")
         return base_df
 
     def import_annotations_csv(
         self, df: pd.DataFrame, active_project_id: str | None
     ) -> dict[str, Any]:
-        required = {"video_id", "is_blank"}
-        missing = required - set(df.columns)
-        if missing:
-            raise ValueError(f"Missing required columns: {sorted(missing)}")
+        has_path = "video_path" in df.columns
+        has_id = "video_id" in df.columns
+        if not has_path and not has_id:
+            raise ValueError("Missing required column: video_path (or video_id)")
+        if "is_blank" not in df.columns:
+            raise ValueError("Missing required column: is_blank")
 
+        path_to_id = {v: k for k, v in self._known_video_map(active_project_id).items()}
         known_ids = self._known_video_ids(active_project_id)
+
+        if has_path and not has_id:
+            df = df.copy()
+            df["video_id"] = df["video_path"].map(path_to_id)
 
         imported = 0
         skipped: list[str] = []
 
         for video_id, group in df.groupby("video_id", sort=False):
-            if video_id not in known_ids:
-                skipped.append(str(video_id))
+            if pd.isna(video_id) or video_id not in known_ids:
+                label = group["video_path"].iloc[0] if has_path else str(video_id)
+                skipped.append(str(label))
                 continue
 
             first = group.iloc[0]
