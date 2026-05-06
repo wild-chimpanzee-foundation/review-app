@@ -29,14 +29,14 @@ from review_app.app.utils import (
     sync_with_progress,
     user_error_message,
 )
-from review_app.backend.backup import (
+from review_app.backend.db.backup import (
     BackupError,
     create_backup,
     get_backup_dir,
     list_backups,
     restore_backup,
 )
-from review_app.backend.local_data_provider import LocalDataProvider
+from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 
 def _build_settings_content(container: ui.column):

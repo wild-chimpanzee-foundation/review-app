@@ -16,8 +16,8 @@ import pandas as pd
 from sqlalchemy import select, text
 
 from review_app.app.config import VIDEO_EXTENSIONS
+from review_app.backend.db.models import ProjectDir, Video
 from review_app.backend.errors import VideoError
-from review_app.backend.models import ProjectDir, Video
 
 logger = logging.getLogger(__name__)
 

@@ -7,8 +7,8 @@ runner we create a real engine, build the current schema with create_all(),
 then wind the version stamp back to simulate an older database.
 """
 
-from review_app.backend.migrations import MIGRATIONS, _migration_v4, run_migrations
-from review_app.backend.models import Base
+from review_app.backend.db.migrations import MIGRATIONS, _migration_v4, run_migrations
+from review_app.backend.db.models import Base
 from sqlalchemy import create_engine, event, text
 
 # ---------------------------------------------------------------------------
@@ -90,7 +90,7 @@ def test_run_migrations_twice_is_safe(tmp_path):
 
 def test_init_from_full_provider_twice_is_safe(tmp_db):
     """End-to-end: constructing LocalDataProvider twice on same DB doesn't crash."""
-    from review_app.backend.local_data_provider import LocalDataProvider
+    from review_app.backend.provider.local_data_provider import LocalDataProvider
 
     LocalDataProvider()
     dp2 = LocalDataProvider()
@@ -159,7 +159,7 @@ def test_migration_v4_is_idempotent(tmp_path):
 
 def test_migration_v4_preserves_existing_species(tmp_path):
     """Species rows already in the DB must survive a v4 re-run."""
-    from review_app.backend.models import Species
+    from review_app.backend.db.models import Species
 
     engine = _make_engine(tmp_path / "test.db")
 

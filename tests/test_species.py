@@ -6,8 +6,8 @@ and CSV-driven project import.
 
 import pytest
 from review_app.backend.errors import DataImportError, SpeciesError
-from review_app.backend.local_data_provider import LocalDataProvider
-from review_app.backend.species import SpeciesMixin
+from review_app.backend.provider.local_data_provider import LocalDataProvider
+from review_app.backend.provider.species import SpeciesMixin
 
 # ---------------------------------------------------------------------------
 # _parse_species_csv (static, no DB needed)

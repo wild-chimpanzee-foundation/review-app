@@ -7,7 +7,7 @@ Tests marked with xfail describe behaviour that is not yet implemented.
 """
 
 import pytest
-from review_app.backend.local_data_provider import LocalDataProvider
+from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 # ---------------------------------------------------------------------------
 # Helpers

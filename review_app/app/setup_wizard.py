@@ -148,7 +148,7 @@ class SetupWizard:
                 set_data_provider,
             )
             from review_app.app.utils import switch_project
-            from review_app.backend.local_data_provider import LocalDataProvider
+            from review_app.backend.provider.local_data_provider import LocalDataProvider
 
             dp = LocalDataProvider()
             set_data_provider(dp)

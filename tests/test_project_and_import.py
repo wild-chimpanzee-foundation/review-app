@@ -5,7 +5,7 @@ Tests for delete_project, import_annotations_csv, and get_overview_stats.
 import pandas as pd
 import pytest
 from review_app.backend.errors import DataImportError
-from review_app.backend.local_data_provider import LocalDataProvider
+from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 # ---------------------------------------------------------------------------
 # delete_project
@@ -74,7 +74,7 @@ def test_delete_project_removes_transcoded_file(provider_with_project, tmp_db):
     fake_transcode = tmp_db["root"] / "transcoded.mp4"
     fake_transcode.write_bytes(b"fake")
 
-    from review_app.backend.models import Video
+    from review_app.backend.db.models import Video
 
     with dp.Session() as s:
         video = s.get(Video, queue[0])
