@@ -853,8 +853,10 @@ def _build_settings_content(container: ui.column):
                                         / f"uploaded_restore_{uuid.uuid4().hex}.db"
                                     )
                                     tmp_path.write_bytes(content)
-                                    await do_restore(tmp_path)
-                                    tmp_path.unlink(missing_ok=True)
+                                    try:
+                                        await do_restore(tmp_path)
+                                    finally:
+                                        tmp_path.unlink(missing_ok=True)
 
                                 backup_uploader = (
                                     ui.upload(on_upload=_handle_backup_upload, auto_upload=True)

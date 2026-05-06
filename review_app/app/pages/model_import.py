@@ -591,7 +591,9 @@ async def setup_model_import():
                     try:
                         cleaned_df = _get_df_from_state("cleaned_df")
                         if cleaned_df is None or cleaned_df.empty:
-                            raise DataImportError(user_message_key="no_data_import")
+                            raise DataImportError(
+                                "No data to import", user_message_key="no_data_import"
+                            )
 
                         df_to_import = cleaned_df.copy()
                         mappings = get_state_val("species_mappings", {})
