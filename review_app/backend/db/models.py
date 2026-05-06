@@ -56,7 +56,7 @@ class Video(Base):
     is_web_safe = Column(Boolean, nullable=True)
     validation_error = Column(String, nullable=True)
     transcoded_path = Column(String, nullable=True)
-    label = relationship("VideoLabel", cascade="all, delete-orphan")
+    label = relationship("VideoLabel", cascade="all, delete-orphan", uselist=False)
     observations = relationship("IndividualObservation", cascade="all, delete-orphan")
     annotations = relationship("ModelAnnotation", cascade="all, delete-orphan")
 
@@ -173,7 +173,6 @@ Index(
 )
 Index("idx_individual_video_time", IndividualObservation.video_id, IndividualObservation.start_sec)
 Index("idx_videos_is_valid", Video.is_valid)
-Index("idx_model_ann_type_value", ModelAnnotation.annotation_type, ModelAnnotation.value_text)
 # Covers: WHERE annotation_type='species' AND value_text=:ps  (possible_species filter)
 Index(
     "idx_model_ann_type_text_video",

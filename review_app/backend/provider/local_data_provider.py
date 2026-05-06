@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+import sqlite3
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,10 @@ from review_app.backend.provider.video import VideoMixin
 from review_app.backend.provider.video_queue import QueueMixin
 
 logger = logging.getLogger(__name__)
+
+# Python 3.12 deprecated the built-in sqlite3 datetime adapters; register explicit replacements.
+sqlite3.register_adapter(datetime, lambda val: val.isoformat())
+sqlite3.register_adapter(date, lambda val: val.isoformat())
 
 
 class LocalDataProvider(
@@ -47,6 +52,8 @@ class LocalDataProvider(
         def set_sqlite_pragma(conn, _):
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA busy_timeout=5000")
             conn.execute("PRAGMA cache_size=-64000")
             conn.execute("PRAGMA temp_store=MEMORY")
             conn.execute("PRAGMA mmap_size=268435456")
