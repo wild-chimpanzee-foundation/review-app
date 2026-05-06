@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-from review_app.backend.local_data_provider import LocalDataProvider
-from review_app.backend.models import ModelAnnotation
+from review_app.backend.db.models import ModelAnnotation
+from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 # ---------------------------------------------------------------------------
 # Shared low-level fixtures
@@ -30,7 +30,9 @@ def tmp_db(tmp_path, monkeypatch):
         "fox;running;Running;\n"
     )
 
-    monkeypatch.setattr("review_app.backend.local_data_provider.get_user_data_dir", lambda: db_dir)
+    monkeypatch.setattr(
+        "review_app.backend.provider.local_data_provider.get_user_data_dir", lambda: db_dir
+    )
     monkeypatch.setattr("review_app.app.config.get_bundled_species_csv", lambda: str(species_csv))
     monkeypatch.setattr(
         "review_app.app.config.get_bundled_behaviors_csv", lambda: str(behavior_csv)
@@ -42,7 +44,7 @@ def tmp_db(tmp_path, monkeypatch):
 @pytest.fixture
 def mock_probe(monkeypatch):
     """Stub out ffprobe so any .mp4 touch()-file is treated as a valid 10-second video."""
-    from review_app.backend import video as video_module
+    from review_app.backend.provider import video as video_module
 
     monkeypatch.setattr(
         video_module,

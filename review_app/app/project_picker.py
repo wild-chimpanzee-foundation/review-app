@@ -3,8 +3,8 @@ from __future__ import annotations
 from review_app.app.state import get_active_project_id, set_data_provider
 from review_app.app.translations import t
 from review_app.app.utils import switch_project
-from review_app.backend.backup import BackupError, create_backup
-from review_app.backend.local_data_provider import LocalDataProvider
+from review_app.backend.db.backup import BackupError, create_backup
+from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 
 def _warn_missing_dirs(missing: list[str]) -> None:

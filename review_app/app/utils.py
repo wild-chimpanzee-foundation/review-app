@@ -97,7 +97,7 @@ def switch_project(dp, project_id: str) -> None:
 async def get_or_create_data_provider():
     from review_app.app.config import get_default_db_path
     from review_app.app.state import get_data_provider, set_data_provider
-    from review_app.backend.local_data_provider import LocalDataProvider
+    from review_app.backend.provider.local_data_provider import LocalDataProvider
 
     dp = get_data_provider()
     if not dp:

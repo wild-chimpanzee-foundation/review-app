@@ -4,9 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine, text
-
-from review_app.backend.backup import (
+from review_app.backend.db.backup import (
     BACKUP_TIMESTAMP_FORMAT,
     DAILY_RETENTION_DAYS,
     MAX_AUTO_BACKUPS,
@@ -23,6 +21,7 @@ from review_app.backend.backup import (
     prune_backups,
     restore_backup,
 )
+from sqlalchemy import create_engine, text
 
 
 @pytest.fixture
@@ -32,7 +31,7 @@ def workspace(tmp_path, monkeypatch):
     backup_dir = db_dir / "backups"
     backup_dir.mkdir()
 
-    monkeypatch.setattr("review_app.backend.backup.get_user_data_dir", lambda: db_dir)
+    monkeypatch.setattr("review_app.backend.db.backup.get_user_data_dir", lambda: db_dir)
     monkeypatch.setattr("review_app.app.config.get_user_data_dir", lambda: db_dir)
 
     db_path = db_dir / "review_data.db"
@@ -74,7 +73,7 @@ class TestCreateBackup:
 
     def test_raises_when_db_missing(self, workspace, monkeypatch):
         monkeypatch.setattr(
-            "review_app.backend.backup.get_user_data_dir",
+            "review_app.backend.db.backup.get_user_data_dir",
             lambda: workspace["db_dir"] / "nonexistent",
         )
         with pytest.raises(BackupDBNotFoundError):
@@ -98,14 +97,14 @@ class TestCreateBackup:
 
     def test_raises_backup_copy_error_when_both_fail(self, workspace, monkeypatch):
         monkeypatch.setattr(
-            "review_app.backend.backup._fallback_copy",
+            "review_app.backend.db.backup._fallback_copy",
             lambda *a, **kw: (_ for _ in ()).throw(OSError("copy failed")),
         )
         monkeypatch.setattr(
-            "review_app.backend.backup.get_user_data_dir",
+            "review_app.backend.db.backup.get_user_data_dir",
             lambda: workspace["db_dir"],
         )
-        with patch("review_app.backend.backup.text", side_effect=RuntimeError("fail")):
+        with patch("review_app.backend.db.backup.text", side_effect=RuntimeError("fail")):
             with pytest.raises(BackupCopyError):
                 create_backup(workspace["engine"], reason="test")
 
@@ -166,7 +165,7 @@ class TestPruneBackups:
             ts = (now - timedelta(days=i)).strftime(BACKUP_TIMESTAMP_FORMAT)
             _make_backup_file(workspace["backup_dir"], ts)
 
-        with patch("review_app.backend.backup.datetime") as mock_dt:
+        with patch("review_app.backend.db.backup.datetime") as mock_dt:
             mock_dt.now.return_value = now
             mock_dt.strptime = lambda s, fmt: datetime.strptime(s, fmt)
             result = prune_backups()
@@ -181,12 +180,10 @@ class TestPruneBackups:
 
         for day in range(DAILY_RETENTION_DAYS + 1):
             for hour in range(3):
-                ts = (now - timedelta(days=day, hours=hour * 8)).strftime(
-                    BACKUP_TIMESTAMP_FORMAT
-                )
+                ts = (now - timedelta(days=day, hours=hour * 8)).strftime(BACKUP_TIMESTAMP_FORMAT)
                 _make_backup_file(workspace["backup_dir"], ts, size_bytes=64)
 
-        with patch("review_app.backend.backup.datetime") as mock_dt:
+        with patch("review_app.backend.db.backup.datetime") as mock_dt:
             mock_dt.now.return_value = now
             mock_dt.strptime = lambda s, fmt: datetime.strptime(s, fmt)
             prune_backups()
@@ -212,7 +209,7 @@ class TestRestoreBackup:
         backup_path = create_backup(workspace["engine"], reason="pre")
         workspace["engine"].dispose()
 
-        with patch("review_app.backend.backup.get_user_data_dir", lambda: workspace["db_dir"]):
+        with patch("review_app.backend.db.backup.get_user_data_dir", lambda: workspace["db_dir"]):
             restore_backup(backup_path, workspace["engine"])
 
         assert workspace["db_path"].exists()
@@ -226,7 +223,9 @@ class TestRestoreBackup:
 
     def test_raises_when_backup_missing(self, workspace):
         with pytest.raises(RestoreFileNotFoundError):
-            with patch("review_app.backend.backup.get_user_data_dir", lambda: workspace["db_dir"]):
+            with patch(
+                "review_app.backend.db.backup.get_user_data_dir", lambda: workspace["db_dir"]
+            ):
                 restore_backup(Path("/nonexistent/backup.db"), workspace["engine"])
 
     def test_raises_when_cannot_remove_existing_db(self, workspace, monkeypatch):
@@ -238,7 +237,7 @@ class TestRestoreBackup:
 
         monkeypatch.setattr(Path, "unlink", fail_unlink)
 
-        with patch("review_app.backend.backup.get_user_data_dir", lambda: workspace["db_dir"]):
+        with patch("review_app.backend.db.backup.get_user_data_dir", lambda: workspace["db_dir"]):
             engine2 = create_engine(f"sqlite:///{workspace['db_path']}")
             with pytest.raises(RestoreRemoveError):
                 restore_backup(backup_path, engine2)
@@ -250,7 +249,7 @@ class TestRestoreBackup:
 
         initial_count = len(list_backups())
 
-        with patch("review_app.backend.backup.get_user_data_dir", lambda: workspace["db_dir"]):
+        with patch("review_app.backend.db.backup.get_user_data_dir", lambda: workspace["db_dir"]):
             engine2 = create_engine(f"sqlite:///{workspace['db_path']}")
             restore_backup(backup1, engine2)
             engine2.dispose()
@@ -297,18 +296,14 @@ class TestFallbackCopy:
 class TestGetBackupDir:
     def test_creates_directory(self, tmp_path, monkeypatch):
         data_dir = tmp_path / "app_data"
-        monkeypatch.setattr(
-            "review_app.backend.backup.get_user_data_dir", lambda: data_dir
-        )
+        monkeypatch.setattr("review_app.backend.db.backup.get_user_data_dir", lambda: data_dir)
         result = get_backup_dir()
         assert result == data_dir / "backups"
         assert result.exists()
 
     def test_idempotent(self, tmp_path, monkeypatch):
         data_dir = tmp_path / "app_data"
-        monkeypatch.setattr(
-            "review_app.backend.backup.get_user_data_dir", lambda: data_dir
-        )
+        monkeypatch.setattr("review_app.backend.db.backup.get_user_data_dir", lambda: data_dir)
         get_backup_dir()
         result = get_backup_dir()
         assert result.exists()

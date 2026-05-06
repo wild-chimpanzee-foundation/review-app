@@ -1,8 +1,7 @@
 from pathlib import Path
 
 import pytest
-
-from review_app.backend.local_data_provider import LocalDataProvider
+from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 
 @pytest.fixture
@@ -16,11 +15,17 @@ def temp_workspace(tmp_path, monkeypatch):
     species_csv.write_text("scientific_name;english_name\ndeer;Red Deer\nfox;Red Fox\n")
 
     behavior_csv = tmp_path / "behaviors.csv"
-    behavior_csv.write_text("scientific_name;key;name_en;name_fr\n*;does_not_react;Does not react;\ndeer;reacts_to_camera;Reacts to camera;\ndeer;grazing;Grazing;\nfox;running;Running;\n")
+    behavior_csv.write_text(
+        "scientific_name;key;name_en;name_fr\n*;does_not_react;Does not react;\ndeer;reacts_to_camera;Reacts to camera;\ndeer;grazing;Grazing;\nfox;running;Running;\n"
+    )
 
-    monkeypatch.setattr("review_app.backend.local_data_provider.get_user_data_dir", lambda: db_dir)
+    monkeypatch.setattr(
+        "review_app.backend.provider.local_data_provider.get_user_data_dir", lambda: db_dir
+    )
     monkeypatch.setattr("review_app.app.config.get_bundled_species_csv", lambda: str(species_csv))
-    monkeypatch.setattr("review_app.app.config.get_bundled_behaviors_csv", lambda: str(behavior_csv))
+    monkeypatch.setattr(
+        "review_app.app.config.get_bundled_behaviors_csv", lambda: str(behavior_csv)
+    )
 
     yield {
         "root": tmp_path,
@@ -29,7 +34,8 @@ def temp_workspace(tmp_path, monkeypatch):
 
 
 def _mock_probe(monkeypatch):
-    from review_app.backend import video as video_module
+    from review_app.backend.provider import video as video_module
+
     monkeypatch.setattr(
         video_module,
         "_probe_many",
@@ -87,7 +93,13 @@ def test_manual_review_update(temp_workspace, monkeypatch):
     video_id = queue[0]
 
     selections = [
-        {"species": "deer", "behavior": "grazing", "start_sec": 0, "end_sec": 5, "labeled_by": "test_user"}
+        {
+            "species": "deer",
+            "behavior": "grazing",
+            "start_sec": 0,
+            "end_sec": 5,
+            "labeled_by": "test_user",
+        }
     ]
     dp.update_manual_review(video_id, selections)
 
@@ -110,7 +122,13 @@ def test_delete_all_annotations_on_empty_submit(temp_workspace, monkeypatch):
     video_id = queue[0]
 
     selections = [
-        {"species": "deer", "behavior": "grazing", "start_sec": 0, "end_sec": 5, "labeled_by": "test_user"}
+        {
+            "species": "deer",
+            "behavior": "grazing",
+            "start_sec": 0,
+            "end_sec": 5,
+            "labeled_by": "test_user",
+        }
     ]
     dp.update_manual_review(video_id, selections)
 

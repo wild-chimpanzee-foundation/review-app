@@ -12,7 +12,7 @@ coverage:
 	uv run pytest tests/ --cov=review_app/backend --cov-report=term-missing
 
 lint:
-	uv run ruff check review_app/ tests/
+	uv run ruff check review_app/ tests/ --fix
 
 format:
 	uv run ruff format review_app/

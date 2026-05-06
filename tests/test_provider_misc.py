@@ -6,7 +6,7 @@ _normalize_annotation_type, get_csv_templates.
 
 import pytest
 from review_app.backend.errors import DataImportError
-from review_app.backend.local_data_provider import LocalDataProvider
+from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 # ---------------------------------------------------------------------------
 # App settings (key-value store)

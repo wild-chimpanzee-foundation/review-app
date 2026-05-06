@@ -20,7 +20,7 @@ from review_app.app.state import (
 )
 from review_app.app.theme import apply_theme
 from review_app.app.translations import t
-from review_app.backend.local_data_provider import LocalDataProvider
+from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +315,7 @@ class GUI:
                 self.dp = dp
                 load_settings_from_db(dp)
 
-                from review_app.backend.backup import BackupError, create_backup
+                from review_app.backend.db.backup import BackupError, create_backup
 
                 try:
                     create_backup(dp.engine, reason="startup")
@@ -352,7 +352,7 @@ class GUI:
         @app.on_shutdown
         def _backup_on_shutdown():
             if self.dp and self.dp.engine:
-                from review_app.backend.backup import BackupError, create_backup
+                from review_app.backend.db.backup import BackupError, create_backup
 
                 try:
                     create_backup(self.dp.engine, reason="shutdown")
