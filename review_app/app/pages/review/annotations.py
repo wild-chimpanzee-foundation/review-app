@@ -43,6 +43,16 @@ def _render_labeled_by_meta(labeled_by, labeled_at=None):
     ui.label(meta).classes("text-caption text-grey-5")
 
 
+def _resolve_behavior(behaviors_map, current_value=None):
+    if current_value in behaviors_map:
+        return current_value
+    if "does_not_react" in behaviors_map:
+        return "does_not_react"
+    if behaviors_map:
+        return list(behaviors_map.keys())[0]
+    return None
+
+
 def _init_annotation_state(video, default_species, default_behavior):
     is_blank = _normalize_is_blank(video.get("is_blank"))
     selections = list(video.get("manual_selections") or [])
@@ -166,7 +176,7 @@ def render_annotation_section(
                         project_id=active_project_id,
                     )
                     sp_value = sel["species"] if sel["species"] in species_map else None
-                    bp_value = sel["behavior"] if sel["behavior"] in behaviors_map else None
+                    bp_value = _resolve_behavior(behaviors_map, sel.get("behavior"))
 
                     sp = ui.select(
                         label=t("species_label"),
@@ -257,11 +267,7 @@ def render_annotation_section(
                         project_id=get_active_project_id(),
                     )
                     b.options = new_behaviors
-                    b.value = (
-                        b.value
-                        if b.value in new_behaviors
-                        else (list(new_behaviors.keys())[0] if new_behaviors else None)
-                    )
+                    b.value = _resolve_behavior(new_behaviors, b.value)
                     b.update()
                     update_sel(idx, s, b, st, en, tr)
 

@@ -84,7 +84,7 @@ async def render_video_section(dp, species_map, global_species_map):
     model_ann_task = run.io_bound(dp.get_model_annotations, selected_video_id)
     video, model_ann = await asyncio.gather(video_task, model_ann_task)
 
-    default_behavior = None
+    default_behavior = "does_not_react"
     if model_ann is not None and not model_ann.empty:
         behavior_rows = model_ann[
             (model_ann["annotation_type"] == "behavior")
@@ -502,7 +502,7 @@ async def setup_review():
         <script>
             if (!window.__videoManagerInitialized) {
                 window.__videoManagerInitialized = true;
-                
+
                 // MutationObserver to clean up video elements immediately when removed from DOM
                 const observer = new MutationObserver((mutations) => {
                     for (const mutation of mutations) {
@@ -533,7 +533,7 @@ async def setup_review():
                     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
                     if (e.target.isContentEditable) return;
                     if (e.ctrlKey || e.metaKey || e.altKey) return;
-                    
+
                     // Priority shortcuts: Submit, Next, Prev, Blank
                     if (e.key === 'Enter') {
                         e.preventDefault();
@@ -551,11 +551,11 @@ async def setup_review():
                         e.preventDefault();
                         document.querySelector('[data-shortcut="mark-unknown"]')?.click();
                     }
-                    
+
                     // Video playback shortcuts - delegated to the first visible video element
                     const videoEl = document.querySelector('video');
                     if (!videoEl) return;
-                    
+
                     if (e.key === ' ') {
                         e.preventDefault();
                         videoEl.paused ? videoEl.play() : videoEl.pause();

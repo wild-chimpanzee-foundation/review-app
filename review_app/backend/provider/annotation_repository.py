@@ -159,7 +159,7 @@ class AnnotationMixin:
             manual_rows = pd.read_sql(
                 text(
                     """
-                    SELECT s.scientific_name AS species, b.key AS behavior,
+                    SELECT io.id, s.scientific_name AS species, b.key AS behavior,
                            io.start_sec, io.end_sec, io.labeled_by, io.labeled_at
                     FROM individual_observations io
                     LEFT JOIN species s ON s.id = io.species_id
@@ -190,10 +190,13 @@ class AnnotationMixin:
         for _, manual in manual_rows.iterrows():
             selections.append(
                 {
+                    "id": int(manual.get("id")) if pd.notna(manual.get("id")) else None,
                     "species": str(manual.get("species")),
                     "behavior": str(manual.get("behavior")),
                     "start_sec": float(manual.get("start_sec")),
-                    "end_sec": float(manual.get("end_sec")),
+                    "end_sec": float(manual.get("end_sec"))
+                    if pd.notna(manual.get("end_sec"))
+                    else None,
                     "labeled_by": manual.get("labeled_by"),
                     "labeled_at": manual.get("labeled_at"),
                 }
@@ -222,6 +225,7 @@ class AnnotationMixin:
         row["is_video_valid"] = (
             True if row.get("is_video_valid") is None else bool(row.get("is_video_valid"))
         )
+        row["is_blank"] = None if row.get("is_blank") is None else bool(row.get("is_blank"))
         row["needs_transcode"] = needs_browser_transcode(row)
 
         blank_prob = row.get("blank_model_probability") or 0.0
@@ -274,14 +278,22 @@ class AnnotationMixin:
         is_blank: bool | None = None,
         labeled_by: str | None = None,
         active_project_id: str | None = None,
+        append: bool = False,
     ) -> None:
         if selections is None:
             selections = []
-        if selections == [] and is_blank is None:
+
+        # Special case: Clearing all annotations (only if not appending)
+        if not append and not selections and is_blank is None:
             with self.Session() as session:
                 if session.get(VideoLabel, video_id) is not None:
                     session.query(VideoLabel).filter(VideoLabel.video_id == video_id).update(
-                        {"is_blank": None, "labeled_by": None, "labeled_at": None}
+                        {
+                            "is_blank": None,
+                            "labeled_by": None,
+                            "labeled_at": None,
+                            "review_later": False,
+                        }
                     )
                     session.query(IndividualObservation).filter(
                         IndividualObservation.video_id == video_id
@@ -289,7 +301,7 @@ class AnnotationMixin:
                     session.commit()
             return
 
-        now = self._utcnow_dt()
+        now = self._utcnow_dt().replace(microsecond=0)
         valid_species = set(self.get_valid_species(active_project_id))
 
         with self.engine.connect() as conn:
@@ -310,10 +322,12 @@ class AnnotationMixin:
                     detail=f"Unknown species: {species!r}",
                 )
             behavior = str(selection.get("behavior") or "").strip() or "unlabeled"
-            if "start_sec" in selection:
-                start_sec = pd.to_numeric(selection.get("start_sec"), errors="coerce")
-            else:
-                start_sec = pd.to_numeric(selection.get("timestamp"), errors="coerce")
+
+            # Support both 'start_sec' and 'timestamp' keys
+            start_sec_raw = selection.get("start_sec")
+            if start_sec_raw is None:
+                start_sec_raw = selection.get("timestamp")
+            start_sec = pd.to_numeric(start_sec_raw, errors="coerce")
             if pd.isna(start_sec):
                 start_sec = 0.0
 
@@ -321,50 +335,115 @@ class AnnotationMixin:
             end_sec = pd.to_numeric(end_sec_raw, errors="coerce")
             end_sec_val: float | None = None if pd.isna(end_sec) else float(end_sec)
 
+            obs_id = selection.get("id")
+            if obs_id is not None:
+                try:
+                    obs_id = int(obs_id)
+                except (ValueError, TypeError):
+                    obs_id = None
+
             normalized.append(
                 {
+                    "id": obs_id,
                     "species_id": species_id_map.get(species),
                     "behavior_id": behavior_id_map.get(behavior),
                     "start_sec": float(start_sec),
                     "end_sec": end_sec_val,
                     "labeled_by": selection.get("labeled_by"),
+                    "labeled_at": selection.get("labeled_at"),
                 }
             )
 
-        if is_blank is None:
-            is_blank = False if normalized else None
+        if is_blank is None and normalized:
+            is_blank = False
 
         with self.Session() as session:
-            label = session.get(VideoLabel, video_id)
-            if label is None:
-                label = VideoLabel(video_id=video_id)
-                session.add(label)
-            label.is_blank = is_blank
-            label.review_later = False
-            if is_blank:
-                label.labeled_by = labeled_by
-                label.labeled_at = now
+            # 1. Update IndividualObservations surgically
+            existing = (
+                session.query(IndividualObservation)
+                .filter(IndividualObservation.video_id == video_id)
+                .all()
+            )
+            existing_map = {obs.id: obs for obs in existing}
+            to_delete = set(existing_map.keys()) if not append else set()
 
-            session.query(IndividualObservation).filter(
-                IndividualObservation.video_id == video_id
-            ).delete(synchronize_session=False)
+            max_id = max(existing_map.keys()) if existing_map else 0
+            newly_added_count = 0
 
-            if is_blank is False:
-                for obs_id, row in enumerate(normalized, start=1):
+            for row in normalized:
+                obs_id = row.get("id")
+                if obs_id and obs_id in existing_map:
+                    # Update existing record
+                    obs = existing_map[obs_id]
+                    end_sec_changed = (obs.end_sec is None) != (row["end_sec"] is None) or (
+                        obs.end_sec is not None
+                        and row["end_sec"] is not None
+                        and abs(obs.end_sec - row["end_sec"]) > 0.001
+                    )
+                    changed = (
+                        obs.species_id != row["species_id"]
+                        or obs.behavior_id != row["behavior_id"]
+                        or abs((obs.start_sec or 0.0) - row["start_sec"]) > 0.001
+                        or end_sec_changed
+                    )
+                    if changed:
+                        obs.species_id = row["species_id"]
+                        obs.behavior_id = row["behavior_id"]
+                        obs.start_sec = row["start_sec"]
+                        obs.end_sec = row["end_sec"]
+                        # The UI echoes back the stored name; if it hasn't changed, use the caller's name instead.
+                        echoed_name = row.get("labeled_by")
+                        obs.labeled_by = (
+                            labeled_by if echoed_name == obs.labeled_by else echoed_name
+                        ) or labeled_by
+                        obs.labeled_at = now
+                        obs.updated_at = now
+                    if obs_id in to_delete:
+                        to_delete.remove(obs_id)
+                else:
+                    # New record
+                    max_id += 1
+                    newly_added_count += 1
                     session.add(
                         IndividualObservation(
                             video_id=video_id,
-                            id=obs_id,
+                            id=max_id,
                             project_id=active_project_id,
                             species_id=row["species_id"],
                             behavior_id=row["behavior_id"],
                             start_sec=row["start_sec"],
                             end_sec=row["end_sec"],
-                            labeled_by=row.get("labeled_by"),
-                            labeled_at=now,
+                            labeled_by=row["labeled_by"] or labeled_by,
+                            labeled_at=row.get("labeled_at") or now,
                             updated_at=now,
                         )
                     )
+
+            if to_delete:
+                session.query(IndividualObservation).filter(
+                    IndividualObservation.video_id == video_id,
+                    IndividualObservation.id.in_(to_delete),
+                ).delete(synchronize_session=False)
+
+            # Determine if any observations exist after this operation
+            has_observations = (len(existing_map) - len(to_delete) + newly_added_count) > 0
+            if has_observations:
+                is_blank = False
+
+            # 2. Update VideoLabel
+            label = session.get(VideoLabel, video_id)
+            if label is None:
+                label = VideoLabel(video_id=video_id)
+                session.add(label)
+
+            # Update labeled_at only if it wasn't labeled before or if blank status changed
+            if is_blank is not None and (label.is_blank != is_blank or not label.labeled_at):
+                label.labeled_at = now
+                label.labeled_by = labeled_by
+
+            label.is_blank = is_blank
+            label.review_later = False
+
             session.commit()
 
     def set_review_later(self, video_id: str, value: bool = True) -> None:

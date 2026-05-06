@@ -895,6 +895,19 @@ async def setup_model_import():
                         )
                         ui.label(t("annotation_import_desc")).classes("text-caption  q-mb-md")
 
+                        with ui.row().classes("items-center gap-sm q-mb-md"):
+                            ui.label(t("csv_mode_label")).classes("text-caption")
+                            mode_toggle = ui.toggle(
+                                {
+                                    "override": t("mode_override"),
+                                    "append": t("mode_append"),
+                                },
+                                value=get_state_val("manual_import_mode") or "override",
+                            ).props("dense size=sm")
+                            mode_toggle.on_value_change(
+                                lambda: set_state_val("manual_import_mode", mode_toggle.value)
+                            )
+
                         annotation_import_status = ui.label("").classes("text-body2 ")
 
                         async def handle_annotation_upload(e):
@@ -902,7 +915,10 @@ async def setup_model_import():
                                 content = await e.file.read()
                                 df = pd.read_csv(io.BytesIO(content))
                                 result = await run.io_bound(
-                                    dp.import_annotations_csv, df, get_active_project_id()
+                                    dp.import_annotations_csv,
+                                    df,
+                                    get_active_project_id(),
+                                    mode=get_state_val("manual_import_mode") or "override",
                                 )
                                 msg = t("imported_annotations", count=result["imported"])
                                 if result["skipped"]:
@@ -933,7 +949,6 @@ async def setup_model_import():
                                 df = await run.io_bound(
                                     dp.export_annotations_csv,
                                     get_active_project_id(),
-                                    get_language(),
                                 )
                                 csv_bytes = df.to_csv(index=False).encode("utf-8")
                                 ui.download(csv_bytes, "annotations.csv")

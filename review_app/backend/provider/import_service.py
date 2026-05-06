@@ -413,9 +413,7 @@ class ImportMixin:
 
     # ── Annotation export / import ────────────────────────────────────────────
 
-    def export_annotations_csv(
-        self, active_project_id: str | None, lang: str = "en"
-    ) -> pd.DataFrame:
+    def export_annotations_csv(self, active_project_id: str | None) -> pd.DataFrame:
         params = {"pid": active_project_id} if active_project_id else {}
         vid_pid = "AND v.project_id = :pid" if active_project_id else ""
         ma_pid = "AND project_id = :pid" if active_project_id else ""
@@ -510,19 +508,18 @@ class ImportMixin:
 
             base_df = base_df.merge(model_wide, on="video_id", how="left")
 
-        if "behavior" in base_df.columns:
-            behavior_map = self.get_behavior_display_map(lang=lang)
-            base_df["behavior"] = base_df["behavior"].map(
-                lambda b: behavior_map.get(b, b) if pd.notna(b) else b
-            )
-
         base_df = base_df.drop(columns=["video_id"], errors="ignore")
         return base_df
 
     def import_annotations_csv(
-        self, df: pd.DataFrame, active_project_id: str | None
+        self, df: pd.DataFrame, active_project_id: str | None, mode: str = "override"
     ) -> dict[str, Any]:
-        logger.info("Importing annotations CSV: %d rows (project=%s)", len(df), active_project_id)
+        logger.info(
+            "Importing annotations CSV: %d rows (project=%s, mode=%s)",
+            len(df),
+            active_project_id,
+            mode,
+        )
         has_path = "video_path" in df.columns
         has_id = "video_id" in df.columns
         if not has_path and not has_id:
@@ -536,15 +533,27 @@ class ImportMixin:
                 detail="Missing required column: is_blank",
             )
 
+        # Build video path lookup: exact match first, then fuzzy suffix fallback for cross-machine sharing.
         path_to_id = {v: k for k, v in self._known_video_map(active_project_id).items()}
+        by_suffix, _by_stem = self._build_video_path_lookup(active_project_id)
         known_ids = self._known_video_ids(active_project_id)
+
+        def _resolve_path(path_str: str) -> str | None:
+            vid = path_to_id.get(path_str)
+            if vid:
+                return vid
+            p = Path(path_str)
+            return by_suffix.get(f"{p.parent.name}/{p.name}".lower()) or by_suffix.get(
+                f"{p.parent.name}/{p.stem}".lower()
+            )
 
         if has_path and not has_id:
             df = df.copy()
-            df["video_id"] = df["video_path"].map(path_to_id)
+            df["video_id"] = df["video_path"].map(_resolve_path)
 
         imported = 0
         skipped: list[str] = []
+        append = mode == "append"
 
         for video_id, group in df.groupby("video_id", sort=False):
             if pd.isna(video_id) or video_id not in known_ids:
@@ -555,10 +564,20 @@ class ImportMixin:
             first = group.iloc[0]
             is_blank_raw = first["is_blank"]
             is_blank = bool(int(is_blank_raw)) if pd.notna(is_blank_raw) else None
+            blank_labeled_by = (
+                str(first["annotator"])
+                if "annotator" in group.columns and pd.notna(first.get("annotator"))
+                else None
+            )
 
             if is_blank:
                 self.update_manual_review(
-                    str(video_id), [], is_blank=True, active_project_id=active_project_id
+                    str(video_id),
+                    [],
+                    is_blank=True,
+                    labeled_by=blank_labeled_by,
+                    active_project_id=active_project_id,
+                    append=append,
                 )
             else:
                 selections = []
@@ -573,18 +592,34 @@ class ImportMixin:
                         if "annotator" in group.columns and pd.notna(row.get("annotator"))
                         else None
                     )
+                    labeled_at = (
+                        pd.to_datetime(row["labeled_at"], errors="coerce")
+                        if "labeled_at" in group.columns and pd.notna(row.get("labeled_at"))
+                        else None
+                    )
+                    if labeled_at is pd.NaT:
+                        labeled_at = None
+                    # Ignore observation_id in append mode to ensure we never override existing records.
+                    obs_id_raw = row.get("observation_id")
+                    obs_id = int(obs_id_raw) if pd.notna(obs_id_raw) and mode != "append" else None
+
                     selections.append(
                         {
+                            "id": obs_id,
                             "species": sp,
                             "behavior": beh,
                             "start_sec": row.get("start_sec"),
                             "end_sec": row.get("end_sec"),
                             "labeled_by": labeled_by,
+                            "labeled_at": labeled_at,
                         }
                     )
                 if selections:
                     self.update_manual_review(
-                        str(video_id), selections, active_project_id=active_project_id
+                        str(video_id),
+                        selections,
+                        active_project_id=active_project_id,
+                        append=append,
                     )
 
             imported += 1
