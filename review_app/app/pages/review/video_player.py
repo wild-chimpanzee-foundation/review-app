@@ -284,9 +284,10 @@ def render_custom_video_player(video_url, duration, vid_key):
             ui.badge(k).props("outline color=grey-6").classes("text-caption text-grey-6")
 
         with (
+            ui.element("div").classes("tour-target-shortcuts"),
             ui.expansion(t("shortcuts_title"), icon="keyboard", value=False)
             .classes("w-full text-caption text-grey-6")
-            .props("dense")
+            .props("dense"),
         ):
             with ui.row().classes("w-full q-mt-xs").style("gap: 4px;"):
                 with (

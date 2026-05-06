@@ -1,6 +1,6 @@
 from nicegui import ui
 
-from review_app.app.state import is_tour_completed, set_tour_completed
+from review_app.app.state import get_state_val, is_tour_completed, set_tour_completed
 
 _TOUR_CSS = """
 <style>
@@ -17,7 +17,8 @@ _TOUR_CSS = """
 </style>
 """
 
-# CSS selector for each step (None = no highlight, dialog centers itself)
+# Default CSS selectors for each step (None = no highlight, dialog centers itself).
+# show_tour() may override per-step targets at runtime (e.g. when AI annotations are missing).
 _STEP_TARGETS = [
     None,  # 0: Welcome
     ".tour-target-queue",  # 1: Review Queue
@@ -25,7 +26,8 @@ _STEP_TARGETS = [
     ".tour-target-ai-predictions",  # 3: AI Predictions
     ".tour-target-action-buttons",  # 4: Blank vs Non-blank
     ".tour-target-review-later",  # 5: Review Later
-    None,  # 6: Done
+    ".tour-target-shortcuts",  # 6: Keyboard Shortcuts
+    None,  # 7: Done
 ]
 
 # Highlights the target element and repositions the tour dialog near it.
@@ -39,6 +41,14 @@ _STEP_JS = """
     var target = sel ? document.querySelector(sel) : null;
     if (target) {
         target.classList.add('tour-highlight');
+    }
+
+    var extraDelay = 0;
+    if (target) {
+        target.querySelectorAll('.q-expansion-item:not([aria-expanded="true"])').forEach(function(exp) {
+            var header = exp.querySelector('.q-expansion-item__container > .q-item');
+            if (header) { header.click(); extraDelay = 350; }
+        });
     }
 
     setTimeout(function() {
@@ -73,7 +83,7 @@ _STEP_JS = """
         } else {
             positionNear(target, dw, dh, vw, vh, gap, pad, inner);
         }
-    }, 60);
+    }, 60 + extraDelay);
 
     function positionNear(target, dw, dh, vw, vh, gap, pad, inner) {
         var tr = target.getBoundingClientRect();
@@ -123,20 +133,40 @@ def show_info_dialog(title: str, body: str) -> None:
 
 
 def show_tour(t) -> None:
+    has_ai_annotations = get_state_val("has_ai_annotations", True)
     ui.add_head_html(_TOUR_CSS, shared=True)
+
+    step_targets = [
+        None,  # 0: Welcome
+        ".tour-target-queue",  # 1: Review Queue
+        ".tour-target-filters",  # 2: Filters
+        ".tour-target-ai-predictions" if has_ai_annotations else None,  # 3: AI Predictions
+        ".tour-target-action-buttons",  # 4: Blank vs Non-blank
+        ".tour-target-review-later",  # 5: Review Later
+        ".tour-target-shortcuts",  # 6: Keyboard Shortcuts
+        None,  # 7: Done
+    ]
 
     steps = [
         (t("tour_step_1_title"), t("tour_step_1_body")),
         (t("tour_step_2_title"), t("tour_step_2_body")),
         (t("tour_step_filters_title"), t("tour_step_filters_body")),
-        (t("tour_step_3_title"), t("tour_step_3_body")),
+        (
+            t("tour_step_3_title") if has_ai_annotations else t("tour_step_3_no_ai_title"),
+            t("tour_step_3_body") if has_ai_annotations else t("tour_step_3_no_ai_body"),
+        ),
         (t("tour_step_4_title"), t("tour_step_4_body")),
         (t("tour_step_5_title"), t("tour_step_5_body")),
+        (t("tour_step_shortcuts_title"), t("tour_step_shortcuts_body")),
         (t("tour_step_6_title"), t("tour_step_6_body")),
     ]
 
     state = {"step": 0}
     els: dict = {}
+
+    def _target_js(step):
+        target = step_targets[step] if step < len(step_targets) else None
+        return _STEP_JS % (target or "")
 
     def update():
         n = state["step"]
@@ -146,7 +176,7 @@ def show_tour(t) -> None:
         els["body"].text = steps[n][1]
         els["prev"].set_visibility(n > 0)
         els["next"].text = t("tour_finish") if n == total - 1 else t("tour_next")
-        ui.run_javascript(_step_js(n))
+        ui.run_javascript(_target_js(n))
 
     def go_prev():
         state["step"] -= 1

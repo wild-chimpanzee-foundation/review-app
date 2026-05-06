@@ -501,6 +501,9 @@ async def setup_review():
 
     ui.run_javascript("document.activeElement?.blur()")
 
+    has_ai = await run.io_bound(lambda: not dp._get_model_annotations_df().empty)
+    logger.info("Tour AI annotations check: has_ai=%s", has_ai)
+    set_state_val("has_ai_annotations", has_ai)
     show_tour_if_needed(t)
 
     ui.add_body_html(
