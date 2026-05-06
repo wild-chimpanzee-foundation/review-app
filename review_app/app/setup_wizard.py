@@ -2,6 +2,7 @@ import platform
 import shutil
 import sqlite3
 import subprocess
+import uuid
 from pathlib import Path
 
 from nicegui import run, ui
@@ -281,6 +282,46 @@ class SetupWizard:
 
                 ui.timer(0, do_check_ffmpeg, once=True)
 
+                # ── Step 1.5: fresh start vs restore choice ───────────────────
+                with ui.column().classes("w-full gap-0") as step_choice:
+                    step_choice.visible = False
+
+                    with ui.card().classes("full-width q-mb-lg"):
+                        ui.label(t("wizard_start_choice")).classes(
+                            "text-h5 text-primary font-weight-bold"
+                        )
+
+                    with ui.row().classes("w-full gap-md"):
+                        with (
+                            ui.card()
+                            .classes("col cursor-pointer q-pa-md")
+                            .props("bordered flat") as fresh_card
+                        ):
+                            with ui.column().classes("items-center text-center gap-sm"):
+                                ui.icon("add_circle_outline", size="3rem").classes("text-primary")
+                                ui.label(t("wizard_fresh_start")).classes(
+                                    "text-subtitle1 font-weight-bold"
+                                )
+                                ui.label(t("wizard_fresh_start_desc")).classes(
+                                    "text-caption text-grey-6"
+                                )
+
+                        with (
+                            ui.card()
+                            .classes("col cursor-pointer q-pa-md")
+                            .props("bordered flat") as restore_card
+                        ):
+                            with ui.column().classes("items-center text-center gap-sm"):
+                                ui.icon("settings_backup_restore", size="3rem").classes(
+                                    "text-primary"
+                                )
+                                ui.label(t("wizard_restore_start")).classes(
+                                    "text-subtitle1 font-weight-bold"
+                                )
+                                ui.label(t("wizard_restore_start_desc")).classes(
+                                    "text-caption text-grey-6"
+                                )
+
                 # ── Step 2: first project ─────────────────────────────────────
                 with ui.column().classes("w-full gap-0") as step2:
                     step2.visible = False
@@ -324,12 +365,156 @@ class SetupWizard:
                     )
                     project_btn_holder[0].set_enabled(False)
 
-                def go_to_step2():
+                # ── Step 3: restore flow ──────────────────────────────────────
+                with ui.column().classes("w-full gap-0") as step_restore:
+                    step_restore.visible = False
+
+                    with ui.card().classes("full-width q-mb-lg"):
+                        ui.label(t("wizard_restore_title")).classes(
+                            "text-h5 text-primary font-weight-bold"
+                        )
+                        ui.label(t("wizard_restore_desc")).classes(
+                            "text-body2 text-grey-7 q-mt-xs"
+                        )
+
+                    restore_list_col = ui.column().classes("w-full gap-xs q-mb-md")
+                    restore_status_label: list = [None]
+
+                    async def do_wizard_restore(backup_path: Path):
+                        from review_app.app.config import get_default_db_path
+                        from review_app.app.media import set_media_dirs
+                        from review_app.app.state import (
+                            load_settings_from_db,
+                            set_active_project,
+                            set_data_provider,
+                        )
+                        from review_app.backend.provider.local_data_provider import (
+                            LocalDataProvider,
+                        )
+
+                        lbl = restore_status_label[0]
+                        if lbl:
+                            lbl.set_text(t("starting"))
+                            lbl.visible = True
+
+                        db_path = get_default_db_path()
+                        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+                        try:
+                            await run.io_bound(shutil.copy2, backup_path, db_path)
+                        except Exception as exc:
+                            if lbl:
+                                lbl.set_text(t("restore_failed", error=str(exc)))
+                            ui.notify(t("restore_failed", error=str(exc)), type="negative")
+                            return
+
+                        try:
+                            dp = LocalDataProvider()
+                            set_data_provider(dp)
+                            load_settings_from_db(dp)
+                            proj = dp.get_most_recent_project()
+                            if proj:
+                                set_active_project(proj.id)
+                                dp.touch_project(proj.id)
+                            set_media_dirs(
+                                [
+                                    Path(d.path)
+                                    for d in dp.get_project_dirs(proj.id if proj else None)
+                                ]
+                            )
+                        except Exception as exc:
+                            if lbl:
+                                lbl.set_text(t("restore_failed", error=str(exc)))
+                            ui.notify(t("restore_failed", error=str(exc)), type="negative")
+                            return
+
+                        ui.notify(t("wizard_restore_success"), type="positive")
+                        self.on_complete_callback()
+
+                    async def _handle_backup_upload(e):
+                        from review_app.backend.db.backup import get_backup_dir
+
+                        content = await e.file.read()
+                        tmp_path = get_backup_dir() / f"uploaded_restore_{uuid.uuid4().hex}.db"
+                        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+                        tmp_path.write_bytes(content)
+                        try:
+                            await do_wizard_restore(tmp_path)
+                        finally:
+                            tmp_path.unlink(missing_ok=True)
+
+                    async def populate_restore_list():
+                        from review_app.backend.db.backup import list_backups
+
+                        backups = await run.io_bound(list_backups)
+                        restore_list_col.clear()
+                        with restore_list_col:
+                            if backups:
+                                ui.label(t("restore_confirm")).classes("text-subtitle2 q-mb-xs")
+                                with (
+                                    ui.column()
+                                    .classes("w-full gap-xs")
+                                    .style("max-height: 260px; overflow-y: auto")
+                                ):
+                                    for b in backups:
+                                        ts = b["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+                                        label = f"{ts}  ({b['size_mb']} MB)"
+
+                                        def _make_restore(p):
+                                            async def _do():
+                                                await do_wizard_restore(p)
+
+                                            return _do
+
+                                        ui.button(
+                                            label,
+                                            icon="restore",
+                                            on_click=_make_restore(b["path"]),
+                                        ).props("flat dense align-left").classes("w-full")
+
+                                with ui.row().classes("w-full gap-sm items-center q-mt-md"):
+                                    ui.separator().classes("col")
+                                    ui.label(t("upload_backup")).classes(
+                                        "text-caption text-grey-6"
+                                    )
+                                    ui.separator().classes("col")
+
+                            backup_uploader = (
+                                ui.upload(on_upload=_handle_backup_upload, auto_upload=True)
+                                .props("accept=.db")
+                                .style("display: none")
+                            )
+                            ui.button(
+                                t("upload_backup_btn"),
+                                icon="upload_file",
+                                color="primary" if not backups else None,
+                                on_click=lambda: ui.run_javascript(
+                                    f"document.getElementById('c{backup_uploader.id}').querySelector('.q-uploader__input').click()"
+                                ),
+                            ).props("size=lg").classes("full-width")
+
+                            restore_status_label[0] = ui.label("").classes(
+                                "text-caption text-grey-6 q-mt-xs"
+                            )
+                            restore_status_label[0].visible = False
+
+                def go_to_step_choice():
                     annotator_name_cell[0] = self.inputs["annotator_name"].value.strip()
                     step1.visible = False
+                    step_choice.visible = True
+
+                def go_to_step2():
+                    step_choice.visible = False
                     step2.visible = True
 
-                continue_btn_holder[0].on_click(go_to_step2)
+                async def go_to_restore():
+                    step_choice.visible = False
+                    step_restore.visible = True
+                    await populate_restore_list()
+
+                fresh_card.on("click", go_to_step2)
+                restore_card.on("click", go_to_restore)
+                continue_btn_holder[0].on_click(go_to_step_choice)
 
             else:
                 # ── Add-project flow: project creation only ────────────────────
