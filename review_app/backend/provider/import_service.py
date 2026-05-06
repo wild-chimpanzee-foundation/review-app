@@ -510,12 +510,6 @@ class ImportMixin:
 
             base_df = base_df.merge(model_wide, on="video_id", how="left")
 
-        if "species" in base_df.columns:
-            species_map = self.get_species_display_map(lang)
-            base_df["species"] = base_df["species"].map(
-                lambda s: species_map.get(s, s) if pd.notna(s) else s
-            )
-
         if "behavior" in base_df.columns:
             behavior_map = self.get_behavior_display_map(lang=lang)
             base_df["behavior"] = base_df["behavior"].map(
@@ -569,7 +563,8 @@ class ImportMixin:
             else:
                 selections = []
                 for _, row in group.iterrows():
-                    sp = str(row.get("species") or "").strip()
+                    sp_raw = row.get("species")
+                    sp = str(sp_raw).strip() if pd.notna(sp_raw) else ""
                     if not sp:
                         continue
                     beh = str(row.get("behavior") or "unlabeled").strip() or "unlabeled"

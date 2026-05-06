@@ -226,17 +226,8 @@ def test_import_raises_without_is_blank(clean_provider):
         dp.import_annotations_csv(df, active_project_id=None)
 
 
-@pytest.mark.xfail(
-    reason="export uses display names; import expects scientific names — round-trip requires name translation"
-)
 def test_export_import_round_trip(populated_provider):
-    """
-    Export annotations then re-import them and verify the DB state is unchanged.
-    Currently fails because export_annotations_csv converts scientific names to
-    display names (e.g. 'deer' → 'Red Deer (deer)') but import_annotations_csv
-    passes values directly to update_manual_review which validates against
-    scientific names only.
-    """
+    """Export annotations then re-import them and verify the DB state is unchanged."""
     dp, ids = populated_provider
 
     exported = dp.export_annotations_csv(active_project_id=None)

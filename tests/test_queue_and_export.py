@@ -232,7 +232,7 @@ def test_export_annotated_video_has_species_and_behavior(populated_provider):
     dp, _ = populated_provider
     df = dp.export_annotations_csv(active_project_id=None)
     row = df[df["video_path"].str.endswith("v1.mp4")].iloc[0]
-    assert "deer" in str(row["species"]).lower()  # display name includes scientific name
+    assert "deer" in str(row["species"]).lower()
     assert "grazing" in str(row["behavior"]).lower()
     assert row["annotator"] == "alice"
 
