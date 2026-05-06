@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from review_app.app.translations import t
 
@@ -108,6 +110,25 @@ async def get_or_create_data_provider():
             except Exception:
                 return None
     return dp
+
+
+def format_utc_timestamp(ts, tz: str | None = None) -> str:
+    if ts is None:
+        return ""
+    try:
+        if isinstance(ts, str):
+            dt = datetime.fromisoformat(ts)
+        elif isinstance(ts, datetime):
+            dt = ts
+        else:
+            return ""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        if tz:
+            return dt.astimezone(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
+        return dt.astimezone().strftime("%Y-%m-%d %H:%M")
+    except (ValueError, ZoneInfoNotFoundError):
+        return ""
 
 
 def get_probability_color(prob: float) -> str:

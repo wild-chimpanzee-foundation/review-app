@@ -4,7 +4,7 @@ import logging
 import re
 import shutil
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -90,7 +90,7 @@ def create_backup(engine, reason: str = "auto", auto_prune: bool = True) -> Path
         raise BackupDBNotFoundError(str(db_path))
 
     schema_version = _get_current_schema_version(engine)
-    timestamp = datetime.now().strftime(BACKUP_TIMESTAMP_FORMAT)
+    timestamp = datetime.now(timezone.utc).strftime(BACKUP_TIMESTAMP_FORMAT)
     backup_name = f"review_backup_{timestamp}_v{schema_version}.db"
     backup_path = get_backup_dir() / backup_name
 

@@ -16,7 +16,7 @@ from review_app.app.state import (
     set_state_val,
 )
 from review_app.app.translations import get_language, t
-from review_app.app.utils import get_probability_color
+from review_app.app.utils import format_utc_timestamp, get_probability_color
 
 
 def _shortcut_badge(key):
@@ -38,7 +38,7 @@ def _render_labeled_by_meta(labeled_by, labeled_at=None):
     ui.icon("person", size="xs").classes("text-grey-5")
     meta = t("labeled_by", name=labeled_by)
     if labeled_at:
-        date_str = str(labeled_at)[:16].replace("T", " ")
+        date_str = format_utc_timestamp(labeled_at)
         meta += f" · {t('labeled_at', date=date_str)}"
     ui.label(meta).classes("text-caption text-grey-5")
 

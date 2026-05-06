@@ -10,7 +10,7 @@ from nicegui import run, ui
 from review_app.app.config import get_default_db_path
 from review_app.app.state import get_language
 from review_app.app.translations import t
-from review_app.app.utils import sync_with_progress
+from review_app.app.utils import format_utc_timestamp, sync_with_progress
 
 FFMPEG_INSTALL_MAC = "brew install ffmpeg"
 FFMPEG_INSTALL_WINDOWS = "winget install ffmpeg OR download from https://ffmpeg.org/download.html"
@@ -473,7 +473,7 @@ class SetupWizard:
                                     .style("max-height: 260px; overflow-y: auto")
                                 ):
                                     for b in backups:
-                                        ts = b["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+                                        ts = format_utc_timestamp(b["timestamp"].isoformat())
                                         label = f"{ts}  ({b['size_mb']} MB)"
 
                                         def _make_restore(p):

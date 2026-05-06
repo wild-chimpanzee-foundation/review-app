@@ -25,6 +25,7 @@ from review_app.app.state import (
 )
 from review_app.app.translations import t
 from review_app.app.utils import (
+    format_utc_timestamp,
     get_or_create_data_provider,
     sync_with_progress,
     user_error_message,
@@ -763,7 +764,7 @@ def _build_settings_content(container: ui.column):
                                     type="negative",
                                 )
                                 return
-                            ui.download(backup_path, filename=backup_path.name)
+                            ui.download(backup_path.read_bytes(), filename=backup_path.name)
                             ui.notify(t("backup_created"), type="positive")
 
                         ui.button(
@@ -825,7 +826,7 @@ def _build_settings_content(container: ui.column):
                                         .style("max-height: 300px; overflow-y: auto")
                                     ):
                                         for b in backups:
-                                            ts = b["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+                                            ts = format_utc_timestamp(b["timestamp"].isoformat())
                                             label = f"{ts}  ({b['size_mb']} MB)"
 
                                             def _make_restore(p):
