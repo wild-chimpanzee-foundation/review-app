@@ -33,6 +33,16 @@ def _normalize_is_blank(raw):
     return bool(raw)
 
 
+def _render_labeled_by_meta(labeled_by, labeled_at=None):
+    """Render person icon and labeled-by metadata with optional timestamp."""
+    ui.icon("person", size="xs").classes("text-grey-5")
+    meta = t("labeled_by", name=labeled_by)
+    if labeled_at:
+        date_str = str(labeled_at)[:16].replace("T", " ")
+        meta += f" · {t('labeled_at', date=date_str)}"
+    ui.label(meta).classes("text-caption text-grey-5")
+
+
 def _init_annotation_state(video, default_species, default_behavior):
     is_blank = _normalize_is_blank(video.get("is_blank"))
     selections = list(video.get("manual_selections") or [])
@@ -114,37 +124,31 @@ def render_annotation_section(
             .classes("full-width q-pa-md q-mb-sm")
             .style("border: 2px solid var(--q-warning)")
         ):
-            with ui.row().classes("w-full gap-sm items-center"):
-                with ui.element("div").classes("col"):
-                    with ui.row().classes("items-center gap-sm"):
-                        ui.badge(t("blank"), color="warning").classes(
-                            "text-body2 px-4 py-2 rounded-full"
-                        )
-                        if human_labeled:
-                            ui.icon("person", size="xs").classes("text-grey-5")
-                            annotator = video.get("blank_labeled_by")
-                            label = (
-                                t("labeled_by", name=annotator)
-                                if annotator
-                                else t("blank_source_human")
-                            )
-                            ui.label(label).classes("text-caption text-grey-5")
-                        else:
-                            ui.icon("smart_toy", size="xs").classes("text-grey-5")
-                            ui.label(t("blank_source_model")).classes("text-caption text-grey-5")
-                            if blank_prob is not None:
-                                with ui.row().classes("items-center gap-xs"):
-                                    ui.label(t("blank")).classes("text-caption text-grey-6")
-                                    ui.label(f"{blank_prob:.0%}").style(
-                                        f"color: {get_probability_color(blank_prob)}; font-weight: bold"
-                                    ).classes("text-caption")
-                                    ui.label("·").classes("text-caption text-grey-6")
-                                    ui.label(t("species_label")).classes(
-                                        "text-caption text-grey-6"
-                                    )
-                                    ui.label(f"{max_sp:.0%}").style(
-                                        f"color: {get_probability_color(max_sp)}; font-weight: bold"
-                                    ).classes("text-caption")
+            with ui.row().classes("items-center gap-sm"):
+                ui.badge(t("blank"), color="warning").classes("text-body2 px-4 py-2 rounded-full")
+
+            with ui.row().classes("items-center gap-xs q-mt-xs w-full"):
+                if human_labeled:
+                    annotator = video.get("blank_labeled_by")
+                    labeled_at = video.get("blank_labeled_at")
+                    if annotator:
+                        _render_labeled_by_meta(annotator, labeled_at)
+                    else:
+                        ui.icon("person", size="xs").classes("text-grey-5")
+                        ui.label(t("blank_source_human")).classes("text-caption text-grey-5")
+                else:
+                    ui.icon("smart_toy", size="xs").classes("text-grey-5")
+                    ui.label(t("blank_source_model")).classes("text-caption text-grey-5")
+                    if blank_prob is not None:
+                        ui.label(t("blank")).classes("text-caption text-grey-6")
+                        ui.label(f"{blank_prob:.0%}").style(
+                            f"color: {get_probability_color(blank_prob)}; font-weight: bold"
+                        ).classes("text-caption")
+                        ui.label("·").classes("text-caption text-grey-6")
+                        ui.label(t("species_label")).classes("text-caption text-grey-6")
+                        ui.label(f"{max_sp:.0%}").style(
+                            f"color: {get_probability_color(max_sp)}; font-weight: bold"
+                        ).classes("text-caption")
                 ui.element("div").classes("col")
                 ui.button(icon="delete", on_click=set_not_blank, color="negative").props("flat")
     else:
@@ -213,12 +217,7 @@ def render_annotation_section(
                 source = sel.get("source")
                 with ui.row().classes("items-center gap-xs q-mt-xs w-full"):
                     if labeled_by:
-                        ui.icon("person", size="xs").classes("text-grey-5")
-                        date_str = str(labeled_at)[:16].replace("T", " ") if labeled_at else None
-                        meta = t("labeled_by", name=labeled_by)
-                        if date_str:
-                            meta += f" · {t('labeled_at', date=date_str)}"
-                        ui.label(meta).classes("text-caption text-grey-5")
+                        _render_labeled_by_meta(labeled_by, labeled_at)
                     elif source == "model":
                         ui.icon("smart_toy", size="xs").classes("text-grey-5")
                         ui.label(t("model_suggestion")).classes("text-caption text-grey-5")

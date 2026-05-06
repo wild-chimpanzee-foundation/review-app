@@ -125,6 +125,7 @@ class AnnotationMixin:
                         vl.is_blank,
                         vl.review_later,
                         vl.labeled_by AS blank_labeled_by,
+                        vl.labeled_at AS blank_labeled_at,
                         ms.behavior_prediction,
                         ms.individual_count,
                         COALESCE(msc.classification_consensus, 'UNKNOWN') AS classification_consensus,
