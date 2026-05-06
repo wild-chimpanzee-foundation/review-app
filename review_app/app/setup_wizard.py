@@ -388,6 +388,11 @@ class SetupWizard:
                             set_active_project,
                             set_data_provider,
                         )
+                        from review_app.backend.db.backup import (
+                            RestoreSchemaVersionError,
+                            _check_restore_schema_version,
+                        )
+                        from review_app.backend.db.migrations import MIGRATIONS
                         from review_app.backend.provider.local_data_provider import (
                             LocalDataProvider,
                         )
@@ -396,6 +401,17 @@ class SetupWizard:
                         if lbl:
                             lbl.set_text(t("starting"))
                             lbl.visible = True
+
+                        try:
+                            await run.io_bound(
+                                _check_restore_schema_version, backup_path, len(MIGRATIONS)
+                            )
+                        except RestoreSchemaVersionError:
+                            msg = t("restore_error_schema_version")
+                            if lbl:
+                                lbl.set_text(msg)
+                            ui.notify(msg, type="negative", timeout=8000)
+                            return
 
                         db_path = get_default_db_path()
                         db_path.parent.mkdir(parents=True, exist_ok=True)

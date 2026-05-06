@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,7 @@ from review_app.backend.errors import AppError
 
 logger = logging.getLogger(__name__)
 
-_BACKUP_TS_RE = re.compile(r"^review_backup_(\d{8}_\d{6})(?:_\d+)?\.db$")
+_BACKUP_TS_RE = re.compile(r"^review_backup_(\d{8}_\d{6})(?:_v(\d+))?(?:_\d+)?\.db$")
 
 MAX_AUTO_BACKUPS = 10
 DAILY_RETENTION_DAYS = 14
@@ -53,10 +54,34 @@ class RestoreCopyError(BackupError):
     user_message_key: str = "restore_error_copy_failed"
 
 
+class RestoreSchemaVersionError(BackupError):
+    user_message_key: str = "restore_error_schema_version"
+
+
 def get_backup_dir() -> Path:
     backup_dir = get_user_data_dir() / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     return backup_dir
+
+
+def _get_current_schema_version(engine) -> int:
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text("SELECT version FROM _schema_version")).fetchone()
+            return row[0] if row else 0
+    except Exception:
+        return 0
+
+
+def read_schema_version(db_path: Path) -> int | None:
+    """Read _schema_version from an arbitrary SQLite file without SQLAlchemy."""
+    try:
+        con = sqlite3.connect(str(db_path))
+        row = con.execute("SELECT version FROM _schema_version").fetchone()
+        con.close()
+        return row[0] if row else None
+    except Exception:
+        return None
 
 
 def create_backup(engine, reason: str = "auto", auto_prune: bool = True) -> Path:
@@ -64,15 +89,16 @@ def create_backup(engine, reason: str = "auto", auto_prune: bool = True) -> Path
     if not db_path.exists():
         raise BackupDBNotFoundError(str(db_path))
 
+    schema_version = _get_current_schema_version(engine)
     timestamp = datetime.now().strftime(BACKUP_TIMESTAMP_FORMAT)
-    backup_name = f"review_backup_{timestamp}.db"
+    backup_name = f"review_backup_{timestamp}_v{schema_version}.db"
     backup_path = get_backup_dir() / backup_name
 
     if backup_path.exists():
         i = 1
-        while (get_backup_dir() / f"review_backup_{timestamp}_{i}.db").exists():
+        while (get_backup_dir() / f"review_backup_{timestamp}_v{schema_version}_{i}.db").exists():
             i += 1
-        backup_path = get_backup_dir() / f"review_backup_{timestamp}_{i}.db"
+        backup_path = get_backup_dir() / f"review_backup_{timestamp}_v{schema_version}_{i}.db"
 
     try:
         escaped = str(backup_path).replace("'", "''")
@@ -104,30 +130,34 @@ def _fallback_copy(src: Path, dst: Path) -> None:
             shutil.copy2(s, d)
 
 
-def _parse_backup_timestamp(name: str) -> datetime | None:
+def _parse_backup_meta(name: str) -> tuple[datetime, int | None] | None:
+    """Return (timestamp, schema_version) parsed from a backup filename, or None."""
     m = _BACKUP_TS_RE.match(name)
     if not m:
         return None
-    ts_str = m.group(1)
     try:
-        return datetime.strptime(ts_str, BACKUP_TIMESTAMP_FORMAT)
+        dt = datetime.strptime(m.group(1), BACKUP_TIMESTAMP_FORMAT)
     except ValueError:
         return None
+    version = int(m.group(2)) if m.group(2) is not None else None
+    return dt, version
 
 
 def list_backups() -> list[dict[str, Any]]:
     backup_dir = get_backup_dir()
     backups = []
     for f in sorted(backup_dir.glob("review_backup_*.db"), reverse=True):
-        dt = _parse_backup_timestamp(f.name)
-        if dt is None:
+        meta = _parse_backup_meta(f.name)
+        if meta is None:
             continue
+        dt, schema_version = meta
         backups.append(
             {
                 "path": f,
                 "name": f.name,
                 "timestamp": dt,
                 "size_mb": round(f.stat().st_size / (1024 * 1024), 2),
+                "schema_version": schema_version,
             }
         )
     return backups
@@ -172,10 +202,22 @@ def get_latest_backup_path() -> Path | None:
     return None
 
 
+def _check_restore_schema_version(backup_path: Path, current_version: int) -> None:
+    """Raise RestoreSchemaVersionError if the backup is from a newer schema."""
+    backup_version = read_schema_version(backup_path)
+    if backup_version is not None and backup_version > current_version:
+        raise RestoreSchemaVersionError(
+            f"backup schema v{backup_version} > app schema v{current_version}"
+        )
+
+
 def restore_backup(backup_path: Path, engine) -> None:
     db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
     if not backup_path.exists():
         raise RestoreFileNotFoundError(str(backup_path))
+
+    current_version = _get_current_schema_version(engine)
+    _check_restore_schema_version(backup_path, current_version)
 
     create_backup(engine, reason="pre_restore", auto_prune=False)
 

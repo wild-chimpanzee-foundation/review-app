@@ -14,11 +14,14 @@ from review_app.backend.db.backup import (
     RestoreCopyError,
     RestoreFileNotFoundError,
     RestoreRemoveError,
+    RestoreSchemaVersionError,
+    _check_restore_schema_version,
     _fallback_copy,
     create_backup,
     get_backup_dir,
     list_backups,
     prune_backups,
+    read_schema_version,
     restore_backup,
 )
 from sqlalchemy import create_engine, text
@@ -108,12 +111,19 @@ class TestCreateBackup:
             with pytest.raises(BackupCopyError):
                 create_backup(workspace["engine"], reason="test")
 
+    def test_backup_filename_includes_schema_version(self, workspace):
+        result = create_backup(workspace["engine"], reason="test")
+        assert "_v" in result.name
+
     def test_user_message_keys(self):
         assert BackupDBNotFoundError("/foo").user_message_key == "backup_error_db_not_found"
         assert BackupCopyError("x").user_message_key == "backup_error_copy_failed"
         assert RestoreFileNotFoundError("/foo").user_message_key == "restore_error_file_not_found"
         assert RestoreRemoveError("/foo").user_message_key == "restore_error_remove_failed"
         assert RestoreCopyError("x").user_message_key == "restore_error_copy_failed"
+        assert (
+            RestoreSchemaVersionError("v5>v4").user_message_key == "restore_error_schema_version"
+        )
 
     def test_exception_hierarchy(self):
         assert issubclass(BackupDBNotFoundError, BackupError)
@@ -121,6 +131,7 @@ class TestCreateBackup:
         assert issubclass(RestoreFileNotFoundError, BackupError)
         assert issubclass(RestoreRemoveError, BackupError)
         assert issubclass(RestoreCopyError, BackupError)
+        assert issubclass(RestoreSchemaVersionError, BackupError)
 
     def test_exception_carries_detail(self):
         exc = BackupDBNotFoundError("/some/path.db")
@@ -140,8 +151,19 @@ class TestListBackups:
 
         backups = list_backups()
         assert len(backups) == 2
-        assert backups[0]["name"] == f"review_backup_{ts2}.db"
-        assert backups[1]["name"] == f"review_backup_{ts1}.db"
+        assert backups[0]["timestamp"] > backups[1]["timestamp"]
+        assert ts2 in backups[0]["name"]
+        assert ts1 in backups[1]["name"]
+
+    def test_lists_backups_includes_schema_version(self, workspace):
+        _make_backup_file(workspace["backup_dir"], "20250101_120000")
+        _make_backup_file(workspace["backup_dir"], "20250101_130000_v4")
+
+        backups = list_backups()
+        assert len(backups) == 2
+        versions = {b["schema_version"] for b in backups}
+        assert None in versions  # old-format file
+        assert 4 in versions
 
     def test_ignores_malformed_filenames(self, workspace):
         _make_backup_file(workspace["backup_dir"], "20250101_120000")
@@ -255,6 +277,78 @@ class TestRestoreBackup:
             engine2.dispose()
 
         assert len(list_backups()) > initial_count
+
+
+class TestSchemaVersionCheck:
+    def test_read_schema_version_returns_none_for_missing_table(self, tmp_path):
+        import sqlite3
+
+        db = tmp_path / "plain.db"
+        con = sqlite3.connect(str(db))
+        con.execute("CREATE TABLE foo (id INTEGER)")
+        con.close()
+        assert read_schema_version(db) is None
+
+    def test_read_schema_version_returns_version(self, tmp_path):
+        import sqlite3
+
+        db = tmp_path / "versioned.db"
+        con = sqlite3.connect(str(db))
+        con.execute("CREATE TABLE _schema_version (version INTEGER)")
+        con.execute("INSERT INTO _schema_version VALUES (7)")
+        con.commit()
+        con.close()
+        assert read_schema_version(db) == 7
+
+    def test_check_allows_older_backup(self, tmp_path):
+        import sqlite3
+
+        db = tmp_path / "old.db"
+        con = sqlite3.connect(str(db))
+        con.execute("CREATE TABLE _schema_version (version INTEGER)")
+        con.execute("INSERT INTO _schema_version VALUES (2)")
+        con.commit()
+        con.close()
+        _check_restore_schema_version(db, current_version=4)  # should not raise
+
+    def test_check_allows_same_version(self, tmp_path):
+        import sqlite3
+
+        db = tmp_path / "same.db"
+        con = sqlite3.connect(str(db))
+        con.execute("CREATE TABLE _schema_version (version INTEGER)")
+        con.execute("INSERT INTO _schema_version VALUES (4)")
+        con.commit()
+        con.close()
+        _check_restore_schema_version(db, current_version=4)  # should not raise
+
+    def test_check_raises_for_newer_backup(self, tmp_path):
+        import sqlite3
+
+        db = tmp_path / "newer.db"
+        con = sqlite3.connect(str(db))
+        con.execute("CREATE TABLE _schema_version (version INTEGER)")
+        con.execute("INSERT INTO _schema_version VALUES (9)")
+        con.commit()
+        con.close()
+        with pytest.raises(RestoreSchemaVersionError):
+            _check_restore_schema_version(db, current_version=4)
+
+    def test_restore_raises_schema_version_error(self, workspace):
+        import sqlite3
+
+        backup_path = workspace["backup_dir"] / "future_backup_v99.db"
+        con = sqlite3.connect(str(backup_path))
+        con.execute("CREATE TABLE _schema_version (version INTEGER)")
+        con.execute("INSERT INTO _schema_version VALUES (99)")
+        con.commit()
+        con.close()
+
+        with pytest.raises(RestoreSchemaVersionError):
+            with patch(
+                "review_app.backend.db.backup.get_user_data_dir", lambda: workspace["db_dir"]
+            ):
+                restore_backup(backup_path, workspace["engine"])
 
 
 class TestFallbackCopy:
