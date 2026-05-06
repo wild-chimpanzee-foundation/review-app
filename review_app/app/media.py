@@ -1,8 +1,10 @@
+import logging
 from pathlib import Path
 
 from fastapi import Request
 from fastapi.responses import Response
 
+logger = logging.getLogger(__name__)
 _video_dirs: list[Path] = []
 
 
@@ -22,6 +24,7 @@ def setup_media_route() -> None:
                 candidate = (base / filepath).resolve()
                 if candidate.is_relative_to(base) and candidate.is_file():
                     return get_range_response(candidate, request, chunk_size=nicegui_chunk_size)
-            except Exception:
+            except Exception as exc:
+                logger.warning("Error resolving media path %s under %s: %s", filepath, base, exc)
                 continue
         return Response(status_code=404, content="Not Found")

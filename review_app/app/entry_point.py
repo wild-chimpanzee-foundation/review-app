@@ -40,6 +40,8 @@ def _setup_logging(user_data_dir: Path, dev_mode: bool) -> None:
         sh = logging.StreamHandler()
         sh.setFormatter(fmt)
         root.addHandler(sh)
+    # NiceGUI emits this on dynamic UI updates; it's framework noise, not actionable
+    logging.getLogger("nicegui").setLevel(logging.ERROR)
 
 
 # Register video mimetypes for both lower and uppercase extensions (camera traps often use .MP4)

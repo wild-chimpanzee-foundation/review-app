@@ -1,8 +1,11 @@
 import asyncio
+import logging
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from review_app.app.translations import t
+
+logger = logging.getLogger(__name__)
 
 
 def user_error_message(exc: Exception) -> str:
@@ -107,7 +110,8 @@ async def get_or_create_data_provider():
             try:
                 dp = LocalDataProvider()
                 set_data_provider(dp)
-            except Exception:
+            except Exception as exc:
+                logger.error("Failed to initialize data provider: %s", exc, exc_info=True)
                 return None
     return dp
 

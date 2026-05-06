@@ -69,7 +69,8 @@ def _get_current_schema_version(engine) -> int:
         with engine.connect() as conn:
             row = conn.execute(text("SELECT version FROM _schema_version")).fetchone()
             return row[0] if row else 0
-    except Exception:
+    except Exception as exc:
+        logger.warning("Could not read current schema version: %s", exc)
         return 0
 
 
@@ -80,7 +81,8 @@ def read_schema_version(db_path: Path) -> int | None:
         row = con.execute("SELECT version FROM _schema_version").fetchone()
         con.close()
         return row[0] if row else None
-    except Exception:
+    except Exception as exc:
+        logger.warning("Could not read schema version from %s: %s", db_path, exc)
         return None
 
 

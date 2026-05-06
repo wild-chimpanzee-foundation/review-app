@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 from pathlib import Path
 from urllib.parse import quote
@@ -31,6 +32,8 @@ from review_app.app.utils import (
     render_uninitialized_state,
 )
 from review_app.backend.utils import df_to_records
+
+logger = logging.getLogger(__name__)
 
 
 def navigate(direction: int):
@@ -235,12 +238,15 @@ async def render_video_section(dp, species_map, global_species_map):
                     ui.label(t("no_video_path")).classes("text-grey-5")
 
                 if not video.get("is_video_valid", True):
-                    ui.label(
-                        t(
-                            "video_validation_failed",
-                            error=video.get("video_validation_details", "Unknown error"),
-                        )
-                    ).classes("text-negative text-caption q-mt-sm")
+                    _err = video.get("video_validation_details", "Unknown error")
+                    logger.warning(
+                        "Displaying invalid video %s: %s",
+                        video.get("video_path", "<unknown>"),
+                        _err,
+                    )
+                    ui.label(t("video_validation_failed", error=_err)).classes(
+                        "text-negative text-caption q-mt-sm"
+                    )
 
             if model_ann is not None and not model_ann.empty:
                 _species_map = global_species_map

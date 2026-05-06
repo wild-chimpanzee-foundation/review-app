@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 
@@ -7,6 +8,8 @@ import pandas as pd
 from sqlalchemy import text
 
 from review_app.backend.errors import DataImportError, SpeciesError
+
+logger = logging.getLogger(__name__)
 
 
 class SpeciesMixin:
@@ -125,7 +128,7 @@ class SpeciesMixin:
                     )
             return rows
         except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as exc:
-            print(f"Failed to parse behaviors CSV {path}: {exc}")
+            logger.error("Failed to parse behaviors CSV %s: %s", path, exc)
             return []
 
     def _load_species_behaviors(self) -> None:
