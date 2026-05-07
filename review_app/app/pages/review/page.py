@@ -67,11 +67,120 @@ def navigate_to(idx: int):
     asyncio.create_task(_do_nav())
 
 
+def _render_ai_annotations(model_ann, global_species_map):
+    if model_ann is None or model_ann.empty:
+        return
+
+    def _is_number(v: str) -> bool:
+        try:
+            float(v)
+            return True
+        except (TypeError, ValueError):
+            return False
+
+    groups: dict = {}
+
+    for _row in df_to_records(model_ann, 20):
+        _ann_type = _row.get("annotation_type", "")
+        _value = _row.get("value_text", "") or ""
+        _prob = _row.get("probability")
+
+        if _ann_type == "blank_non_blank":
+            threshold = get_blank_threshold() or 0.0
+            if _is_number(_value):
+                _value = t("non_blank") if float(_value) < threshold else t("blank")
+            elif _prob is not None:
+                _value = t("non_blank") if _prob < threshold else t("blank")
+            else:
+                _value = t("blank") if str(_value).lower() == "blank" else t("non_blank")
+        elif _ann_type == "species":
+            _value = global_species_map.get(_value, _value)
+
+        _color = get_probability_color(_prob) if _prob is not None else "grey"
+
+        if _ann_type not in groups:
+            groups[_ann_type] = {}
+        if _value not in groups[_ann_type]:
+            groups[_ann_type][_value] = []
+
+        groups[_ann_type][_value].append(
+            {"model": _row.get("model_name", ""), "prob": _prob, "color": _color}
+        )
+        groups[_ann_type][_value].sort(
+            key=lambda x: (x["prob"] is not None, x["prob"]), reverse=True
+        )
+
+        group_order = ["species", "blank_non_blank"]
+        groups = dict(
+            sorted(
+                groups.items(),
+                key=lambda x: group_order.index(x[0]) if x[0] in group_order else len(group_order),
+            )
+        )
+
+    with ui.card().classes(
+        "full-width q-mt-xs q-pa-none bg-transparent no-shadow tour-target-ai-predictions"
+    ):
+        rename_map = {
+            "species": t("species_annotations"),
+            "blank_non_blank": t("blank_annotations"),
+        }
+        first_ann_type = True
+        for _ann_type, _predictions in groups.items():
+            ann_type_display = rename_map.get(_ann_type, _ann_type.capitalize())
+            with ui.row().classes("items-center gap-xs q-mt-xs q-mb-none"):
+                ui.label(ann_type_display).classes("text-micro  text-italic")
+                if first_ann_type:
+                    ui.button(
+                        icon="info_outline",
+                        on_click=lambda: show_info_dialog(
+                            t("info_ai_predictions_title"),
+                            t("info_ai_predictions_body"),
+                        ),
+                    ).props("flat round dense size=xs color=grey-6")
+                    first_ann_type = False
+            with ui.column().classes("w-full gap-y-1"):
+                for _val, _models in sorted(
+                    _predictions.items(),
+                    key=lambda x: (
+                        sum(m["prob"] for m in x[1] if m["prob"] is not None)
+                        / max(sum(1 for m in x[1] if m["prob"] is not None), 1),
+                        len(x[1]),
+                    ),
+                    reverse=True,
+                ):
+                    with ui.row().classes(
+                        "w-full items-center justify-between q-pa-xs rounded-borders bg-white/5 border border-white/5"
+                    ):
+                        with ui.row().classes("items-center gap-x-2"):
+                            ui.label(_val).classes("text-caption text-bold")
+                            if len(_models) > 1:
+                                ui.badge(f"{len(_models)}").props("color=blue-6 outline size=xs")
+                        with ui.row().classes("gap-x-1"):
+                            for _m in _models:
+                                with ui.element("div").style(
+                                    "display:inline-flex; align-items:center; gap:4px; "
+                                    "background: rgba(128,128,128,0.1); padding: 1px 6px; border-radius: 3px;"
+                                ):
+                                    ui.label(_m["model"]).classes("text-micro ")
+                                    if _m["prob"] is not None:
+                                        prob_color = (
+                                            None if _ann_type == "blank_non_blank" else _m["color"]
+                                        )
+                                        try:
+                                            _p = float(_m["prob"])
+                                            ui.label(f"{_p:.0%}").classes(
+                                                "text-micro text-bold"
+                                            ).style(f"color: {prob_color};")
+                                        except (ValueError, TypeError):
+                                            pass
+
+
 @ui.refreshable
 async def render_video_section(dp, species_map, global_species_map):
     queue = get_queue()
     if not queue:
-        ui.label(t("no_videos_match")).classes("text-h6 text-grey-5")
+        ui.label(t("no_videos_match")).classes("text-h6 ")
         return
 
     current_idx = get_current_idx()
@@ -121,27 +230,8 @@ async def render_video_section(dp, species_map, global_species_map):
     if get_state_val("is_loading"):
         with ui.column().classes("w-full h-64 items-center justify-center"):
             ui.spinner(size="lg")
-            ui.label(t("loading_video")).classes("text-grey-6 q-mt-md")
+            ui.label(t("loading_video")).classes(" q-mt-md")
         return
-
-    with ui.column().classes("w-full q-mb-xs gap-0 tour-target-queue"):
-        with ui.row().classes("items-center gap-xs"):
-            queue_label = ui.label().classes("text-caption text-grey-6")
-            ui.button(
-                icon="info_outline",
-                on_click=lambda: show_info_dialog(t("info_queue_title"), t("info_queue_body")),
-            ).props("flat round dense size=xs color=grey-6")
-        slider = (
-            ui.slider(min=0, max=max(len(queue) - 1, 1), step=1, value=current_idx)
-            .props("dense color=primary")
-            .classes("w-full")
-            .on("change", lambda e: navigate_to(int(e.args)))
-        )
-        queue_label.bind_text_from(
-            slider,
-            "value",
-            backward=lambda v: t("queue_label", current=int(v) + 1, total=len(queue)),
-        )
 
     is_review_later = bool(video.get("review_later"))
 
@@ -154,23 +244,41 @@ async def render_video_section(dp, species_map, global_species_map):
         bookmark_btn._props["color"] = "orange" if new_val else "grey-6"
         bookmark_btn.update()
 
-    with ui.row().classes("w-full items-center q-mb-md"):
-        with ui.row().classes("items-center gap-xs"):
-            prev_btn = ui.button(icon="chevron_left", on_click=lambda: navigate(-1)).props("flat")
-            prev_btn._props["data-shortcut"] = "prev"
-            ui.badge("P").props("color=grey-9").classes("text-caption")
-        ui.element("div").classes("col flex justify-center")
-        with ui.element("div").classes("col flex justify-center"):
-            with ui.column().classes("items-center gap-0"):
-                ui.label(Path(video.get("video_path", "")).name).classes(
-                    "text-subtitle1 font-weight-medium text-center"
-                )
+    with ui.column().classes("w-full q-mb-xs gap-0 tour-target-queue"):
+        with ui.row().classes("w-full items-center"):
+            with ui.element("div").classes("col"):
                 if video.get("camera_id"):
-                    ui.label(video["camera_id"]).classes("text-caption text-grey-5 text-center")
-        ui.element("div").classes("col flex justify-center")
-        with ui.row().classes("items-center gap-xs"):
-            ui.badge("N").props("color=grey-9").classes("text-caption")
-            next_btn = ui.button(icon="chevron_right", on_click=lambda: navigate(1)).props("flat")
+                    ui.label(video["camera_id"]).classes("text-caption")
+            ui.label(Path(video.get("video_path", "")).name).classes(
+                "col text-caption text-center"
+            ).style("white-space: nowrap; overflow: hidden; text-overflow: ellipsis;")
+            with ui.row().classes("col justify-end items-center gap-xs no-wrap"):
+                queue_label = ui.label().classes("text-caption no-wrap")
+                ui.button(
+                    icon="info_outline",
+                    on_click=lambda: show_info_dialog(t("info_queue_title"), t("info_queue_body")),
+                ).props("flat round dense size=xs color=grey-6")
+        with ui.row().classes("w-full items-center gap-xs q-mt-none"):
+            with ui.button(on_click=lambda: navigate(-1)).props("flat dense") as prev_btn:
+                with ui.row().classes("items-center gap-xs no-wrap"):
+                    ui.icon("chevron_left")
+                    ui.badge("P").props("color=grey-9").classes("text-caption")
+            prev_btn._props["data-shortcut"] = "prev"
+            slider = (
+                ui.slider(min=0, max=max(len(queue) - 1, 1), step=1, value=current_idx)
+                .props("dense color=primary")
+                .classes("col")
+                .on("change", lambda e: navigate_to(int(e.args)))
+            )
+            queue_label.bind_text_from(
+                slider,
+                "value",
+                backward=lambda v: t("queue_label", current=int(v) + 1, total=len(queue)),
+            )
+            with ui.button(on_click=lambda: navigate(1)).props("flat dense") as next_btn:
+                with ui.row().classes("items-center gap-xs no-wrap"):
+                    ui.badge("N").props("color=grey-9").classes("text-caption")
+                    ui.icon("chevron_right")
             next_btn._props["data-shortcut"] = "next"
 
     with ui.row().classes("w-full gap-xs items-start"):
@@ -181,7 +289,7 @@ async def render_video_section(dp, species_map, global_species_map):
                     if selected_video_id not in attempted and is_auto_transcode():
                         attempted.add(selected_video_id)
                         set_state_val("transcode_attempted_ids", list(attempted))
-                        ui.label(t("transcoding_video")).classes("text-body2 text-grey-7 q-mb-sm")
+                        ui.label(t("transcoding_video")).classes("text-body2 q-mb-sm")
                         result = await run.io_bound(dp.transcode_video, selected_video_id)
                         if result.get("success"):
                             ui.notify(t("video_transcoded"), type="positive")
@@ -241,7 +349,7 @@ async def render_video_section(dp, species_map, global_species_map):
                             video_url, video.get("duration_sec") or 0, str(uuid.uuid4())
                         )
                 else:
-                    ui.label(t("no_video_path")).classes("text-grey-5")
+                    ui.label(t("no_video_path"))
 
                 if not video.get("is_video_valid", True):
                     _err = video.get("video_validation_details", "Unknown error")
@@ -254,147 +362,8 @@ async def render_video_section(dp, species_map, global_species_map):
                         "text-negative text-caption q-mt-sm"
                     )
 
-            if model_ann is not None and not model_ann.empty:
-                _species_map = global_species_map
-
-                def _is_number(v: str) -> bool:
-                    try:
-                        float(v)
-                        return True
-                    except (TypeError, ValueError):
-                        return False
-
-                # Grouping structure: { annotation_type: { prediction_value: [list_of_supporting_models] } }
-                groups: dict = {}
-
-                for _row in df_to_records(model_ann, 20):
-                    _ann_type = _row.get("annotation_type", "")
-                    _value = _row.get("value_text", "") or ""
-                    _prob = _row.get("probability")
-
-                    # 1. Logic for Blank/Non-Blank
-                    if _ann_type == "blank_non_blank":
-                        threshold = get_blank_threshold() or 0.0
-                        if _is_number(_value):
-                            _value = t("non_blank") if float(_value) < threshold else t("blank")
-                        elif _prob is not None:
-                            _value = t("non_blank") if _prob < threshold else t("blank")
-                        else:
-                            _value = (
-                                t("blank") if str(_value).lower() == "blank" else t("non_blank")
-                            )
-
-                    # 2. Species mapping
-                    elif _ann_type == "species":
-                        _value = _species_map.get(_value, _value)
-
-                    _color = get_probability_color(_prob) if _prob is not None else "grey"
-
-                    # 3. Nesting: Type -> Value -> Models
-                    if _ann_type not in groups:
-                        groups[_ann_type] = {}
-                    if _value not in groups[_ann_type]:
-                        groups[_ann_type][_value] = []
-
-                    groups[_ann_type][_value].append(
-                        {
-                            "model": _row.get("model_name", ""),
-                            "prob": _prob,
-                            "color": _color,
-                        }
-                    )
-
-                    # move higher confidence predictions to the top of the list for each value
-                    groups[_ann_type][_value].sort(
-                        key=lambda x: (x["prob"] is not None, x["prob"]), reverse=True
-                    )
-
-                    # show species before blank/non-blank if both are present, as species is often more informative and blank/non-blank can be a fallback
-                    group_order = ["species", "blank_non_blank"]
-                    groups = dict(
-                        sorted(
-                            groups.items(),
-                            key=lambda x: (
-                                group_order.index(x[0])
-                                if x[0] in group_order
-                                else len(group_order)
-                            ),
-                        )
-                    )
-
-                with ui.card().classes(
-                    "full-width q-mt-xs q-pa-none bg-transparent no-shadow tour-target-ai-predictions"
-                ):
-                    rename_map = {
-                        "species": t("species_annotations"),
-                        "blank_non_blank": t("blank_annotations"),
-                    }
-
-                    first_ann_type = True
-                    for _ann_type, _predictions in groups.items():
-                        ann_type_display = rename_map.get(_ann_type, _ann_type.capitalize())
-
-                        with ui.row().classes("items-center gap-xs q-mt-xs q-mb-none"):
-                            ui.label(ann_type_display).classes(
-                                "text-micro text-grey-6 text-italic"
-                            )
-                            if first_ann_type:
-                                ui.button(
-                                    icon="info_outline",
-                                    on_click=lambda: show_info_dialog(
-                                        t("info_ai_predictions_title"),
-                                        t("info_ai_predictions_body"),
-                                    ),
-                                ).props("flat round dense size=xs color=grey-6")
-                                first_ann_type = False
-
-                        with ui.column().classes("w-full gap-y-1"):
-                            for _val, _models in sorted(
-                                _predictions.items(),
-                                key=lambda x: (
-                                    sum(m["prob"] for m in x[1] if m["prob"] is not None)
-                                    / max(sum(1 for m in x[1] if m["prob"] is not None), 1),
-                                    len(x[1]),
-                                ),
-                                reverse=True,
-                            ):
-                                with ui.row().classes(
-                                    "w-full items-center justify-between q-pa-xs rounded-borders bg-white/5 border border-white/5"
-                                ):
-                                    # Left side: Value
-                                    with ui.row().classes("items-center gap-x-2"):
-                                        ui.label(_val).classes("text-caption text-bold")
-                                        if len(_models) > 1:
-                                            ui.badge(f"{len(_models)}").props(
-                                                "color=blue-6 outline size=xs"
-                                            )
-
-                                    # Right side: Models
-                                    with ui.row().classes("gap-x-1"):
-                                        for _m in _models:
-                                            with ui.element("div").style(
-                                                "display:inline-flex; align-items:center; gap:4px; "
-                                                "background: rgba(128,128,128,0.1); padding: 1px 6px; border-radius: 3px;"
-                                            ):
-                                                ui.label(_m["model"]).classes(
-                                                    "text-micro text-grey-5"
-                                                )
-
-                                                if _m["prob"] is not None:
-                                                    if _ann_type == "blank_non_blank":
-                                                        prob_color = None
-
-                                                    else:
-                                                        prob_color = _m["color"]
-                                                    try:
-                                                        _p = float(_m["prob"])
-                                                        ui.label(f"{_p:.0%}").classes(
-                                                            "text-micro text-bold"
-                                                        ).style(f"color: {prob_color};")
-                                                    except (ValueError, TypeError):
-                                                        pass
-
         with ui.column().style("flex: 1; min-width: 300px; max-width: 560px;"):
+            _render_ai_annotations(model_ann, global_species_map)
             with ui.card().classes("full-width"):
                 with ui.row().classes("items-center w-full q-mb-none"):
                     ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium")

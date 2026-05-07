@@ -36,7 +36,7 @@ async def render_filter_drawer(
     with ui.element("div").classes("q-mini-drawer-hide full-width"):
         # ── Filters ──────────────────────────────────────────────────
         with ui.card().classes("full-width q-mb-md tour-target-filters"):
-            ui.label(t("filter_section_general")).classes("text-caption text-grey-5 q-mt-xs")
+            ui.label(t("filter_section_general")).classes("text-caption q-mt-xs")
 
             search = ui.input(t("search"), placeholder=t("search_placeholder")).props(
                 "outlined dense class=full-width"
@@ -57,7 +57,7 @@ async def render_filter_drawer(
             ).props("outlined dense class=full-width")
 
             ui.separator().classes("q-my-xs")
-            ui.label(t("filter_section_model")).classes("text-caption text-grey-5")
+            ui.label(t("filter_section_model")).classes("text-caption")
 
             possible_species_values = filter_options.get("possible_species_values", [])
             selected_possible_species = filters.get("selected_possible_species", [])
@@ -116,7 +116,7 @@ async def render_filter_drawer(
             ).props("outlined dense class=full-width")
 
             ui.separator().classes("q-my-xs")
-            ui.label(t("filter_section_manual")).classes("text-caption text-grey-5")
+            ui.label(t("filter_section_manual")).classes("text-caption")
 
             species_values = filter_options.get("species_values", [])
             selected_species = filters.get("selected_species", [])
@@ -258,7 +258,7 @@ async def render_filter_drawer(
 
         # ── Sort ─────────────────────────────────────────────────────────
         with ui.card().classes("full-width q-mb-md"):
-            ui.label(t("sort_label")).classes("text-subtitle2 text-grey-7 q-mb-xs")
+            ui.label(t("sort_label")).classes("text-subtitle2 q-mb-xs")
             with ui.row().classes("w-full items-center gap-sm"):
                 sort_select = ui.select(
                     options={
@@ -306,7 +306,7 @@ async def render_filter_drawer(
 
         # ── Playback ──────────────────────────────────────────────────────
         with ui.card().classes("full-width q-mb-md"):
-            ui.label(t("playback_settings")).classes("text-subtitle2 text-grey-7 q-mb-xs")
+            ui.label(t("playback_settings")).classes("text-subtitle2 q-mb-xs")
 
             ui.checkbox(
                 t("autoplay"),

@@ -281,12 +281,12 @@ def render_custom_video_player(video_url, duration, vid_key):
         """)
 
         def _key(k):
-            ui.badge(k).props("outline color=grey-6").classes("text-caption text-grey-6")
+            ui.badge(k).props("outline color=grey-6").classes("text-caption")
 
         with (
             ui.element("div").classes("tour-target-shortcuts"),
             ui.expansion(t("shortcuts_title"), icon="keyboard", value=False)
-            .classes("w-full text-caption text-grey-6")
+            .classes("w-full text-caption")
             .props("dense"),
         ):
             with ui.row().classes("w-full q-mt-xs").style("gap: 4px;"):
@@ -297,7 +297,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                 ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("Space")
-                    ui.label(t("shortcut_play_pause")).classes("text-caption text-grey-6")
+                    ui.label(t("shortcut_play_pause")).classes("text-caption")
                 with (
                     ui.column()
                     .classes("items-center gap-xs")
@@ -307,7 +307,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                         _key("←")
                         _key("→")
                     ui.label(f"{t('shortcut_seek_back')} / {t('shortcut_seek_forward')}").classes(
-                        "text-caption text-grey-6"
+                        "text-caption"
                     )
                 with (
                     ui.column()
@@ -318,7 +318,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                         _key("S")
                         _key("D")
                     ui.label(f"{t('shortcut_speed_down')} / {t('shortcut_speed_up')}").classes(
-                        "text-caption text-grey-6"
+                        "text-caption"
                     )
                 with (
                     ui.column()
@@ -327,10 +327,10 @@ def render_custom_video_player(video_url, duration, vid_key):
                     .tooltip(t("zoom_tooltip"))
                 ):
                     with ui.row().classes("items-center gap-xs"):
-                        ui.icon("mouse").classes("text-grey-6")
-                        ui.label("+").classes("text-grey-6")
-                        ui.icon("pan_tool").classes("text-grey-6")
-                    ui.label(t("zoom")).classes("text-caption text-grey-6")
+                        ui.icon("mouse").classes("")
+                        ui.label("+").classes("")
+                        ui.icon("pan_tool").classes("")
+                    ui.label(t("zoom")).classes("text-caption")
                 with (
                     ui.column()
                     .classes("items-center gap-xs")
@@ -339,7 +339,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                 ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("Z")
-                    ui.label(t("reset_zoom")).classes("text-caption text-grey-6")
+                    ui.label(t("reset_zoom")).classes("text-caption")
 
             with ui.row().classes("w-full q-mt-xs").style("gap: 4px;"):
                 with (
@@ -350,7 +350,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                     with ui.row().classes("items-center gap-xs"):
                         _key("[")
                         _key("]")
-                    ui.label(t("shortcut_brightness")).classes("text-caption text-grey-6")
+                    ui.label(t("shortcut_brightness")).classes("text-caption")
                 with (
                     ui.column()
                     .classes("items-center gap-xs")
@@ -359,7 +359,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                     with ui.row().classes("items-center gap-xs"):
                         _key("{")
                         _key("}")
-                    ui.label(t("shortcut_contrast")).classes("text-caption text-grey-6")
+                    ui.label(t("shortcut_contrast")).classes("text-caption")
                 with (
                     ui.column()
                     .classes("items-center gap-xs")
@@ -367,7 +367,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                 ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("R")
-                    ui.label(t("shortcut_reset_filters")).classes("text-caption text-grey-6")
+                    ui.label(t("shortcut_reset_filters")).classes("text-caption")
                 with (
                     ui.column()
                     .classes("items-center gap-xs")
@@ -375,6 +375,6 @@ def render_custom_video_player(video_url, duration, vid_key):
                 ):
                     with ui.row().classes("items-center gap-xs"):
                         _key("F")
-                    ui.label(t("shortcut_fullscreen")).classes("text-caption text-grey-6")
+                    ui.label(t("shortcut_fullscreen")).classes("text-caption")
 
     return v
