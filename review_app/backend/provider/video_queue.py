@@ -29,11 +29,13 @@ class QueueMixin(ProviderBase):
         vid_filter = ""
         io_exists = ""
         ma_exists = ""
+        vl_exists = ""
         if active_project_id:
             params["pid"] = active_project_id
             vid_filter = "AND project_id = :pid"
             io_exists = "AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = io.video_id AND v.project_id = :pid)"
             ma_exists = "AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = ma.video_id AND v.project_id = :pid)"
+            vl_exists = "AND EXISTS (SELECT 1 FROM videos v WHERE v.video_id = vl.video_id AND v.project_id = :pid)"
 
         with self.engine.connect() as conn:
             df = pd.read_sql(
@@ -58,6 +60,14 @@ class QueueMixin(ProviderBase):
                     SELECT 'model_behavior', ma.value_text FROM model_annotations ma
                     WHERE ma.annotation_type = 'behavior' AND ma.value_text IS NOT NULL AND TRIM(ma.value_text) <> '' {ma_exists}
                     GROUP BY ma.value_text
+                    UNION ALL
+                    SELECT 'annotator', ann FROM (
+                        SELECT labeled_by AS ann FROM individual_observations io
+                        WHERE labeled_by IS NOT NULL AND labeled_by != '' {io_exists}
+                        UNION
+                        SELECT labeled_by FROM video_labels vl
+                        WHERE labeled_by IS NOT NULL AND labeled_by != '' {vl_exists}
+                    ) _ann GROUP BY ann
                 """),
                 conn,
                 params=params,
@@ -69,6 +79,7 @@ class QueueMixin(ProviderBase):
             "behavior_values": [],
             "possible_species_values": [],
             "model_behavior_values": [],
+            "annotator_values": [],
         }
         for _, row in df.iterrows():
             source = str(row["source"])
@@ -83,12 +94,15 @@ class QueueMixin(ProviderBase):
                 result["possible_species_values"].append(val)
             elif source == "model_behavior":
                 result["model_behavior_values"].append(val)
+            elif source == "annotator":
+                result["annotator_values"].append(val)
 
         result["camera_values"].sort()
         result["species_values"].sort()
         result["behavior_values"].sort()
         result["possible_species_values"].sort()
         result["model_behavior_values"].sort()
+        result["annotator_values"].sort()
 
         return result
 
@@ -104,6 +118,8 @@ class QueueMixin(ProviderBase):
         selected_model_blank = filters.get("selected_model_blank", "All")
         selected_model_behavior = filters.get("selected_model_behavior") or []
         selected_behavior = filters.get("selected_behavior") or []
+        selected_annotator = filters.get("selected_annotator") or []
+        selected_multiple_annotators = bool(filters.get("selected_multiple_annotators", False))
         if isinstance(selected_species, str):
             selected_species = []
         if isinstance(selected_possible_species, str):
@@ -112,6 +128,8 @@ class QueueMixin(ProviderBase):
             selected_behavior = []
         if isinstance(selected_model_behavior, str):
             selected_model_behavior = []
+        if isinstance(selected_annotator, str):
+            selected_annotator = []
         selected_annotation_status = filters.get("selected_annotation_status", "All")
         selected_is_review_later = filters.get("selected_is_review_later", False)
         selected_sort = filters.get("selected_sort", "camera")
@@ -295,6 +313,30 @@ class QueueMixin(ProviderBase):
             where.append(
                 "EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.review_later = 1)"
             )
+
+        if selected_annotator:
+            phs = ", ".join(f":ann{i}" for i in range(len(selected_annotator)))
+            for i, v in enumerate(selected_annotator):
+                params[f"ann{i}"] = v
+            where.append(f"""
+                (
+                    EXISTS (
+                        SELECT 1 FROM individual_observations io
+                        WHERE io.video_id = v.video_id AND io.labeled_by IN ({phs})
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM video_labels vl2
+                        WHERE vl2.video_id = v.video_id AND vl2.labeled_by IN ({phs})
+                    )
+                )""")
+
+        if selected_multiple_annotators:
+            where.append("""
+                (
+                    SELECT COUNT(DISTINCT labeled_by)
+                    FROM individual_observations io
+                    WHERE io.video_id = v.video_id AND io.labeled_by IS NOT NULL
+                ) > 1""")
 
         if selected_sort == "camera":
             order_by = f"ORDER BY v.camera_id {sort_dir}, v.video_path ASC"

@@ -20,6 +20,7 @@ from review_app.app.state import (
     get_species_threshold,
     get_state_val,
     is_auto_transcode,
+    reset_filters,
     set_current_idx,
     set_queue,
     set_selections,
@@ -440,27 +441,25 @@ async def setup_review():
 
     global_species_map = await run.io_bound(dp.get_species_display_map, get_language())
 
-    filters = get_filters()
-    queue = get_queue()
+    reset_filters()
+    set_current_idx(0)
+    set_selections([])
+    set_state_val("review_state_video_id", None)
+    set_state_val("review_is_blank", None)
+    set_state_val("review_active_id", None)
+    set_state_val("pending_blank_confirm", False)
 
-    # Always refresh queue from DB to avoid stale IDs in session state.
+    # Always rebuild queue from DB with fresh (reset) filters.
     queue_ids = await run.io_bound(
         dp.get_video_queue,
         filters={
-            **filters,
+            **get_filters(),
             "blank_threshold": get_blank_threshold(),
             "species_threshold": get_species_threshold(),
         },
         active_project_id=get_active_project_id(),
     )
     set_queue(queue_ids)
-    if queue != queue_ids:
-        set_current_idx(0)
-        set_selections([])
-        set_state_val("review_state_video_id", None)
-        set_state_val("review_is_blank", None)
-        set_state_val("review_active_id", None)
-        set_state_val("pending_blank_confirm", False)
 
     # Move CSS to a single injection
     ui.add_head_html(

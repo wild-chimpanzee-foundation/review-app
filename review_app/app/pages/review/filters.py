@@ -171,11 +171,33 @@ async def render_filter_drawer(
                 on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width")
 
+            annotator_values = filter_options.get("annotator_values", [])
+            selected_annotator = filters.get("selected_annotator", [])
+            if not isinstance(selected_annotator, list):
+                selected_annotator = []
+            selected_annotator = [v for v in selected_annotator if v in annotator_values]
+            annotator_filter = ui.select(
+                label=t("annotator_filter"),
+                options={v: v for v in annotator_values},
+                value=selected_annotator,
+                with_input=True,
+                multiple=True,
+                on_change=lambda _: apply_filters(),
+            ).props("outlined dense class=full-width use-chips")
+
+            multiple_annotators_cb = ui.checkbox(
+                t("multiple_annotators_filter"),
+                value=bool(filters.get("selected_multiple_annotators", False)),
+                on_change=lambda _: apply_filters(),
+            ).props("class=full-width")
+
             is_review_later = ui.checkbox(
                 t("review_later_filter"),
                 value=bool(filters.get("selected_is_review_later", False)),
                 on_change=lambda _: apply_filters(),
-            ).props("class=full-width")
+            ).props(
+                "checked-icon=bookmark unchecked-icon=bookmark_border class=full-width color='warning'"
+            )
 
             async def reset_filters():
                 search.value = ""
@@ -189,6 +211,8 @@ async def render_filter_drawer(
                 manual_blank_filter.value = "All"
                 annotation_filter.value = "All"
                 is_review_later.value = False
+                annotator_filter.value = []
+                multiple_annotators_cb.value = False
                 web_safe_only_cb.value = False
                 sort_select.value = "camera"
                 sort_dir[0] = "desc"
@@ -209,6 +233,8 @@ async def render_filter_drawer(
                     "selected_model_blank": model_blank_filter.value,
                     "selected_annotation_status": annotation_filter.value,
                     "selected_is_review_later": is_review_later.value,
+                    "selected_annotator": annotator_filter.value,
+                    "selected_multiple_annotators": multiple_annotators_cb.value,
                     "selected_needs_review": needs_review_filter.value,
                     "web_safe_only": web_safe_only_cb.value,
                 }

@@ -33,6 +33,8 @@ _DEFAULT_FILTERS: dict[str, Any] = {
     "selected_sort": "camera",
     "selected_sort_direction": "desc",
     "selected_is_review_later": False,
+    "selected_annotator": [],
+    "selected_multiple_annotators": False,
     "web_safe_only": False,
     "selected_needs_review": "All",
 }

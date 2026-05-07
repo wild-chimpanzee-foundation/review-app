@@ -120,6 +120,38 @@ def test_queue_filter_review_later(populated_provider):
     assert result == {ids["v3"]}
 
 
+def test_queue_filter_annotator_alice(populated_provider):
+    dp, ids = populated_provider
+    result = queue(dp, {"selected_annotator": ["alice"]})
+    assert result == {ids["v1"]}
+
+
+def test_queue_filter_annotator_bob(populated_provider):
+    dp, ids = populated_provider
+    result = queue(dp, {"selected_annotator": ["bob"]})
+    assert result == {ids["v3"]}
+
+
+def test_queue_filter_annotator_multi(populated_provider):
+    """alice OR bob → both their videos."""
+    dp, ids = populated_provider
+    result = queue(dp, {"selected_annotator": ["alice", "bob"]})
+    assert result == {ids["v1"], ids["v3"]}
+
+
+def test_queue_filter_multiple_annotators(populated_provider):
+    """Only videos with observations from more than one annotator."""
+    dp, ids = populated_provider
+    # Add a second annotator to v1 so it has both alice and bob.
+    dp.update_manual_review(
+        ids["v1"],
+        [{"species": "deer", "behavior": "grazing", "start_sec": 6.0, "labeled_by": "bob"}],
+        append=True,
+    )
+    result = queue(dp, {"selected_multiple_annotators": True})
+    assert result == {ids["v1"]}
+
+
 def test_queue_filter_search_by_filename(populated_provider):
     dp, ids = populated_provider
     result = queue(dp, {"search_query": "v1"})
