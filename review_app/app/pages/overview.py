@@ -4,7 +4,6 @@ from review_app.app.state import get_active_project_id, get_language, reset_filt
 from review_app.app.translations import t
 from review_app.app.utils import (
     get_or_create_data_provider,
-    get_probability_color,
     render_uninitialized_state,
 )
 
@@ -38,6 +37,11 @@ async def setup_overview():
         ui.navigate.to("/review")
 
     with ui.column().classes("w-full q-pa-lg").style("max-width: 1600px; margin: 0 auto"):
+        v = stats.get("videos", {})
+        lb = stats.get("labeling", {})
+        total = max(int(lb.get("total_videos", 1)), 1)
+        labeled = int(lb.get("labeled", 0))
+        review_later = int(lb.get("review_later", 0))
         with ui.row().classes("items-center justify-between q-mb-lg"):
             ui.label(t("overview_title")).classes("text-h5 text-primary font-weight-bold")
             with ui.row().classes("gap-2"):
@@ -50,12 +54,13 @@ async def setup_overview():
                         selected_needs_review="Needs Review",
                     ),
                 ).props("outline")
-
-        v = stats.get("videos", {})
-        lb = stats.get("labeling", {})
-        total = max(int(lb.get("total_videos", 1)), 1)
-        labeled = int(lb.get("labeled", 0))
-        review_later = int(lb.get("review_later", 0))
+                if review_later:
+                    ui.button(
+                        t("quick_review_later"),
+                        icon="bookmark",
+                        color="warning",
+                        on_click=lambda: go_review(selected_is_review_later=True),
+                    ).props("outline")
 
         # Stat cards
         with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
@@ -181,63 +186,3 @@ async def setup_overview():
                 ui.table(columns=columns, rows=rows).classes("q-pa-sm")
             else:
                 ui.label(t("no_camera_data")).classes("text-grey-5 q-pa-sm")
-
-        # Model annotations (only if data exists)
-        model_coverage = stats.get("model_coverage", [])
-        model_agreement = stats.get("model_human_agreement", [])
-        if model_coverage:
-            with (
-                ui.expansion(t("model_annotations"), icon="smart_toy")
-                .classes("full-width q-mb-lg")
-                .props("content-inset-level=0 header-class='q-pa-md q-py-sm'")
-            ):
-                with ui.column().classes("w-full gap-md q-pa-sm"):
-                    with ui.card().classes("full-width"):
-                        ui.label(t("col_coverage")).classes(
-                            "text-subtitle2 font-weight-medium q-mb-sm"
-                        )
-                        coverage_cols = [
-                            {"name": "model", "label": t("col_model"), "field": "model_name"},
-                            {
-                                "name": "covered",
-                                "label": t("col_coverage"),
-                                "field": "videos_covered",
-                            },
-                            {
-                                "name": "avg_conf",
-                                "label": t("col_avg_conf"),
-                                "field": "avg_probability",
-                            },
-                        ]
-                        coverage_rows = [
-                            {
-                                **r,
-                                "avg_probability": f"{r['avg_probability']:.2f}"
-                                if r.get("avg_probability") is not None
-                                else "—",
-                            }
-                            for r in model_coverage
-                        ]
-                        ui.table(columns=coverage_cols, rows=coverage_rows)
-
-                    if model_agreement:
-                        with ui.card().classes("full-width"):
-                            ui.label("Model-Human Agreement").classes(
-                                "text-subtitle2 font-weight-medium q-mb-xs"
-                            )
-                            ui.label(
-                                "For videos with both model and manual annotations, "
-                                "counts how often the model's top species prediction matches "
-                                "the manually labeled species."
-                            ).classes("text-caption text-grey-6 q-mb-sm")
-                            for row in model_agreement:
-                                pct = row.get("agreement_pct") or 0
-                                color = get_probability_color(pct / 100)
-                                with ui.row().classes("w-full items-center q-mb-sm"):
-                                    ui.label(row.get("model_name", "")).classes("col text-body2")
-                                    ui.label(
-                                        f"{row.get('agreed', 0)}/{row.get('compared', 0)}"
-                                    ).classes("text-body2 text-grey-6 q-mr-md")
-                                    ui.label(f"{pct:.0f}%").classes("text-body2").style(
-                                        f"color: {color}; font-weight: bold"
-                                    )

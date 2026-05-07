@@ -399,6 +399,12 @@ async def render_video_section(dp, species_map, global_species_map):
                     ).props(
                         f"flat round dense {'color=orange' if is_review_later else 'color=grey-6'}"
                     ).tooltip(t("review_later"))
+                    ui.button(
+                        icon="info_outline",
+                        on_click=lambda: show_info_dialog(
+                            t("info_review_later_title"), t("info_review_later_body")
+                        ),
+                    ).props("flat round dense size=xs color=grey-6")
                 consensus = video.get("classification_consensus")
                 default_species = (
                     consensus if consensus and consensus != "UNKNOWN" else None

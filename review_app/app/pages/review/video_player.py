@@ -84,12 +84,12 @@ def render_custom_video_player(video_url, duration, vid_key):
                 </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;padding:4px 8px;width:100%;flex-wrap:wrap;">
-                <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:180px;">
+                <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:220px;">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="#888" style="flex-shrink:0" title="Brightness"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>
                     <input type="range" id="vp-brightness-{vid_key}" min="0.5" max="2" step="0.01" value="1" style="flex:1;cursor:pointer;height:28px;">
                     <span id="vp-brightness-val-{vid_key}" style="font-size:14px;color:#888;width:30px;text-align:right;flex-shrink:0;">1.00</span>
                 </div>
-                <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:180px;">
+                <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:220px;">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="#888" style="flex-shrink:0" title="Contrast"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18V4c4.41 0 8 3.59 8 8s-3.59 8-8 8z"/></svg>
                     <input type="range" id="vp-contrast-{vid_key}" min="0.5" max="2" step="0.01" value="1" style="flex:1;cursor:pointer;height:28px;">
                     <span id="vp-contrast-val-{vid_key}" style="font-size:14px;color:#888;width:30px;text-align:right;flex-shrink:0;">1.00</span>

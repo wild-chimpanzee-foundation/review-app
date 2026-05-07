@@ -1,6 +1,5 @@
 from nicegui import run, ui
 
-from review_app.app.onboarding import show_info_dialog
 from review_app.app.state import (
     get_active_project_id,
     get_annotator_name,
@@ -481,9 +480,3 @@ def render_annotation_section(
                     _shortcut_badge("M")
             review_later_btn._props["data-shortcut"] = "mark-unknown"
             review_later_btn.tooltip(t("tooltip_review_later_btn"))
-            ui.button(
-                icon="info_outline",
-                on_click=lambda: show_info_dialog(
-                    t("info_review_later_title"), t("info_review_later_body")
-                ),
-            ).props("flat round dense size=xs color=grey-6")
