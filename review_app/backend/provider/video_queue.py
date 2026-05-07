@@ -98,12 +98,20 @@ class QueueMixin(ProviderBase):
         # through bind params (the `params` dict). Do not interpolate filter values directly.
         search_raw = (filters.get("search_query") or "").strip().lower()
         selected_camera = filters.get("selected_camera", "All")
-        selected_species = filters.get("selected_species", "All")
-        selected_possible_species = filters.get("selected_possible_species", "All")
+        selected_species = filters.get("selected_species") or []
+        selected_possible_species = filters.get("selected_possible_species") or []
         selected_manual_blank = filters.get("selected_manual_blank", "All")
         selected_model_blank = filters.get("selected_model_blank", "All")
-        selected_model_behavior = filters.get("selected_model_behavior", "All")
-        selected_behavior = filters.get("selected_behavior", "All")
+        selected_model_behavior = filters.get("selected_model_behavior") or []
+        selected_behavior = filters.get("selected_behavior") or []
+        if isinstance(selected_species, str):
+            selected_species = []
+        if isinstance(selected_possible_species, str):
+            selected_possible_species = []
+        if isinstance(selected_behavior, str):
+            selected_behavior = []
+        if isinstance(selected_model_behavior, str):
+            selected_model_behavior = []
         selected_annotation_status = filters.get("selected_annotation_status", "All")
         selected_is_review_later = filters.get("selected_is_review_later", False)
         selected_sort = filters.get("selected_sort", "camera")
@@ -190,23 +198,27 @@ class QueueMixin(ProviderBase):
             params["camera"] = selected_camera
             where.append("v.camera_id = :camera")
 
-        if selected_species != "All":
-            params["species"] = selected_species
-            where.append("""
+        if selected_species:
+            phs = ", ".join(f":sp{i}" for i in range(len(selected_species)))
+            for i, v in enumerate(selected_species):
+                params[f"sp{i}"] = v
+            where.append(f"""
                 EXISTS (
                     SELECT 1 FROM individual_observations io
                     JOIN species s ON s.id = io.species_id
-                    WHERE io.video_id = v.video_id AND s.scientific_name = :species
+                    WHERE io.video_id = v.video_id AND s.scientific_name IN ({phs})
                 )""")
 
-        if selected_possible_species != "All":
-            params["ps"] = selected_possible_species
-            where.append("""
+        if selected_possible_species:
+            phs = ", ".join(f":ps{i}" for i in range(len(selected_possible_species)))
+            for i, v in enumerate(selected_possible_species):
+                params[f"ps{i}"] = v
+            where.append(f"""
                 EXISTS (
                     SELECT 1 FROM model_annotations ma
                     WHERE ma.video_id = v.video_id
                     AND ma.annotation_type = 'species'
-                    AND ma.value_text = :ps
+                    AND ma.value_text IN ({phs})
                 )""")
 
         if selected_manual_blank == "Blank":
@@ -229,35 +241,27 @@ class QueueMixin(ProviderBase):
         elif selected_model_blank == "Unknown":
             where.append("mb_f.video_id IS NULL")
 
-        if selected_behavior == "Has Behavior":
-            where.append("""
-                EXISTS (
-                    SELECT 1 FROM individual_observations io
-                    WHERE io.video_id = v.video_id AND io.behavior_id IS NOT NULL
-                )""")
-        elif selected_behavior == "No Behavior":
-            where.append("""
-                NOT EXISTS (
-                    SELECT 1 FROM individual_observations io
-                    WHERE io.video_id = v.video_id AND io.behavior_id IS NOT NULL
-                )""")
-        elif selected_behavior not in ("All", "Has Behavior", "No Behavior"):
-            params["behavior"] = selected_behavior
-            where.append("""
+        if selected_behavior:
+            phs = ", ".join(f":beh{i}" for i in range(len(selected_behavior)))
+            for i, v in enumerate(selected_behavior):
+                params[f"beh{i}"] = v
+            where.append(f"""
                 EXISTS (
                     SELECT 1 FROM individual_observations io
                     JOIN behaviors b ON b.id = io.behavior_id
-                    WHERE io.video_id = v.video_id AND b.key = :behavior
+                    WHERE io.video_id = v.video_id AND b.key IN ({phs})
                 )""")
 
-        if selected_model_behavior != "All":
-            params["model_behavior"] = selected_model_behavior
-            where.append("""
+        if selected_model_behavior:
+            phs = ", ".join(f":mbeh{i}" for i in range(len(selected_model_behavior)))
+            for i, v in enumerate(selected_model_behavior):
+                params[f"mbeh{i}"] = v
+            where.append(f"""
                 EXISTS (
                     SELECT 1 FROM model_annotations ma
                     WHERE ma.video_id = v.video_id
                     AND ma.annotation_type = 'behavior'
-                    AND ma.value_text = :model_behavior
+                    AND ma.value_text IN ({phs})
                 )""")
 
         if web_safe_only:
@@ -296,10 +300,10 @@ class QueueMixin(ProviderBase):
                 v.video_path ASC"""
         elif selected_sort == "species_prob":
             species_sort_filter = (
-                selected_possible_species
-                if selected_possible_species != "All"
-                else selected_species
-                if selected_species != "All"
+                selected_possible_species[0]
+                if selected_possible_species
+                else selected_species[0]
+                if selected_species
                 else None
             )
             if species_sort_filter is not None:

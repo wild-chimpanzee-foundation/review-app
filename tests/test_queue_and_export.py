@@ -59,27 +59,34 @@ def test_queue_filter_manual_unlabeled(populated_provider):
 
 def test_queue_filter_species_deer(populated_provider):
     dp, ids = populated_provider
-    result = queue(dp, {"selected_species": "deer"})
+    result = queue(dp, {"selected_species": ["deer"]})
     assert result == {ids["v1"]}
 
 
 def test_queue_filter_species_fox(populated_provider):
     dp, ids = populated_provider
-    result = queue(dp, {"selected_species": "fox"})
+    result = queue(dp, {"selected_species": ["fox"]})
     assert result == {ids["v3"]}
+
+
+def test_queue_filter_species_multi(populated_provider):
+    """Selecting deer AND fox returns both."""
+    dp, ids = populated_provider
+    result = queue(dp, {"selected_species": ["deer", "fox"]})
+    assert result == {ids["v1"], ids["v3"]}
 
 
 def test_queue_filter_possible_species_deer(populated_provider):
     """Model predicted deer → only v1."""
     dp, ids = populated_provider
-    result = queue(dp, {"selected_possible_species": "deer"})
+    result = queue(dp, {"selected_possible_species": ["deer"]})
     assert result == {ids["v1"]}
 
 
 def test_queue_filter_possible_species_fox(populated_provider):
     """Model predicted fox → only v3."""
     dp, ids = populated_provider
-    result = queue(dp, {"selected_possible_species": "fox"})
+    result = queue(dp, {"selected_possible_species": ["fox"]})
     assert result == {ids["v3"]}
 
 
@@ -121,7 +128,7 @@ def test_queue_filter_search_by_filename(populated_provider):
 
 def test_queue_filter_behavior_deer(populated_provider):
     dp, ids = populated_provider
-    result = queue(dp, {"selected_behavior": "grazing"})
+    result = queue(dp, {"selected_behavior": ["grazing"]})
     assert result == {ids["v1"]}
 
 

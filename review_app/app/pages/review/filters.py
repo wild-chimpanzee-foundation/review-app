@@ -4,6 +4,7 @@ from review_app.app.state import (
     get_active_project_id,
     get_blank_threshold,
     get_filters,
+    get_language,
     get_species_threshold,
     is_auto_transcode,
     is_autoplay,
@@ -24,7 +25,12 @@ async def render_filter_drawer(
     navigate_to_callback,
     render_video_section_callback,
 ):
-    filter_options = await run.io_bound(dp.get_queue_filter_options, get_active_project_id())
+    filter_options, behavior_display_map = await run.io_bound(
+        lambda: (
+            dp.get_queue_filter_options(get_active_project_id()),
+            dp.get_behavior_display_map(lang=get_language()),
+        )
+    )
     filters = get_filters()
 
     with ui.element("div").classes("q-mini-drawer-hide full-width"):
@@ -48,40 +54,38 @@ async def render_filter_drawer(
                 with_input=True,
             ).props("outlined dense class=full-width")
 
-            web_safe_only_cb = ui.checkbox(
-                t("web_safe_only"), value=bool(filters.get("web_safe_only", False))
-            )
-
             ui.separator().classes("q-my-xs")
             ui.label(t("filter_section_model")).classes("text-caption text-grey-5")
 
             possible_species_values = filter_options.get("possible_species_values", [])
-            selected_possible_species = filters.get("selected_possible_species", "All")
-            if selected_possible_species not in ["All"] + possible_species_values:
-                selected_possible_species = "All"
+            selected_possible_species = filters.get("selected_possible_species", [])
+            if not isinstance(selected_possible_species, list):
+                selected_possible_species = []
+            selected_possible_species = [
+                v for v in selected_possible_species if v in possible_species_values
+            ]
             possible_species_filter = ui.select(
                 label=t("species_model_filter"),
-                options={
-                    v: species_map.get(v, v) if v != "All" else t("all_option")
-                    for v in ["All"] + possible_species_values
-                },
+                options={v: species_map.get(v, v) for v in possible_species_values},
                 value=selected_possible_species,
                 with_input=True,
-            ).props("outlined dense class=full-width")
+                multiple=True,
+            ).props("outlined dense class=full-width use-chips")
 
             model_behavior_values = filter_options.get("model_behavior_values", [])
-            selected_model_behavior = filters.get("selected_model_behavior", "All")
-            if selected_model_behavior not in ["All"] + model_behavior_values:
-                selected_model_behavior = "All"
+            selected_model_behavior = filters.get("selected_model_behavior", [])
+            if not isinstance(selected_model_behavior, list):
+                selected_model_behavior = []
+            selected_model_behavior = [
+                v for v in selected_model_behavior if v in model_behavior_values
+            ]
             model_behavior_filter = ui.select(
                 label=t("model_behavior_filter"),
-                options={
-                    "All": t("all_option"),
-                    **{v: v for v in model_behavior_values},
-                },
+                options={v: behavior_display_map.get(v, v) for v in model_behavior_values},
                 value=selected_model_behavior,
                 with_input=True,
-            ).props("outlined dense class=full-width")
+                multiple=True,
+            ).props("outlined dense class=full-width use-chips")
 
             selected_model_blank = filters.get("selected_model_blank", "All")
             model_blank_filter = ui.select(
@@ -109,34 +113,30 @@ async def render_filter_drawer(
             ui.label(t("filter_section_manual")).classes("text-caption text-grey-5")
 
             species_values = filter_options.get("species_values", [])
-            selected_species = filters.get("selected_species", "All")
-            if selected_species not in ["All"] + species_values:
-                selected_species = "All"
+            selected_species = filters.get("selected_species", [])
+            if not isinstance(selected_species, list):
+                selected_species = []
+            selected_species = [v for v in selected_species if v in species_values]
             species_filter = ui.select(
                 label=t("species_manual_filter"),
-                options={
-                    v: species_map.get(v, v) if v != "All" else t("all_option")
-                    for v in ["All"] + species_values
-                },
+                options={v: species_map.get(v, v) for v in species_values},
                 value=selected_species,
                 with_input=True,
-            ).props("outlined dense class=full-width")
+                multiple=True,
+            ).props("outlined dense class=full-width use-chips")
 
             behavior_values = filter_options.get("behavior_values", [])
-            selected_behavior = filters.get("selected_behavior", "All")
-            if selected_behavior not in ["All", "Has Behavior", "No Behavior"] + behavior_values:
-                selected_behavior = "All"
+            selected_behavior = filters.get("selected_behavior", [])
+            if not isinstance(selected_behavior, list):
+                selected_behavior = []
+            selected_behavior = [v for v in selected_behavior if v in behavior_values]
             behavior_filter = ui.select(
                 label=t("manual_behavior_filter"),
-                options={
-                    "All": t("all_option"),
-                    "Has Behavior": t("has_behavior"),
-                    "No Behavior": t("no_behavior"),
-                    **{v: v for v in behavior_values},
-                },
+                options={v: behavior_display_map.get(v, v) for v in behavior_values},
                 value=selected_behavior,
                 with_input=True,
-            ).props("outlined dense class=full-width")
+                multiple=True,
+            ).props("outlined dense class=full-width use-chips")
 
             selected_manual_blank = filters.get("selected_manual_blank", "All")
             manual_blank_filter = ui.select(
@@ -169,12 +169,12 @@ async def render_filter_drawer(
             async def reset_filters():
                 search.value = ""
                 camera_select.value = "All"
-                possible_species_filter.value = "All"
-                model_behavior_filter.value = "All"
+                possible_species_filter.value = []
+                model_behavior_filter.value = []
                 model_blank_filter.value = "All"
                 needs_review_filter.value = "All"
-                species_filter.value = "All"
-                behavior_filter.value = "All"
+                species_filter.value = []
+                behavior_filter.value = []
                 manual_blank_filter.value = "All"
                 annotation_filter.value = "All"
                 is_review_later.value = False
@@ -295,4 +295,10 @@ async def render_filter_drawer(
                 t("auto_transcode"),
                 value=is_auto_transcode(),
                 on_change=lambda e: set_auto_transcode(e.value),
+            )
+
+            web_safe_only_cb = ui.checkbox(
+                t("web_safe_only"),
+                value=bool(filters.get("web_safe_only", False)),
+                on_change=lambda _: apply_filters(),
             )

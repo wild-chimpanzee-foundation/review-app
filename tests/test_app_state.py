@@ -45,7 +45,7 @@ class TestDefaultFilters:
         f = state.get_filters()
         assert f["search_query"] == "hello"
         assert f["selected_camera"] == "Cam1"
-        assert f["selected_species"] == "All"
+        assert f["selected_species"] == []
 
 
 class TestResetAppState:
