@@ -321,6 +321,7 @@ class AnnotationMixin(ProviderBase):
                 raise SpeciesError(
                     user_message_key="species_error_unknown",
                     detail=f"Unknown species: {species!r}",
+                    name=species,
                 )
             behavior = str(selection.get("behavior") or "").strip() or "unlabeled"
 

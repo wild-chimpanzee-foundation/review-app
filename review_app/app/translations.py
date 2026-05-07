@@ -483,7 +483,7 @@ TRANSLATIONS = {
         "species_error_csv_format": "Species CSV format error",
         "species_error_csv_not_found": "Species CSV file not found",
         "species_error_csv_empty": "Species CSV is empty",
-        "species_error_unknown": "Unknown species",
+        "species_error_unknown": "Unknown species: '{name}'",
     },
     ##
     ##
@@ -969,7 +969,7 @@ TRANSLATIONS = {
         "species_error_csv_format": "Erreur de format du CSV d'espèces",
         "species_error_csv_not_found": "Fichier CSV d'espèces introuvable",
         "species_error_csv_empty": "Le CSV d'espèces est vide",
-        "species_error_unknown": "Espèce inconnue",
+        "species_error_unknown": "Espèce inconnue : '{name}'",
     },
 }
 

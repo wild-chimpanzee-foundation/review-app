@@ -16,6 +16,7 @@ from review_app.app.state import (
 )
 from review_app.app.translations import get_language, t
 from review_app.app.utils import format_utc_timestamp, get_probability_color
+from review_app.backend.errors import SpeciesError
 
 
 def _shortcut_badge(key):
@@ -340,9 +341,9 @@ def render_annotation_section(
         set_state_val("review_active_id", None)
         set_state_val("pending_blank_confirm", False)
 
-    async def update_annotation():
+    async def update_annotation() -> bool:
         if get_state_val("submit_in_progress"):
-            return
+            return False
         set_state_val("submit_in_progress", True)
         try:
             sels = get_selections()
@@ -351,7 +352,7 @@ def render_annotation_section(
                 await run.io_bound(
                     dp.update_manual_review, selected_video_id, [], is_blank=None, labeled_by=None
                 )
-                return
+                return True
             annotator = get_annotator_name()
             labeled_sels = [{**s, "labeled_by": annotator} for s in sels]
             await run.io_bound(
@@ -362,18 +363,24 @@ def render_annotation_section(
                 active_project_id=get_active_project_id(),
             )
             ui.notify(t("review_saved"), type="positive")
+            return True
+        except SpeciesError as exc:
+            ui.notify(t(exc.user_message_key, name=exc.name), type="negative")
+            return False
         finally:
             set_state_val("submit_in_progress", False)
 
     async def submit_and_next():
-        await update_annotation()
+        if not await update_annotation():
+            return
         await _advance_to_next(selected_video_id)
         _clear_review_state()
         render_video_section_callback.refresh()
         render_filter_drawer_callback.refresh()
 
     async def submit():
-        await update_annotation()
+        if not await update_annotation():
+            return
         set_state_val("review_state_video_id", None)
         render_video_section_callback.refresh()
         render_filter_drawer_callback.refresh()

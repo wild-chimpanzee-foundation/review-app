@@ -23,3 +23,7 @@ class DataImportError(AppError):
 
 class SpeciesError(AppError):
     user_message_key = "species_error_generic"
+
+    def __init__(self, detail: str = "", *, user_message_key: str | None = None, name: str = ""):
+        super().__init__(detail, user_message_key=user_message_key)
+        self.name = name
