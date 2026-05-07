@@ -6,7 +6,6 @@ Each test describes the *expected contract*, not the current implementation.
 Tests marked with xfail describe behaviour that is not yet implemented.
 """
 
-import pytest
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 # ---------------------------------------------------------------------------
@@ -264,9 +263,6 @@ def test_remove_project_dir_removes_dir_record(provider_with_project):
     assert dp.get_project_dirs(project.id) == []
 
 
-@pytest.mark.xfail(
-    reason="remove_project_dir does not yet cascade to videos (TODO in implementation)"
-)
 def test_remove_project_dir_cascades_videos_out_of_queue(provider_with_project):
     """
     Removing a project directory should remove its videos from the project queue.

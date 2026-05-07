@@ -5,7 +5,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-from review_app.backend.db.models import Project, ProjectDir
+from review_app.backend.db.models import Project, ProjectDir, Video
 from review_app.backend.provider.base import ProviderBase
 
 
@@ -89,12 +89,17 @@ class ProjectMixin(ProviderBase):
             return d
 
     def remove_project_dir(self, dir_id: str) -> None:
-        # TODO deal with videos from that dir
         with self.Session() as s:
             d = s.query(ProjectDir).filter_by(id=dir_id).first()
-            if d:
-                s.delete(d)
-                s.commit()
+            if not d:
+                return
+            prefix = d.path.rstrip("/") + "/"
+            s.query(Video).filter(
+                Video.project_id == d.project_id,
+                Video.video_path.like(prefix + "%"),
+            ).delete(synchronize_session=False)
+            s.delete(d)
+            s.commit()
 
     def get_project_video_count(self, project_id: str) -> int:
         with self.engine.connect() as conn:

@@ -180,9 +180,6 @@ def test_import_multiple_observations_same_video(clean_provider):
     assert len(detail["manual_selections"]) == 2
 
 
-@pytest.mark.xfail(
-    reason="unknown paths map to NaN and are silently dropped by groupby — never added to skipped"
-)
 def test_import_unknown_path_is_skipped(clean_provider):
     dp = clean_provider
     df = pd.DataFrame([{"video_path": "/nonexistent/ghost.mp4", "is_blank": 0, "species": "deer"}])
@@ -192,9 +189,6 @@ def test_import_unknown_path_is_skipped(clean_provider):
     assert "/nonexistent/ghost.mp4" in result["skipped"]
 
 
-@pytest.mark.xfail(
-    reason="unknown paths map to NaN and are silently dropped by groupby — never added to skipped"
-)
 def test_import_mixed_known_and_unknown(clean_provider):
     dp = clean_provider
     paths = _video_paths(dp)

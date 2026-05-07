@@ -564,7 +564,7 @@ class ImportMixin(ProviderBase):
         skipped: list[str] = []
         append = mode == "append"
 
-        for video_id, group in df.groupby("video_id", sort=False):
+        for video_id, group in df.groupby("video_id", sort=False, dropna=False):
             if pd.isna(video_id) or video_id not in known_ids:
                 label = group["video_path"].iloc[0] if has_path else str(video_id)
                 skipped.append(str(label))
