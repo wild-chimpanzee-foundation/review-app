@@ -1,8 +1,6 @@
 from pathlib import Path
-import nicegui
 
 project_root = Path.cwd()
-nicegui_dir = Path(nicegui.__file__).parent
 
 a = Analysis(
     [str(project_root / "review_app" / "app" / "entry_point.py")],
@@ -10,7 +8,6 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(project_root / "review_app"), "review_app"),
-        (str(nicegui_dir), "nicegui"),
     ],
     hiddenimports=[
         "pygments.lexers",

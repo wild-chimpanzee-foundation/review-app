@@ -23,29 +23,7 @@ def _migration_v4(conn) -> None:
     def _columns(table: str) -> set[str]:
         return {r[1] for r in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()}
 
-    # ── 1. Populate behaviors from all historic behavior strings ─────────────
-    # behaviors table was created empty by create_all; source tables may still exist.
-    sources = []
-    if "species_behavior" in _tables():
-        sources.append(
-            "SELECT DISTINCT behavior AS b FROM species_behavior WHERE behavior IS NOT NULL"
-        )
-    if "behavior" in _columns("individual_observations"):
-        sources.append(
-            "SELECT DISTINCT behavior AS b FROM individual_observations"
-            " WHERE behavior IS NOT NULL AND TRIM(behavior) <> ''"
-        )
-    if sources:
-        conn.execute(
-            text(
-                f"""
-                INSERT OR IGNORE INTO behaviors (id, key, name_en)
-                SELECT lower(hex(randomblob(16))), b, b FROM ({" UNION ".join(sources)})
-                """
-            )
-        )
-
-    # ── 2. Recreate species table with surrogate id ──────────────────────────
+    # ── 1. Recreate species table with surrogate id ──────────────────────────
     tables = _tables()
     if "species_new" not in tables and "id" not in _columns("species"):
         conn.execute(
@@ -69,32 +47,17 @@ def _migration_v4(conn) -> None:
                 """
             )
         )
-    elif "species_new" not in tables:
-        # id column already exists on species (partial previous run); nothing to do here.
-        pass
 
-    # ── 3. Populate species_behaviors from old junction table ─────────────────
-    if "species_behavior" in _tables():
-        src = "species_new" if "species_new" in _tables() else "species"
-        conn.execute(
-            text(
-                f"""
-                INSERT OR IGNORE INTO species_behaviors (species_id, behavior_id)
-                SELECT sn.id, b.id
-                FROM species_behavior sb
-                JOIN {src} sn ON sn.scientific_name = sb.scientific_name
-                JOIN behaviors b ON b.key = sb.behavior
-                """
-            )
-        )
-        conn.execute(text("DROP TABLE species_behavior"))
-
-    # ── 4. Swap species_new → species ─────────────────────────────────────────
+    # ── 2. Swap species_new → species ─────────────────────────────────────────
     if "species_new" in _tables():
         conn.execute(text("DROP TABLE species"))
         conn.execute(text("ALTER TABLE species_new RENAME TO species"))
 
-    # ── 5. Add FK columns to individual_observations ─────────────────────────
+    # ── 3. Drop old junction table — species_behaviors is repopulated from the bundled CSV on startup
+    if "species_behavior" in _tables():
+        conn.execute(text("DROP TABLE species_behavior"))
+
+    # ── 4. Add FK columns to individual_observations ─────────────────────────
     io_cols = _columns("individual_observations")
     if "species_id" not in io_cols:
         conn.execute(
@@ -117,7 +80,7 @@ def _migration_v4(conn) -> None:
             )
         )
 
-    # ── 6. Backfill FK columns from old string columns ────────────────────────
+    # ── 5. Backfill FK columns from old string columns ────────────────────────
     io_cols = _columns("individual_observations")
     if "species" in io_cols:
         conn.execute(

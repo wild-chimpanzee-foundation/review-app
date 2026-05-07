@@ -208,14 +208,78 @@ def shared_header(show_drawer: bool = False):
 class GUI:
     def __init__(self):
         self.dp = None
+        self._startup_error: Exception | None = None
 
     def main_page(self):
         from nicegui import ui
 
-        if get_active_project_id():
+        if self._startup_error:
+            ui.navigate.to("/db-error")
+        elif get_active_project_id():
             ui.navigate.to("/overview")
         else:
             ui.navigate.to("/setup")
+
+    def db_error_page(self):
+        from nicegui import ui
+
+        from review_app.app.config import get_default_db_path, get_user_data_dir
+
+        shared_header()
+
+        err = self._startup_error
+
+        with (
+            ui.column()
+            .classes("w-full items-center justify-center q-pa-xl gap-4")
+            .style("min-height: 80vh")
+        ):
+            ui.icon("error_outline", size="xl").classes("text-negative")
+            ui.label("Could not open database").classes("text-h5 text-negative")
+            ui.label(
+                "The database failed to load, possibly due to a failed migration or corruption."
+            ).classes("text-body1 text-grey-7 text-center")
+            if err:
+                ui.code(str(err)).classes("q-pa-md text-caption").style(
+                    "max-width: 700px; white-space: pre-wrap; word-break: break-all"
+                )
+
+            ui.separator().style("max-width: 500px; width: 100%")
+            ui.label(
+                "You can delete the database and start fresh. "
+                "A backup of the current database will be kept in the data folder."
+            ).classes("text-body2 text-grey-6 text-center").style("max-width: 500px")
+
+            def delete_and_restart():
+                import shutil
+
+                db_path = get_default_db_path()
+                if db_path.exists():
+                    backup = db_path.with_suffix(f".broken-{db_path.stat().st_mtime_ns}.db")
+                    shutil.copy2(db_path, backup)
+                    db_path.unlink()
+                    logger.info("Deleted broken DB %s; backup saved to %s", db_path, backup)
+                # Also remove WAL/SHM sidecar files so SQLite starts clean
+                for ext in (".db-wal", ".db-shm"):
+                    sidecar = db_path.with_suffix(ext)
+                    if sidecar.exists():
+                        sidecar.unlink()
+                self._startup_error = None
+                ui.navigate.to("/setup")
+
+            with ui.row().classes("gap-4 q-mt-sm"):
+                ui.button(
+                    "Open data folder",
+                    icon="folder_open",
+                    on_click=lambda: ui.run_javascript(
+                        f"window.open('file://{get_user_data_dir()}', '_blank')"
+                    ),
+                ).props("flat")
+                ui.button(
+                    "Delete database and start fresh",
+                    icon="delete_forever",
+                    on_click=delete_and_restart,
+                ).props("color=negative")
 
     async def overview_page(self):
         from review_app.app.pages.overview import setup_overview
@@ -296,6 +360,7 @@ class GUI:
                 ui.button(t("go_home_btn"), on_click=lambda: ui.navigate.to("/"), icon="home")
 
         ui.page("/")(self.main_page)
+        ui.page("/db-error")(self.db_error_page)
         ui.page("/overview")(self.overview_page)
         ui.page("/review")(self.review_page)
         ui.page("/setup")(self.setup_page)
@@ -337,7 +402,8 @@ class GUI:
                     [Path(d.path) for d in dp.get_project_dirs(get_active_project_id())]
                 )
             except Exception as e:
-                logger.warning("Could not initialize data provider at startup: %s", e)
+                logger.exception("Could not initialize data provider at startup")
+                self._startup_error = e
 
         setup_media_route()
 
