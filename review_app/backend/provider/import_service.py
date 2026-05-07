@@ -117,7 +117,6 @@ class ImportMixin(ProviderBase):
         self,
         df: pd.DataFrame,
         path_col: str,
-        match_strategy: str,
         ann_mappings: list[dict[str, str]],
         active_project_id: str | None,
     ) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -125,7 +124,7 @@ class ImportMixin(ProviderBase):
         Normalize an arbitrary CSV to the long format expected by validate_model_csv, using
         an explicit column mapping provided by the user.
 
-        match_strategy: "suffix" (parent_dir/stem) or "stem" (filename only, unambiguous)
+        Matching: tries parent_dir/filename (suffix) first, falls back to unambiguous stem.
         ann_mappings: list of {model_name, annotation_type, value_col, prob_col}
         """
         by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
@@ -139,16 +138,17 @@ class ImportMixin(ProviderBase):
             raw_path = str(src_row.get(path_col, "")).strip()
             p = Path(raw_path)
 
-            video_id: str | None = None
-            if match_strategy == "suffix":
-                video_id = by_suffix.get(f"{p.parent.name}/{p.name}".lower()) or by_suffix.get(
+            video_id = (
+                by_suffix.get(f"{p.parent.name}/{p.name}".lower())
+                or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
+                or by_stem.get(p.stem.lower())
+            )
+            if video_id:
+                if by_suffix.get(f"{p.parent.name}/{p.name}".lower()) or by_suffix.get(
                     f"{p.parent.name}/{p.stem}".lower()
-                )
-                if video_id:
+                ):
                     matched_suffix += 1
-            elif match_strategy == "stem":
-                video_id = by_stem.get(p.stem.lower())
-                if video_id:
+                else:
                     matched_stem += 1
 
             if video_id is None:
