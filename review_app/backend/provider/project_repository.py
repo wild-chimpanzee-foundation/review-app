@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 
@@ -7,6 +8,8 @@ from sqlalchemy import text
 
 from review_app.backend.db.models import Project, ProjectDir, Video
 from review_app.backend.provider.base import ProviderBase
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectMixin(ProviderBase):
@@ -28,7 +31,8 @@ class ProjectMixin(ProviderBase):
                 )
             s.commit()
             s.refresh(project)
-            return project
+        logger.info("Created project %r (id=%s, dir=%s)", name, project.id, video_dir or "none")
+        return project
 
     def list_projects(self) -> list[Project]:
         with self.Session() as s:
@@ -86,7 +90,8 @@ class ProjectMixin(ProviderBase):
             s.add(d)
             s.commit()
             s.refresh(d)
-            return d
+        logger.info("Added directory %s to project %s", path, project_id)
+        return d
 
     def remove_project_dir(self, dir_id: str) -> None:
         with self.Session() as s:
@@ -94,12 +99,22 @@ class ProjectMixin(ProviderBase):
             if not d:
                 return
             prefix = d.path.rstrip("/") + "/"
-            s.query(Video).filter(
-                Video.project_id == d.project_id,
-                Video.video_path.startswith(prefix),
-            ).delete(synchronize_session=False)
+            deleted = (
+                s.query(Video)
+                .filter(
+                    Video.project_id == d.project_id,
+                    Video.video_path.startswith(prefix),
+                )
+                .delete(synchronize_session=False)
+            )
             s.delete(d)
             s.commit()
+        logger.info(
+            "Removed directory %s from project %s (%d videos deleted)",
+            d.path,
+            d.project_id,
+            deleted,
+        )
 
     def get_project_video_count(self, project_id: str) -> int:
         with self.engine.connect() as conn:
@@ -113,7 +128,9 @@ class ProjectMixin(ProviderBase):
         with self.Session() as s:
             project = s.get(Project, project_id)
             if project is None:
+                logger.warning("delete_project: project %s not found", project_id)
                 return {"deleted": False}
+            project_name = project.name
             video_count = len(project.videos)
             transcoded_paths = [
                 Path(v.transcoded_path) for v in project.videos if v.transcoded_path is not None
@@ -122,4 +139,11 @@ class ProjectMixin(ProviderBase):
             s.commit()
         for p in transcoded_paths:
             p.unlink(missing_ok=True)
+        logger.info(
+            "Deleted project %r (id=%s): %d videos removed, %d transcoded files cleaned up",
+            project_name,
+            project_id,
+            video_count,
+            len(transcoded_paths),
+        )
         return {"deleted": True, "videos_removed": video_count}

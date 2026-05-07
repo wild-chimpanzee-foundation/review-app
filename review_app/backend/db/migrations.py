@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 from sqlalchemy import text
+
+logger = logging.getLogger(__name__)
 
 # Each entry is (version: int, sql: str | list[str] | Callable[[conn], None]).
 # Use a callable for migrations that need conditional logic (e.g. idempotent DDL).
@@ -134,12 +137,18 @@ def run_migrations(engine) -> None:
         conn.execute(text("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER)"))
         row = conn.execute(text("SELECT version FROM _schema_version")).fetchone()
         if row is None:
-            # Fresh DB — create_all already applied the latest schema; just stamp the version.
+            logger.info("Fresh database — stamping schema version %d", len(MIGRATIONS))
             conn.execute(text("INSERT INTO _schema_version VALUES (:v)"), {"v": len(MIGRATIONS)})
             return
         current = row[0]
+        pending = [v for v, _ in MIGRATIONS if v > current]
+        if pending:
+            logger.info(
+                "Running %d migration(s): v%d → v%d", len(pending), current, len(MIGRATIONS)
+            )
         for version, migration in MIGRATIONS:
             if version > current:
+                logger.debug("Applying migration v%d", version)
                 if callable(migration):
                     migration(conn)
                 else:

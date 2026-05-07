@@ -2,6 +2,9 @@ import argparse
 import logging
 import mimetypes
 import secrets
+import socket
+import sys
+import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -27,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 def _setup_logging(user_data_dir: Path, dev_mode: bool) -> None:
     root = logging.getLogger()
-    root.setLevel(logging.DEBUG if dev_mode else logging.INFO)
+    root.setLevel(logging.DEBUG)
     fmt = logging.Formatter(
         "%(asctime)s %(levelname)-8s %(name)s: %(message)s", datefmt="%Y-%m-%dT%H:%M:%S"
     )
@@ -40,8 +43,29 @@ def _setup_logging(user_data_dir: Path, dev_mode: bool) -> None:
         sh = logging.StreamHandler()
         sh.setFormatter(fmt)
         root.addHandler(sh)
-    # NiceGUI emits this on dynamic UI updates; it's framework noise, not actionable
+    # Suppress noisy third-party loggers
     logging.getLogger("nicegui").setLevel(logging.ERROR)
+    logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
+    logging.getLogger("watchfiles").setLevel(logging.WARNING)
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+
+    def _excepthook(exc_type, exc_value, exc_tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+            return
+        logger.critical("Unhandled exception", exc_info=(exc_type, exc_value, exc_tb))
+
+    def _thread_excepthook(args):
+        if args.exc_type is SystemExit:
+            return
+        logger.critical(
+            "Unhandled exception in thread %s",
+            args.thread.name if args.thread else "unknown",
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    sys.excepthook = _excepthook
+    threading.excepthook = _thread_excepthook
 
 
 # Register video mimetypes for both lower and uppercase extensions (camera traps often use .MP4)
@@ -205,6 +229,15 @@ def shared_header(show_drawer: bool = False):
     return drawer, toggle_drawer
 
 
+def _check_port(port: int) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if s.connect_ex(("127.0.0.1", port)) == 0:
+            raise OSError(
+                f"Port {port} is already in use. Another instance may still be running. "
+                f"Close it or pass --port to use a different port."
+            )
+
+
 class GUI:
     def __init__(self):
         self.dp = None
@@ -345,11 +378,15 @@ class GUI:
         _udd.mkdir(parents=True, exist_ok=True)
         _setup_logging(_udd, dev_mode)
 
+        logger.info("Starting (dev=%s, port=%d, data_dir=%s)", dev_mode, port, _udd)
+
         @app.on_page_exception
         def custom_error_page(exception: Exception):
             from traceback import format_exc
 
             from review_app.app.utils import user_error_message
+
+            logger.exception("Unhandled page exception: %s", exception)
 
             with ui.column().classes("w-full h-screen items-center justify-center"):
                 ui.icon("error_outline", size="xl").classes("text-negative q-mb-md")
@@ -398,12 +435,22 @@ class GUI:
                         set_active_project(proj.id)
                         dp.touch_project(proj.id)
 
+                active_pid = get_active_project_id()
+                active_proj = dp.get_project(active_pid) if active_pid else None
+                logger.info(
+                    "Active project: %s (id=%s)",
+                    active_proj.name if active_proj else "none",
+                    active_pid or "none",
+                )
+
                 set_media_dirs(
                     [Path(d.path) for d in dp.get_project_dirs(get_active_project_id())]
                 )
             except Exception as e:
                 logger.exception("Could not initialize data provider at startup")
                 self._startup_error = e
+        else:
+            logger.info("No existing database found — fresh install, launching setup wizard")
 
         setup_media_route()
 
@@ -419,6 +466,7 @@ class GUI:
 
         @app.on_shutdown
         def _backup_on_shutdown():
+            logger.info("Shutting down")
             if self.dp and self.dp.engine:
                 from review_app.backend.db.backup import BackupError, create_backup
 
@@ -449,6 +497,11 @@ if __name__ in {"__main__", "__mp_main__"}:
 
     gui = GUI()
     try:
+        if __name__ == "__main__":
+            _check_port(args.port)
         gui.start(dev_mode=args.dev, port=args.port)
     except KeyboardInterrupt:
         pass
+    except OSError as exc:
+        logging.getLogger(__name__).error("%s", exc)
+        raise SystemExit(1) from None

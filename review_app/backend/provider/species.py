@@ -67,6 +67,7 @@ class SpeciesMixin(ProviderBase):
                 user_message_key="species_error_csv_empty",
                 detail="Bundled species CSV is empty or missing a scientific_name column.",
             )
+        logger.debug("Loaded %d species from bundled CSV", len(rows))
 
         with self.engine.begin() as conn:
             # Preserve existing IDs so FK references in individual_observations remain valid.
@@ -607,6 +608,7 @@ class SpeciesMixin(ProviderBase):
                     "iucn": iucn,
                 },
             )
+        logger.info("Added custom species %r", scientific_name)
         return True
 
     def _upsert_species(self, row: dict[str, Any]) -> None:
@@ -656,6 +658,7 @@ class SpeciesMixin(ProviderBase):
 
         names = [r["scientific_name"] for r in rows]
         self.set_project_species(project_id, names)
+        logger.info("Set %d project species for project %s from CSV", len(names), project_id)
         return len(names)
 
     def import_project_behaviors_from_csv(self, project_id: str, content: str) -> int:
@@ -696,4 +699,5 @@ class SpeciesMixin(ProviderBase):
             if sci not in project_species and self.species_exists(sci):
                 self.set_project_species_behaviors(project_id, sci, global_keys + keys)
                 updated += 1
+        logger.info("Set behaviors for %d species in project %s from CSV", updated, project_id)
         return updated

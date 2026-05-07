@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 import pandas as pd
@@ -10,6 +11,8 @@ from review_app.backend.db.models import IndividualObservation, VideoLabel
 from review_app.backend.errors import SpeciesError
 from review_app.backend.provider.base import ProviderBase
 from review_app.backend.utils import needs_browser_transcode
+
+logger = logging.getLogger(__name__)
 
 
 class AnnotationMixin(ProviderBase):
@@ -286,6 +289,7 @@ class AnnotationMixin(ProviderBase):
 
         # Special case: Clearing all annotations (only if not appending)
         if not append and not selections and is_blank is None:
+            logger.info("Clearing annotations for video %s", video_id)
             with self.Session() as session:
                 if session.get(VideoLabel, video_id) is not None:
                     session.query(VideoLabel).filter(VideoLabel.video_id == video_id).update(
@@ -447,6 +451,13 @@ class AnnotationMixin(ProviderBase):
             label.review_later = False
 
             session.commit()
+            logger.info(
+                "Annotation saved: video=%s is_blank=%s observations=%d labeled_by=%s",
+                video_id,
+                is_blank,
+                len(normalized),
+                labeled_by,
+            )
 
     def set_review_later(self, video_id: str, value: bool = True) -> None:
         with self.Session() as session:
@@ -456,3 +467,4 @@ class AnnotationMixin(ProviderBase):
                 session.add(label)
             label.review_later = value
             session.commit()
+        logger.debug("review_later=%s for video %s", value, video_id)

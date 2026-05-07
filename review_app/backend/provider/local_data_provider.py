@@ -59,6 +59,7 @@ class LocalDataProvider(
             conn.execute("PRAGMA temp_store=MEMORY")
             conn.execute("PRAGMA mmap_size=268435456")
 
+        logger.info("Opening database at %s", self._db_path)
         Base.metadata.create_all(self.engine)
         run_migrations(self.engine)
         self.Session = sessionmaker(bind=self.engine)
