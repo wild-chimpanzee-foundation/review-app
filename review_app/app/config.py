@@ -38,7 +38,9 @@ def get_app_dir() -> Path:
     NOT for writing — use get_user_data_dir() for config and DB.
     """
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
+        # PyInstaller 6+ places data files in _internal/ (sys._MEIPASS);
+        # fall back to executable parent for older builds.
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     return Path(__file__).parents[2]
 
 
@@ -47,16 +49,10 @@ def get_default_db_path() -> Path:
 
 
 def get_bundled_species_csv() -> str | None:
-    bundle_dir = Path(__file__).parent.parent / "data"
-    bundled = bundle_dir / "species.csv"
-    if bundled.exists():
-        return str(bundled)
-    return None
+    bundled = get_app_dir() / "review_app" / "data" / "species.csv"
+    return str(bundled) if bundled.exists() else None
 
 
 def get_bundled_behaviors_csv() -> str | None:
-    bundle_dir = Path(__file__).parent.parent / "data"
-    bundled = bundle_dir / "behaviors.csv"
-    if bundled.exists():
-        return str(bundled)
-    return None
+    bundled = get_app_dir() / "review_app" / "data" / "behaviors.csv"
+    return str(bundled) if bundled.exists() else None
