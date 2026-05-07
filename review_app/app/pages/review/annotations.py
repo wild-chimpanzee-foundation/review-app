@@ -426,7 +426,7 @@ def render_annotation_section(
             set_state_val("submit_in_progress", False)
 
     # ── Action buttons ────────────────────────────────────────────────────────
-    # Primary row: the two most-used actions, full-width, visually dominant
+    # Primary row: the three most-used actions, full-width, visually dominant
     with ui.row().classes("w-full gap-sm q-mt-sm tour-target-action-buttons"):
         with (
             ui.button(on_click=submit_and_next, color="warning")
@@ -450,26 +450,6 @@ def render_annotation_section(
                 _shortcut_badge("B")
         blank_next_btn._props["data-shortcut"] = "mark-blank"
         blank_next_btn.tooltip(t("tooltip_mark_blank"))
-
-    # Secondary row: less-common actions, subtle styling
-    with ui.row().classes("w-full gap-sm q-mb-md q-mt-xs"):
-        with (
-            ui.button(on_click=submit, color="primary")
-            .props("outline")
-            .classes("col")
-            .style("height: 60px; min-width: 160px;")
-        ):
-            with ui.row().classes("items-center justify-center w-full no-wrap"):
-                ui.label(t("submit"))
-
-        with (
-            ui.button(on_click=mark_blank_stay, color="primary")
-            .props("outline")
-            .classes("col")
-            .style("height: 60px; min-width: 160px;")
-        ):
-            with ui.row().classes("items-center justify-center w-full no-wrap"):
-                ui.label(t("blank"))
 
         with (
             ui.row()

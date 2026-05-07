@@ -146,8 +146,13 @@ async def render_video_section(dp, species_map, global_species_map):
     is_review_later = bool(video.get("review_later"))
 
     async def toggle_review_later():
-        await run.io_bound(dp.set_review_later, selected_video_id, not is_review_later)
-        render_video_section.refresh()
+        nonlocal is_review_later
+        new_val = not is_review_later
+        await run.io_bound(dp.set_review_later, selected_video_id, new_val)
+        is_review_later = new_val
+        bookmark_btn._props["icon"] = "bookmark" if new_val else "bookmark_border"
+        bookmark_btn._props["color"] = "orange" if new_val else "grey-6"
+        bookmark_btn.update()
 
     with ui.row().classes("w-full items-center q-mb-md"):
         with ui.row().classes("items-center gap-xs"):
@@ -394,12 +399,16 @@ async def render_video_section(dp, species_map, global_species_map):
                 with ui.row().classes("items-center w-full q-mb-none"):
                     ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium")
                     ui.space()
-                    ui.button(
-                        icon="bookmark" if is_review_later else "bookmark_border",
-                        on_click=toggle_review_later,
-                    ).props(
-                        f"flat round dense {'color=orange' if is_review_later else 'color=grey-6'}"
-                    ).tooltip(t("review_later"))
+                    bookmark_btn = (
+                        ui.button(
+                            icon="bookmark" if is_review_later else "bookmark_border",
+                            on_click=toggle_review_later,
+                        )
+                        .props(
+                            f"flat round dense {'color=orange' if is_review_later else 'color=grey-6'}"
+                        )
+                        .tooltip(t("review_later"))
+                    )
                     ui.button(
                         icon="info_outline",
                         on_click=lambda: show_info_dialog(
