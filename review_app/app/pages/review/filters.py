@@ -42,6 +42,7 @@ async def render_filter_drawer(
                 "outlined dense class=full-width"
             )
             search.value = filters.get("search_query", "")
+            search.on("keyup.enter", lambda _: apply_filters())
 
             camera_values = filter_options.get("camera_values", [])
             selected_camera = filters.get("selected_camera", "All")
@@ -52,6 +53,7 @@ async def render_filter_drawer(
                 options={v: v if v != "All" else t("all_option") for v in ["All"] + camera_values},
                 value=selected_camera,
                 with_input=True,
+                on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width")
 
             ui.separator().classes("q-my-xs")
@@ -70,6 +72,7 @@ async def render_filter_drawer(
                 value=selected_possible_species,
                 with_input=True,
                 multiple=True,
+                on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width use-chips")
 
             model_behavior_values = filter_options.get("model_behavior_values", [])
@@ -85,6 +88,7 @@ async def render_filter_drawer(
                 value=selected_model_behavior,
                 with_input=True,
                 multiple=True,
+                on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width use-chips")
 
             selected_model_blank = filters.get("selected_model_blank", "All")
@@ -94,9 +98,10 @@ async def render_filter_drawer(
                     "All": t("all_option"),
                     "Blank": t("blank"),
                     "Non-Blank": t("non_blank"),
-                    "Unknown": t("unknown"),
+                    "Unknown": t("model_blank_not_processed"),
                 },
                 value=selected_model_blank,
+                on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width")
 
             needs_review_filter = ui.select(
@@ -107,6 +112,7 @@ async def render_filter_drawer(
                     "No Review": t("no_review_needed"),
                 },
                 value=filters.get("selected_needs_review", "All"),
+                on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width")
 
             ui.separator().classes("q-my-xs")
@@ -123,6 +129,7 @@ async def render_filter_drawer(
                 value=selected_species,
                 with_input=True,
                 multiple=True,
+                on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width use-chips")
 
             behavior_values = filter_options.get("behavior_values", [])
@@ -136,6 +143,7 @@ async def render_filter_drawer(
                 value=selected_behavior,
                 with_input=True,
                 multiple=True,
+                on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width use-chips")
 
             selected_manual_blank = filters.get("selected_manual_blank", "All")
@@ -148,6 +156,7 @@ async def render_filter_drawer(
                     "Unlabeled": t("unlabeled_option"),
                 },
                 value=selected_manual_blank,
+                on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width")
 
             annotation_filter = ui.select(
@@ -159,11 +168,13 @@ async def render_filter_drawer(
                     "Review Later": t("review_later"),
                 },
                 value=filters.get("selected_annotation_status", "All"),
+                on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width")
 
             is_review_later = ui.checkbox(
                 t("review_later_filter"),
                 value=bool(filters.get("selected_is_review_later", False)),
+                on_change=lambda _: apply_filters(),
             ).props("class=full-width")
 
             async def reset_filters():
@@ -215,13 +226,9 @@ async def render_filter_drawer(
                 navigate_to_callback(0)
                 ui.run_javascript("document.activeElement?.blur()")
 
-            with ui.row().classes("w-full gap-sm"):
-                ui.button(t("apply_filters"), on_click=apply_filters, color="primary").classes(
-                    "col"
-                )
-                ui.button(
-                    t("reset_filters"), on_click=lambda: reset_filters(), color="negative"
-                ).classes("col")
+            ui.button(t("reset_filters"), on_click=reset_filters, color="negative").classes(
+                "full-width"
+            )
 
         # ── Sort ─────────────────────────────────────────────────────────
         with ui.card().classes("full-width q-mb-md"):

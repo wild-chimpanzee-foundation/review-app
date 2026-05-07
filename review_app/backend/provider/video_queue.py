@@ -171,11 +171,18 @@ class QueueMixin(ProviderBase):
 
         need_model_blank_filter = selected_model_blank != "All"
         if need_model_blank_filter:
+            if "blank_thr" not in params:
+                params["blank_thr"] = blank_threshold
             ctes.append("""
             model_blank AS (
-                SELECT video_id, LOWER(TRIM(value_text)) AS result
+                SELECT video_id,
+                    CASE
+                        WHEN LOWER(TRIM(value_text)) = 'non_blank' THEN 'non_blank'
+                        WHEN COALESCE(probability, 0.0) >= :blank_thr THEN 'blank'
+                        ELSE 'non_blank'
+                    END AS result
                 FROM (
-                    SELECT video_id, value_text,
+                    SELECT video_id, value_text, probability,
                         ROW_NUMBER() OVER (
                             PARTITION BY video_id
                             ORDER BY COALESCE(probability, -1.0) DESC, updated_at DESC
