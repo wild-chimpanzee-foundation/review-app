@@ -36,12 +36,20 @@ def _subprocess_env() -> dict[str, str]:
     Restoring the original value fixes that.
     """
     env = os.environ.copy()
-    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
-        orig = env.get("LD_LIBRARY_PATH_ORIG", "")
-        if orig:
-            env["LD_LIBRARY_PATH"] = orig
-        else:
-            env.pop("LD_LIBRARY_PATH", None)
+    if getattr(sys, "frozen", False):
+        if sys.platform.startswith("linux"):
+            orig = env.get("LD_LIBRARY_PATH_ORIG", "")
+            if orig:
+                env["LD_LIBRARY_PATH"] = orig
+            else:
+                env.pop("LD_LIBRARY_PATH", None)
+        elif sys.platform == "darwin":
+            # Homebrew directories are stripped from PATH in frozen bundles
+            path_parts = env.get("PATH", "").split(":")
+            for brew_bin in ("/opt/homebrew/bin", "/usr/local/bin"):
+                if brew_bin not in path_parts:
+                    path_parts.insert(0, brew_bin)
+            env["PATH"] = ":".join(path_parts)
     return env
 
 

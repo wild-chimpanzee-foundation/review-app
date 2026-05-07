@@ -36,11 +36,27 @@ def validate_video_dir(path: str) -> tuple[str, dict] | None:
     return ("video_dir_no_videos", {"exts": ", ".join(sorted(VIDEO_EXTENSIONS))})
 
 
+_HOMEBREW_PATHS = ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg")
+
+
+def find_ffmpeg() -> str | None:
+    """Return the ffmpeg executable path, checking Homebrew locations as fallback."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    # PyInstaller strips PATH on macOS; check known Homebrew install locations
+    for candidate in _HOMEBREW_PATHS:
+        if Path(candidate).is_file():
+            return candidate
+    return None
+
+
 def check_ffmpeg() -> bool:
-    if not shutil.which("ffmpeg"):
+    path = find_ffmpeg()
+    if not path:
         return False
     try:
-        result = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=5)
+        result = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=5)
         return result.returncode == 0
     except Exception:
         return False
