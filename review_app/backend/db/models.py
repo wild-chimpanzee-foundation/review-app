@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -12,9 +12,12 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
-    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -26,7 +29,7 @@ class Project(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String, unique=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     last_opened: Mapped[datetime | None] = mapped_column(DateTime)
     dirs: Mapped[list[ProjectDir]] = relationship(
         "ProjectDir", backref="project", cascade="all, delete-orphan"
@@ -39,6 +42,7 @@ class Project(Base):
 
 class ProjectDir(Base):
     __tablename__ = "project_dirs"
+    __table_args__ = (UniqueConstraint("project_id", "path", name="uq_project_dir"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id"), index=True)
@@ -56,7 +60,7 @@ class Video(Base):
     camera_id: Mapped[str | None] = mapped_column(String, index=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime)
     duration_sec: Mapped[float | None] = mapped_column(Float)
-    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     is_valid: Mapped[bool | None] = mapped_column(Boolean)
     is_web_safe: Mapped[bool | None] = mapped_column(Boolean)
     validation_error: Mapped[str | None] = mapped_column(String)
@@ -142,7 +146,7 @@ class IndividualObservation(Base):
     end_sec: Mapped[float | None] = mapped_column(Float)
     labeled_by: Mapped[str | None] = mapped_column(String)
     labeled_at: Mapped[datetime | None] = mapped_column(DateTime)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 class ModelAnnotation(Base):
@@ -163,7 +167,7 @@ class ModelAnnotation(Base):
     probability: Mapped[float | None] = mapped_column(Float)
     t_start_sec: Mapped[float | None] = mapped_column(Float)
     t_end_sec: Mapped[float | None] = mapped_column(Float)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 class AppSetting(Base):
@@ -185,6 +189,7 @@ Index(
 )
 Index("idx_individual_video_time", IndividualObservation.video_id, IndividualObservation.start_sec)
 Index("idx_videos_is_valid", Video.is_valid)
+Index("idx_videos_is_web_safe", Video.is_web_safe)
 # Covers: WHERE annotation_type='species' AND value_text=:ps  (possible_species filter)
 Index(
     "idx_model_ann_type_text_video",

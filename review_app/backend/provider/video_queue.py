@@ -110,10 +110,8 @@ class QueueMixin(ProviderBase):
         selected_sort_direction = filters.get("selected_sort_direction", "desc")
         sort_dir = "DESC" if selected_sort_direction == "desc" else "ASC"
         sort_dir_inv = "ASC" if selected_sort_direction == "desc" else "DESC"
-        assert sort_dir in ("ASC", "DESC") and sort_dir_inv in (
-            "ASC",
-            "DESC",
-        )  # interpolated into SQL
+        if sort_dir not in ("ASC", "DESC") or sort_dir_inv not in ("ASC", "DESC"):
+            raise ValueError(f"Invalid sort direction: {selected_sort_direction!r}")
         web_safe_only = bool(filters.get("web_safe_only", False))
         selected_needs_review = filters.get("selected_needs_review", "All")
         blank_threshold = float(filters.get("blank_threshold", 0.75))

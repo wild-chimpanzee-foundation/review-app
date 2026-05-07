@@ -156,6 +156,13 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     ),
     (3, "CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)"),
     (4, _migration_v4),
+    (
+        5,
+        [
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_project_dir ON project_dirs(project_id, path)",
+            "CREATE INDEX IF NOT EXISTS idx_videos_is_web_safe ON videos(is_web_safe)",
+        ],
+    ),
 ]
 
 

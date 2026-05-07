@@ -96,7 +96,7 @@ class ProjectMixin(ProviderBase):
             prefix = d.path.rstrip("/") + "/"
             s.query(Video).filter(
                 Video.project_id == d.project_id,
-                Video.video_path.like(prefix + "%"),
+                Video.video_path.startswith(prefix),
             ).delete(synchronize_session=False)
             s.delete(d)
             s.commit()
