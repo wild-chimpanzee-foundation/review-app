@@ -26,16 +26,13 @@ class ProviderBase:
     # Declared here so mixins that call methods from other mixins satisfy pyright.
     # Each stub is overridden by the mixin that actually implements it.
 
-    def get_valid_species(self, project_id: str | None) -> list[str]:
-        raise NotImplementedError
+    def get_valid_species(self, project_id: str | None) -> list[str]: ...
 
     def _validate_species_fuzzy(
         self, value_text: str, variant_map: dict[str, str] | None
-    ) -> tuple[bool, str | None]:
-        raise NotImplementedError
+    ) -> tuple[bool, str | None]: ...
 
-    def _build_species_variant_map(self) -> dict[str, str]:
-        raise NotImplementedError
+    def _build_species_variant_map(self) -> dict[str, str]: ...
 
     def update_manual_review(
         self,
@@ -45,5 +42,4 @@ class ProviderBase:
         labeled_by: str | None = None,
         active_project_id: str | None = None,
         append: bool = False,
-    ) -> None:
-        raise NotImplementedError
+    ) -> None: ...

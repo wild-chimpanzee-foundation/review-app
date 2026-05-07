@@ -33,6 +33,14 @@ build-backend = "flit_core.buildapi"
 [tool.flit.module]
 name = "review_app"
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "basic"
+reportArgumentType = "none"
+reportGeneralTypeIssues = "none"
+reportCallIssue = "none"
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.2.0",

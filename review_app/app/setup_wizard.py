@@ -8,7 +8,7 @@ from pathlib import Path
 from nicegui import run, ui
 
 from review_app.app.config import get_default_db_path
-from review_app.app.state import get_language
+from review_app.app.state import get_language, set_language
 from review_app.app.translations import t
 from review_app.app.utils import format_utc_timestamp, sync_with_progress
 
@@ -227,8 +227,6 @@ class SetupWizard:
                                 ui.label(t("welcome_setup_msg")).classes("text-body1 text-grey-7")
 
                             def change_language(e):
-                                from review_app.app.translations import set_language
-
                                 set_language(e.value)
                                 ui.run_javascript("window.location.reload()")
 
@@ -249,7 +247,7 @@ class SetupWizard:
                             placeholder=t("annotator_name_placeholder"),
                         ).props("outlined dense class=w-full")
                         self.inputs["annotator_name"].on_value_change(
-                            lambda e: update_continue_button()
+                            lambda _: update_continue_button()
                         )
 
                     with ui.card().classes("full-width q-mb-md"):
@@ -340,7 +338,7 @@ class SetupWizard:
                             placeholder=t("project_name_placeholder"),
                         ).props("outlined dense class=w-full")
                         self.inputs["project_name"].on_value_change(
-                            lambda e: update_project_button()
+                            lambda _: update_project_button()
                         )
 
                     with ui.card().classes("full-width q-mb-md"):
@@ -545,7 +543,7 @@ class SetupWizard:
                     self.inputs["project_name"] = ui.input(
                         placeholder=t("project_name_placeholder"),
                     ).props("outlined dense class=w-full")
-                    self.inputs["project_name"].on_value_change(lambda e: update_project_button())
+                    self.inputs["project_name"].on_value_change(lambda _: update_project_button())
 
                 with ui.card().classes("full-width q-mb-md"):
                     ui.label(t("video_dir_label")).classes(
