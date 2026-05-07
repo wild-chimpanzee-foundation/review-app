@@ -3,20 +3,22 @@ from __future__ import annotations
 import logging
 import uuid
 from pathlib import Path
+from typing import IO, Any
 
 import pandas as pd
 from sqlalchemy import text
 
 from review_app.backend.errors import DataImportError, SpeciesError
+from review_app.backend.provider.base import ProviderBase
 
 logger = logging.getLogger(__name__)
 
 
-class SpeciesMixin:
+class SpeciesMixin(ProviderBase):
     """Species and behavior loading and queries. Requires self.engine."""
 
     @staticmethod
-    def _parse_species_csv(path) -> list[dict]:
+    def _parse_species_csv(path: Path | IO[str]) -> list[dict[str, Any]]:
         df = pd.read_csv(path, sep=";")
         if "scientific_name" not in df.columns:
             raise SpeciesError(
@@ -106,7 +108,7 @@ class SpeciesMixin:
             )
 
     @staticmethod
-    def _parse_behaviors_csv(path) -> list[dict]:
+    def _parse_behaviors_csv(path: Path | IO[str]) -> list[dict[str, Any]]:
         try:
             df = pd.read_csv(path, sep=";")
             if "scientific_name" not in df.columns or "key" not in df.columns:
@@ -416,7 +418,7 @@ class SpeciesMixin:
         result = [r[0] for r in rows]
         return result
 
-    def get_all_behaviors(self) -> list[dict]:
+    def get_all_behaviors(self) -> list[dict[str, str]]:
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text("SELECT key, name_en, name_fr FROM behaviors ORDER BY key")
@@ -607,7 +609,7 @@ class SpeciesMixin:
             )
         return True
 
-    def _upsert_species(self, row: dict) -> None:
+    def _upsert_species(self, row: dict[str, Any]) -> None:
         """Insert or update a species from a user-supplied CSV. Marks as custom so the
         bundled-data reload on startup cannot overwrite it."""
         sci = row["scientific_name"]

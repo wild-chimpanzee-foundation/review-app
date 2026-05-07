@@ -6,9 +6,10 @@ import pandas as pd
 from sqlalchemy import select, text
 
 from review_app.backend.db.models import IndividualObservation, ModelAnnotation, VideoLabel
+from review_app.backend.provider.base import ProviderBase
 
 
-class QueueMixin:
+class QueueMixin(ProviderBase):
     """Video queue building and filter options. Requires self.engine."""
 
     def _get_model_annotations_df(self) -> pd.DataFrame:
@@ -91,7 +92,7 @@ class QueueMixin:
 
         return result
 
-    def get_video_queue(self, filters: dict, active_project_id: str | None) -> list[str]:
+    def get_video_queue(self, filters: dict[str, Any], active_project_id: str | None) -> list[str]:
         # Safety invariant: only hardcoded SQL fragments and pre-validated keywords (ASC/DESC)
         # are interpolated into the query via f-strings. All user-supplied values must go
         # through bind params (the `params` dict). Do not interpolate filter values directly.

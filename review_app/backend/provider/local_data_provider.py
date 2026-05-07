@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Callable
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -93,10 +94,10 @@ class LocalDataProvider(
 
     def sync_videos(
         self,
-        progress_callback,
+        progress_callback: Callable[[int, int, str], None] | None = None,
         video_dir: Path | None = None,
         active_project_id: str | None = None,
-    ) -> dict:
+    ) -> dict[str, int]:
         return self._sync_videos_table(
             progress_callback, video_dir=video_dir, active_project_id=active_project_id
         )
@@ -105,7 +106,7 @@ class LocalDataProvider(
     def db_path(self) -> Path:
         return self._db_path
 
-    def has_videos_in_db(self, active_project_id) -> bool:
+    def has_videos_in_db(self, active_project_id: str | None) -> bool:
         if not self._db_path.exists():
             return False
         with self.engine.connect() as conn:

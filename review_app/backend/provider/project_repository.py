@@ -6,9 +6,10 @@ from pathlib import Path
 from sqlalchemy import text
 
 from review_app.backend.db.models import Project, ProjectDir
+from review_app.backend.provider.base import ProviderBase
 
 
-class ProjectMixin:
+class ProjectMixin(ProviderBase):
     """Project and ProjectDir CRUD. Requires self.engine, self.Session, self._utcnow_dt."""
 
     def create_project(self, name: str, video_dir: str) -> Project:
@@ -103,7 +104,7 @@ class ProjectMixin:
             ).fetchone()
             return result[0] if result else 0
 
-    def delete_project(self, project_id: str) -> dict:
+    def delete_project(self, project_id: str) -> dict[str, bool | int]:
         with self.Session() as s:
             project = s.get(Project, project_id)
             if project is None:

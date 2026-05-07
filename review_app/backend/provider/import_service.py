@@ -10,11 +10,12 @@ from sqlalchemy import text
 
 from review_app.app.config import CSV_TEMPLATES
 from review_app.backend.errors import DataImportError
+from review_app.backend.provider.base import ProviderBase
 
 logger = logging.getLogger(__name__)
 
 
-class ImportMixin:
+class ImportMixin(ProviderBase):
     """CSV import, export, and validation. Requires self.engine, self.Session, self._utcnow_dt."""
 
     # ── Shared path/video lookups ─────────────────────────────────────────────

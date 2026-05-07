@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from sqlalchemy import select, text
 from review_app.app.config import VIDEO_EXTENSIONS
 from review_app.backend.db.models import ProjectDir, Video
 from review_app.backend.errors import VideoError
+from review_app.backend.provider.base import ProviderBase
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,7 @@ _FFPROBE_MAX_WORKERS: int = int(os.getenv("FFPROBE_MAX_WORKERS", "16"))
 _FFPROBE_TIMEOUT_SEC: int = int(os.getenv("FFPROBE_TIMEOUT_SEC", "10"))
 
 
-def _subprocess_env() -> dict:
+def _subprocess_env() -> dict[str, str]:
     """Return an environment safe for subprocesses when running frozen.
 
     PyInstaller prepends _internal/ to LD_LIBRARY_PATH so its bundled libs
@@ -116,7 +118,7 @@ def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
 def _probe_many(
     paths: list[Path],
     max_workers: int = _FFPROBE_MAX_WORKERS,
-    progress_callback: callable = None,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> dict[Path, tuple[float | None, bool, bool, str | None]]:
     if not paths:
         return {}
@@ -139,7 +141,7 @@ def _probe_many(
     return results
 
 
-class VideoMixin:
+class VideoMixin(ProviderBase):
     """Video scanning, probing, and transcoding. Requires self.engine, self.Session."""
 
     def _scan_videos(
@@ -182,10 +184,10 @@ class VideoMixin:
 
     def _sync_videos_table(
         self,
-        progress_callback=None,
+        progress_callback: Callable[[int, int, str], None] | None = None,
         video_dir: Path | None = None,
         active_project_id: str | None = None,
-    ) -> dict:
+    ) -> dict[str, int]:
         scanned = self._scan_videos(video_dir, active_project_id)
         now = self._utcnow_dt()
 

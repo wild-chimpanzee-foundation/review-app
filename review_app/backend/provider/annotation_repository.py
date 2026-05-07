@@ -8,10 +8,11 @@ from sqlalchemy import text
 
 from review_app.backend.db.models import IndividualObservation, VideoLabel
 from review_app.backend.errors import SpeciesError
+from review_app.backend.provider.base import ProviderBase
 from review_app.backend.utils import needs_browser_transcode
 
 
-class AnnotationMixin:
+class AnnotationMixin(ProviderBase):
     """Video detail queries and manual review writes. Requires self.engine, self.Session, self._utcnow_dt."""
 
     def get_video_detail(
@@ -19,7 +20,7 @@ class AnnotationMixin:
         video_id: str,
         blank_threshold: float = 0.75,
         species_threshold: float = 0.75,
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         with self.engine.connect() as conn:
             detail_df = pd.read_sql(
                 text(
@@ -181,11 +182,11 @@ class AnnotationMixin:
 
     def _build_video_detail_row(
         self,
-        row: dict,
+        row: dict[str, Any],
         manual_rows: pd.DataFrame,
         blank_threshold: float,
         species_threshold: float,
-    ) -> dict:
+    ) -> dict[str, Any]:
         selections = []
         for _, manual in manual_rows.iterrows():
             selections.append(

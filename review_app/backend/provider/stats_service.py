@@ -5,8 +5,10 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 
+from review_app.backend.provider.base import ProviderBase
 
-class StatsMixin:
+
+class StatsMixin(ProviderBase):
     """Overview statistics queries. Requires self.engine."""
 
     def get_overview_stats(self, active_project_id: str | None = None) -> dict[str, Any]:
