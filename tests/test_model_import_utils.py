@@ -1,7 +1,11 @@
-from review_app.app.pages.model_import import (
-    _auto_suggest_mappings,
-    _auto_suggest_path_col,
-    _is_long_format,
+from review_app.app.pages.model_import._helpers import (
+    auto_suggest_mappings as _auto_suggest_mappings,
+)
+from review_app.app.pages.model_import._helpers import (
+    auto_suggest_path_col as _auto_suggest_path_col,
+)
+from review_app.app.pages.model_import._helpers import (
+    is_long_format as _is_long_format,
 )
 
 
