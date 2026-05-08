@@ -10,7 +10,7 @@ _dark_mode: bool = True
 _language: str = "en"
 _playback_speed: str = "1x"
 _autoplay: bool = True
-_muted: bool = True
+_muted: bool = False
 _auto_transcode: bool = True
 _tour_completed: bool = False
 
@@ -62,7 +62,7 @@ def reset_app_state() -> None:
     _language = "en"
     _playback_speed = "1x"
     _autoplay = True
-    _muted = True
+    _muted = False
     _auto_transcode = True
     _tour_completed = False
     _data_provider = None

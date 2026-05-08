@@ -559,7 +559,7 @@ async def setup_review():
                         videoEl.currentTime = Math.min(videoEl.duration || 0, videoEl.currentTime + 5);
                     } else if (e.key === 'd' || e.key === 'D') {
                         e.preventDefault();
-                        const speedSteps = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0];
+                        const speedSteps = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
                         let best = 3, bestDiff = Infinity;
                         speedSteps.forEach((s, i) => { const d = Math.abs(s - videoEl.playbackRate); if (d < bestDiff) { bestDiff = d; best = i; } });
                         const newRate = speedSteps[Math.min(best + 1, speedSteps.length - 1)];
@@ -572,7 +572,7 @@ async def setup_review():
                         videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRate }));
                     } else if (e.key === 's' || e.key === 'S') {
                         e.preventDefault();
-                        const speedSteps = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0];
+                        const speedSteps = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
                         let best = 3, bestDiff = Infinity;
                         speedSteps.forEach((s, i) => { const d = Math.abs(s - videoEl.playbackRate); if (d < bestDiff) { bestDiff = d; best = i; } });
                         const newRate = speedSteps[Math.max(best - 1, 0)];
