@@ -165,7 +165,6 @@ async def render_filter_drawer(
                     "All": t("all_option"),
                     "Annotated": t("annotated"),
                     "Not Annotated": t("not_annotated"),
-                    "Review Later": t("review_later"),
                 },
                 value=filters.get("selected_annotation_status", "All"),
                 on_change=lambda _: apply_filters(),

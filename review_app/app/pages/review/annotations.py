@@ -3,14 +3,11 @@ from nicegui import run, ui
 from review_app.app.state import (
     get_active_project_id,
     get_annotator_name,
-    get_blank_threshold,
     get_current_idx,
-    get_filters,
+    get_queue,
     get_selections,
-    get_species_threshold,
     get_state_val,
     set_current_idx,
-    set_queue,
     set_selections,
     set_state_val,
 )
@@ -318,26 +315,16 @@ def render_annotation_section(
     # Source of truth: the video currently rendered.
     selected_video_id = video.get("video_id")
 
-    async def _advance_to_next(current_video_id):
-        """Refetch queue after an annotation and position idx to the next unprocessed video."""
-        filters = get_filters()
-        new_queue = await run.io_bound(
-            dp.get_video_queue,
-            {
-                **filters,
-                "blank_threshold": get_blank_threshold(),
-                "species_threshold": get_species_threshold(),
-            },
-            get_active_project_id(),
-        )
+    def _advance_to_next(current_video_id):
+        """Move to the next position in the current queue without rebuilding it."""
+        queue = get_queue()
         prev_idx = get_current_idx()
-        set_queue(new_queue)
-        if not new_queue:
+        if not queue:
             set_current_idx(0)
-        elif current_video_id in new_queue:
-            set_current_idx(min(new_queue.index(current_video_id) + 1, len(new_queue) - 1))
+        elif current_video_id in queue:
+            set_current_idx(min(queue.index(current_video_id) + 1, len(queue) - 1))
         else:
-            set_current_idx(max(0, min(prev_idx, len(new_queue) - 1)))
+            set_current_idx(max(0, min(prev_idx + 1, len(queue) - 1)))
 
     def _clear_review_state():
         set_state_val("review_state_video_id", None)
@@ -378,7 +365,7 @@ def render_annotation_section(
     async def submit_and_next():
         if not await update_annotation():
             return
-        await _advance_to_next(selected_video_id)
+        _advance_to_next(selected_video_id)
         _clear_review_state()
         render_video_section_callback.refresh()
         render_filter_drawer_callback.refresh()
@@ -397,7 +384,7 @@ def render_annotation_section(
         try:
             await run.io_bound(dp.set_review_later, selected_video_id)
             ui.notify(t("marked_review_later"), type="info")
-            await _advance_to_next(selected_video_id)
+            _advance_to_next(selected_video_id)
             _clear_review_state()
             render_video_section_callback.refresh()
         finally:
@@ -423,7 +410,7 @@ def render_annotation_section(
             )
             ui.notify(t("marked_blank"), type="positive")
             if go_next:
-                await _advance_to_next(selected_video_id)
+                _advance_to_next(selected_video_id)
             _clear_review_state()
             render_video_section_callback.refresh()
             render_filter_drawer_callback.refresh()

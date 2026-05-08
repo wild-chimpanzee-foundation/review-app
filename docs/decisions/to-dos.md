@@ -2,12 +2,12 @@
 
 ## Queue & Filtering
 
-### Fix "not annotated / review later" filter
+### Fix "not annotated / review later" filter - done
 
 The queue in `video_queue.py` computes a derived `is_annotated` flag via SQL CTE, and `review_later` is a column on `VideoLabel`. The bug likely involves an interaction between these two — e.g. a "review later" video is being counted as annotated (because a `VideoLabel` row exists), causing it to vanish from the "not annotated" queue. Fix is a targeted SQL logic change.
 **Effort: S**
 
-### Don't disappear annotated videos from the "not annotated" queue
+### Don't disappear annotated videos from the "not annotated" queue - done
 
 Right now the queue is rebuilt after every submission, which removes the just-annotated video from a "not annotated" filter immediately. The request is to keep the current video in place even after saving — only update queue position when explicitly moving to the next video. Requires decoupling queue refresh from annotation save.
 **Effort: M**

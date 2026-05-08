@@ -307,7 +307,8 @@ class QueueMixin(ProviderBase):
             where.append("""
                 NOT EXISTS (
                     SELECT 1 FROM video_labels vl2
-                    WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
+                    WHERE vl2.video_id = v.video_id
+                    AND (vl2.is_blank IS NOT NULL OR vl2.review_later = 1)
                 )""")
         if selected_is_review_later:
             where.append(
