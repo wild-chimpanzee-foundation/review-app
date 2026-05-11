@@ -166,7 +166,7 @@ class AnnotationMixin(ProviderBase):
                 text(
                     """
                     SELECT io.id, s.scientific_name AS species, b.key AS behavior,
-                           io.start_sec, io.end_sec, io.labeled_by, io.labeled_at
+                           io.count, io.start_sec, io.end_sec, io.labeled_by, io.labeled_at
                     FROM individual_observations io
                     LEFT JOIN species s ON s.id = io.species_id
                     LEFT JOIN behaviors b ON b.id = io.behavior_id
@@ -214,6 +214,7 @@ class AnnotationMixin(ProviderBase):
                     "id": int(manual.get("id")) if pd.notna(manual.get("id")) else None,
                     "species": str(manual.get("species")),
                     "behavior": str(manual.get("behavior")),
+                    "count": int(manual.get("count")) if pd.notna(manual.get("count")) else None,
                     "start_sec": float(manual.get("start_sec")),
                     "end_sec": float(manual.get("end_sec"))
                     if pd.notna(manual.get("end_sec"))
@@ -366,11 +367,15 @@ class AnnotationMixin(ProviderBase):
                 except (ValueError, TypeError):
                     obs_id = None
 
+            count_raw = selection.get("count")
+            count_val: int | None = int(count_raw) if count_raw is not None else None
+
             normalized.append(
                 {
                     "id": obs_id,
                     "species_id": species_id_map.get(species),
                     "behavior_id": behavior_id_map.get(behavior),
+                    "count": count_val,
                     "start_sec": float(start_sec),
                     "end_sec": end_sec_val,
                     "labeled_by": selection.get("labeled_by"),
@@ -407,12 +412,14 @@ class AnnotationMixin(ProviderBase):
                     changed = (
                         obs.species_id != row["species_id"]
                         or obs.behavior_id != row["behavior_id"]
+                        or obs.count != row["count"]
                         or abs((obs.start_sec or 0.0) - row["start_sec"]) > 0.001
                         or end_sec_changed
                     )
                     if changed:
                         obs.species_id = row["species_id"]
                         obs.behavior_id = row["behavior_id"]
+                        obs.count = row["count"]
                         obs.start_sec = row["start_sec"]
                         obs.end_sec = row["end_sec"]
                         # The UI echoes back the stored name; if it hasn't changed, use the caller's name instead.
@@ -435,6 +442,7 @@ class AnnotationMixin(ProviderBase):
                             project_id=active_project_id,
                             species_id=row["species_id"],
                             behavior_id=row["behavior_id"],
+                            count=row["count"],
                             start_sec=row["start_sec"],
                             end_sec=row["end_sec"],
                             labeled_by=row["labeled_by"] or labeled_by,

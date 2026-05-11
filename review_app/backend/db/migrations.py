@@ -204,6 +204,21 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
         7,
         lambda conn: _migration_v7(conn),
     ),
+    (
+        8,
+        lambda conn: [
+            conn.execute(text("ALTER TABLE individual_observations ADD COLUMN count INTEGER"))
+            if "count"
+            not in {
+                r[1]
+                for r in conn.execute(
+                    text("PRAGMA table_info(individual_observations)")
+                ).fetchall()
+            }
+            else None,
+            conn.execute(text("UPDATE individual_observations SET count = 1 WHERE count IS NULL")),
+        ],
+    ),
 ]
 
 

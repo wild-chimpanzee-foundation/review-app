@@ -510,6 +510,7 @@ class ImportMixin(ProviderBase):
                         io.id                     AS observation_id,
                         s.scientific_name         AS species,
                         b.key                     AS behavior,
+                        io.count,
                         io.start_sec,
                         io.end_sec
                     FROM videos v

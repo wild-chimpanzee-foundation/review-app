@@ -144,6 +144,7 @@ class IndividualObservation(Base):
     project_id: Mapped[str | None] = mapped_column(String, ForeignKey("projects.id"), index=True)
     species_id: Mapped[str | None] = mapped_column(String, ForeignKey("species.id"), index=True)
     behavior_id: Mapped[str | None] = mapped_column(String, ForeignKey("behaviors.id"), index=True)
+    count: Mapped[int | None] = mapped_column(Integer)
     start_sec: Mapped[float] = mapped_column(Float, default=0.0)
     end_sec: Mapped[float | None] = mapped_column(Float)
     labeled_by: Mapped[str | None] = mapped_column(String)

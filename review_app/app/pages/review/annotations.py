@@ -224,6 +224,26 @@ def render_annotation_section(
                                 .style("flex: 2; min-width: 120px;")
                             )
 
+                    current_count = sel.get("count") or 1
+                    count_options = {i: str(i) for i in range(1, 11)}
+                    count_options[11] = ">10"
+                    with ui.row().classes("items-center gap-xs q-mt-sm w-full"):
+                        ct = (
+                            ui.select(
+                                label=t("count_label"),
+                                options=count_options,
+                                value=current_count,
+                            )
+                            .props("outlined dense")
+                            .classes("col")
+                        )
+                        ui.button(icon="remove").props("flat dense round size=sm").on(
+                            "click", lambda idx=i: step_count(idx, -1)
+                        )
+                        ui.button(icon="add").props("flat dense round size=sm").on(
+                            "click", lambda idx=i: step_count(idx, 1)
+                        )
+
                     labeled_by = sel.get("labeled_by")
                     labeled_at = sel.get("labeled_at")
                     source = sel.get("source")
@@ -251,18 +271,28 @@ def render_annotation_section(
                             icon="delete", on_click=lambda idx=i: delete_selection(idx)
                         ).props("flat color=negative dense")
 
-                    def update_sel(idx, sp_el, bp_el):
+                    def update_sel(idx, sp_el, bp_el, ct_el):
                         new_sels = get_selections()
                         if 0 <= idx < len(new_sels):
                             new_sels[idx] = {
                                 "species": sp_el.value,
                                 "behavior": bp_el.value,
+                                "count": ct_el.value or 1,
                                 "start_sec": new_sels[idx].get("start_sec"),
                                 "end_sec": new_sels[idx].get("end_sec"),
                             }
                             set_selections(new_sels)
 
-                    def on_species_change(_, s=sp, b=bp, idx=i):
+                    def step_count(idx, delta, c=ct):
+                        new_sels = get_selections()
+                        if 0 <= idx < len(new_sels):
+                            new_count = max(1, min(11, (new_sels[idx].get("count") or 1) + delta))
+                            new_sels[idx] = {**new_sels[idx], "count": new_count}
+                            set_selections(new_sels)
+                            c.value = new_count
+                            c.update()
+
+                    def on_species_change(_, s=sp, b=bp, c=ct, idx=i):
                         new_behaviors = dp.get_behavior_display_map(
                             lang=get_language(),
                             species_name=s.value,
@@ -271,10 +301,11 @@ def render_annotation_section(
                         b.options = new_behaviors
                         b.value = _resolve_behavior(new_behaviors, b.value)
                         b.update()
-                        update_sel(idx, s, b)
+                        update_sel(idx, s, b, c)
 
                     sp.on_value_change(on_species_change)
-                    bp.on_value_change(lambda _, s=sp, b=bp, idx=i: update_sel(idx, s, b))
+                    bp.on_value_change(lambda _, s=sp, b=bp, c=ct, idx=i: update_sel(idx, s, b, c))
+                    ct.on_value_change(lambda _, s=sp, b=bp, c=ct, idx=i: update_sel(idx, s, b, c))
 
     # Source of truth: the video currently rendered.
     selected_video_id = video.get("video_id")
