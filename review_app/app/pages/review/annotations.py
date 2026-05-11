@@ -212,7 +212,7 @@ def render_annotation_section(
                             .classes("col")
                         )
 
-                        with ui.row().classes("w-full gap-sm items-center q-mt-sm") as time_row:
+                        with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
                             bp = (
                                 ui.select(
                                     label=t("behavior_label"),
@@ -223,31 +223,6 @@ def render_annotation_section(
                                 .props("outlined dense")
                                 .style("flex: 2; min-width: 120px;")
                             )
-
-                            with ui.element("div").style(
-                                "display:flex; gap:8px; flex:1; min-width:170px;"
-                            ):
-                                start_in = (
-                                    ui.number(
-                                        label=t("start_sec"),
-                                        value=sel.get("start_sec", 0.0),
-                                        step=0.1,
-                                        format="%.1f",
-                                    )
-                                    .props("outlined dense")
-                                    .style("flex: 1; min-width: 0;")
-                                )
-
-                                end_in = (
-                                    ui.number(
-                                        label=t("end_sec"),
-                                        value=sel.get("end_sec"),
-                                        step=0.1,
-                                        format="%.1f",
-                                    )
-                                    .props("outlined dense")
-                                    .style("flex: 1; min-width: 0;")
-                                )
 
                     labeled_by = sel.get("labeled_by")
                     labeled_at = sel.get("labeled_at")
@@ -276,20 +251,18 @@ def render_annotation_section(
                             icon="delete", on_click=lambda idx=i: delete_selection(idx)
                         ).props("flat color=negative dense")
 
-                    def update_sel(idx, sp_el, bp_el, start_el, end_el, tr):
+                    def update_sel(idx, sp_el, bp_el):
                         new_sels = get_selections()
                         if 0 <= idx < len(new_sels):
                             new_sels[idx] = {
                                 "species": sp_el.value,
                                 "behavior": bp_el.value,
-                                "start_sec": start_el.value if start_el.value is not None else 0.0,
-                                "end_sec": end_el.value,
+                                "start_sec": new_sels[idx].get("start_sec"),
+                                "end_sec": new_sels[idx].get("end_sec"),
                             }
                             set_selections(new_sels)
 
-                    def on_species_change(
-                        _, s=sp, b=bp, st=start_in, en=end_in, tr=time_row, idx=i
-                    ):
+                    def on_species_change(_, s=sp, b=bp, idx=i):
                         new_behaviors = dp.get_behavior_display_map(
                             lang=get_language(),
                             species_name=s.value,
@@ -298,24 +271,10 @@ def render_annotation_section(
                         b.options = new_behaviors
                         b.value = _resolve_behavior(new_behaviors, b.value)
                         b.update()
-                        update_sel(idx, s, b, st, en, tr)
+                        update_sel(idx, s, b)
 
                     sp.on_value_change(on_species_change)
-                    bp.on_value_change(
-                        lambda _, s=sp, b=bp, st=start_in, en=end_in, tr=time_row, idx=i: (
-                            update_sel(idx, s, b, st, en, tr)
-                        )
-                    )
-                    start_in.on_value_change(
-                        lambda _, s=sp, b=bp, st=start_in, en=end_in, tr=time_row, idx=i: (
-                            update_sel(idx, s, b, st, en, tr)
-                        )
-                    )
-                    end_in.on_value_change(
-                        lambda _, s=sp, b=bp, st=start_in, en=end_in, tr=time_row, idx=i: (
-                            update_sel(idx, s, b, st, en, tr)
-                        )
-                    )
+                    bp.on_value_change(lambda _, s=sp, b=bp, idx=i: update_sel(idx, s, b))
 
     # Source of truth: the video currently rendered.
     selected_video_id = video.get("video_id")
