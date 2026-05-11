@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -57,21 +58,32 @@ def _find_ffprobe() -> str | None:
     return shutil.which("ffprobe")
 
 
-def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
+def _parse_iso6709(s: str) -> tuple[float, float] | None:
+    """Parse an ISO 6709 location string like '+37.4060-122.0782/' into (lat, lon)."""
+    m = re.match(r"^([+-]\d+\.?\d*)([+-]\d+\.?\d*)", s)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    return None
+
+
+def _probe_video(
+    path: Path,
+) -> tuple[float | None, bool, bool, str | None, datetime | None, float | None, float | None]:
     """
-    Run ffprobe on *path* and return ``(duration_sec, is_valid, is_web_safe, error_message)``.
+    Run ffprobe on *path* and return
+    ``(duration_sec, is_valid, is_web_safe, error_message, created_at, latitude, longitude)``.
     """
     ffprobe = _find_ffprobe()
     if ffprobe is None:
         logger.error("ffprobe not found on PATH — video probing unavailable")
-        return None, False, False, "ffprobe executable not found"
+        return None, False, False, "ffprobe executable not found", None, None, None
 
     cmd = [
         ffprobe,
         "-v",
         "error",
         "-show_entries",
-        "format=duration,format_name:stream=duration,codec_name,codec_type",
+        "format=duration,format_name:format_tags:stream=duration,codec_name,codec_type",
         "-of",
         "json",
         str(path),
@@ -87,25 +99,42 @@ def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
         )
     except subprocess.TimeoutExpired:
         logger.warning("ffprobe timed out after %ds on %s", _FFPROBE_TIMEOUT_SEC, path)
-        return None, False, False, f"ffprobe timed out after {_FFPROBE_TIMEOUT_SEC}s"
+        return (
+            None,
+            False,
+            False,
+            f"ffprobe timed out after {_FFPROBE_TIMEOUT_SEC}s",
+            None,
+            None,
+            None,
+        )
     except OSError as exc:
         logger.error("ffprobe OS error on %s: %s", path, exc)
-        return None, False, False, f"ffprobe OS error: {exc}"
+        return None, False, False, f"ffprobe OS error: {exc}", None, None, None
 
     if result.returncode != 0:
         stderr_text = result.stderr.strip()
         logger.warning("ffprobe non-zero exit for %s: %s", path, stderr_text[:200])
-        return None, False, False, stderr_text[:200] or "ffprobe returned non-zero exit code"
+        return (
+            None,
+            False,
+            False,
+            stderr_text[:200] or "ffprobe returned non-zero exit code",
+            None,
+            None,
+            None,
+        )
 
     try:
         data = json.loads(result.stdout)
-        raw_duration = data.get("format", {}).get("duration")
+        fmt = data.get("format", {})
+        raw_duration = fmt.get("duration")
         if raw_duration is None:
             streams = data.get("streams", [])
             if streams:
                 raw_duration = streams[0].get("duration")
 
-        format_name = data.get("format", {}).get("format_name", "").lower()
+        format_name = fmt.get("format_name", "").lower()
         streams = data.get("streams", [])
         video_codec = next(
             (s.get("codec_name", "") for s in streams if s.get("codec_type") == "video"), ""
@@ -116,18 +145,47 @@ def _probe_video(path: Path) -> tuple[float | None, bool, bool, str | None]:
         formats = {f.strip() for f in format_name.split(",")}
         is_web_safe = bool(formats & safe_formats) and video_codec in safe_codecs
 
+        tags = fmt.get("tags", {})
+
+        created_at: datetime | None = None
+        for tag_key in ("creation_time", "com.apple.quicktime.creationdate"):
+            raw_ts = tags.get(tag_key)
+            if raw_ts:
+                try:
+                    ts = raw_ts.rstrip("Z")
+                    if "+" not in ts and "T" in ts:
+                        ts += "+00:00"
+                    created_at = datetime.fromisoformat(ts)
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=timezone.utc)
+                    break
+                except ValueError:
+                    pass
+
+        latitude: float | None = None
+        longitude: float | None = None
+        for tag_key in ("location", "com.apple.quicktime.location.ISO6709"):
+            raw_loc = tags.get(tag_key)
+            if raw_loc:
+                parsed = _parse_iso6709(raw_loc)
+                if parsed:
+                    latitude, longitude = parsed
+                    break
+
     except (json.JSONDecodeError, ValueError, TypeError):
         logger.warning("ffprobe returned unparseable JSON for %s", path)
-        return None, False, False, "ffprobe returned unparseable JSON"
+        return None, False, False, "ffprobe returned unparseable JSON", None, None, None
 
-    return raw_duration, True, is_web_safe, None
+    return raw_duration, True, is_web_safe, None, created_at, latitude, longitude
 
 
 def _probe_many(
     paths: list[Path],
     max_workers: int = _FFPROBE_MAX_WORKERS,
     progress_callback: Callable[[int, int, str], None] | None = None,
-) -> dict[Path, tuple[float | None, bool, bool, str | None]]:
+) -> dict[
+    Path, tuple[float | None, bool, bool, str | None, datetime | None, float | None, float | None]
+]:
     if not paths:
         return {}
 
@@ -142,7 +200,7 @@ def _probe_many(
                 results[path] = future.result()
             except Exception as exc:  # pragma: no cover
                 logger.error("Unexpected error probing %s: %s", path, exc)
-                results[path] = (None, False, False, str(exc))
+                results[path] = (None, False, False, str(exc), None, None, None)
             if progress_callback:
                 progress_callback(i + 1, total, path.name)
 
@@ -177,17 +235,10 @@ class VideoMixin(ProviderBase):
                 if p.suffix.lower() not in VIDEO_EXTENSIONS:
                     continue
                 camera_id = p.parent.name if p.parent != scan_dir else "default"
-                created_at = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
-                rows.append(
-                    {
-                        "video_path": str(p),
-                        "camera_id": camera_id,
-                        "created_at": created_at,
-                    }
-                )
+                rows.append({"video_path": str(p), "camera_id": camera_id})
 
         if not rows:
-            return pd.DataFrame(columns=["video_path", "camera_id", "created_at"])
+            return pd.DataFrame(columns=["video_path", "camera_id"])
         return pd.DataFrame(rows)
 
     def _sync_videos_table(
@@ -237,40 +288,43 @@ class VideoMixin(ProviderBase):
                 )
 
             if not new_rows.empty:
-                session.execute(
-                    Video.__table__.insert(),
-                    [
+                insert_rows = []
+                for _, row in new_rows.iterrows():
+                    probe = probe_results.get(
+                        Path(row["video_path"]), (None, None, None, None, None, None, None)
+                    )
+                    (
+                        duration_sec,
+                        is_valid,
+                        is_web_safe,
+                        validation_error,
+                        ffprobe_created_at,
+                        latitude,
+                        longitude,
+                    ) = probe
+                    insert_rows.append(
                         {
                             "video_id": str(uuid.uuid4()),
                             "project_id": active_project_id,
                             "video_path": row["video_path"],
                             "camera_id": row["camera_id"],
-                            "created_at": row["created_at"].to_pydatetime(),
+                            "created_at": ffprobe_created_at,
                             "last_seen_at": now,
-                            **dict(
-                                zip(
-                                    (
-                                        "duration_sec",
-                                        "is_valid",
-                                        "is_web_safe",
-                                        "validation_error",
-                                    ),
-                                    probe_results.get(
-                                        Path(row["video_path"]), (None, None, None, None)
-                                    ),
-                                )
-                            ),
+                            "duration_sec": duration_sec,
+                            "is_valid": is_valid,
+                            "is_web_safe": is_web_safe,
+                            "validation_error": validation_error,
+                            "latitude": latitude,
+                            "longitude": longitude,
                         }
-                        for _, row in new_rows.iterrows()
-                    ],
-                )
+                    )
+                session.execute(Video.__table__.insert(), insert_rows)
 
             if not existing_df.empty:
                 session.execute(
                     text("""
                         UPDATE videos
                         SET camera_id    = :camera_id,
-                            created_at   = :created_at,
                             last_seen_at = :last_seen_at
                         WHERE video_path = :video_path
                           AND project_id IS :project_id
@@ -279,7 +333,6 @@ class VideoMixin(ProviderBase):
                         {
                             "video_path": row["video_path"],
                             "camera_id": row["camera_id"],
-                            "created_at": row["created_at"].to_pydatetime(),
                             "last_seen_at": now,
                             "project_id": active_project_id,
                         }
@@ -314,13 +367,19 @@ class VideoMixin(ProviderBase):
                     user_message_key="video_error_not_found",
                     detail=f"Unknown video_id: {video_id!r}",
                 )
-            duration, is_valid, is_web_safe, validation_error = _probe_video(
-                Path(video.video_path)
+            duration, is_valid, is_web_safe, validation_error, created_at, latitude, longitude = (
+                _probe_video(Path(video.video_path))
             )
             video.duration_sec = duration
             video.is_valid = is_valid
             video.is_web_safe = is_web_safe
             video.validation_error = validation_error
+            if created_at is not None and video.created_at is None:
+                video.created_at = created_at
+            if latitude is not None and video.latitude is None:
+                video.latitude = latitude
+            if longitude is not None and video.longitude is None:
+                video.longitude = longitude
             session.commit()
 
     def reprobe_invalid_videos(self) -> dict[str, Any]:
@@ -338,7 +397,15 @@ class VideoMixin(ProviderBase):
 
             now_valid = 0
             still_invalid = 0
-            for path, (duration, is_valid, is_web_safe, validation_error) in probe_results.items():
+            for path, (
+                duration,
+                is_valid,
+                is_web_safe,
+                validation_error,
+                created_at,
+                latitude,
+                longitude,
+            ) in probe_results.items():
                 vid_id = path_map[path]
                 video = session.get(Video, vid_id)
                 if video is None:
@@ -347,6 +414,12 @@ class VideoMixin(ProviderBase):
                 video.is_valid = is_valid
                 video.is_web_safe = is_web_safe
                 video.validation_error = validation_error
+                if created_at is not None and video.created_at is None:
+                    video.created_at = created_at
+                if latitude is not None and video.latitude is None:
+                    video.latitude = latitude
+                if longitude is not None and video.longitude is None:
+                    video.longitude = longitude
                 if is_valid:
                     now_valid += 1
                 else:

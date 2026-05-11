@@ -49,7 +49,7 @@ def mock_probe(monkeypatch):
     monkeypatch.setattr(
         video_module,
         "_probe_many",
-        lambda paths, **_: {p: (10.0, True, True, None) for p in paths},
+        lambda paths, **_: {p: (10.0, True, True, None, None, None, None) for p in paths},
     )
 
 

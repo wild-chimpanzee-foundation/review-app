@@ -65,6 +65,8 @@ class Video(Base):
     is_web_safe: Mapped[bool | None] = mapped_column(Boolean)
     validation_error: Mapped[str | None] = mapped_column(String)
     transcoded_path: Mapped[str | None] = mapped_column(String)
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
     label: Mapped[VideoLabel | None] = relationship(
         "VideoLabel", cascade="all, delete-orphan", uselist=False
     )

@@ -129,6 +129,19 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
             "CREATE INDEX IF NOT EXISTS idx_videos_is_web_safe ON videos(is_web_safe)",
         ],
     ),
+    (
+        6,
+        lambda conn: [
+            conn.execute(text("ALTER TABLE videos ADD COLUMN latitude REAL"))
+            if "latitude"
+            not in {r[1] for r in conn.execute(text("PRAGMA table_info(videos)")).fetchall()}
+            else None,
+            conn.execute(text("ALTER TABLE videos ADD COLUMN longitude REAL"))
+            if "longitude"
+            not in {r[1] for r in conn.execute(text("PRAGMA table_info(videos)")).fetchall()}
+            else None,
+        ],
+    ),
 ]
 
 

@@ -122,6 +122,8 @@ class AnnotationMixin(ProviderBase):
                         v.camera_id,
                         v.duration_sec,
                         v.created_at,
+                        v.latitude,
+                        v.longitude,
                         v.is_valid AS is_video_valid,
                         v.is_web_safe,
                         v.transcoded_path,

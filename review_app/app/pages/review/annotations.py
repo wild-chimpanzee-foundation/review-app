@@ -200,12 +200,16 @@ def render_annotation_section(
                         sp_value = sel["species"] if sel["species"] in species_map else None
                         bp_value = _resolve_behavior(behaviors_map, sel.get("behavior"))
 
-                        sp = ui.select(
-                            label=t("species_label"),
-                            options=species_map,
-                            value=sp_value,
-                            with_input=True,
-                        ).props("outlined dense class=col")
+                        sp = (
+                            ui.select(
+                                label=t("species_label"),
+                                options=species_map,
+                                value=sp_value,
+                                with_input=True,
+                            )
+                            .props("outlined dense")
+                            .classes("col")
+                        )
 
                         with ui.row().classes("w-full gap-sm items-center q-mt-sm") as time_row:
                             bp = (

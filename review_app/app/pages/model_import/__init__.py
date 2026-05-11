@@ -6,6 +6,7 @@ from review_app.app.translations import t
 from review_app.app.utils import get_or_create_data_provider, render_uninitialized_state
 
 from ._annotations_tab import setup_annotations_tab
+from ._metadata_tab import setup_metadata_tab
 from ._model_tab import setup_model_tab
 
 _STATE_KEYS = (
@@ -56,9 +57,12 @@ async def setup_model_import():
         with ui.tabs().classes("w-full") as tabs:
             tab_model = ui.tab("model_import", label=t("model_import_title"))
             tab_annotations = ui.tab("annotations", label=t("annotation_export_import_title"))
+            tab_metadata = ui.tab("metadata", label=t("metadata_import_title"))
 
         with ui.tab_panels(tabs, value=tab_model).classes("w-full"):
             with ui.tab_panel(tab_model):
                 await setup_model_tab(dp, loading_dialog)
             with ui.tab_panel(tab_annotations):
                 setup_annotations_tab(dp, loading_dialog)
+            with ui.tab_panel(tab_metadata):
+                setup_metadata_tab(dp)

@@ -41,7 +41,7 @@ def _mock_probe(monkeypatch):
     monkeypatch.setattr(
         video_module,
         "_probe_many",
-        lambda paths, **_: {p: (10.0, True, True, None) for p in paths},
+        lambda paths, **_: {p: (10.0, True, True, None, None, None, None) for p in paths},
     )
 
 
@@ -381,7 +381,7 @@ def test_annotation_sharing_round_trip(tmp_path, monkeypatch):
     monkeypatch.setattr(
         video_module,
         "_probe_many",
-        lambda paths, **_: {p: (10.0, True, True, None) for p in paths},
+        lambda paths, **_: {p: (10.0, True, True, None, None, None, None) for p in paths},
     )
 
     species_csv = tmp_path / "species.csv"

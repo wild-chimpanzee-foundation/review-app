@@ -194,3 +194,26 @@ class StatsMixin(ProviderBase):
             ).to_dict(orient="records")
 
         return stats
+
+    def get_video_locations(self, active_project_id: str | None = None) -> list[dict]:
+        """Return distinct (lat, lon, camera_id, count) tuples for all geotagged videos."""
+        p = {"pid": active_project_id} if active_project_id else {}
+        pf = "WHERE latitude IS NOT NULL AND longitude IS NOT NULL" + (
+            " AND project_id = :pid" if active_project_id else ""
+        )
+        with self.engine.connect() as conn:
+            return pd.read_sql(
+                text(f"""
+                SELECT
+                    ROUND(latitude, 6)  AS latitude,
+                    ROUND(longitude, 6) AS longitude,
+                    camera_id,
+                    COUNT(*)            AS video_count
+                FROM videos
+                {pf}
+                GROUP BY ROUND(latitude, 6), ROUND(longitude, 6), camera_id
+                ORDER BY video_count DESC
+                """),
+                conn,
+                params=p,
+            ).to_dict(orient="records")

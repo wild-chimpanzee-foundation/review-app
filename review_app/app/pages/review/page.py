@@ -45,12 +45,15 @@ def navigate(direction: int):
 
 
 def navigate_to(idx: int):
+    from nicegui import context as ui_context
+
     queue = get_queue()
     idx = max(0, min(idx, len(queue) - 1))
     # Debounce to prevent rapid overlap
     token = str(uuid.uuid4())
     set_state_val("nav_token", token)
     set_state_val("is_loading", True)
+    client = ui_context.client  # capture before task loses slot context
 
     async def _do_nav():
         await asyncio.sleep(0.1)
@@ -62,6 +65,8 @@ def navigate_to(idx: int):
             set_state_val("review_is_blank", None)
             set_selections([])
             set_state_val("is_loading", False)
+            video_id = queue[idx]
+            client.run_javascript(f"history.pushState(null, '', '/review?v={video_id}')")
             render_video_section.refresh()
 
     asyncio.create_task(_do_nav())
@@ -362,6 +367,33 @@ async def render_video_section(dp, species_map, global_species_map):
                         "text-negative text-caption q-mt-sm"
                     )
 
+                _meta_parts = []
+                _missing_parts = []
+                _created = video.get("created_at")
+                if _created:
+                    try:
+                        _created_str = str(_created)[:16].replace("T", " ")
+                        _meta_parts.append(f"{t('video_created_at')}: {_created_str}")
+                    except Exception:
+                        _missing_parts.append(t("video_created_at"))
+                else:
+                    _missing_parts.append(t("video_created_at"))
+                _lat = video.get("latitude")
+                _lon = video.get("longitude")
+                if _lat is not None and _lon is not None:
+                    _meta_parts.append(f"{t('video_location')}: {_lat:.5f}, {_lon:.5f}")
+                else:
+                    _missing_parts.append(t("video_location"))
+                with ui.row().classes("items-center gap-xs q-mt-xs"):
+                    if _meta_parts:
+                        ui.label("  ·  ".join(_meta_parts)).classes("text-caption")
+                    if _missing_parts:
+                        ui.label(
+                            t("video_metadata_missing", fields=", ".join(_missing_parts))
+                        ).classes("text-caption text-grey-6").tooltip(
+                            t("video_metadata_missing_tooltip")
+                        )
+
         with ui.column().style("flex: 1; min-width: 300px; max-width: 560px;"):
             _render_ai_annotations(model_ann, global_species_map)
             with ui.card().classes("full-width"):
@@ -401,6 +433,8 @@ async def render_video_section(dp, species_map, global_species_map):
 
 
 async def setup_review():
+    from nicegui import context as ui_context
+
     from review_app.app.entry_point import shared_header
 
     dp = await get_or_create_data_provider()
@@ -420,7 +454,6 @@ async def setup_review():
     global_species_map = await run.io_bound(dp.get_species_display_map, get_language())
 
     reset_filters()
-    set_current_idx(0)
     set_selections([])
     set_state_val("review_state_video_id", None)
     set_state_val("review_is_blank", None)
@@ -438,6 +471,15 @@ async def setup_review():
         active_project_id=get_active_project_id(),
     )
     set_queue(queue_ids)
+
+    video_id_param = ui_context.client.request.query_params.get("v")
+    initial_idx = 0
+    if video_id_param and queue_ids:
+        try:
+            initial_idx = queue_ids.index(video_id_param)
+        except ValueError:
+            ui.notify(t("video_not_in_project"), type="warning")
+    set_current_idx(initial_idx)
 
     # Move CSS to a single injection
     ui.add_head_html(
@@ -483,6 +525,9 @@ async def setup_review():
             await render_video_section(dp, species_map, global_species_map)
 
     ui.run_javascript("document.activeElement?.blur()")
+
+    if queue_ids:
+        ui.run_javascript(f"history.pushState(null, '', '/review?v={queue_ids[initial_idx]}')")
 
     has_ai = await run.io_bound(lambda: not dp._get_model_annotations_df().empty)
     logger.info("Tour AI annotations check: has_ai=%s", has_ai)

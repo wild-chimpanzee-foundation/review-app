@@ -412,6 +412,76 @@ class ImportMixin(ProviderBase):
         logger.info("Model CSV import complete: %d rows upserted", len(rows))
         return {"inserted_rows": len(rows)}
 
+    # ── Video metadata CSV import ─────────────────────────────────────────────
+
+    def import_video_metadata_csv(
+        self, df: pd.DataFrame, active_project_id: str | None
+    ) -> dict[str, Any]:
+        """
+        Update video rows from a CSV with columns: path (required), created_at, latitude, longitude.
+        Uses the same path-matching logic as model annotation import.
+        Returns {"updated": int, "skipped": list[str]}.
+        """
+        if "path" not in df.columns:
+            raise DataImportError(
+                user_message_key="csv_error_missing_column_video_path",
+                detail="Metadata CSV must contain a 'path' column",
+            )
+
+        by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
+        has_created_at = "created_at" in df.columns
+        has_latitude = "latitude" in df.columns
+        has_longitude = "longitude" in df.columns
+
+        updated = 0
+        skipped: list[str] = []
+
+        with self.engine.begin() as conn:
+            for _, row in df.iterrows():
+                raw_path = str(row.get("path", "")).strip()
+                p = Path(raw_path)
+                video_id = (
+                    by_suffix.get(f"{p.parent.name}/{p.name}".lower())
+                    or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
+                    or by_stem.get(p.stem.lower())
+                )
+                if video_id is None:
+                    skipped.append(raw_path)
+                    continue
+
+                fields: dict[str, Any] = {}
+                if has_created_at and not pd.isna(row["created_at"]):
+                    try:
+                        fields["created_at"] = pd.to_datetime(
+                            row["created_at"], utc=True
+                        ).to_pydatetime()
+                    except Exception:
+                        pass
+                if has_latitude and not pd.isna(row["latitude"]):
+                    try:
+                        fields["latitude"] = float(str(row["latitude"]).replace(",", "."))
+                    except (ValueError, TypeError):
+                        pass
+                if has_longitude and not pd.isna(row["longitude"]):
+                    try:
+                        fields["longitude"] = float(str(row["longitude"]).replace(",", "."))
+                    except (ValueError, TypeError):
+                        pass
+
+                if not fields:
+                    continue
+
+                set_clause = ", ".join(f"{k} = :{k}" for k in fields)
+                fields["video_id"] = video_id
+                conn.execute(
+                    text(f"UPDATE videos SET {set_clause} WHERE video_id = :video_id"),
+                    fields,
+                )
+                updated += 1
+
+        logger.info("Video metadata import: %d updated, %d skipped", updated, len(skipped))
+        return {"updated": updated, "skipped": skipped}
+
     # ── Annotation export / import ────────────────────────────────────────────
 
     def export_annotations_csv(self, active_project_id: str | None) -> pd.DataFrame:
@@ -427,6 +497,8 @@ class ImportMixin(ProviderBase):
                         v.video_path,
                         v.camera_id,
                         v.created_at              AS recorded_at,
+                        v.latitude,
+                        v.longitude,
                         v.duration_sec,
                         CAST(vl.is_blank AS INTEGER)      AS is_blank,
                         CAST(vl.review_later AS INTEGER)  AS review_later,
