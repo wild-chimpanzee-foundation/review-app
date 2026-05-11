@@ -67,8 +67,9 @@ def navigate_to(idx: int):
             set_state_val("review_is_blank", None)
             set_selections([])
             set_state_val("is_loading", False)
-            video_id = queue[idx]
-            client.run_javascript(f"history.pushState(null, '', '/review?v={video_id}')")
+            if queue and idx < len(queue):
+                video_id = queue[idx]
+                client.run_javascript(f"history.pushState(null, '', '/review?v={video_id}')")
             render_video_section.refresh()
 
     asyncio.create_task(_do_nav())

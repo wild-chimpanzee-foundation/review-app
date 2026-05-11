@@ -355,14 +355,13 @@ class QueueMixin(ProviderBase):
                 ) > 1""")
 
         if selected_tags:
-            phs = ", ".join(f":tag{i}" for i in range(len(selected_tags)))
             for i, v in enumerate(selected_tags):
                 params[f"tag{i}"] = v
-            where.append(f"""
+                where.append(f"""
                 EXISTS (
                     SELECT 1 FROM video_tags vt
                     JOIN tags t ON t.id = vt.tag_id
-                    WHERE vt.video_id = v.video_id AND t.key IN ({phs})
+                    WHERE vt.video_id = v.video_id AND t.key = :tag{i}
                 )""")
 
         if selected_sort == "camera":
