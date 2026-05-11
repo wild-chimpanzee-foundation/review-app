@@ -3,6 +3,7 @@
 ## Context
 
 Three separate feature requests were consolidated into a single per-video tagging concept:
+
 - "Fire / nice video / other" highlight flags
 - "Broken metadata" flag for videos where ffprobe returned incomplete or corrupt data
 - General video-level labels that sit outside the species/behavior annotation system
@@ -14,6 +15,7 @@ Introduce a `Tag` reference table and a `VideoTag` join table, modelled after th
 ### Schema
 
 **`Tag`**
+
 ```
 id          UUID PK
 key         String UNIQUE   — e.g. "fire", "nice_shot", "broken_metadata"
@@ -25,6 +27,7 @@ is_custom   Boolean
 ```
 
 **`VideoTag`**
+
 ```
 video_id    FK → videos.video_id   PK
 tag_id      FK → tags.id           PK
@@ -44,6 +47,8 @@ tagged_at   DateTime
 
 `sync_videos()` already sets `validation_error` on `Video` when ffprobe fails. After sync, auto-apply the `broken_metadata` tag to any video where `validation_error IS NOT NULL`, so it appears in the tag filter without manual annotator work.
 
+Benjamin: Actually they are two things: time is not correct because the metadata and the time written on the video mismatches (metadata collection issue) or the date on time has an issue because it says it is noon in the video time tag while it is a nightime video. But we could flag those with a tag I guess
+
 ### Review UI
 
 A row of toggle chips above the species cards in the annotation panel — one chip per tag, using the tag's icon and color. Clicking toggles the tag on/off for the current video, persisted immediately (independent of the Submit button).
@@ -51,6 +56,7 @@ A row of toggle chips above the species cards in the annotation panel — one ch
 ### Queue filter
 
 New "Tags" multi-select in the filter drawer, same pattern as the existing species/behavior filters:
+
 ```sql
 EXISTS (SELECT 1 FROM video_tags WHERE video_id = v.video_id AND tag_id IN (...))
 ```

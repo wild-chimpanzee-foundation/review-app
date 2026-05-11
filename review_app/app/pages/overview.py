@@ -1,7 +1,6 @@
-import json
-
 from nicegui import run, ui
 
+from review_app.app.components.location_map import MapMarker, render_location_map
 from review_app.app.state import get_active_project_id, get_language, reset_filters, update_filters
 from review_app.app.translations import t
 from review_app.app.utils import (
@@ -167,53 +166,24 @@ async def setup_overview():
 
         # Location map
         if locations:
-            ui.add_head_html(
-                '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>'
-                '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>'
-            )
             with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
                 with ui.card().classes("col q-pa-md"):
                     ui.label(t("location_map_title")).classes(
                         "text-subtitle1 font-weight-medium q-mb-md"
                     )
-                    map_div = ui.element("div").style(
-                        "width:100%; height:400px; border-radius:4px"
-                    )
-                    map_id = map_div.id
-
-                    locs_json = json.dumps(
-                        [
-                            {
-                                "lat": loc["latitude"],
-                                "lon": loc["longitude"],
-                                "camera": loc.get("camera_id") or "",
-                                "count": int(loc["video_count"]),
-                            }
-                            for loc in locations
-                        ]
-                    )
-                    await ui.run_javascript(f"""
-                        (function() {{
-                            var el = getElement({map_id});
-                            if (!el || el._leaflet_map) return;
-                            var locs = {locs_json};
-                            var map = L.map(el).setView([locs[0].lat, locs[0].lon], 10);
-                            el._leaflet_map = map;
-                            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                                attribution: '© OpenStreetMap contributors',
-                                maxZoom: 19
-                            }}).addTo(map);
-                            var bounds = [];
-                            locs.forEach(function(loc) {{
-                                var popup = loc.camera
-                                    ? loc.camera + '<br>' + loc.count + ' video(s)'
-                                    : loc.count + ' video(s)';
-                                L.marker([loc.lat, loc.lon]).addTo(map).bindPopup(popup);
-                                bounds.push([loc.lat, loc.lon]);
-                            }});
-                            if (bounds.length > 1) map.fitBounds(bounds, {{padding: [30, 30]}});
-                        }})();
-                    """)
+                    map_markers = [
+                        MapMarker(
+                            lat=loc["latitude"],
+                            lon=loc["longitude"],
+                            label=(
+                                f"{loc['camera_id']}: {int(loc['video_count'])} video(s)"
+                                if loc.get("camera_id")
+                                else f"{int(loc['video_count'])} video(s)"
+                            ),
+                        )
+                        for loc in locations
+                    ]
+                    render_location_map(map_markers)
 
         # Camera summary table
         with (

@@ -380,13 +380,41 @@ async def render_video_section(dp, species_map, global_species_map):
                     _missing_parts.append(t("video_created_at"))
                 _lat = video.get("latitude")
                 _lon = video.get("longitude")
-                if _lat is not None and _lon is not None:
-                    _meta_parts.append(f"{t('video_location')}: {_lat:.5f}, {_lon:.5f}")
-                else:
+                _has_location = _lat is not None and _lon is not None
+                if not _has_location:
                     _missing_parts.append(t("video_location"))
                 with ui.row().classes("items-center gap-xs q-mt-xs"):
                     if _meta_parts:
                         ui.label("  ·  ".join(_meta_parts)).classes("text-caption")
+                    if _has_location:
+
+                        def _open_map(lat=_lat, lon=_lon):
+                            from review_app.app.components.location_map import (
+                                MapMarker,
+                                render_location_map,
+                            )
+
+                            with (
+                                ui.dialog().props("maximized=false") as dlg,
+                                ui.card()
+                                .classes("q-pa-md")
+                                .style("min-width:480px; min-height:360px"),
+                            ):
+                                with ui.row().classes(
+                                    "items-center justify-between w-full q-mb-sm"
+                                ):
+                                    ui.label(t("video_location")).classes(
+                                        "text-subtitle2 font-weight-medium"
+                                    )
+                                    ui.button(icon="close", on_click=dlg.close).props(
+                                        "flat round dense"
+                                    )
+                                render_location_map([MapMarker(lat=lat, lon=lon)], height="320px")
+                            dlg.open()
+
+                        ui.label(f"{t('video_location')}: {_lat:.5f}, {_lon:.5f}").classes(
+                            "text-caption text-primary cursor-pointer"
+                        ).on("click", _open_map).tooltip(t("click_to_view_map"))
                     if _missing_parts:
                         ui.label(
                             t("video_metadata_missing", fields=", ".join(_missing_parts))
