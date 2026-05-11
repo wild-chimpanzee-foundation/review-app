@@ -384,6 +384,36 @@ class SpeciesMixin(ProviderBase):
             ).fetchall()
         return {sci: f"{name} ({sci})" if name else sci for sci, name in rows}
 
+    def get_species_group_map(
+        self, lang: str = "en", project_id: str | None = None
+    ) -> dict[str, str | None]:
+        """Return {scientific_name: group} for the active species set."""
+        col = "group_en" if lang != "fr" else "group_fr"
+        with self.engine.connect() as conn:
+            if project_id:
+                has_proj_sp = conn.execute(
+                    text("SELECT 1 FROM project_species WHERE project_id = :pid LIMIT 1"),
+                    {"pid": project_id},
+                ).fetchone()
+                if has_proj_sp:
+                    rows = conn.execute(
+                        text(
+                            f"""
+                            SELECT s.scientific_name, s.{col} FROM species s
+                            JOIN project_species ps ON ps.species_id = s.id
+                            WHERE ps.project_id = :pid
+                            ORDER BY s.scientific_name
+                            """
+                        ),
+                        {"pid": project_id},
+                    ).fetchall()
+                    return {sci: grp for sci, grp in rows}
+
+            rows = conn.execute(
+                text(f"SELECT scientific_name, {col} FROM species ORDER BY scientific_name")
+            ).fetchall()
+        return {sci: grp for sci, grp in rows}
+
     def get_behaviors_for_species(
         self, species_name: str, project_id: str | None = None
     ) -> list[str]:

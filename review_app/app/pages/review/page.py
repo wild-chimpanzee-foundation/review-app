@@ -75,6 +75,55 @@ def navigate_to(idx: int):
     asyncio.create_task(_do_nav())
 
 
+def _render_no_videos_match():
+    filters = get_filters()
+    label_map = {
+        "search_query": t("search"),
+        "selected_camera": t("camera_filter"),
+        "selected_possible_species_group": f"{t('filter_section_model')} · {t('group_label')}",
+        "selected_possible_species": t("species_model_filter"),
+        "selected_model_blank": t("model_blank_filter"),
+        "selected_needs_review": t("needs_review_filter"),
+        "selected_species_group": f"{t('filter_section_manual')} · {t('group_label')}",
+        "selected_species": t("species_manual_filter"),
+        "selected_behavior": t("manual_behavior_filter"),
+        "selected_manual_blank": t("manual_blank_filter"),
+        "selected_annotation_status": t("annotation_filter"),
+        "selected_annotator": t("annotator_filter"),
+        "selected_tags": t("tag_filter"),
+        "selected_is_review_later": t("review_later_filter"),
+        "selected_multiple_annotators": t("multiple_annotators_filter"),
+        "web_safe_only": t("web_safe_only"),
+    }
+    active = []
+    for key, label in label_map.items():
+        val = filters.get(key)
+        if val in ("All", "", None, False, "camera"):
+            continue
+        if isinstance(val, list) and not val:
+            continue
+        if isinstance(val, str):
+            display = val
+        elif isinstance(val, list):
+            display = ", ".join(str(v) for v in val)
+        else:
+            display = str(val)
+        active.append((label, display))
+
+    with ui.column().classes("items-center q-pa-xl gap-md"):
+        ui.icon("filter_list_off", size="48px").classes("text-grey-5")
+        ui.label(t("no_videos_match")).classes("text-h6 text-grey-5")
+        if active:
+            with ui.card().classes("q-pa-md").style("min-width: 320px; max-width: 520px"):
+                ui.label(t("active_filters")).classes("text-caption text-grey-5 q-mb-xs")
+                for label, display in active:
+                    with ui.row().classes("items-start gap-xs w-full"):
+                        ui.label(f"{label}:").classes("text-caption text-grey-5").style(
+                            "min-width: 140px; flex-shrink: 0"
+                        )
+                        ui.label(display).classes("text-caption text-weight-medium")
+
+
 def _render_ai_annotations(model_ann, global_species_map):
     if model_ann is None or model_ann.empty:
         return
@@ -185,10 +234,10 @@ def _render_ai_annotations(model_ann, global_species_map):
 
 
 @ui.refreshable
-async def render_video_section(dp, species_map, global_species_map):
+async def render_video_section(dp, species_map, species_groups, global_species_map):
     queue = get_queue()
     if not queue:
-        ui.label(t("no_videos_match")).classes("text-h6 ")
+        _render_no_videos_match()
         return
 
     current_idx = get_current_idx()
@@ -457,6 +506,7 @@ async def render_video_section(dp, species_map, global_species_map):
                 render_annotation_section(
                     video,
                     species_map,
+                    species_groups,
                     dp,
                     default_species,
                     default_behavior,
@@ -483,6 +533,10 @@ async def setup_review():
     )
     if not species_map:
         species_map = {"unknown": "unknown"}
+
+    species_groups = await run.io_bound(
+        dp.get_species_group_map, get_language(), project_id=get_active_project_id()
+    )
 
     global_species_map = await run.io_bound(dp.get_species_display_map, get_language())
 
@@ -551,11 +605,13 @@ async def setup_review():
     left_drawer.classes("review-sidebar")
 
     with left_drawer:
-        await render_filter_drawer(dp, species_map, navigate_to, render_video_section)
+        await render_filter_drawer(
+            dp, species_map, species_groups, navigate_to, render_video_section
+        )
 
     with ui.column().classes("w-full q-pa-xs"):
         with ui.element("div").style("width: 100%; max-width: 1900px; margin: 0 auto"):
-            await render_video_section(dp, species_map, global_species_map)
+            await render_video_section(dp, species_map, species_groups, global_species_map)
 
     ui.run_javascript("document.activeElement?.blur()")
 

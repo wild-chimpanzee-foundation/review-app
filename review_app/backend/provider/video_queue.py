@@ -145,6 +145,10 @@ class QueueMixin(ProviderBase):
         selected_tags = filters.get("selected_tags") or []
         if isinstance(selected_tags, str):
             selected_tags = []
+        selected_species_group = (filters.get("selected_species_group") or "").strip()
+        selected_possible_species_group = (
+            filters.get("selected_possible_species_group") or ""
+        ).strip()
         selected_annotation_status = filters.get("selected_annotation_status", "All")
         selected_is_review_later = filters.get("selected_is_review_later", False)
         selected_sort = filters.get("selected_sort", "camera")
@@ -259,6 +263,27 @@ class QueueMixin(ProviderBase):
                     WHERE ma.video_id = v.video_id
                     AND ma.annotation_type = 'species'
                     AND ma.value_text IN ({phs})
+                )""")
+
+        if selected_possible_species_group:
+            params["ps_group"] = selected_possible_species_group
+            where.append("""
+                EXISTS (
+                    SELECT 1 FROM model_annotations ma
+                    JOIN species s ON s.scientific_name = ma.value_text
+                    WHERE ma.video_id = v.video_id
+                    AND ma.annotation_type = 'species'
+                    AND (s.group_en = :ps_group OR s.group_fr = :ps_group)
+                )""")
+
+        if selected_species_group:
+            params["sp_group"] = selected_species_group
+            where.append("""
+                EXISTS (
+                    SELECT 1 FROM individual_observations io
+                    JOIN species s ON s.id = io.species_id
+                    WHERE io.video_id = v.video_id
+                    AND (s.group_en = :sp_group OR s.group_fr = :sp_group)
                 )""")
 
         if selected_manual_blank == "Blank":

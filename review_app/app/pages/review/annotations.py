@@ -78,10 +78,22 @@ def _init_annotation_state(video, default_species, default_behavior):
     set_state_val("video_tags", list(video.get("video_tags") or []))
 
 
+def _build_group_options(species_groups: dict) -> dict[str, str]:
+    seen = sorted({grp for grp in species_groups.values() if grp})
+    return {"": t("all_groups"), **{g: g for g in seen}}
+
+
+def _filter_species_by_group(species_map: dict, species_groups: dict, group: str) -> dict:
+    if not group:
+        return species_map
+    return {sci: label for sci, label in species_map.items() if species_groups.get(sci) == group}
+
+
 @ui.refreshable
 def render_annotation_section(
     video,
     species_map,
+    species_groups,
     dp,
     default_species,
     default_behavior,
@@ -191,20 +203,36 @@ def render_annotation_section(
                     .classes("full-width q-pa-md q-mb-sm")
                     .style("border: 2px solid var(--q-primary)")
                 ):
-                    with ui.row().classes("w-full gap-sm items-center"):
-                        active_project_id = get_active_project_id()
-                        behaviors_map = dp.get_behavior_display_map(
-                            lang=get_language(),
-                            species_name=sel["species"],
-                            project_id=active_project_id,
-                        )
-                        sp_value = sel["species"] if sel["species"] in species_map else None
-                        bp_value = _resolve_behavior(behaviors_map, sel.get("behavior"))
+                    active_project_id = get_active_project_id()
+                    behaviors_map = dp.get_behavior_display_map(
+                        lang=get_language(),
+                        species_name=sel["species"],
+                        project_id=active_project_id,
+                    )
+                    sp_value = sel["species"] if sel["species"] in species_map else None
+                    bp_value = _resolve_behavior(behaviors_map, sel.get("behavior"))
+                    group_options = _build_group_options(species_groups)
+                    initial_group = species_groups.get(sp_value, "") if sp_value else ""
+                    filtered_species = _filter_species_by_group(
+                        species_map, species_groups, initial_group
+                    )
 
+                    with ui.row().classes("w-full gap-sm items-center"):
+                        gp = (
+                            ui.select(
+                                label=t("group_label"),
+                                options=group_options,
+                                value=initial_group,
+                            )
+                            .props("outlined dense clearable")
+                            .classes("col")
+                        )
+
+                    with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
                         sp = (
                             ui.select(
                                 label=t("species_label"),
-                                options=species_map,
+                                options=filtered_species,
                                 value=sp_value,
                                 with_input=True,
                             )
@@ -212,17 +240,17 @@ def render_annotation_section(
                             .classes("col")
                         )
 
-                        with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
-                            bp = (
-                                ui.select(
-                                    label=t("behavior_label"),
-                                    options=behaviors_map,
-                                    value=bp_value,
-                                    with_input=True,
-                                )
-                                .props("outlined dense")
-                                .style("flex: 2; min-width: 120px;")
+                    with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
+                        bp = (
+                            ui.select(
+                                label=t("behavior_label"),
+                                options=behaviors_map,
+                                value=bp_value,
+                                with_input=True,
                             )
+                            .props("outlined dense")
+                            .style("flex: 2; min-width: 120px;")
+                        )
 
                     current_count = sel.get("count") or 1
                     count_options = {i: str(i) for i in range(1, 11)}
@@ -292,7 +320,16 @@ def render_annotation_section(
                             c.value = new_count
                             c.update()
 
-                    def on_species_change(_, s=sp, b=bp, c=ct, idx=i):
+                    def on_group_change(_, g=gp, s=sp):
+                        new_filtered = _filter_species_by_group(
+                            species_map, species_groups, g.value or ""
+                        )
+                        s.options = new_filtered
+                        if s.value not in new_filtered:
+                            s.value = None
+                        s.update()
+
+                    def on_species_change(_, s=sp, b=bp, c=ct, g=gp, idx=i):
                         new_behaviors = dp.get_behavior_display_map(
                             lang=get_language(),
                             species_name=s.value,
@@ -301,8 +338,14 @@ def render_annotation_section(
                         b.options = new_behaviors
                         b.value = _resolve_behavior(new_behaviors, b.value)
                         b.update()
+                        if s.value:
+                            inferred_group = species_groups.get(s.value, "")
+                            if inferred_group != (g.value or ""):
+                                g.value = inferred_group
+                                g.update()
                         update_sel(idx, s, b, c)
 
+                    gp.on_value_change(on_group_change)
                     sp.on_value_change(on_species_change)
                     bp.on_value_change(lambda _, s=sp, b=bp, c=ct, idx=i: update_sel(idx, s, b, c))
                     ct.on_value_change(lambda _, s=sp, b=bp, c=ct, idx=i: update_sel(idx, s, b, c))
