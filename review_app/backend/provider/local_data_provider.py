@@ -18,6 +18,7 @@ from review_app.backend.provider.import_service import ImportMixin
 from review_app.backend.provider.project_repository import ProjectMixin
 from review_app.backend.provider.species import SpeciesMixin
 from review_app.backend.provider.stats_service import StatsMixin
+from review_app.backend.provider.tag_repository import TagMixin
 from review_app.backend.provider.video import VideoMixin
 from review_app.backend.provider.video_queue import QueueMixin
 
@@ -36,6 +37,7 @@ class LocalDataProvider(
     AnnotationMixin,
     ImportMixin,
     StatsMixin,
+    TagMixin,
 ):
     """SQLite-backed local data provider for manual review + constrained model imports."""
 
@@ -99,9 +101,11 @@ class LocalDataProvider(
         video_dir: Path | None = None,
         active_project_id: str | None = None,
     ) -> dict[str, int]:
-        return self._sync_videos_table(
+        result = self._sync_videos_table(
             progress_callback, video_dir=video_dir, active_project_id=active_project_id
         )
+        self.auto_apply_broken_metadata_tags(active_project_id)
+        return result
 
     @property
     def db_path(self) -> Path:

@@ -184,6 +184,19 @@ async def render_filter_drawer(
                 on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width use-chips")
 
+            tag_values = filter_options.get("tag_values", [])
+            selected_tags = filters.get("selected_tags", [])
+            if not isinstance(selected_tags, list):
+                selected_tags = []
+            selected_tags = [v for v in selected_tags if v in tag_values]
+            tag_filter = ui.select(
+                label=t("tag_filter"),
+                options={v: v for v in tag_values},
+                value=selected_tags,
+                with_input=True,
+                multiple=True,
+                on_change=lambda _: apply_filters(),
+            ).props("outlined dense class=full-width use-chips")
             multiple_annotators_cb = ui.checkbox(
                 t("multiple_annotators_filter"),
                 value=bool(filters.get("selected_multiple_annotators", False)),
@@ -212,6 +225,7 @@ async def render_filter_drawer(
                 is_review_later.value = False
                 annotator_filter.value = []
                 multiple_annotators_cb.value = False
+                tag_filter.value = []
                 web_safe_only_cb.value = False
                 sort_select.value = "camera"
                 sort_dir[0] = "desc"
@@ -236,6 +250,7 @@ async def render_filter_drawer(
                     "selected_multiple_annotators": multiple_annotators_cb.value,
                     "selected_needs_review": needs_review_filter.value,
                     "web_safe_only": web_safe_only_cb.value,
+                    "selected_tags": tag_filter.value,
                 }
                 update_filters(**new_filters)
                 new_queue = await run.io_bound(

@@ -22,6 +22,7 @@ from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 from .database import render_database_section
 from .species import render_species_section
+from .tags import render_tags_section
 
 
 def _build_settings_content(container: ui.column):
@@ -167,13 +168,16 @@ def _build_settings_content(container: ui.column):
 
         with ui.expansion(t("advanced_settings"), icon="settings").classes("full-width q-mb-lg"):
             with ui.column().classes("w-full gap-lg q-pa-md"):
+                _dp = get_data_provider() or LocalDataProvider()
                 if active_project_id:
                     lang = get_language()
-                    _dp = get_data_provider() or LocalDataProvider()
                     with ui.expansion(t("project_species_settings"), icon="pets").classes(
                         "full-width"
                     ):
                         render_species_section(_dp, active_project_id, lang)
+
+                with ui.expansion(t("settings_tags_section"), icon="label").classes("full-width"):
+                    render_tags_section(_dp)
 
                 with ui.expansion(t("blank_detection"), icon="tune").classes("full-width"):
                     ui.label(t("blank_detection_desc")).classes("text-caption text-grey-6 q-mb-md")

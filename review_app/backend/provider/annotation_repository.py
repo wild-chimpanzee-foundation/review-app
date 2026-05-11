@@ -178,11 +178,25 @@ class AnnotationMixin(ProviderBase):
                 params={"video_id": video_id},
             )
 
+            tag_rows = conn.execute(
+                text(
+                    "SELECT t.key FROM video_tags vt "
+                    "JOIN tags t ON t.id = vt.tag_id "
+                    "WHERE vt.video_id = :video_id"
+                ),
+                {"video_id": video_id},
+            ).fetchall()
+
         if detail_df.empty:
             return None
 
+        video_tag_keys = [r[0] for r in tag_rows]
         return self._build_video_detail_row(
-            detail_df.iloc[0].to_dict(), manual_rows, blank_threshold, species_threshold
+            detail_df.iloc[0].to_dict(),
+            manual_rows,
+            blank_threshold,
+            species_threshold,
+            video_tag_keys,
         )
 
     def _build_video_detail_row(
@@ -191,6 +205,7 @@ class AnnotationMixin(ProviderBase):
         manual_rows: pd.DataFrame,
         blank_threshold: float,
         species_threshold: float,
+        video_tag_keys: list[str] | None = None,
     ) -> dict[str, Any]:
         selections = []
         for _, manual in manual_rows.iterrows():
@@ -208,6 +223,7 @@ class AnnotationMixin(ProviderBase):
                 }
             )
         row["manual_selections"] = selections
+        row["video_tags"] = video_tag_keys or []
         row["species_behavior_json"] = json.dumps(selections) if selections else None
         row["manual_review_prediction"] = (
             "\n".join(

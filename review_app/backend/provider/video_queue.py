@@ -68,6 +68,14 @@ class QueueMixin(ProviderBase):
                         SELECT labeled_by FROM video_labels vl
                         WHERE labeled_by IS NOT NULL AND labeled_by != '' {vl_exists}
                     ) _ann GROUP BY ann
+                    UNION ALL
+                    SELECT 'tag', t.key FROM video_tags vt
+                    JOIN tags t ON t.id = vt.tag_id
+                    WHERE EXISTS (
+                        SELECT 1 FROM videos v
+                        WHERE v.video_id = vt.video_id {vid_filter}
+                    )
+                    GROUP BY t.key
                 """),
                 conn,
                 params=params,
@@ -80,6 +88,7 @@ class QueueMixin(ProviderBase):
             "possible_species_values": [],
             "model_behavior_values": [],
             "annotator_values": [],
+            "tag_values": [],
         }
         for _, row in df.iterrows():
             source = str(row["source"])
@@ -96,6 +105,8 @@ class QueueMixin(ProviderBase):
                 result["model_behavior_values"].append(val)
             elif source == "annotator":
                 result["annotator_values"].append(val)
+            elif source == "tag":
+                result["tag_values"].append(val)
 
         result["camera_values"].sort()
         result["species_values"].sort()
@@ -103,6 +114,7 @@ class QueueMixin(ProviderBase):
         result["possible_species_values"].sort()
         result["model_behavior_values"].sort()
         result["annotator_values"].sort()
+        result["tag_values"].sort()
 
         return result
 
@@ -130,6 +142,9 @@ class QueueMixin(ProviderBase):
             selected_model_behavior = []
         if isinstance(selected_annotator, str):
             selected_annotator = []
+        selected_tags = filters.get("selected_tags") or []
+        if isinstance(selected_tags, str):
+            selected_tags = []
         selected_annotation_status = filters.get("selected_annotation_status", "All")
         selected_is_review_later = filters.get("selected_is_review_later", False)
         selected_sort = filters.get("selected_sort", "camera")
@@ -338,6 +353,17 @@ class QueueMixin(ProviderBase):
                     FROM individual_observations io
                     WHERE io.video_id = v.video_id AND io.labeled_by IS NOT NULL
                 ) > 1""")
+
+        if selected_tags:
+            phs = ", ".join(f":tag{i}" for i in range(len(selected_tags)))
+            for i, v in enumerate(selected_tags):
+                params[f"tag{i}"] = v
+            where.append(f"""
+                EXISTS (
+                    SELECT 1 FROM video_tags vt
+                    JOIN tags t ON t.id = vt.tag_id
+                    WHERE vt.video_id = v.video_id AND t.key IN ({phs})
+                )""")
 
         if selected_sort == "camera":
             order_by = f"ORDER BY v.camera_id {sort_dir}, v.video_path ASC"

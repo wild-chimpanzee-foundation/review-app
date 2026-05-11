@@ -75,6 +75,7 @@ def _init_annotation_state(video, default_species, default_behavior):
     set_state_val("review_is_blank", is_blank)
     set_selections(selections)
     set_state_val("review_state_video_id", video.get("video_id"))
+    set_state_val("video_tags", list(video.get("video_tags") or []))
 
 
 @ui.refreshable
@@ -429,10 +430,10 @@ def render_annotation_section(
             with (
                 ui.button(on_click=submit_and_next, color="warning")
                 .classes("col")
-                .style("height: 60px; font-weight:700; min-width: 160px;") as submit_next_btn
+                .style("min-height: 60px; font-weight:700; min-width: 160px;") as submit_next_btn
             ):
-                with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
-                    ui.label(t("submit_next"))
+                with ui.row().classes("items-center justify-between w-full q-px-xs q-py-sm"):
+                    ui.label(t("submit_next")).classes("text-center col")
                     _shortcut_badge("↵ Enter")
             submit_next_btn._props["data-shortcut"] = "submit-next"
             submit_next_btn.tooltip(t("tooltip_submit_next"))
@@ -441,10 +442,10 @@ def render_annotation_section(
                 ui.button(on_click=mark_blank_next, color="primary")
                 .props("outline")
                 .classes("col")
-                .style("height: 60px; min-width: 160px;") as blank_next_btn
+                .style("min-height: 60px; min-width: 160px;") as blank_next_btn
             ):
-                with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
-                    ui.label(t("mark_blank"))
+                with ui.row().classes("items-center justify-between w-full q-px-xs q-py-sm"):
+                    ui.label(t("mark_blank")).classes("text-center col")
                     _shortcut_badge("B")
             blank_next_btn._props["data-shortcut"] = "mark-blank"
             blank_next_btn.tooltip(t("tooltip_mark_blank"))
@@ -458,10 +459,10 @@ def render_annotation_section(
                     ui.button(on_click=mark_review_later)
                     .props("outline color=grey")
                     .classes("col")
-                    .style("height: 60px;") as review_later_btn
+                    .style("min-height: 60px;") as review_later_btn
                 ):
-                    with ui.row().classes("items-center justify-between w-full no-wrap q-px-xs"):
-                        ui.label(t("mark_review_later"))
+                    with ui.row().classes("items-center justify-between w-full q-px-xs q-py-sm"):
+                        ui.label(t("mark_review_later")).classes("text-center col")
                         _shortcut_badge("M")
                 review_later_btn._props["data-shortcut"] = "mark-unknown"
                 review_later_btn.tooltip(t("tooltip_review_later_btn"))

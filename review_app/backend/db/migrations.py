@@ -107,6 +107,64 @@ def _migration_v4(conn) -> None:
         )
 
 
+def _migration_v7(conn) -> None:
+    """Create tags and video_tags tables and seed built-in tags. Idempotent."""
+    tables = {
+        r[0]
+        for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
+    }
+    if "tags" not in tables:
+        conn.execute(
+            text("""
+                CREATE TABLE tags (
+                    id TEXT PRIMARY KEY,
+                    key TEXT UNIQUE NOT NULL,
+                    name_en TEXT NOT NULL,
+                    name_fr TEXT,
+                    color TEXT,
+                    icon TEXT,
+                    is_custom BOOLEAN NOT NULL DEFAULT 0
+                )
+            """)
+        )
+    if "video_tags" not in tables:
+        conn.execute(
+            text("""
+                CREATE TABLE video_tags (
+                    video_id TEXT NOT NULL REFERENCES videos(video_id),
+                    tag_id TEXT NOT NULL REFERENCES tags(id),
+                    tagged_by TEXT,
+                    tagged_at TEXT NOT NULL,
+                    PRIMARY KEY (video_id, tag_id)
+                )
+            """)
+        )
+    builtin_tags = [
+        ("fire", "Fire", "Feu", "deep-orange", "local_fire_department"),
+        ("nice_shot", "Nice Shot", "Belle image", "amber", "star"),
+        ("broken_metadata", "Broken Metadata", "Métadonnées corrompues", "red", "report_problem"),
+    ]
+    for key, name_en, name_fr, color, icon in builtin_tags:
+        existing = conn.execute(text("SELECT id FROM tags WHERE key = :k"), {"k": key}).fetchone()
+        if existing is None:
+            import uuid as _uuid
+
+            conn.execute(
+                text(
+                    "INSERT INTO tags (id, key, name_en, name_fr, color, icon, is_custom) "
+                    "VALUES (:id, :key, :name_en, :name_fr, :color, :icon, 0)"
+                ),
+                {
+                    "id": str(_uuid.uuid4()),
+                    "key": key,
+                    "name_en": name_en,
+                    "name_fr": name_fr,
+                    "color": color,
+                    "icon": icon,
+                },
+            )
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -141,6 +199,10 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
             not in {r[1] for r in conn.execute(text("PRAGMA table_info(videos)")).fetchall()}
             else None,
         ],
+    ),
+    (
+        7,
+        lambda conn: _migration_v7(conn),
     ),
 ]
 

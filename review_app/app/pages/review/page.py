@@ -9,9 +9,11 @@ from nicegui import run, ui
 from review_app.app.onboarding import show_info_dialog, show_tour_if_needed
 from review_app.app.pages.review.annotations import render_annotation_section
 from review_app.app.pages.review.filters import render_filter_drawer  # noqa: F401 (refreshable)
+from review_app.app.pages.review.tags import render_video_tags
 from review_app.app.pages.review.video_player import render_custom_video_player
 from review_app.app.state import (
     get_active_project_id,
+    get_annotator_name,
     get_blank_threshold,
     get_current_idx,
     get_filters,
@@ -421,6 +423,8 @@ async def render_video_section(dp, species_map, global_species_map):
                         ).classes("text-caption text-grey-6").tooltip(
                             t("video_metadata_missing_tooltip")
                         )
+                ui.separator().classes("q-my-xs")
+                await render_video_tags(selected_video_id, dp, get_annotator_name())
 
         with ui.column().style("flex: 1; min-width: 300px; max-width: 560px;"):
             _render_ai_annotations(model_ann, global_species_map)

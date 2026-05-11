@@ -473,8 +473,10 @@ class ImportMixin(ProviderBase):
 
                 set_clause = ", ".join(f"{k} = :{k}" for k in fields)
                 fields["video_id"] = video_id
+                fields["pid"] = active_project_id
+                pid_clause = " AND project_id = :pid" if active_project_id else ""
                 conn.execute(
-                    text(f"UPDATE videos SET {set_clause} WHERE video_id = :video_id"),
+                    text(f"UPDATE videos SET {set_clause} WHERE video_id = :video_id{pid_clause}"),
                     fields,
                 )
                 updated += 1
@@ -523,6 +525,17 @@ class ImportMixin(ProviderBase):
                 params=params,
             )
 
+            tags_df = pd.read_sql(
+                text(f"""
+                    SELECT vt.video_id, t.key, t.is_custom
+                    FROM video_tags vt
+                    JOIN tags t ON t.id = vt.tag_id
+                    WHERE EXISTS (SELECT 1 FROM videos v WHERE v.video_id = vt.video_id {vid_pid})
+                """),
+                conn,
+                params=params,
+            )
+
             model_df = pd.read_sql(
                 text(f"""
                     SELECT video_id, model_name, annotation_type, value_text, probability
@@ -532,6 +545,29 @@ class ImportMixin(ProviderBase):
                 conn,
                 params=params,
             )
+
+        if not tags_df.empty:
+            builtin_keys = tags_df.loc[tags_df["is_custom"] == 0, "key"].unique().tolist()
+            # One 0/1 column per built-in tag
+            for key in sorted(builtin_keys):
+                col = f"tag_{key}"
+                flagged = tags_df.loc[tags_df["key"] == key, "video_id"]
+                base_df[col] = base_df["video_id"].isin(flagged).astype(int)
+            # Custom tags combined in one column
+            custom_tags = tags_df[tags_df["is_custom"] == 1].copy()
+            if not custom_tags.empty:
+                custom_agg = (
+                    custom_tags.groupby("video_id")["key"]
+                    .apply(lambda s: ",".join(sorted(s)))
+                    .reset_index(name="custom_tags")
+                )
+                base_df = base_df.merge(custom_agg, on="video_id", how="left")
+            else:
+                base_df["custom_tags"] = None
+        else:
+            for key in ["fire", "nice_shot", "broken_metadata"]:
+                base_df[f"tag_{key}"] = 0
+            base_df["custom_tags"] = None
 
         if not model_df.empty:
             model_df["col"] = model_df["model_name"] + "__" + model_df["annotation_type"]

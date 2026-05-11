@@ -172,6 +172,27 @@ class ModelAnnotation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    key: Mapped[str] = mapped_column(String, unique=True)
+    name_en: Mapped[str] = mapped_column(String)
+    name_fr: Mapped[str | None] = mapped_column(String)
+    color: Mapped[str | None] = mapped_column(String)
+    icon: Mapped[str | None] = mapped_column(String)
+    is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class VideoTag(Base):
+    __tablename__ = "video_tags"
+
+    video_id: Mapped[str] = mapped_column(String, ForeignKey("videos.video_id"), primary_key=True)
+    tag_id: Mapped[str] = mapped_column(String, ForeignKey("tags.id"), primary_key=True)
+    tagged_by: Mapped[str | None] = mapped_column(String)
+    tagged_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class AppSetting(Base):
     __tablename__ = "app_settings"
 
