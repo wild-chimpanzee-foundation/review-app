@@ -265,11 +265,23 @@ def render_annotation_section(
                             .props("outlined dense")
                             .classes("col")
                         )
+
+                        def step_count(idx, delta, c=ct):
+                            new_sels = get_selections()
+                            if 0 <= idx < len(new_sels):
+                                new_count = max(
+                                    1, min(11, (new_sels[idx].get("count") or 1) + delta)
+                                )
+                                new_sels[idx] = {**new_sels[idx], "count": new_count}
+                                set_selections(new_sels)
+                                c.value = new_count
+                                c.update()
+
                         ui.button(icon="remove").props("flat dense round size=sm").on(
-                            "click", lambda idx=i: step_count(idx, -1)
+                            "click", lambda idx=i, fn=step_count: fn(idx, -1)
                         )
                         ui.button(icon="add").props("flat dense round size=sm").on(
-                            "click", lambda idx=i: step_count(idx, 1)
+                            "click", lambda idx=i, fn=step_count: fn(idx, 1)
                         )
 
                     labeled_by = sel.get("labeled_by")
@@ -310,15 +322,6 @@ def render_annotation_section(
                                 "end_sec": new_sels[idx].get("end_sec"),
                             }
                             set_selections(new_sels)
-
-                    def step_count(idx, delta, c=ct):
-                        new_sels = get_selections()
-                        if 0 <= idx < len(new_sels):
-                            new_count = max(1, min(11, (new_sels[idx].get("count") or 1) + delta))
-                            new_sels[idx] = {**new_sels[idx], "count": new_count}
-                            set_selections(new_sels)
-                            c.value = new_count
-                            c.update()
 
                     def on_group_change(_, g=gp, s=sp):
                         new_filtered = _filter_species_by_group(
