@@ -284,19 +284,20 @@ class GUI:
             ).classes("text-body2 text-grey-6 text-center").style("max-width: 500px")
 
             def delete_and_restart():
-                import shutil
+                from review_app.backend.db.backup import quarantine_broken_db
 
-                db_path = get_default_db_path()
-                if db_path.exists():
-                    backup = db_path.with_suffix(f".broken-{db_path.stat().st_mtime_ns}.db")
-                    shutil.copy2(db_path, backup)
-                    db_path.unlink()
-                    logger.info("Deleted broken DB %s; backup saved to %s", db_path, backup)
-                # Also remove WAL/SHM sidecar files so SQLite starts clean
-                for ext in (".db-wal", ".db-shm"):
-                    sidecar = db_path.with_suffix(ext)
-                    if sidecar.exists():
-                        sidecar.unlink()
+                try:
+                    quarantined = quarantine_broken_db()
+                    if quarantined:
+                        logger.info("Quarantined broken DB to %s", quarantined)
+                except Exception:
+                    logger.exception("quarantine_broken_db failed; deleting live DB anyway")
+                    db_path = get_default_db_path()
+                    if db_path.exists():
+                        db_path.unlink()
+                    from review_app.backend.db.backup import remove_db_sidecars
+
+                    remove_db_sidecars(db_path)
                 self._startup_error = None
                 ui.navigate.to("/setup")
 
@@ -422,7 +423,7 @@ class GUI:
                 from review_app.backend.db.backup import BackupError, create_backup
 
                 try:
-                    create_backup(dp.engine, reason="startup")
+                    create_backup(reason="startup")
                 except BackupError:
                     pass
 
@@ -471,7 +472,7 @@ class GUI:
                 from review_app.backend.db.backup import BackupError, create_backup
 
                 try:
-                    create_backup(self.dp.engine, reason="shutdown")
+                    create_backup(reason="shutdown")
                 except BackupError:
                     pass
 

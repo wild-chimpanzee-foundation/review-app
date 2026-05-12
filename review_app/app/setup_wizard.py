@@ -2,7 +2,6 @@ import platform
 import shutil
 import sqlite3
 import subprocess
-import uuid
 from pathlib import Path
 
 from nicegui import run, ui
@@ -395,17 +394,13 @@ class SetupWizard:
                     restore_status_label: list = [None]
 
                     async def do_wizard_restore(backup_path: Path):
-                        from review_app.app.config import get_default_db_path
                         from review_app.app.media import set_media_dirs
                         from review_app.app.state import (
                             load_settings_from_db,
                             set_active_project,
                             set_data_provider,
                         )
-                        from review_app.backend.db.backup import (
-                            RestoreSchemaVersionError,
-                            _check_restore_schema_version,
-                        )
+                        from review_app.backend.db.backup import BackupError, restore_backup
                         from review_app.backend.db.migrations import MIGRATIONS
                         from review_app.backend.provider.local_data_provider import (
                             LocalDataProvider,
@@ -417,21 +412,13 @@ class SetupWizard:
                             lbl.visible = True
 
                         try:
-                            await run.io_bound(
-                                _check_restore_schema_version, backup_path, len(MIGRATIONS)
-                            )
-                        except RestoreSchemaVersionError:
-                            msg = t("restore_error_schema_version")
+                            await run.io_bound(restore_backup, backup_path, len(MIGRATIONS))
+                        except BackupError as exc:
+                            msg = t("restore_failed", error=t(exc.user_message_key))
                             if lbl:
                                 lbl.set_text(msg)
                             ui.notify(msg, type="negative", timeout=8000)
                             return
-
-                        db_path = get_default_db_path()
-                        db_path.parent.mkdir(parents=True, exist_ok=True)
-
-                        try:
-                            await run.io_bound(shutil.copy2, backup_path, db_path)
                         except Exception as exc:
                             if lbl:
                                 lbl.set_text(t("restore_failed", error=str(exc)))
@@ -456,18 +443,19 @@ class SetupWizard:
                             if lbl:
                                 lbl.set_text(t("restore_failed", error=str(exc)))
                             ui.notify(t("restore_failed", error=str(exc)), type="negative")
+                            ui.navigate.to("/db-error")
                             return
 
                         ui.notify(t("wizard_restore_success"), type="positive")
                         self.on_complete_callback()
 
                     async def _handle_backup_upload(e):
-                        from review_app.backend.db.backup import get_backup_dir
+                        import tempfile
 
                         content = await e.file.read()
-                        tmp_path = get_backup_dir() / f"uploaded_restore_{uuid.uuid4().hex}.db"
-                        tmp_path.parent.mkdir(parents=True, exist_ok=True)
-                        tmp_path.write_bytes(content)
+                        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+                            f.write(content)
+                            tmp_path = Path(f.name)
                         try:
                             await do_wizard_restore(tmp_path)
                         finally:

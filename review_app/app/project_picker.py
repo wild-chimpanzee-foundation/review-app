@@ -66,7 +66,7 @@ def build_project_picker():
                                     async def confirm():
                                         del_dp = LocalDataProvider()
                                         try:
-                                            create_backup(del_dp.engine, reason="delete_project")
+                                            create_backup(reason="delete_project")
                                         except BackupError as exc:
                                             ui.notify(
                                                 t(

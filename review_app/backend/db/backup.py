@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-from sqlalchemy import text
 
 from review_app.app.config import DEFAULT_DB_FILENAME, get_user_data_dir
 from review_app.backend.errors import AppError
@@ -17,8 +16,10 @@ logger = logging.getLogger(__name__)
 
 _BACKUP_TS_RE = re.compile(r"^review_backup_(\d{8}_\d{6})(?:_v(\d+))?(?:_\d+)?\.db$")
 
-MAX_AUTO_BACKUPS = 10
+RECENT_KEEP_COUNT = 5
 DAILY_RETENTION_DAYS = 14
+WEEKLY_RETENTION_WEEKS = 8
+MONTHLY_RETENTION_MONTHS = 12
 BACKUP_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 
 
@@ -58,87 +59,109 @@ class RestoreSchemaVersionError(BackupError):
     user_message_key: str = "restore_error_schema_version"
 
 
+class RestoreCorruptError(BackupError):
+    user_message_key: str = "restore_error_corrupt"
+
+
 def get_backup_dir() -> Path:
     backup_dir = get_user_data_dir() / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     return backup_dir
 
 
-def _get_current_schema_version(engine) -> int:
-    try:
-        with engine.connect() as conn:
-            row = conn.execute(text("SELECT version FROM _schema_version")).fetchone()
-            return row[0] if row else 0
-    except Exception as exc:
-        logger.warning("Could not read current schema version: %s", exc)
-        return 0
-
-
 def read_schema_version(db_path: Path) -> int | None:
-    """Read _schema_version from an arbitrary SQLite file without SQLAlchemy."""
+    """Read _schema_version from an arbitrary SQLite file. Returns None if unreadable or missing."""
     try:
         con = sqlite3.connect(str(db_path))
-        row = con.execute("SELECT version FROM _schema_version").fetchone()
-        con.close()
+        try:
+            row = con.execute("SELECT version FROM _schema_version").fetchone()
+        finally:
+            con.close()
         return row[0] if row else None
     except Exception as exc:
         logger.warning("Could not read schema version from %s: %s", db_path, exc)
         return None
 
 
-def create_backup(engine, reason: str = "auto", auto_prune: bool = True) -> Path:
+def _validate_backup_path(path: Path) -> None:
+    s = str(path)
+    if "\n" in s or "\0" in s:
+        raise BackupCopyError(f"invalid backup path: {path!r}")
+    backup_dir = get_backup_dir().resolve()
+    if path.resolve().parent != backup_dir:
+        raise BackupCopyError(f"backup path outside backup dir: {path}")
+
+
+def _validate_restore_source(path: Path) -> None:
+    """Lightweight validation for restore sources. The path is application-controlled
+    (list_backups or a tempfile) so this is defense in depth, not access control."""
+    s = str(path)
+    if "\n" in s or "\0" in s:
+        raise RestoreFileNotFoundError(f"invalid backup path: {path!r}")
+
+
+SIDE_CAR_EXTS: tuple[str, ...] = ("-wal", "-shm", "-journal")
+
+
+def remove_db_sidecars(db_path: Path) -> None:
+    """Remove SQLite sidecar files (-wal, -shm, -journal) for db_path. Best-effort."""
+    for ext in SIDE_CAR_EXTS:
+        p = Path(str(db_path) + ext)
+        if p.exists():
+            try:
+                p.unlink()
+            except OSError:
+                logger.warning("Failed to remove sidecar %s", p)
+
+
+def create_backup(reason: str = "auto", auto_prune: bool = True) -> Path:
+    """Create a VACUUM INTO backup of the live DB. Raises on any failure."""
     db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
     if not db_path.exists():
         raise BackupDBNotFoundError(str(db_path))
 
-    schema_version = _get_current_schema_version(engine)
+    schema_version = read_schema_version(db_path) or 0
     timestamp = datetime.now(timezone.utc).strftime(BACKUP_TIMESTAMP_FORMAT)
-    backup_name = f"review_backup_{timestamp}_v{schema_version}.db"
-    backup_path = get_backup_dir() / backup_name
-
+    backup_dir = get_backup_dir()
+    backup_path = backup_dir / f"review_backup_{timestamp}_v{schema_version}.db"
     if backup_path.exists():
         i = 1
-        while (get_backup_dir() / f"review_backup_{timestamp}_v{schema_version}_{i}.db").exists():
+        while (backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db").exists():
             i += 1
-        backup_path = get_backup_dir() / f"review_backup_{timestamp}_v{schema_version}_{i}.db"
+        backup_path = backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db"
 
+    _validate_backup_path(backup_path)
+    escaped = str(backup_path).replace("'", "''")
+
+    con = None
     try:
-        escaped = str(backup_path).replace("'", "''")
-        with engine.connect() as conn:
-            conn.execute(text(f"VACUUM INTO '{escaped}'"))
-        logger.info("Backup created (%s): %s", reason, backup_path)
-        if auto_prune:
-            prune_backups()
-        return backup_path
-    except Exception:
-        logger.exception("VACUUM INTO failed, falling back to file copy")
-        try:
-            _fallback_copy(db_path, backup_path)
-            logger.info("Fallback copy backup created (%s): %s", reason, backup_path)
-            if auto_prune:
-                prune_backups()
-            return backup_path
-        except Exception as copy_exc:
-            logger.exception("Fallback copy also failed")
-            raise BackupCopyError(str(copy_exc)) from copy_exc
+        con = sqlite3.connect(str(db_path))
+        con.execute(f"VACUUM INTO '{escaped}'")
+    except Exception as exc:
+        logger.exception("VACUUM INTO failed")
+        if backup_path.exists():
+            try:
+                backup_path.unlink()
+            except OSError:
+                logger.warning("Could not clean up partial backup %s", backup_path)
+        raise BackupVacuumError(str(exc)) from exc
+    finally:
+        if con is not None:
+            con.close()
 
-
-def _fallback_copy(src: Path, dst: Path) -> None:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    for ext in ("", "-wal", "-shm"):
-        s = Path(str(src) + ext)
-        d = Path(str(dst) + ext)
-        if s.exists():
-            shutil.copy2(s, d)
+    logger.info("Backup created (%s): %s", reason, backup_path)
+    if auto_prune:
+        prune_backups()
+    return backup_path
 
 
 def _parse_backup_meta(name: str) -> tuple[datetime, int | None] | None:
-    """Return (timestamp, schema_version) parsed from a backup filename, or None."""
+    """Return (timestamp UTC, schema_version) parsed from a backup filename, or None."""
     m = _BACKUP_TS_RE.match(name)
     if not m:
         return None
     try:
-        dt = datetime.strptime(m.group(1), BACKUP_TIMESTAMP_FORMAT)
+        dt = datetime.strptime(m.group(1), BACKUP_TIMESTAMP_FORMAT).replace(tzinfo=timezone.utc)
     except ValueError:
         return None
     version = int(m.group(2)) if m.group(2) is not None else None
@@ -166,46 +189,58 @@ def list_backups() -> list[dict[str, Any]]:
 
 
 def prune_backups() -> int:
+    """GFS retention: N most recent + 1/day for D days + 1/week for W weeks + 1/month for M months.
+    Each tier picks the newest backup in its bucket; tiers overlap rather than partition."""
     backups = list_backups()
 
-    daily_milestones: set[str] = set()
     keep: set[Path] = set()
+    daily_seen: set[str] = set()
+    weekly_seen: set[str] = set()
+    monthly_seen: set[str] = set()
 
-    now = datetime.now()
-    for b in backups:
-        age_days = (now - b["timestamp"]).days
-        day_key = b["timestamp"].strftime("%Y-%m-%d")
-        if age_days <= DAILY_RETENTION_DAYS and day_key not in daily_milestones:
-            daily_milestones.add(day_key)
-            keep.add(b["path"])
-
-    for b in backups[:MAX_AUTO_BACKUPS]:
+    for b in backups[:RECENT_KEEP_COUNT]:
         keep.add(b["path"])
+
+    now = datetime.now(timezone.utc)
+    for b in backups:
+        ts = b["timestamp"]
+        age_days = (now - ts).days
+
+        if age_days <= DAILY_RETENTION_DAYS:
+            day_key = ts.strftime("%Y-%m-%d")
+            if day_key not in daily_seen:
+                daily_seen.add(day_key)
+                keep.add(b["path"])
+
+        if age_days <= WEEKLY_RETENTION_WEEKS * 7:
+            iso = ts.isocalendar()
+            week_key = f"{iso[0]}-W{iso[1]:02d}"
+            if week_key not in weekly_seen:
+                weekly_seen.add(week_key)
+                keep.add(b["path"])
+
+        if age_days <= MONTHLY_RETENTION_MONTHS * 31:
+            month_key = ts.strftime("%Y-%m")
+            if month_key not in monthly_seen:
+                monthly_seen.add(month_key)
+                keep.add(b["path"])
 
     to_delete = [b for b in backups if b["path"] not in keep]
     count = 0
     for b in to_delete:
         try:
             b["path"].unlink()
-            for ext in ("-wal", "-shm"):
-                p = Path(str(b["path"]) + ext)
-                if p.exists():
-                    p.unlink()
             count += 1
         except OSError:
             logger.warning("Failed to prune backup: %s", b["path"])
     return count
 
 
-def get_latest_backup_path() -> Path | None:
-    backups = list_backups()
-    if backups:
-        return backups[0]["path"]
-    return None
-
-
-def _check_restore_schema_version(backup_path: Path, current_version: int) -> None:
-    """Raise RestoreSchemaVersionError if the backup is from a newer schema."""
+def _check_restore_schema_version(backup_path: Path, current_version: int | None) -> None:
+    """Raise RestoreSchemaVersionError if the backup is from a newer schema.
+    Skips the check if current_version is None (current schema unknown)."""
+    if current_version is None:
+        return
     backup_version = read_schema_version(backup_path)
     if backup_version is not None and backup_version > current_version:
         raise RestoreSchemaVersionError(
@@ -213,30 +248,105 @@ def _check_restore_schema_version(backup_path: Path, current_version: int) -> No
         )
 
 
-def restore_backup(backup_path: Path, engine) -> None:
+def _check_restore_integrity(backup_path: Path) -> None:
+    try:
+        con = sqlite3.connect(str(backup_path))
+        try:
+            result = con.execute("PRAGMA integrity_check").fetchone()
+        finally:
+            con.close()
+        if result and result[0] != "ok":
+            raise RestoreCorruptError(f"integrity_check: {result[0]}")
+    except RestoreCorruptError:
+        raise
+    except Exception as exc:
+        raise RestoreCorruptError(str(exc)) from exc
+
+
+def _emergency_rollback(pre_restore_path: Path | None, db_path: Path) -> bool:
+    """Best-effort restore of db_path from pre_restore_path. Cleans sidecars first.
+    Returns True on success. No-op if pre_restore_path is None."""
+    if pre_restore_path is None:
+        return False
+    try:
+        if pre_restore_path.exists():
+            remove_db_sidecars(db_path)
+            shutil.copy2(pre_restore_path, db_path)
+            logger.warning("Emergency rollback restored db from %s", pre_restore_path)
+            return True
+    except Exception:
+        logger.exception("Emergency rollback failed")
+    return False
+
+
+def restore_backup(backup_path: Path, app_schema_version: int | None = None) -> Path | None:
+    """Restore a backup over the live DB atomically (write-to-staging + os.replace).
+    The caller MUST dispose any open SQLAlchemy engine on the live DB first.
+
+    If app_schema_version is provided, it caps the allowed backup schema version (use this
+    when there is no live DB to read from, e.g. setup wizard). Otherwise the live DB's
+    schema version is used.
+
+    Returns the pre-restore safety backup path, or None if no live DB existed."""
     db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
     if not backup_path.exists():
         raise RestoreFileNotFoundError(str(backup_path))
 
-    current_version = _get_current_schema_version(engine)
-    _check_restore_schema_version(backup_path, current_version)
+    _validate_restore_source(backup_path)
+    _check_restore_integrity(backup_path)
 
-    create_backup(engine, reason="pre_restore", auto_prune=False)
+    max_version = app_schema_version
+    if max_version is None and db_path.exists():
+        max_version = read_schema_version(db_path)
+    _check_restore_schema_version(backup_path, max_version)
 
-    engine.dispose()
+    pre_restore_path: Path | None = None
+    if db_path.exists():
+        pre_restore_path = create_backup(reason="pre_restore", auto_prune=False)
 
-    for ext in ("", "-wal", "-shm", "-journal"):
-        p = Path(str(db_path) + ext)
-        if p.exists():
-            try:
-                p.unlink()
-            except OSError as exc:
-                logger.exception("Failed to remove %s", p)
-                raise RestoreRemoveError(str(p)) from exc
+    staging = Path(str(db_path) + ".restoring")
+    try:
+        shutil.copy2(backup_path, staging)
+    except OSError as exc:
+        logger.exception("Failed to stage backup at %s", staging)
+        staging.unlink(missing_ok=True)
+        _emergency_rollback(pre_restore_path, db_path)
+        raise RestoreCopyError(f"{backup_path} -> {staging}") from exc
+
+    remove_db_sidecars(db_path)
 
     try:
-        shutil.copy2(backup_path, db_path)
+        os.replace(staging, db_path)
     except OSError as exc:
-        logger.exception("Failed to copy backup %s to %s", backup_path, db_path)
-        raise RestoreCopyError(f"{backup_path} -> {db_path}") from exc
+        logger.exception("Failed to swap staging file into %s", db_path)
+        staging.unlink(missing_ok=True)
+        _emergency_rollback(pre_restore_path, db_path)
+        raise RestoreCopyError(str(exc)) from exc
+
     logger.info("Database restored from backup: %s", backup_path)
+    return pre_restore_path
+
+
+def quarantine_broken_db() -> Path | None:
+    """Move a corrupt live DB into the backup directory so it remains visible in
+    list_backups() and can be inspected later. Sidecars are cleaned up.
+    Returns the quarantine path, or None if no live DB existed."""
+    db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
+    if not db_path.exists():
+        return None
+
+    schema_version = read_schema_version(db_path) or 0
+    timestamp = datetime.now(timezone.utc).strftime(BACKUP_TIMESTAMP_FORMAT)
+    backup_dir = get_backup_dir()
+    target = backup_dir / f"review_backup_{timestamp}_v{schema_version}.db"
+    if target.exists():
+        i = 1
+        while (backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db").exists():
+            i += 1
+        target = backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db"
+
+    shutil.copy2(db_path, target)
+    db_path.unlink()
+    remove_db_sidecars(db_path)
+    logger.warning("Quarantined broken DB to %s", target)
+    return target

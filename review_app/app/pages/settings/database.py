@@ -1,12 +1,18 @@
 import asyncio
-import uuid
+import logging
+import shutil
+import tempfile
 from pathlib import Path
 
 from nicegui import run, ui
 
+from review_app.app.config import DEFAULT_DB_FILENAME, get_user_data_dir
+from review_app.app.media import set_media_dirs
 from review_app.app.state import (
+    get_active_project_id,
     load_settings_from_db,
     reset_app_state,
+    set_active_project,
     set_data_provider,
 )
 from review_app.app.translations import t
@@ -14,11 +20,15 @@ from review_app.app.utils import format_utc_timestamp, user_error_message
 from review_app.backend.db.backup import (
     BackupError,
     create_backup,
-    get_backup_dir,
     list_backups,
+    remove_db_sidecars,
     restore_backup,
 )
 from review_app.backend.provider.local_data_provider import LocalDataProvider
+
+logger = logging.getLogger(__name__)
+
+_db_op_lock = asyncio.Lock()
 
 
 def render_database_section(current_db_path: Path | None) -> None:
@@ -27,18 +37,27 @@ def render_database_section(current_db_path: Path | None) -> None:
 
         return get_data_provider() or LocalDataProvider()
 
+    def _busy() -> bool:
+        if _db_op_lock.locked():
+            ui.notify(t("db_op_in_progress"), type="warning")
+            return True
+        return False
+
     with ui.row().classes("w-full items-center q-mb-md"):
         ui.label(t("backup_download_label")).classes("text-body2")
         ui.space()
 
         async def do_backup_download():
-            try:
-                backup_path = await run.io_bound(create_backup, _get_dp().engine, reason="manual")
-            except BackupError as exc:
-                ui.notify(t("backup_failed", error=t(exc.user_message_key)), type="negative")
+            if _busy():
                 return
-            ui.download(backup_path.read_bytes(), filename=backup_path.name)
-            ui.notify(t("backup_created"), type="positive")
+            async with _db_op_lock:
+                try:
+                    backup_path = await run.io_bound(create_backup, reason="manual")
+                except BackupError as exc:
+                    ui.notify(t("backup_failed", error=t(exc.user_message_key)), type="negative")
+                    return
+                ui.download(backup_path.read_bytes(), filename=backup_path.name)
+                ui.notify(t("backup_created"), type="positive")
 
         ui.button(
             t("backup_download_btn"), icon="download", color="primary", on_click=do_backup_download
@@ -50,23 +69,68 @@ def render_database_section(current_db_path: Path | None) -> None:
 
         restore_dialog = ui.dialog().props("persistent")
 
-        async def do_restore(selected_backup_path):
+        async def do_restore(selected_backup_path: Path):
             restore_dialog.close()
-            try:
-                await run.io_bound(restore_backup, selected_backup_path, _get_dp().engine)
-            except BackupError as exc:
-                ui.notify(t("restore_failed", error=t(exc.user_message_key)), type="negative")
+            if _busy():
                 return
-            except Exception as exc:
-                ui.notify(t("restore_failed", error=user_error_message(exc)), type="negative")
-                return
-            reset_app_state()
-            new_dp = LocalDataProvider()
-            set_data_provider(new_dp)
-            load_settings_from_db(new_dp)
-            ui.notify(t("restore_success"), type="positive")
-            await asyncio.sleep(0.5)
-            ui.navigate.to("/overview")
+            async with _db_op_lock:
+                db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
+                dp = _get_dp()
+                dp.engine.dispose()
+
+                try:
+                    pre_restore_path = await run.io_bound(restore_backup, selected_backup_path)
+                except BackupError as exc:
+                    ui.notify(t("restore_failed", error=t(exc.user_message_key)), type="negative")
+                    return
+                except Exception as exc:
+                    ui.notify(t("restore_failed", error=user_error_message(exc)), type="negative")
+                    return
+
+                reset_app_state()
+                try:
+                    new_dp = LocalDataProvider()
+                except Exception as exc:
+                    logger.exception("Restored DB failed to open; rolling back")
+                    if pre_restore_path is None:
+                        ui.notify(
+                            t("restore_failed", error=user_error_message(exc)), type="negative"
+                        )
+                        return
+                    try:
+                        await run.io_bound(remove_db_sidecars, db_path)
+                        await run.io_bound(shutil.copy2, pre_restore_path, db_path)
+                        new_dp = LocalDataProvider()
+                        set_data_provider(new_dp)
+                        load_settings_from_db(new_dp)
+                        ui.notify(
+                            t("restore_failed", error=user_error_message(exc)), type="negative"
+                        )
+                    except Exception:
+                        logger.exception("Rollback after restore failure also failed")
+                        ui.notify(t("restore_rollback_failed"), type="negative")
+                    return
+
+                set_data_provider(new_dp)
+                load_settings_from_db(new_dp)
+
+                active_pid = get_active_project_id()
+                if active_pid and new_dp.get_project(active_pid):
+                    new_dp.touch_project(active_pid)
+                else:
+                    proj = new_dp.get_most_recent_project()
+                    if proj:
+                        set_active_project(proj.id)
+                        new_dp.touch_project(proj.id)
+                    else:
+                        set_active_project(None)
+                set_media_dirs(
+                    [Path(d.path) for d in new_dp.get_project_dirs(get_active_project_id())]
+                )
+
+                ui.notify(t("restore_success"), type="positive")
+                await asyncio.sleep(0.5)
+                ui.navigate.to("/overview")
 
         async def open_restore_dialog():
             backups = list_backups()
@@ -101,8 +165,9 @@ def render_database_section(current_db_path: Path | None) -> None:
 
                 async def _handle_backup_upload(e):
                     content = await e.file.read()
-                    tmp_path = get_backup_dir() / f"uploaded_restore_{uuid.uuid4().hex}.db"
-                    tmp_path.write_bytes(content)
+                    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+                        f.write(content)
+                        tmp_path = Path(f.name)
                     try:
                         await do_restore(tmp_path)
                     finally:
@@ -137,21 +202,26 @@ def render_database_section(current_db_path: Path | None) -> None:
 
         async def do_reset():
             reset_dialog.close()
-            old_dp = _get_dp()
-            if current_db_path and current_db_path.exists():
-                try:
-                    create_backup(old_dp.engine, reason="reset_database")
-                except BackupError as exc:
-                    ui.notify(
-                        t("backup_failed_proceed", error=t(exc.user_message_key)), type="warning"
-                    )
-                old_dp.engine.dispose()
-                current_db_path.unlink()
-            else:
-                old_dp.engine.dispose()
-            reset_app_state()
-            ui.notify(t("database_reset"), type="positive")
-            ui.navigate.to("/setup")
+            if _busy():
+                return
+            async with _db_op_lock:
+                old_dp = _get_dp()
+                if current_db_path and current_db_path.exists():
+                    try:
+                        await run.io_bound(create_backup, reason="reset_database")
+                    except BackupError as exc:
+                        ui.notify(
+                            t("backup_failed", error=t(exc.user_message_key)), type="negative"
+                        )
+                        return
+                    old_dp.engine.dispose()
+                    current_db_path.unlink()
+                    remove_db_sidecars(current_db_path)
+                else:
+                    old_dp.engine.dispose()
+                reset_app_state()
+                ui.notify(t("database_reset"), type="positive")
+                ui.navigate.to("/setup")
 
         with reset_dialog, ui.card().classes("q-pa-lg"):
             ui.label(t("reset_confirm")).classes("text-h6 q-mb-sm")
