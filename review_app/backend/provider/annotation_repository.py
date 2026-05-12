@@ -134,7 +134,7 @@ class AnnotationMixin(ProviderBase):
                         vl.labeled_at AS blank_labeled_at,
                         ms.behavior_prediction,
                         ms.individual_count,
-                        COALESCE(msc.classification_consensus, 'UNKNOWN') AS classification_consensus,
+                        msc.classification_consensus,
                         COALESCE(mbe.behavior_prediction, 'unlabeled') AS model_behavior_prediction,
                         CASE
                             WHEN vl.is_blank IS NOT NULL THEN CASE WHEN vl.is_blank = 1 THEN 'blank' ELSE 'non_blank' END

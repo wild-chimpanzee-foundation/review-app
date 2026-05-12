@@ -59,8 +59,8 @@ def _init_annotation_state(video, default_species, default_behavior):
             is_blank = True
         else:
             is_blank = False
-            species = default_species or video.get("classification_consensus", "unknown")
-            if species and species != "UNKNOWN":
+            species = default_species or video.get("classification_consensus")
+            if species:
                 selections = [
                     {
                         "species": species,
@@ -69,6 +69,15 @@ def _init_annotation_state(video, default_species, default_behavior):
                         "end_sec": video.get("duration_sec"),
                         "source": "model",
                         "probability": video.get("max_species_confidence"),
+                    }
+                ]
+            else:
+                selections = [
+                    {
+                        "species": None,
+                        "behavior": default_behavior,
+                        "start_sec": 0.0,
+                        "end_sec": video.get("duration_sec"),
                     }
                 ]
 

@@ -499,9 +499,7 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
                         ),
                     ).props("flat round dense size=xs color=grey-6")
                 consensus = video.get("classification_consensus")
-                default_species = (
-                    consensus if consensus and consensus != "UNKNOWN" else None
-                ) or (list(species_map.keys())[0] if species_map else "unknown")
+                default_species = consensus or None
 
                 render_annotation_section(
                     video,
