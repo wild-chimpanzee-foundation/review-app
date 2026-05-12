@@ -32,6 +32,7 @@ _STATE_KEYS = (
     "ann_video_col",
     "ann_species_col",
     "ann_data_type_col",
+    "ann_data_type_val",
     "ann_behavior_col",
     "ann_count_col",
     "ann_observer_col",

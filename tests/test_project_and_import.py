@@ -2,44 +2,11 @@
 Tests for delete_project, import_annotations_csv, and get_overview_stats.
 """
 
-import uuid
-
 import pandas as pd
 import pytest
+from conftest import seed_builtin_tags
 from review_app.backend.errors import DataImportError
 from review_app.backend.provider.local_data_provider import LocalDataProvider
-from sqlalchemy import text
-
-
-def _seed_builtin_tags(dp) -> None:
-    """Insert built-in tags that are normally seeded by migration v7.
-
-    In tests, run_migrations stamps fresh DBs as current and skips all migrations,
-    so built-in tags must be seeded manually where needed.
-    """
-    builtin = [
-        ("fire", "Fire", "Feu", "deep-orange", "local_fire_department"),
-        ("nice_shot", "Nice Shot", "Belle image", "amber", "star"),
-        ("broken_metadata", "Broken Metadata", "Métadonnées corrompues", "red", "report_problem"),
-    ]
-    with dp.engine.begin() as conn:
-        for key, name_en, name_fr, color, icon in builtin:
-            if not conn.execute(text("SELECT 1 FROM tags WHERE key=:k"), {"k": key}).fetchone():
-                conn.execute(
-                    text(
-                        "INSERT INTO tags (id,key,name_en,name_fr,color,icon,is_custom) "
-                        "VALUES (:id,:key,:name_en,:name_fr,:color,:icon,0)"
-                    ),
-                    {
-                        "id": str(uuid.uuid4()),
-                        "key": key,
-                        "name_en": name_en,
-                        "name_fr": name_fr,
-                        "color": color,
-                        "icon": icon,
-                    },
-                )
-
 
 # ---------------------------------------------------------------------------
 # delete_project
@@ -314,7 +281,7 @@ def test_import_review_later_round_trip(clean_provider):
 def test_import_tags_round_trip_override(clean_provider):
     """Built-in and custom tags must be restored in override mode."""
     dp = clean_provider
-    _seed_builtin_tags(dp)
+    seed_builtin_tags(dp)
     paths = _video_paths(dp)
     v1_id = paths[next(p for p in paths if p.endswith("v1.mp4"))]
 
@@ -338,7 +305,7 @@ def test_import_tags_round_trip_override(clean_provider):
 def test_import_tags_round_trip_append(clean_provider):
     """Append mode must add CSV tags without removing tags not in the CSV."""
     dp = clean_provider
-    _seed_builtin_tags(dp)
+    seed_builtin_tags(dp)
     paths = _video_paths(dp)
     v1_id = paths[next(p for p in paths if p.endswith("v1.mp4"))]
 

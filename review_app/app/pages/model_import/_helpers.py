@@ -5,6 +5,7 @@ from nicegui import ui
 
 from review_app.app.state import get_language, get_state_val, set_state_val
 from review_app.app.translations import t
+from review_app.backend.provider.import_service import BLANK_SENTINEL
 
 
 def get_df_from_state(key: str) -> pd.DataFrame | None:
@@ -80,9 +81,6 @@ def auto_suggest_path_col(columns: list[str], sample: list[dict]) -> str:
 
 def is_long_format(columns: list[str]) -> bool:
     return {"path", "annotation_type", "model_name"}.issubset(set(columns))
-
-
-BLANK_SENTINEL = "__blank__"
 
 
 def render_species_mappings(

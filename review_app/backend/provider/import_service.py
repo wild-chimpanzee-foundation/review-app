@@ -14,7 +14,7 @@ from review_app.backend.provider.base import ProviderBase
 
 logger = logging.getLogger(__name__)
 
-_BLANK_SENTINEL = "__blank__"
+BLANK_SENTINEL = "__blank__"
 _FALSY = {"", "0", "false", "False", "nan", "none", "None", "no"}
 
 
@@ -815,10 +815,11 @@ class ImportMixin(ProviderBase):
         folder_col: str,
         video_col: str,
         data_type_col: str,
+        data_type_val: str = "",
     ) -> tuple[pd.DataFrame, int, dict[str, list[dict]], list[str]]:
-        """Filter to Video rows, build path lookup, group matched rows by video_id."""
-        if data_type_col in df.columns:
-            video_df = df[df[data_type_col].astype(str).str.strip() == "Video"].copy()
+        """Filter rows by data_type_col == data_type_val (when both are set), build path lookup, group matched rows by video_id."""
+        if data_type_col in df.columns and data_type_val:
+            video_df = df[df[data_type_col].astype(str).str.strip() == data_type_val].copy()
             skipped_installation = len(df) - len(video_df)
         else:
             video_df = df.copy()
@@ -847,13 +848,14 @@ class ImportMixin(ProviderBase):
         video_col: str = "Video_name",
         species_col: str = "Species",
         data_type_col: str = "Data_type",
+        data_type_val: str = "Video",
         species_mappings: dict[str, str] | None = None,
         is_blank_col: str = "",
         tag_cols: list[str] | None = None,
     ) -> dict[str, Any]:
         species_mappings = species_mappings or {}
         video_df, skipped_installation, groups, skipped = self._filter_and_group_historic(
-            df, active_project_id, folder_col, video_col, data_type_col
+            df, active_project_id, folder_col, video_col, data_type_col, data_type_val
         )
         variant_map = self._build_species_variant_map()
 
@@ -870,7 +872,16 @@ class ImportMixin(ProviderBase):
             for rows in groups.values():
                 for row in rows:
                     sp = str(row.get(species_col, "")).strip()
-                    if sp and sp not in ("Vide", "NA", "nan") and sp not in species_mappings:
+                    if not sp or sp in ("Vide", "NA", "nan"):
+                        continue
+                    if sp in species_mappings:
+                        mapped = species_mappings[sp]
+                        # Blank sentinel is always valid; empty means not yet mapped
+                        if mapped and mapped != BLANK_SENTINEL:
+                            is_valid, _ = self._validate_species_fuzzy(mapped, variant_map)
+                            if not is_valid:
+                                unknown_species.add(sp)
+                    else:
                         is_valid, _ = self._validate_species_fuzzy(sp, variant_map)
                         if not is_valid:
                             unknown_species.add(sp)
@@ -899,6 +910,7 @@ class ImportMixin(ProviderBase):
         video_col: str = "Video_name",
         species_col: str = "Species",
         data_type_col: str = "Data_type",
+        data_type_val: str = "Video",
         behavior_col: str = "Behaviour",
         count_col: str = "Number",
         observer_col: str = "Observer",
@@ -911,7 +923,7 @@ class ImportMixin(ProviderBase):
         species_mappings = species_mappings or {}
         tag_cols = tag_cols or []
         _, _, groups, skipped = self._filter_and_group_historic(
-            df, active_project_id, folder_col, video_col, data_type_col
+            df, active_project_id, folder_col, video_col, data_type_col, data_type_val
         )
         variant_map = self._build_species_variant_map()
         append = mode == "append"
@@ -937,8 +949,7 @@ class ImportMixin(ProviderBase):
                     r
                     for r in rows
                     if str(r.get(species_col, "")).strip() not in ("Vide", "NA", "nan", "")
-                    and species_mappings.get(str(r.get(species_col, "")).strip())
-                    != _BLANK_SENTINEL
+                    and species_mappings.get(str(r.get(species_col, "")).strip()) != BLANK_SENTINEL
                 ]
             )
 

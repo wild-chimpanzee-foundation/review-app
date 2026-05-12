@@ -2,42 +2,13 @@
 Tests for validate_historic_csv and import_historic_csv.
 """
 
-import uuid
 from pathlib import Path
 
 import pandas as pd
 import pytest
+from conftest import seed_builtin_tags
+from review_app.backend.provider.import_service import BLANK_SENTINEL
 from review_app.backend.provider.local_data_provider import LocalDataProvider
-from sqlalchemy import text
-
-
-def _seed_builtin_tags(dp) -> None:
-    builtin = [
-        ("fire", "Fire", "Feu", "deep-orange", "local_fire_department"),
-        ("nice_shot", "Nice Shot", "Belle image", "amber", "star"),
-        ("broken_metadata", "Broken Metadata", "Métadonnées corrompues", "red", "report_problem"),
-    ]
-    with dp.engine.begin() as conn:
-        for key, name_en, name_fr, color, icon in builtin:
-            if not conn.execute(text("SELECT 1 FROM tags WHERE key=:k"), {"k": key}).fetchone():
-                conn.execute(
-                    text(
-                        "INSERT INTO tags (id,key,name_en,name_fr,color,icon,is_custom) "
-                        "VALUES (:id,:key,:name_en,:name_fr,:color,:icon,0)"
-                    ),
-                    {
-                        "id": str(uuid.uuid4()),
-                        "key": key,
-                        "name_en": name_en,
-                        "name_fr": name_fr,
-                        "color": color,
-                        "icon": icon,
-                    },
-                )
-
-
-_BLANK_SENTINEL = "__blank__"
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -52,6 +23,19 @@ def historic_provider(tmp_db, mock_probe):
     (video_dir / "cam_a" / "v1.mp4").touch()
     (video_dir / "cam_b").mkdir()
     (video_dir / "cam_b" / "v2.mp4").touch()
+    dp = LocalDataProvider()
+    dp.sync_videos(progress_callback=None, video_dir=video_dir)
+    return dp
+
+
+@pytest.fixture
+def ambiguous_provider(tmp_db, mock_probe):
+    """Provider with two videos that share the same stem in different folders."""
+    video_dir = tmp_db["video_dir"]
+    (video_dir / "cam_a").mkdir()
+    (video_dir / "cam_a" / "clip.mp4").touch()
+    (video_dir / "cam_b").mkdir()
+    (video_dir / "cam_b" / "clip.mp4").touch()
     dp = LocalDataProvider()
     dp.sync_videos(progress_callback=None, video_dir=video_dir)
     return dp
@@ -141,6 +125,24 @@ def test_validate_mapped_species_not_flagged(historic_provider):
     assert result["unknown_species"] == []
 
 
+def test_validate_mapped_to_invalid_species_is_flagged(historic_provider):
+    """Mapping an unknown species to another unknown target must still be reported."""
+    df = pd.DataFrame([_row(species="unmappable_xyz")])
+    result = historic_provider.validate_historic_csv(
+        df, active_project_id=None, species_mappings={"unmappable_xyz": "also_invalid_xyz"}
+    )
+    assert "unmappable_xyz" in result["unknown_species"]
+
+
+def test_validate_mapped_to_blank_sentinel_not_flagged(historic_provider):
+    """Mapping to the blank sentinel must not be flagged as unknown."""
+    df = pd.DataFrame([_row(species="unmappable_xyz")])
+    result = historic_provider.validate_historic_csv(
+        df, active_project_id=None, species_mappings={"unmappable_xyz": BLANK_SENTINEL}
+    )
+    assert result["unknown_species"] == []
+
+
 # ---------------------------------------------------------------------------
 # import_historic_csv
 # ---------------------------------------------------------------------------
@@ -169,12 +171,15 @@ def test_import_species_creates_observation(historic_provider):
 
 
 def test_import_na_behaviour_stores_no_behavior(historic_provider):
-    """NA/blank behaviour should not crash; stored as null since 'unlabeled' has no DB entry."""
+    """NA/blank behaviour should store observation with null behavior field."""
     ids = _ids(historic_provider)
     df = pd.DataFrame([_row(species="deer", Behaviour="NA")])
     result = historic_provider.import_historic_csv(df, active_project_id=None)
     assert result["imported"] == 1
-    assert historic_provider.get_video_detail(ids["v1"])["manual_selections"]
+    sels = historic_provider.get_video_detail(ids["v1"])["manual_selections"]
+    assert len(sels) == 1
+    assert sels[0]["species"] == "deer"
+    assert sels[0].get("behavior") in (None, "None", "")
 
 
 def test_import_skips_unmatched_video(historic_provider):
@@ -209,7 +214,7 @@ def test_import_blank_sentinel_mapping_creates_blank_label(historic_provider):
     ids = _ids(historic_provider)
     df = pd.DataFrame([_row(species="unknown_sp")])
     result = historic_provider.import_historic_csv(
-        df, active_project_id=None, species_mappings={"unknown_sp": _BLANK_SENTINEL}
+        df, active_project_id=None, species_mappings={"unknown_sp": BLANK_SENTINEL}
     )
     assert result["imported"] == 1
     assert historic_provider.get_video_detail(ids["v1"])["is_blank"] == 1
@@ -313,7 +318,7 @@ def test_import_tag_cols_creates_and_applies_tags(historic_provider):
 def test_import_tag_cols_append_does_not_remove_existing(historic_provider):
     """In append mode, tag_cols should add tags but not remove ones already set."""
     ids = _ids(historic_provider)
-    _seed_builtin_tags(historic_provider)
+    seed_builtin_tags(historic_provider)
     historic_provider.toggle_video_tag(ids["v1"], "fire")
 
     df = pd.DataFrame([_row(species="deer", flagged="1")])
@@ -323,3 +328,23 @@ def test_import_tag_cols_append_does_not_remove_existing(historic_provider):
     tags = set(historic_provider.get_video_tags(ids["v1"]))
     assert "fire" in tags  # existing tag preserved
     assert "flagged" in tags  # new tag added
+
+
+def test_import_ambiguous_stem_not_matched_by_stem_fallback(ambiguous_provider):
+    """When two videos share the same stem, stem-only fallback must not silently pick one."""
+    df = pd.DataFrame(
+        [
+            {
+                "Folder_name_standard": "",
+                "Video_name": "clip",
+                "Species": "deer",
+                "Data_type": "Video",
+            }
+        ]
+    )
+    result = ambiguous_provider.import_historic_csv(df, active_project_id=None)
+    # With an empty folder the suffix key is "/clip" which won't match either
+    # "cam_a/clip.mp4" or "cam_b/clip.mp4", and the stem "clip" is ambiguous so
+    # the stem fallback must not match either video.
+    assert result["imported"] == 0
+    assert len(result["skipped"]) == 1

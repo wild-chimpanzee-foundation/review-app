@@ -5,6 +5,42 @@ from pathlib import Path
 import pytest
 from review_app.backend.db.models import ModelAnnotation
 from review_app.backend.provider.local_data_provider import LocalDataProvider
+from sqlalchemy import text
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def seed_builtin_tags(dp) -> None:
+    """Insert built-in tags that are normally seeded by migration v7.
+
+    In tests, run_migrations stamps fresh DBs as current and skips all migrations,
+    so built-in tags must be seeded manually where needed.
+    """
+    builtin = [
+        ("fire", "Fire", "Feu", "deep-orange", "local_fire_department"),
+        ("nice_shot", "Nice Shot", "Belle image", "amber", "star"),
+        ("broken_metadata", "Broken Metadata", "Métadonnées corrompues", "red", "report_problem"),
+    ]
+    with dp.engine.begin() as conn:
+        for key, name_en, name_fr, color, icon in builtin:
+            if not conn.execute(text("SELECT 1 FROM tags WHERE key=:k"), {"k": key}).fetchone():
+                conn.execute(
+                    text(
+                        "INSERT INTO tags (id,key,name_en,name_fr,color,icon,is_custom) "
+                        "VALUES (:id,:key,:name_en,:name_fr,:color,:icon,0)"
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "key": key,
+                        "name_en": name_en,
+                        "name_fr": name_fr,
+                        "color": color,
+                        "icon": icon,
+                    },
+                )
+
 
 # ---------------------------------------------------------------------------
 # Shared low-level fixtures

@@ -14,17 +14,18 @@ from ._helpers import get_df_from_state, render_species_mappings
 
 _MAPPINGS_KEY = "ann_species_mappings"
 
-_DEFAULTS = {
-    "ann_folder_col": "Folder_name_standard",
-    "ann_video_col": "Video_name",
-    "ann_species_col": "Species",
-    "ann_data_type_col": "Data_type",
-    "ann_behavior_col": "Behaviour",
-    "ann_count_col": "Number",
-    "ann_observer_col": "Observer",
-    "ann_timestamp_col": "timestamp",
-    "ann_is_blank_col": "",
-}
+# Required path-matching columns — default to the first column in the CSV
+_REQUIRED_COLS = ("ann_folder_col", "ann_video_col", "ann_species_col")
+# Optional annotation columns — default to "" (none)
+_OPTIONAL_COLS = (
+    "ann_data_type_col",
+    "ann_data_type_val",
+    "ann_behavior_col",
+    "ann_count_col",
+    "ann_observer_col",
+    "ann_timestamp_col",
+    "ann_is_blank_col",
+)
 
 _NONE_VALUE = ""
 
@@ -35,7 +36,7 @@ def _is_app_format(columns: list[str]) -> bool:
 
 
 def _col_val(key: str) -> str:
-    return get_state_val(key) or _DEFAULTS[key]
+    return get_state_val(key) or ""
 
 
 def setup_annotations_tab(dp, loading_dialog) -> None:
@@ -110,7 +111,6 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     sels += _make_col_selects(
                         [
                             ("ann_species_col", required_opts),
-                            ("ann_data_type_col", optional_opts),
                             ("ann_behavior_col", optional_opts),
                             ("ann_count_col", optional_opts),
                             ("ann_observer_col", optional_opts),
@@ -135,16 +135,47 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         .props("outlined dense use-chips")
                         .classes("col")
                     )
+                    tag_sel._props["hint"] = t("ann_tag_cols_hint")
+
+                with ui.row().classes("w-full gap-md q-mb-sm items-end"):
+                    sels += _make_col_selects([("ann_data_type_col", optional_opts)])
+
+                    data_type_val_sel = (
+                        ui.select(
+                            label=t("ann_data_type_val"),
+                            options={},
+                            value=get_state_val("ann_data_type_val") or None,
+                            with_input=True,
+                        )
+                        .props("outlined dense")
+                        .classes("col")
+                    )
+                    data_type_val_sel._props["hint"] = t("ann_data_type_val_hint")
 
                 async def on_col_change() -> None:
+                    prev_data_type_col = get_state_val("ann_data_type_col")
                     for key, sel in sels:
                         set_state_val(key, sel.value)
                     set_state_val("ann_tag_cols", tag_sel.value)
+                    set_state_val("ann_data_type_val", data_type_val_sel.value)
+                    if get_state_val("ann_data_type_col") != prev_data_type_col:
+                        new_col = get_state_val("ann_data_type_col") or ""
+                        set_state_val("ann_data_type_val", None)
+                        new_opts: dict[str, str] = {}
+                        if new_col:
+                            df = get_df_from_state("ann_df_records")
+                            if df is not None and new_col in df.columns:
+                                vals = sorted(
+                                    df[new_col].dropna().astype(str).str.strip().unique().tolist()
+                                )
+                                new_opts = {v: v for v in vals if v}
+                        data_type_val_sel.set_options(new_opts, value=None)
                     await _run_validate(dp, loading_dialog, results_ui, results_container)
 
                 for _, sel in sels:
                     sel.on_value_change(on_col_change)
                 tag_sel.on_value_change(on_col_change)
+                data_type_val_sel.on_value_change(on_col_change)
 
         col_config_ui()
 
@@ -224,6 +255,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                                 _col_val("ann_video_col"),
                                 _col_val("ann_species_col"),
                                 _col_val("ann_data_type_col"),
+                                _col_val("ann_data_type_val"),
                                 mappings,
                                 _col_val("ann_is_blank_col"),
                                 get_state_val("ann_tag_cols") or [],
@@ -270,6 +302,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         _col_val("ann_video_col"),
                         _col_val("ann_species_col"),
                         _col_val("ann_data_type_col"),
+                        _col_val("ann_data_type_val"),
                         _col_val("ann_behavior_col"),
                         _col_val("ann_count_col"),
                         _col_val("ann_observer_col"),
@@ -336,8 +369,10 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     set_state_val(_MAPPINGS_KEY, {})
                     set_state_val("ann_validation", None)
 
-                    for key, default in _DEFAULTS.items():
-                        set_state_val(key, default if default in columns else columns[0])
+                    for key in _REQUIRED_COLS:
+                        set_state_val(key, columns[0])
+                    for key in _OPTIONAL_COLS:
+                        set_state_val(key, "")
                     set_state_val("ann_tag_cols", [])
 
                     col_config_section.visible = True
@@ -346,7 +381,6 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         upload_holder[0].visible = False
             except Exception as exc:
                 ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
-                loading_dialog.close()
                 return
             finally:
                 loading_dialog.close()
@@ -372,11 +406,12 @@ def _make_col_selects(specs: list[tuple[str, dict]]) -> list[tuple[str, object]]
             ui.select(
                 label=t(key),
                 options=opts,
-                value=get_state_val(key) or _DEFAULTS.get(key, ""),
+                value=get_state_val(key) or "",
             )
             .props("outlined dense")
             .classes("col")
         )
+        sel._props["hint"] = t(key + "_hint")
         result.append((key, sel))
     return result
 
@@ -396,12 +431,12 @@ async def _run_validate(dp, loading_dialog, results_ui, results_container) -> No
             _col_val("ann_video_col"),
             _col_val("ann_species_col"),
             _col_val("ann_data_type_col"),
+            _col_val("ann_data_type_val"),
             mappings,
             _col_val("ann_is_blank_col"),
             get_state_val("ann_tag_cols") or [],
         )
         set_state_val("ann_validation", result)
-        set_state_val(_MAPPINGS_KEY, {})
         results_container.visible = True
         results_ui.refresh()
     except Exception as exc:
