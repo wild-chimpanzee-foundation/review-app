@@ -236,6 +236,9 @@ def render_custom_video_player(video_url, duration, vid_key):
                 }}
 
                 window.addEventListener('keydown', (e) => {{
+                    if (document.querySelector('.q-dialog')) return;
+                    const _tag = e.target.tagName.toLowerCase();
+                    if (_tag === 'input' || _tag === 'textarea' || _tag === 'select') return;
                     if (e.key === 'z') {{
                         resetZoom();
                     }} else if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey) {{

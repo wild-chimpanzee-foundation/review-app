@@ -653,6 +653,7 @@ async def setup_review():
                         document.activeElement?.blur();
                         return;
                     }
+                    if (document.querySelector('.q-dialog')) return;
                     const tag = e.target.tagName.toLowerCase();
                     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
                     if (e.target.isContentEditable) return;
