@@ -200,7 +200,7 @@ def render_annotation_section(
             render_annotation_section.refresh()
 
         with ui.element("div").style(
-            "overflow-y: auto; overflow-x: hidden; max-height: calc(100vh - 360px);"
+            "overflow-y: auto; overflow-x: hidden; max-height: calc(100vh - 360px); width: 100%;"
         ):
             with ui.row().classes("w-full justify-center q-mb-xs"):
                 ui.button(t("add_species"), icon="add", on_click=add_species).props(
@@ -232,6 +232,7 @@ def render_annotation_section(
                                 label=t("group_label"),
                                 options=group_options,
                                 value=initial_group,
+                                with_input=True,
                             )
                             .props("outlined dense clearable")
                             .classes("col")
