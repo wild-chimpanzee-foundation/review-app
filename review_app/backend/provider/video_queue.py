@@ -390,7 +390,7 @@ class QueueMixin(ProviderBase):
                 )""")
 
         if selected_sort == "camera":
-            order_by = f"ORDER BY v.camera_id {sort_dir}, v.video_path ASC"
+            order_by = f"ORDER BY v.camera_id {sort_dir}, v.created_at ASC NULLS LAST"
         elif selected_sort == "unreviewed_first":
             order_by = f"""ORDER BY
                 CASE WHEN EXISTS (
