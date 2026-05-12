@@ -50,6 +50,14 @@ def _resolve_behavior(behaviors_map, current_value=None):
     return None
 
 
+def _new_annotation(species, behavior, duration_sec, source=None, probability=None):
+    ann = {"species": species, "behavior": behavior, "start_sec": 0.0, "end_sec": duration_sec}
+    if source:
+        ann["source"] = source
+        ann["probability"] = probability
+    return ann
+
+
 def _init_annotation_state(video, default_species, default_behavior):
     is_blank = _normalize_is_blank(video.get("is_blank"))
     selections = list(video.get("manual_selections") or [])
@@ -59,27 +67,15 @@ def _init_annotation_state(video, default_species, default_behavior):
             is_blank = True
         else:
             is_blank = False
-            species = default_species or video.get("classification_consensus")
-            if species:
-                selections = [
-                    {
-                        "species": species,
-                        "behavior": default_behavior,
-                        "start_sec": 0.0,
-                        "end_sec": video.get("duration_sec"),
-                        "source": "model",
-                        "probability": video.get("max_species_confidence"),
-                    }
-                ]
-            else:
-                selections = [
-                    {
-                        "species": None,
-                        "behavior": default_behavior,
-                        "start_sec": 0.0,
-                        "end_sec": video.get("duration_sec"),
-                    }
-                ]
+            selections = [
+                _new_annotation(
+                    default_species,
+                    default_behavior,
+                    video.get("duration_sec"),
+                    source="model" if default_species else None,
+                    probability=video.get("max_species_confidence") if default_species else None,
+                )
+            ]
 
     set_state_val("review_is_blank", is_blank)
     set_selections(selections)
@@ -130,15 +126,8 @@ def render_annotation_section(
         set_state_val("review_is_blank", False)
         existing = list(video.get("manual_selections") or [])
         if not existing:
-            default = list(species_map.keys())[0] if species_map else "unknown"
-            species = default_species or default
             existing = [
-                {
-                    "species": species,
-                    "behavior": default_behavior,
-                    "start_sec": 0.0,
-                    "end_sec": video.get("duration_sec"),
-                }
+                _new_annotation(default_species, default_behavior, video.get("duration_sec"))
             ]
         set_selections(existing)
         render_annotation_section.refresh()
@@ -183,18 +172,9 @@ def render_annotation_section(
     else:
 
         def add_species():
-            default = list(species_map.keys())[0] if species_map else "unknown"
-            first = selections[0]["species"] if selections else default
+            first = selections[0]["species"] if selections else default_species
             new_sels = get_selections()
-            new_sels.insert(
-                0,
-                {
-                    "species": first,
-                    "behavior": default_behavior,
-                    "start_sec": 0.0,
-                    "end_sec": video.get("duration_sec"),
-                },
-            )
+            new_sels.insert(0, _new_annotation(first, default_behavior, video.get("duration_sec")))
             set_selections(new_sels)
             set_state_val("review_is_blank", False)
             render_annotation_section.refresh()
