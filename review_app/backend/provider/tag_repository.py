@@ -128,6 +128,53 @@ class TagMixin(ProviderBase):
                 {"color": color, "key": key},
             )
 
+    def set_video_tags(self, video_id: str, tag_keys: list[str], append: bool = False) -> None:
+        """Apply tag_keys to video_id.
+
+        override mode (append=False): clears all existing tags for the video first.
+        append mode: adds only tags not already present; never removes existing tags.
+        Unknown keys (not in DB) are skipped with a warning.
+        """
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        with self.engine.begin() as conn:
+            known = {r[0]: r[1] for r in conn.execute(text("SELECT key, id FROM tags")).fetchall()}
+            valid_ids = []
+            for key in tag_keys:
+                if key in known:
+                    valid_ids.append(known[key])
+                else:
+                    logger.warning("set_video_tags: unknown tag key %r — skipped", key)
+
+            if not append:
+                conn.execute(
+                    text("DELETE FROM video_tags WHERE video_id = :vid"), {"vid": video_id}
+                )
+                for tag_id in valid_ids:
+                    conn.execute(
+                        text(
+                            "INSERT INTO video_tags (video_id, tag_id, tagged_by, tagged_at) "
+                            "VALUES (:vid, :tid, NULL, :at)"
+                        ),
+                        {"vid": video_id, "tid": tag_id, "at": now},
+                    )
+            else:
+                existing = {
+                    r[0]
+                    for r in conn.execute(
+                        text("SELECT tag_id FROM video_tags WHERE video_id = :vid"),
+                        {"vid": video_id},
+                    ).fetchall()
+                }
+                for tag_id in valid_ids:
+                    if tag_id not in existing:
+                        conn.execute(
+                            text(
+                                "INSERT INTO video_tags (video_id, tag_id, tagged_by, tagged_at) "
+                                "VALUES (:vid, :tid, NULL, :at)"
+                            ),
+                            {"vid": video_id, "tid": tag_id, "at": now},
+                        )
+
     def delete_custom_tag(self, key: str) -> None:
         with self.engine.begin() as conn:
             tag_row = conn.execute(

@@ -3,7 +3,7 @@ import io
 import pandas as pd
 from nicegui import run, ui
 
-from review_app.app.state import get_active_project_id, get_language, get_state_val, set_state_val
+from review_app.app.state import get_active_project_id, get_state_val, set_state_val
 from review_app.app.translations import t
 from review_app.app.utils import user_error_message
 from review_app.backend.errors import DataImportError
@@ -14,6 +14,7 @@ from ._helpers import (
     auto_suggest_path_col,
     get_df_from_state,
     is_long_format,
+    render_species_mappings,
 )
 
 _SCROLL_TO_CTA = 'setTimeout(()=>document.getElementById("import-cta")?.scrollIntoView({behavior:"smooth",block:"start"}),100)'
@@ -83,7 +84,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             loading_dialog.open()
             try:
                 content = await e.file.read()
-                raw_df = pd.read_csv(io.BytesIO(content))
+                raw_df = pd.read_csv(io.BytesIO(content), sep=None, engine="python")
                 columns = list(raw_df.columns)
                 sample = raw_df.head(3).to_dict(orient="records")
 
@@ -315,14 +316,55 @@ async def setup_model_tab(dp, loading_dialog) -> None:
 
             if all_species:
                 ui.separator().classes("q-my-md")
-                _render_species_mappings(
+
+                async def apply_mappings_model():
+                    loading_dialog.open()
+                    try:
+                        uploaded_df = get_df_from_state("uploaded_df")
+                        mappings = get_state_val("species_mappings", {})
+                        cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
+                            dp.validate_model_csv,
+                            uploaded_df,
+                            mappings,
+                            get_active_project_id(),
+                        )
+                        set_state_val(
+                            "cleaned_df",
+                            cleaned_df.to_dict(orient="records")
+                            if cleaned_df is not None
+                            else None,
+                        )
+                        set_state_val(
+                            "errors_df",
+                            errors_df.to_dict(orient="records") if errors_df is not None else None,
+                        )
+                        set_state_val("unmapped_species", unmapped_species)
+                        ui.notify(t("mappings_applied"), type="positive")
+                        refresh_results()
+                    except Exception as exc:
+                        ui.notify(
+                            t("mapping_failed", error=user_error_message(exc)), type="negative"
+                        )
+                    finally:
+                        loading_dialog.close()
+
+                pending_unmapped_now = [
+                    k for k, v in (get_state_val("species_mappings") or {}).items() if not v
+                ]
+                cleaned_df_now = get_df_from_state("cleaned_df")
+                can_apply = (
+                    cleaned_df_now is not None
+                    and not cleaned_df_now.empty
+                    and not pending_unmapped_now
+                )
+                render_species_mappings(
                     dp,
-                    loading_dialog,
                     all_mappings,
                     unmapped_origs,
                     all_species,
-                    refresh_results,
-                    update_import_button,
+                    apply_fn=apply_mappings_model,
+                    update_import_button=update_import_button,
+                    can_apply=can_apply,
                 )
 
             # Error details
@@ -510,88 +552,6 @@ def _render_validation_counts(valid_count: int, errors_df, cleaned_df) -> None:
                     "paginationPageSize": 50,
                 }
             ).classes("h-64")
-
-
-def _render_species_mappings(
-    dp,
-    loading_dialog,
-    all_mappings,
-    unmapped_origs,
-    all_species,
-    refresh_results,
-    update_import_button,
-) -> None:
-    ui.label(t("species_mappings")).classes("text-subtitle1 font-weight-medium q-mb-sm")
-    ui.label(t("edit_mappings_desc")).classes("text-caption q-mb-md")
-
-    species_map = dp.get_species_display_map(get_language())
-    select_options = {"": "", **species_map}
-
-    for orig in sorted(all_species):
-        current_mapping = all_mappings.get(orig, "")
-        is_unmapped = orig in unmapped_origs
-        with ui.row().classes("w-full items-center q-mb-sm"):
-            ui.label(orig).classes(f"col {'text-negative' if is_unmapped else ''}")
-            select = ui.select(
-                label=t("mapped_to"),
-                options=select_options,
-                value=current_mapping,
-                with_input=True,
-            ).props("outlined dense class=col-4")
-
-            def make_update_fn(o, sel):
-                def update_mapping():
-                    mappings = get_state_val("species_mappings", {})
-                    mappings[o] = sel.value
-                    set_state_val("species_mappings", mappings)
-                    update_import_button()
-
-                return update_mapping
-
-            select.on_value_change(make_update_fn(orig, select))
-
-    async def apply_mappings():
-        loading_dialog.open()
-        try:
-            uploaded_df = get_df_from_state("uploaded_df")
-            mappings = get_state_val("species_mappings", {})
-
-            cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
-                dp.validate_model_csv,
-                uploaded_df,
-                mappings,
-                get_active_project_id(),
-            )
-
-            set_state_val(
-                "cleaned_df",
-                cleaned_df.to_dict(orient="records") if cleaned_df is not None else None,
-            )
-            set_state_val(
-                "errors_df",
-                errors_df.to_dict(orient="records") if errors_df is not None else None,
-            )
-            set_state_val("unmapped_species", unmapped_species)
-
-            ui.notify(t("mappings_applied"), type="positive")
-            refresh_results()
-        except Exception as exc:
-            ui.notify(t("mapping_failed", error=user_error_message(exc)), type="negative")
-        finally:
-            loading_dialog.close()
-
-    species_mappings = get_state_val("species_mappings", {})
-    pending_unmapped = [k for k, v in species_mappings.items() if not v]
-    cleaned_df_now = get_df_from_state("cleaned_df")
-    can_apply = cleaned_df_now is not None and not cleaned_df_now.empty and not pending_unmapped
-
-    ui.button(t("apply"), icon="refresh", on_click=apply_mappings, color="primary").props(
-        f"wide {'disabled' if not can_apply else ''}"
-    )
-    if pending_unmapped:
-        ui.label(t("map_all_to_import", list=", ".join(pending_unmapped))).classes(
-            "text-warning text-caption q-mt-sm"
-        )
 
 
 def _render_error_details(errors_df) -> None:

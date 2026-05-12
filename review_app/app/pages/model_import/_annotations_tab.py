@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import io
 
 import pandas as pd
@@ -6,33 +8,315 @@ from nicegui import run, ui
 from review_app.app.state import get_active_project_id, get_state_val, set_state_val
 from review_app.app.translations import t
 from review_app.app.utils import user_error_message
+from review_app.backend.utils import df_to_records
+
+from ._helpers import get_df_from_state, render_species_mappings
+
+_MAPPINGS_KEY = "ann_species_mappings"
+
+_DEFAULTS = {
+    "ann_folder_col": "Folder_name_standard",
+    "ann_video_col": "Video_name",
+    "ann_species_col": "Species",
+    "ann_data_type_col": "Data_type",
+    "ann_behavior_col": "Behaviour",
+    "ann_count_col": "Number",
+    "ann_observer_col": "Observer",
+    "ann_timestamp_col": "timestamp",
+    "ann_is_blank_col": "",
+}
+
+_NONE_VALUE = ""
+
+
+def _is_app_format(columns: list[str]) -> bool:
+    col_set = set(columns)
+    return ("video_path" in col_set or "video_id" in col_set) and "is_blank" in col_set
+
+
+def _col_val(key: str) -> str:
+    return get_state_val(key) or _DEFAULTS[key]
 
 
 def setup_annotations_tab(dp, loading_dialog) -> None:
-    with ui.row().classes("w-full gap-md q-mt-md items-start"):
-        with ui.card().classes("col q-pa-md"):
-            ui.label(t("upload_csv")).classes("text-subtitle2 font-weight-medium q-mb-xs")
-            ui.label(t("annotation_import_desc")).classes("text-caption  q-mb-md")
+    # ── Export ────────────────────────────────────────────────────────────────
+    with ui.card().classes("full-width q-pa-md q-mb-md"):
+        ui.label(t("export_annotations")).classes("text-subtitle2 font-weight-medium q-mb-xs")
+        ui.label(t("annotation_export_desc")).classes("text-caption q-mb-md")
 
-            with ui.row().classes("items-center gap-sm q-mb-md"):
-                ui.label(t("csv_mode_label")).classes("text-caption")
-                mode_toggle = ui.toggle(
-                    {
-                        "override": t("mode_override"),
-                        "append": t("mode_append"),
-                    },
-                    value=get_state_val("manual_import_mode") or "override",
-                ).props("dense size=sm")
-                mode_toggle.on_value_change(
-                    lambda: set_state_val("manual_import_mode", mode_toggle.value)
+        async def do_export() -> None:
+            try:
+                df = await run.io_bound(dp.export_annotations_csv, get_active_project_id())
+                ui.download(df.to_csv(index=False).encode("utf-8"), "annotations.csv")
+            except Exception as exc:
+                ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
+
+        ui.button(t("export_annotations"), icon="download", on_click=do_export).props(
+            "flat color=primary"
+        )
+
+    # ── Import ────────────────────────────────────────────────────────────────
+    with ui.card().classes("full-width q-pa-md q-mb-md"):
+        ui.label(t("upload_csv")).classes("text-subtitle2 font-weight-medium q-mb-xs")
+        ui.label(t("ann_import_desc")).classes("text-caption q-mb-md")
+
+        with ui.row().classes("items-center gap-sm q-mb-md"):
+            ui.label(t("csv_mode_label")).classes("text-caption")
+            mode_toggle = ui.toggle(
+                {"override": t("mode_override"), "append": t("mode_append")},
+                value=get_state_val("manual_import_mode") or "override",
+            ).props("dense size=sm")
+            mode_toggle.on_value_change(
+                lambda: set_state_val("manual_import_mode", mode_toggle.value)
+            )
+
+        import_status = ui.label("").classes("text-body2")
+        upload_holder: list = [None]
+
+        col_config_section = ui.element("div").classes("w-full q-mb-md")
+        col_config_section.visible = False
+
+        results_container = ui.column().classes("w-full q-mt-md")
+        results_container.visible = False
+
+        # ── External format: column config ────────────────────────────────────
+
+        @ui.refreshable
+        def col_config_ui() -> None:
+            col_config_section.clear()
+            columns = get_state_val("ann_columns") or []
+            if not columns:
+                return
+
+            required_opts = {c: c for c in columns}
+            optional_opts = {_NONE_VALUE: f"— {t('historic_col_none')} —", **required_opts}
+
+            with col_config_section:
+                ui.label(t("historic_path_matching")).classes(
+                    "text-caption text-grey q-mb-xs q-mt-sm"
                 )
+                with ui.row().classes("w-full gap-md q-mb-sm items-end"):
+                    sels = _make_col_selects(
+                        [
+                            ("ann_folder_col", required_opts),
+                            ("ann_video_col", required_opts),
+                        ]
+                    )
 
-            annotation_import_status = ui.label("").classes("text-body2 ")
+                ui.label(t("historic_annotation_cols")).classes(
+                    "text-caption text-grey q-mb-xs q-mt-sm"
+                )
+                with ui.row().classes("w-full gap-md q-mb-sm items-end"):
+                    sels += _make_col_selects(
+                        [
+                            ("ann_species_col", required_opts),
+                            ("ann_data_type_col", optional_opts),
+                            ("ann_behavior_col", optional_opts),
+                            ("ann_count_col", optional_opts),
+                            ("ann_observer_col", optional_opts),
+                            ("ann_timestamp_col", optional_opts),
+                        ]
+                    )
 
-            async def handle_annotation_upload(e):
+                ui.label(t("historic_extra_cols")).classes(
+                    "text-caption text-grey q-mb-xs q-mt-sm"
+                )
+                with ui.row().classes("w-full gap-md q-mb-sm items-end"):
+                    sels += _make_col_selects([("ann_is_blank_col", optional_opts)])
+
+                    tag_sel = (
+                        ui.select(
+                            label=t("ann_tag_cols"),
+                            options=required_opts,
+                            value=get_state_val("ann_tag_cols") or [],
+                            multiple=True,
+                            with_input=True,
+                        )
+                        .props("outlined dense use-chips")
+                        .classes("col")
+                    )
+
+                async def on_col_change() -> None:
+                    for key, sel in sels:
+                        set_state_val(key, sel.value)
+                    set_state_val("ann_tag_cols", tag_sel.value)
+                    await _run_validate(dp, loading_dialog, results_ui, results_container)
+
+                for _, sel in sels:
+                    sel.on_value_change(on_col_change)
+                tag_sel.on_value_change(on_col_change)
+
+        col_config_ui()
+
+        # ── External format: validation results + import button ───────────────
+
+        @ui.refreshable
+        def results_ui() -> None:
+            validation = get_state_val("ann_validation")
+            if not validation:
+                return
+
+            matched = validation["matched"]
+            unmatched = validation["unmatched"]
+            skipped_inst = validation["skipped_installation"]
+            unknown = validation["unknown_species"]
+
+            with ui.card().classes("full-width q-pa-md q-mb-md"):
+                color = "text-positive" if unmatched == 0 else "text-warning"
+                ui.label(t("historic_matched_videos", count=matched)).classes(
+                    f"text-subtitle2 {color} q-mb-xs"
+                )
+                if unmatched:
+                    ui.label(t("historic_unmatched_videos", count=unmatched)).classes(
+                        "text-body2 text-warning q-mb-xs"
+                    )
+                    unmatched_paths = validation.get("unmatched_paths") or []
+                    if unmatched_paths:
+                        with ui.expansion(
+                            t("wide_format_unmatched", count=unmatched), icon="warning"
+                        ).classes("q-mt-xs full-width"):
+                            ui.aggrid(
+                                {
+                                    "columnDefs": [
+                                        {
+                                            "field": "path",
+                                            "headerName": t("ann_folder_col")
+                                            + "/"
+                                            + t("ann_video_col"),
+                                        }
+                                    ],
+                                    "rowData": df_to_records(
+                                        pd.DataFrame({"path": unmatched_paths}), limit=500
+                                    ),
+                                    "columnSize": "autoSize",
+                                    "pagination": True,
+                                    "paginationPageSize": 50,
+                                }
+                            ).classes("h-48")
+                if skipped_inst:
+                    ui.label(t("historic_skipped_installation", count=skipped_inst)).classes(
+                        "text-caption text-grey"
+                    )
+
+            if unknown:
+                with ui.card().classes("full-width q-pa-md q-mb-md"):
+                    ui.label(t("historic_unknown_species")).classes(
+                        "text-subtitle2 text-warning q-mb-sm"
+                    )
+                    ui.separator().classes("q-mb-sm")
+
+                    all_mappings = get_state_val(_MAPPINGS_KEY) or {}
+                    all_species = set(unknown) | set(all_mappings.keys())
+                    unmapped_origs = set(unknown)
+
+                    async def apply_mappings() -> None:
+                        loading_dialog.open()
+                        try:
+                            df = get_df_from_state("ann_df_records")
+                            if df is None:
+                                return
+                            mappings = get_state_val(_MAPPINGS_KEY) or {}
+                            result = await run.io_bound(
+                                dp.validate_historic_csv,
+                                df,
+                                get_active_project_id(),
+                                _col_val("ann_folder_col"),
+                                _col_val("ann_video_col"),
+                                _col_val("ann_species_col"),
+                                _col_val("ann_data_type_col"),
+                                mappings,
+                                _col_val("ann_is_blank_col"),
+                                get_state_val("ann_tag_cols") or [],
+                            )
+                            set_state_val("ann_validation", result)
+                            ui.notify(t("mappings_applied"), type="positive")
+                            results_ui.refresh()
+                        except Exception as exc:
+                            ui.notify(
+                                t("mapping_failed", error=user_error_message(exc)), type="negative"
+                            )
+                        finally:
+                            loading_dialog.close()
+
+                    pending = [k for k, v in (get_state_val(_MAPPINGS_KEY) or {}).items() if not v]
+                    can_apply = bool(get_state_val("ann_df_records")) and not pending
+
+                    render_species_mappings(
+                        dp,
+                        all_mappings,
+                        unmapped_origs,
+                        all_species,
+                        apply_fn=apply_mappings,
+                        update_import_button=results_ui.refresh,
+                        can_apply=can_apply,
+                        mappings_state_key=_MAPPINGS_KEY,
+                        show_blank_option=True,
+                    )
+
+            ui.separator().classes("q-my-md")
+
+            async def do_external_import() -> None:
+                loading_dialog.open()
                 try:
-                    content = await e.file.read()
-                    df = pd.read_csv(io.BytesIO(content))
+                    df = get_df_from_state("ann_df_records")
+                    if df is None:
+                        ui.notify(t("no_data_import"), type="warning")
+                        return
+                    result = await run.io_bound(
+                        dp.import_historic_csv,
+                        df,
+                        get_active_project_id(),
+                        _col_val("ann_folder_col"),
+                        _col_val("ann_video_col"),
+                        _col_val("ann_species_col"),
+                        _col_val("ann_data_type_col"),
+                        _col_val("ann_behavior_col"),
+                        _col_val("ann_count_col"),
+                        _col_val("ann_observer_col"),
+                        _col_val("ann_timestamp_col"),
+                        get_state_val("manual_import_mode") or "override",
+                        get_state_val(_MAPPINGS_KEY) or {},
+                        _col_val("ann_is_blank_col"),
+                        get_state_val("ann_tag_cols") or [],
+                    )
+                    msg = t("imported_historic", count=result["imported"])
+                    if result["skipped"]:
+                        msg += t("skipped_historic", count=len(result["skipped"]))
+                    if result["skipped_observations"]:
+                        msg += t("skipped_obs_historic", count=len(result["skipped_observations"]))
+                    import_status.set_text(msg)
+                    ui.notify(msg, type="positive")
+                except Exception as exc:
+                    ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+                finally:
+                    loading_dialog.close()
+
+            ui.button(
+                t("historic_import_btn"),
+                icon="file_upload",
+                on_click=do_external_import,
+                color="warning",
+            )
+
+        # ── Upload ────────────────────────────────────────────────────────────
+
+        async def handle_upload(e) -> None:
+            loading_dialog.open()
+            try:
+                content = await e.file.read()
+                df = pd.read_csv(io.BytesIO(content), sep=None, engine="python")
+                columns = list(df.columns)
+
+                if _is_app_format(columns):
+                    # App format: import directly
+                    set_state_val("ann_format", "app")
+                    set_state_val("ann_df_records", None)
+                    set_state_val("ann_validation", None)
+                    col_config_section.visible = False
+                    results_container.visible = False
+                    col_config_ui.refresh()
+                    results_ui.refresh()
+
                     result = await run.io_bound(
                         dp.import_annotations_csv,
                         df,
@@ -42,39 +326,85 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     msg = t("imported_annotations", count=result["imported"])
                     if result["skipped"]:
                         msg += t("skipped_annotations", count=len(result["skipped"]))
-                    annotation_import_status.set_text(msg)
+                    import_status.set_text(msg)
                     ui.notify(msg, type="positive")
-                except Exception as exc:
-                    ui.notify(
-                        t("import_failed", error=user_error_message(exc)),
-                        type="negative",
-                    )
+                else:
+                    # External format: show column config + validate
+                    set_state_val("ann_format", "external")
+                    set_state_val("ann_df_records", df.to_dict(orient="records"))
+                    set_state_val("ann_columns", columns)
+                    set_state_val(_MAPPINGS_KEY, {})
+                    set_state_val("ann_validation", None)
 
-            ui.upload(
-                on_upload=handle_annotation_upload,
-                multiple=False,
-                label=t("choose_annotations_csv"),
-                auto_upload=True,
-            ).props("accept=.csv")
+                    for key, default in _DEFAULTS.items():
+                        set_state_val(key, default if default in columns else columns[0])
+                    set_state_val("ann_tag_cols", [])
 
-        with ui.card().classes("col q-pa-md"):
-            ui.label(t("export_annotations")).classes("text-subtitle2 font-weight-medium q-mb-xs")
-            ui.label(t("annotation_export_desc")).classes("text-caption q-mb-md")
+                    col_config_section.visible = True
+                    col_config_ui.refresh()
+                    if upload_holder[0]:
+                        upload_holder[0].visible = False
+            except Exception as exc:
+                ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+                loading_dialog.close()
+                return
+            finally:
+                loading_dialog.close()
 
-            async def do_export():
-                try:
-                    df = await run.io_bound(
-                        dp.export_annotations_csv,
-                        get_active_project_id(),
-                    )
-                    csv_bytes = df.to_csv(index=False).encode("utf-8")
-                    ui.download(csv_bytes, "annotations.csv")
-                except Exception as exc:
-                    ui.notify(
-                        t("export_failed", error=user_error_message(exc)),
-                        type="negative",
-                    )
+            if get_state_val("ann_format") == "external":
+                await _run_validate(dp, loading_dialog, results_ui, results_container)
 
-            ui.button(t("export_annotations"), icon="download", on_click=do_export).props(
-                "flat color=primary"
+        upload_holder[0] = ui.upload(
+            on_upload=handle_upload,
+            multiple=False,
+            label=t("choose_annotations_csv"),
+            auto_upload=True,
+        ).props("accept=.csv")
+
+    with results_container:
+        results_ui()
+
+
+def _make_col_selects(specs: list[tuple[str, dict]]) -> list[tuple[str, object]]:
+    result = []
+    for key, opts in specs:
+        sel = (
+            ui.select(
+                label=t(key),
+                options=opts,
+                value=get_state_val(key) or _DEFAULTS.get(key, ""),
             )
+            .props("outlined dense")
+            .classes("col")
+        )
+        result.append((key, sel))
+    return result
+
+
+async def _run_validate(dp, loading_dialog, results_ui, results_container) -> None:
+    loading_dialog.open()
+    try:
+        df = get_df_from_state("ann_df_records")
+        if df is None:
+            return
+        mappings = get_state_val(_MAPPINGS_KEY) or {}
+        result = await run.io_bound(
+            dp.validate_historic_csv,
+            df,
+            get_active_project_id(),
+            _col_val("ann_folder_col"),
+            _col_val("ann_video_col"),
+            _col_val("ann_species_col"),
+            _col_val("ann_data_type_col"),
+            mappings,
+            _col_val("ann_is_blank_col"),
+            get_state_val("ann_tag_cols") or [],
+        )
+        set_state_val("ann_validation", result)
+        set_state_val(_MAPPINGS_KEY, {})
+        results_container.visible = True
+        results_ui.refresh()
+    except Exception as exc:
+        ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+    finally:
+        loading_dialog.close()

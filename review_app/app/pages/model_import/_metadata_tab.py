@@ -20,7 +20,7 @@ def setup_metadata_tab(dp) -> None:
         async def handle_upload(e):
             try:
                 content = await e.file.read()
-                df = pd.read_csv(io.BytesIO(content))
+                df = pd.read_csv(io.BytesIO(content), sep=None, engine="python")
                 result = await run.io_bound(
                     dp.import_video_metadata_csv,
                     df,

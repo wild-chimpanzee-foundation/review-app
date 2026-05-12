@@ -22,6 +22,22 @@ _STATE_KEYS = (
     "unmapped_species",
     "match_stats",
     "csv_format",
+    "manual_import_mode",
+    "ann_df_records",
+    "ann_columns",
+    "ann_format",
+    "ann_validation",
+    "ann_species_mappings",
+    "ann_folder_col",
+    "ann_video_col",
+    "ann_species_col",
+    "ann_data_type_col",
+    "ann_behavior_col",
+    "ann_count_col",
+    "ann_observer_col",
+    "ann_timestamp_col",
+    "ann_is_blank_col",
+    "ann_tag_cols",
 )
 
 

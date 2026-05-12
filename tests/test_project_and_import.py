@@ -2,10 +2,44 @@
 Tests for delete_project, import_annotations_csv, and get_overview_stats.
 """
 
+import uuid
+
 import pandas as pd
 import pytest
 from review_app.backend.errors import DataImportError
 from review_app.backend.provider.local_data_provider import LocalDataProvider
+from sqlalchemy import text
+
+
+def _seed_builtin_tags(dp) -> None:
+    """Insert built-in tags that are normally seeded by migration v7.
+
+    In tests, run_migrations stamps fresh DBs as current and skips all migrations,
+    so built-in tags must be seeded manually where needed.
+    """
+    builtin = [
+        ("fire", "Fire", "Feu", "deep-orange", "local_fire_department"),
+        ("nice_shot", "Nice Shot", "Belle image", "amber", "star"),
+        ("broken_metadata", "Broken Metadata", "Métadonnées corrompues", "red", "report_problem"),
+    ]
+    with dp.engine.begin() as conn:
+        for key, name_en, name_fr, color, icon in builtin:
+            if not conn.execute(text("SELECT 1 FROM tags WHERE key=:k"), {"k": key}).fetchone():
+                conn.execute(
+                    text(
+                        "INSERT INTO tags (id,key,name_en,name_fr,color,icon,is_custom) "
+                        "VALUES (:id,:key,:name_en,:name_fr,:color,:icon,0)"
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "key": key,
+                        "name_en": name_en,
+                        "name_fr": name_fr,
+                        "color": color,
+                        "icon": icon,
+                    },
+                )
+
 
 # ---------------------------------------------------------------------------
 # delete_project
@@ -236,6 +270,94 @@ def test_export_import_round_trip(populated_provider):
 
     detail = dp.get_video_detail(ids["v1"])
     assert detail["manual_selections"][0]["species"] == "deer"
+
+
+# ---------------------------------------------------------------------------
+# Round-trip: count, review_later, tags
+# ---------------------------------------------------------------------------
+
+
+def test_import_count_round_trip(clean_provider):
+    """count field exported by export_annotations_csv must survive a reimport."""
+    dp = clean_provider
+    paths = _video_paths(dp)
+    v1_path = next(p for p in paths if p.endswith("v1.mp4"))
+    v1_id = paths[v1_path]
+
+    dp.update_manual_review(v1_id, [{"species": "deer", "behavior": "grazing", "count": 3}])
+    exported = dp.export_annotations_csv(active_project_id=None)
+    dp.update_manual_review(v1_id, [], is_blank=None)
+
+    dp.import_annotations_csv(exported, active_project_id=None)
+    sel = dp.get_video_detail(v1_id)["manual_selections"][0]
+    assert sel["count"] == 3
+
+
+def test_import_review_later_round_trip(clean_provider):
+    """review_later=True exported in CSV must be restored on reimport."""
+    dp = clean_provider
+    paths = _video_paths(dp)
+    v1_id = paths[next(p for p in paths if p.endswith("v1.mp4"))]
+
+    dp.update_manual_review(v1_id, [], is_blank=True)
+    dp.set_review_later(v1_id, True)
+
+    exported = dp.export_annotations_csv(active_project_id=None)
+    dp.update_manual_review(v1_id, [], is_blank=None)
+    dp.set_review_later(v1_id, False)
+
+    dp.import_annotations_csv(exported, active_project_id=None)
+    detail = dp.get_video_detail(v1_id)
+    assert detail["review_later"] == 1
+
+
+def test_import_tags_round_trip_override(clean_provider):
+    """Built-in and custom tags must be restored in override mode."""
+    dp = clean_provider
+    _seed_builtin_tags(dp)
+    paths = _video_paths(dp)
+    v1_id = paths[next(p for p in paths if p.endswith("v1.mp4"))]
+
+    dp.update_manual_review(v1_id, [], is_blank=True)
+    dp.toggle_video_tag(v1_id, "fire")
+    custom_key = dp.create_custom_tag(name_en="Interesting")
+    dp.toggle_video_tag(v1_id, custom_key)
+
+    exported = dp.export_annotations_csv(active_project_id=None)
+    # wipe tags
+    dp.toggle_video_tag(v1_id, "fire")
+    dp.toggle_video_tag(v1_id, custom_key)
+    assert dp.get_video_tags(v1_id) == []
+
+    dp.import_annotations_csv(exported, active_project_id=None)
+    tags = set(dp.get_video_tags(v1_id))
+    assert "fire" in tags
+    assert custom_key in tags
+
+
+def test_import_tags_round_trip_append(clean_provider):
+    """Append mode must add CSV tags without removing tags not in the CSV."""
+    dp = clean_provider
+    _seed_builtin_tags(dp)
+    paths = _video_paths(dp)
+    v1_id = paths[next(p for p in paths if p.endswith("v1.mp4"))]
+
+    dp.update_manual_review(v1_id, [], is_blank=True)
+    # nice_shot will appear in the exported CSV
+    dp.toggle_video_tag(v1_id, "nice_shot")
+    exported = dp.export_annotations_csv(active_project_id=None)
+
+    # Wipe nice_shot so reimport has something to restore
+    dp.toggle_video_tag(v1_id, "nice_shot")
+    assert dp.get_video_tags(v1_id) == []
+
+    # fire is set after export — append mode must not remove it
+    dp.toggle_video_tag(v1_id, "fire")
+
+    dp.import_annotations_csv(exported, active_project_id=None, mode="append")
+    tags = set(dp.get_video_tags(v1_id))
+    assert "nice_shot" in tags  # restored from CSV
+    assert "fire" in tags  # was not in CSV, must survive
 
 
 # ---------------------------------------------------------------------------
