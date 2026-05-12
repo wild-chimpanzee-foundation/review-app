@@ -38,6 +38,9 @@ class Project(Base):
     project_species: Mapped[list[ProjectSpecies]] = relationship(
         "ProjectSpecies", cascade="all, delete-orphan"
     )
+    project_species_behaviors: Mapped[list[ProjectSpeciesBehavior]] = relationship(
+        "ProjectSpeciesBehavior", cascade="all, delete-orphan"
+    )
 
 
 class ProjectDir(Base):
@@ -76,6 +79,7 @@ class Video(Base):
     annotations: Mapped[list[ModelAnnotation]] = relationship(
         "ModelAnnotation", cascade="all, delete-orphan"
     )
+    tags: Mapped[list[VideoTag]] = relationship("VideoTag", cascade="all, delete-orphan")
 
 
 class VideoLabel(Base):

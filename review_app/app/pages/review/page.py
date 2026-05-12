@@ -22,7 +22,6 @@ from review_app.app.state import (
     get_species_threshold,
     get_state_val,
     is_auto_transcode,
-    reset_filters,
     set_current_idx,
     set_queue,
     set_selections,
@@ -538,14 +537,13 @@ async def setup_review():
 
     global_species_map = await run.io_bound(dp.get_species_display_map, get_language())
 
-    reset_filters()
     set_selections([])
     set_state_val("review_state_video_id", None)
     set_state_val("review_is_blank", None)
     set_state_val("review_active_id", None)
     set_state_val("pending_blank_confirm", False)
 
-    # Always rebuild queue from DB with fresh (reset) filters.
+    # Rebuild queue from DB with current filters.
     queue_ids = await run.io_bound(
         dp.get_video_queue,
         filters={

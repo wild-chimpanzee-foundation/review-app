@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from review_app.app.state import get_active_project_id, set_data_provider
+from review_app.app.state import get_active_project_id, reset_app_state, set_data_provider
 from review_app.app.translations import t
 from review_app.app.utils import switch_project
 from review_app.backend.db.backup import BackupError, create_backup
@@ -87,6 +87,7 @@ def build_project_picker():
                                                 dialog.close()
                                                 ui.navigate.to("/overview")
                                             else:
+                                                reset_app_state()
                                                 dialog.close()
                                                 ui.navigate.to("/setup")
                                         else:
