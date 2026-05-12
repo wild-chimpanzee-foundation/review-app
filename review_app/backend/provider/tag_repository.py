@@ -79,13 +79,15 @@ class TagMixin(ProviderBase):
                 logger.debug("Added tag %s to video %s", tag_key, video_id)
                 return True
 
-    def create_custom_tag(self, name_en: str, color: str | None = None) -> str:
+    def create_custom_tag(
+        self, name_en: str = "", color: str | None = None, name_fr: str | None = None
+    ) -> str:
         """Create a custom tag if it doesn't exist yet. Returns the tag key."""
-        key = re.sub(
-            r"[^a-z0-9_]", "", name_en.lower().strip().replace(" ", "_").replace("-", "_")
-        )
+        key_source = name_en.strip() or (name_fr.strip() if name_fr else "")
+        key = re.sub(r"[^a-z0-9_]", "", key_source.lower().replace(" ", "_").replace("-", "_"))
         if not key:
-            raise ValueError(f"Cannot derive a valid key from tag name: {name_en!r}")
+            raise ValueError(f"Cannot derive a valid key from tag names: {name_en!r}, {name_fr!r}")
+        name_fr_val = name_fr.strip() if name_fr and name_fr.strip() else None
         with self.engine.begin() as conn:
             existing = conn.execute(
                 text("SELECT key FROM tags WHERE key = :k"), {"k": key}
@@ -94,19 +96,29 @@ class TagMixin(ProviderBase):
                 return key
             conn.execute(
                 text(
-                    "INSERT INTO tags (id, key, name_en, color, is_custom) "
-                    "VALUES (:id, :key, :name_en, :color, 1)"
+                    "INSERT INTO tags (id, key, name_en, name_fr, color, is_custom) "
+                    "VALUES (:id, :key, :name_en, :name_fr, :color, 1)"
                 ),
-                {"id": str(uuid.uuid4()), "key": key, "name_en": name_en.strip(), "color": color},
+                {
+                    "id": str(uuid.uuid4()),
+                    "key": key,
+                    "name_en": name_en.strip() or None,
+                    "name_fr": name_fr_val,
+                    "color": color,
+                },
             )
         logger.info("Created custom tag: key=%s name=%s color=%s", key, name_en.strip(), color)
         return key
 
-    def update_tag_name(self, key: str, name_en: str) -> None:
+    def update_tag_names(self, key: str, name_en: str, name_fr: str | None = None) -> None:
+        name_fr_val = name_fr.strip() if name_fr and name_fr.strip() else None
         with self.engine.begin() as conn:
             conn.execute(
-                text("UPDATE tags SET name_en = :name WHERE key = :key AND is_custom = 1"),
-                {"name": name_en.strip(), "key": key},
+                text(
+                    "UPDATE tags SET name_en = :name_en, name_fr = :name_fr "
+                    "WHERE key = :key AND is_custom = 1"
+                ),
+                {"name_en": name_en.strip(), "name_fr": name_fr_val, "key": key},
             )
 
     def update_tag_color(self, key: str, color: str | None) -> None:

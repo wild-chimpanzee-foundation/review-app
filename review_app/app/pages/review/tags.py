@@ -70,14 +70,16 @@ async def render_video_tags(video_id: str, dp, annotator: str | None):
             pass
 
     def open_add_tag_dialog():
-        state = {"color": None, "name_input": None}
+        state = {"color": None, "name_input": None, "name_fr_input": None}
 
         async def confirm_add():
             name = (state["name_input"].value or "").strip()
-            if not name:
+            name_fr = (state["name_fr_input"].value or "").strip() or None
+            if not name and not name_fr:
+                ui.notify(t("add_tag_name_required"), type="warning")
                 return
             try:
-                tag_key = await run.io_bound(dp.create_custom_tag, name, state["color"])
+                tag_key = await run.io_bound(dp.create_custom_tag, name, state["color"], name_fr)
                 await toggle_tag(tag_key)
             except ValueError as exc:
                 ui.notify(str(exc), type="negative")
@@ -91,6 +93,9 @@ async def render_video_tags(video_id: str, dp, annotator: str | None):
             state["name_input"] = ui.input(
                 label=t("add_tag_name_label"), placeholder=t("add_tag_name_placeholder")
             ).props("outlined dense autofocus class=full-width q-mb-sm")
+            state["name_fr_input"] = ui.input(
+                label=t("add_tag_name_fr_label"), placeholder=t("add_tag_name_fr_placeholder")
+            ).props("outlined dense class=full-width q-mb-sm")
             ui.label(t("tag_color_label")).classes("text-caption q-mb-xs")
             _color_picker(None, on_select=lambda c: state.update({"color": c}))
             with ui.row().classes("w-full justify-end gap-sm q-mt-xs"):
@@ -105,14 +110,12 @@ async def render_video_tags(video_id: str, dp, annotator: str | None):
             color = tag.get("color") or "grey"
             icon = tag.get("icon") or "label"
             label = _tag_label(tag)
-            chip = ui.chip(
+            ui.chip(
                 label,
                 icon=icon,
                 color=color if is_active else "grey-5",
                 on_click=lambda k=tag["key"]: toggle_tag(k),
-            ).props("clickable")
-            if not is_active:
-                chip.props("outline")
+            ).props("clickable outline")
 
         ui.chip(
             t("add_tag_btn"),

@@ -35,18 +35,23 @@ def _render_custom_tag_row(dp, tag: dict) -> None:
 
         def save():
             name = (name_input.value or "").strip()
-            if not name:
+            name_fr = (name_fr_input.value or "").strip() or None
+            if not name and not name_fr:
+                ui.notify(t("add_tag_name_required"), type="warning")
                 return
-            dp.update_tag_name(tag["key"], name)
+            dp.update_tag_names(tag["key"], name, name_fr)
             dp.update_tag_color(tag["key"], state["color"])
             dlg.close()
             render_tags_section.refresh()
 
         with ui.dialog() as dlg, ui.card().classes("q-pa-md").style("min-width: 340px"):
             ui.label(t("settings_tags_edit_title")).classes("text-subtitle2 q-mb-sm")
-            name_input = ui.input(value=tag["name_en"]).props(
+            name_input = ui.input(label=t("add_tag_name_label"), value=tag["name_en"]).props(
                 "outlined dense autofocus class=full-width q-mb-sm"
             )
+            name_fr_input = ui.input(
+                label=t("add_tag_name_fr_label"), value=tag.get("name_fr") or ""
+            ).props("outlined dense class=full-width q-mb-sm")
             ui.label(t("tag_color_label")).classes("text-caption q-mb-xs")
             _color_picker(tag.get("color"), on_select=lambda c: state.update({"color": c}))
             with ui.row().classes("w-full justify-end gap-sm q-mt-xs"):
