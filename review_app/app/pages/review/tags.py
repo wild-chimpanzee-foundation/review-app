@@ -1,7 +1,7 @@
 from nicegui import run, ui
 
 from review_app.app.state import get_current_idx, get_queue
-from review_app.app.translations import get_language, t
+from review_app.app.translations import get_language
 
 PALETTE = [
     "red",
@@ -69,41 +69,6 @@ async def render_video_tags(video_id: str, dp, annotator: str | None):
         except RuntimeError:
             pass
 
-    def open_add_tag_dialog():
-        state = {"color": None, "name_input": None, "name_fr_input": None}
-
-        async def confirm_add():
-            name = (state["name_input"].value or "").strip()
-            name_fr = (state["name_fr_input"].value or "").strip() or None
-            if not name and not name_fr:
-                ui.notify(t("add_tag_name_required"), type="warning")
-                return
-            try:
-                tag_key = await run.io_bound(dp.create_custom_tag, name, state["color"], name_fr)
-                await toggle_tag(tag_key)
-            except ValueError as exc:
-                ui.notify(str(exc), type="negative")
-            dlg.close()
-
-        with ui.dialog() as dlg, ui.card().classes("q-pa-md").style("min-width: 380px"):
-            with ui.row().classes("items-center gap-sm q-mb-sm"):
-                ui.icon("warning", color="warning", size="sm")
-                ui.label(t("add_tag_warning_title")).classes("text-subtitle2")
-            ui.label(t("add_tag_warning_body")).classes("text-caption text-grey-7 q-mb-sm")
-            state["name_input"] = ui.input(
-                label=t("add_tag_name_label"), placeholder=t("add_tag_name_placeholder")
-            ).props("outlined dense autofocus class=full-width q-mb-sm")
-            state["name_fr_input"] = ui.input(
-                label=t("add_tag_name_fr_label"), placeholder=t("add_tag_name_fr_placeholder")
-            ).props("outlined dense class=full-width q-mb-sm")
-            ui.label(t("tag_color_label")).classes("text-caption q-mb-xs")
-            _color_picker(None, on_select=lambda c: state.update({"color": c}))
-            with ui.row().classes("w-full justify-end gap-sm q-mt-xs"):
-                ui.button(t("cancel"), on_click=dlg.close).props("flat")
-                ui.button(t("add_tag_confirm"), on_click=confirm_add, color="primary")
-
-        dlg.open()
-
     with ui.row().classes("w-full gap-xs flex-wrap items-center"):
         for tag in all_tags:
             is_active = tag["key"] in active_tag_keys
@@ -116,10 +81,3 @@ async def render_video_tags(video_id: str, dp, annotator: str | None):
                 color=color if is_active else "grey-5",
                 on_click=lambda k=tag["key"]: toggle_tag(k),
             ).props("clickable outline")
-
-        ui.chip(
-            t("add_tag_btn"),
-            icon="add",
-            color="grey-5",
-            on_click=open_add_tag_dialog,
-        ).props("outline clickable")

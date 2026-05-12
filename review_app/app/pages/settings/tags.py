@@ -1,4 +1,4 @@
-from nicegui import ui
+from nicegui import run, ui
 
 from review_app.app.pages.review.tags import _color_picker, _tag_label
 from review_app.app.translations import t
@@ -17,7 +17,11 @@ def render_tags_section(dp) -> None:
             icon = tag.get("icon") or "label"
             ui.chip(_tag_label(tag), icon=icon, color=color).props("outline")
 
-    ui.label(t("settings_tags_custom_label")).classes("text-caption text-grey-6 q-mb-xs")
+    with ui.row().classes("items-center justify-between w-full q-mb-xs"):
+        ui.label(t("settings_tags_custom_label")).classes("text-caption text-grey-6")
+        ui.button(
+            t("add_tag_btn"), icon="add", on_click=lambda: _open_add_tag_dialog(dp, all_tags)
+        ).props("size=sm outline color=primary")
 
     if not custom_tags:
         ui.label(t("settings_tags_no_custom")).classes("text-caption text-grey-5 q-mb-sm")
@@ -25,6 +29,56 @@ def render_tags_section(dp) -> None:
         with ui.column().classes("w-full gap-sm q-mb-sm"):
             for tag in custom_tags:
                 _render_custom_tag_row(dp, tag)
+
+
+def _open_add_tag_dialog(dp, all_tags: list) -> None:
+    state = {"color": "teal", "name_input": None, "name_fr_input": None, "submitting": False}
+
+    async def confirm_add():
+        if state["submitting"]:
+            return
+        name = (state["name_input"].value or "").strip()
+        name_fr = (state["name_fr_input"].value or "").strip() or None
+        if not name and not name_fr:
+            ui.notify(t("add_tag_name_required"), type="warning")
+            return
+        existing_names = {
+            n
+            for tag in all_tags
+            for n in (tag.get("name_en") or "", tag.get("name_fr") or "")
+            if n
+        }
+        if (name and name.lower() in {n.lower() for n in existing_names}) or (
+            name_fr and name_fr.lower() in {n.lower() for n in existing_names}
+        ):
+            ui.notify(t("add_tag_duplicate"), type="warning")
+            return
+        state["submitting"] = True
+        confirm_btn.props("loading")
+        try:
+            await run.io_bound(dp.create_custom_tag, name, state["color"], name_fr)
+        except ValueError as exc:
+            ui.notify(str(exc), type="negative")
+            return
+        finally:
+            state["submitting"] = False
+        dlg.close()
+        render_tags_section.refresh()
+
+    with ui.dialog() as dlg, ui.card().classes("q-pa-md").style("min-width: 380px"):
+        ui.label(t("add_tag_warning_title")).classes("text-subtitle2 q-mb-sm")
+        state["name_input"] = ui.input(
+            label=t("add_tag_name_label"), placeholder=t("add_tag_name_placeholder")
+        ).props("outlined dense autofocus class=full-width q-mb-sm")
+        state["name_fr_input"] = ui.input(
+            label=t("add_tag_name_fr_label"), placeholder=t("add_tag_name_fr_placeholder")
+        ).props("outlined dense class=full-width q-mb-sm")
+        ui.label(t("tag_color_label")).classes("text-caption q-mb-xs")
+        _color_picker("teal", on_select=lambda c: state.update({"color": c}))
+        with ui.row().classes("w-full justify-end gap-sm q-mt-xs"):
+            ui.button(t("cancel"), on_click=dlg.close).props("flat")
+            confirm_btn = ui.button(t("add_tag_confirm"), on_click=confirm_add, color="primary")
+    dlg.open()
 
 
 def _render_custom_tag_row(dp, tag: dict) -> None:
