@@ -1,135 +1,300 @@
-scientific_name;french_name;group_fr;IUCN;english_name;group_en
-Amphibien;Amphibien;Amphibien;NA;Amphibian;Amphibian
-Amphibien sp.;Amphibien sp.;Autre;NA;Undetermined amphibian;Other
-Aonyx capensis;Loutre à joues blanches;Carnivore;NT;African clawless otter;Carnivore
-Araignee sp.;Araignee sp.;Autre;NA;Spider sp.;Other
-Atelerix albiventris;Herisson a ventre blanc;Erinaceomorphe;LC;Four-toed hedgehog;Hedgehog
-Atherurus africanus;Atherure africain;Rongeur;LC;African brush-tailed porcupine;Rodent
-Atilax paludinosus;Mangouste des marais;Carnivore;LC;Marsh Mongoose;Carnivore
-Bos taurus;Vache;Domestique;NA;Cow;Domestic
-Bovide sp.;Bovide sp.;Bovide;NA;Bovid sp.;Bovid
-Canis familiaris;Chien domestique;NA;NA;Domestic dog;NA
-Canis lupus familiaris;Chien;Domestique;NA;Dog;Domestic
-Capra sp.;Chevre;Domestique;NA;Goat;Domestic
-Caracal aurata;Chat dore;Carnivore;VU;African golden cat;Carnivore
-Caracal caracal;Caracal;Carnivore;LC;Caracal;Carnivore
-Cephalophus dorsalis;Cephalophe a bande dorsale noire;Bovide;NT;Bay duiker;Bovid
-Cephalophus jentinki;Cephalophe de Jentink;Bovide;EN;Jentink's duiker;Bovid
-Cephalophus niger;Cephalophe noir;Bovide;LC;Black duiker;Bovid
-Cephalophus ogilbyi brookei;Cephalophe de Brooke;Bovide;VU;Brooke's duiker;Bovid
-Cephalophus rufilatus;Cephalophe a flancs roux;Bovide;LC;Red-flanked duiker;Bovid
-Cephalophus silvicultor;Cephalophe a dos jaune;Bovide;NT;Yellow-backed duiker;Bovid
-Cephalophus sp.;Cephalophe sp.;Bovide;NA;Duiker sp.;Bovid
-Cephalophus zebra;Cephalophe zebre;Bovide;VU;Zebra duiker;Bovid
-Cercocebus atys;Cercocebe fuligineux;Primate;VU;Sooty mangabey;Primate
-Cercopithecus campbelli;Mone de Campbell;Primate;NT;Campbell's monkey;Primate
-Cercopithecus diana;Cercopitheque diane;Primate;EN;Diana monkey;Primate
-Cercopithecus nictitans stampflii;Cercopitheque hocheur;Primate;EN;Stampfli's putty-nosed monkey;Primate
-Cercopithecus petaurista;Cercopitheque blanc-nez;Primate;NT;Spot-nosed monkey;Primate
-Chasseur;Chasseur;Humain;NA;Hunter;Human
-Chiroptere sp.;Chauve-souris sp.;Chiroptere;NA;Bat sp.;Bat
-Chlorocebus sabaeus;Vervet vert;Primate;LC;Green monkey;Primate
-Choeropsis liberiensis;Hippopotame pygmee;Hippopotamide;EN;Pygmy hippopotamus;Hippopotamus
-Civettictis civetta;Civette africaine;Carnivore;LC;African civet;Carnivore
-Colobus polykomos;Colobe blanc-noir;Primate;EN;King colobus;Primate
-Cricetome sp.;Cricetome sp.;Rongeur;NA;Unidentified giant pouched rat;Rodent
-Cricetomys emini;Cricetome de foret;Rongeur;LC;Forest giant pouched rat;Rodent
-Cricetomys gambianus;Rat geant de Gambie;Rongeur;LC;Northern giant pouch rat;Rodent
-Crocodile sp.;Crocodile sp.;Reptile;NA;Crocodile sp.;Reptile
-Crocuta crocuta;Hyene tachetee;Carnivore;LC;Spotted hyena;Carnivore
-Crossarchus obscurus;Mangouste brune;Carnivore;LC;Common kusimanse;Carnivore
-Dendrohyrax dorsalis;Daman d'arbre;Autre;NA;Western tree hyrax;Other
-Ecureuil sp.;Ecureuil sp.;Rongeur;NA;Squirrel sp.;Rodent
-Epixerus ebii;Ecureuil d'Ebi;Rongeur;LC;Western palm squirrel;Rodent
-Erythrocebus patas;Patas;Primate;NT;Patas monkey;Primate
-Felin sp.;Felin sp.;Carnivore;NA;Unidentified feline;Carnivore
-Funisciurus pyrropus;Funisciure a pattes rousses;Rongeur;LC;Fire-footed rope squirrel;Rodent
-Galago senegalensis;Galago du Senegal;Primate;LC;Northern lesser galago;Primate
-Galago sp.;Galago sp.;Primate;NA;Galago sp.;Primate
-Galagoides demidoff;Galago de Demidoff;Primate;LC;Demidoff's dwarf galago;Primate
-Galagoides thomasi;Galago de Thomas;Primate;LC;Thomas's dwarf galago;Primate
-Genetta bourloni;Genette de Bourlon;Carnivore;VU;Bourlon's genet;Carnivore
-Genetta genetta;Genette commune;Carnivore;LC;Common genet;Carnivore
-Genetta johnstoni;Genette de Johnston;Carnivore;NT;Johnston's genet;Carnivore
-Genetta pardina;Genette pardine;Carnivore;NT;Pardine genet;Carnivore
-Genetta sp.;Genette sp.;Carnivore;NA;Genet sp.;Carnivore
-Graphiure sp.;Graphiure sp.;Rongeur;NA;Unidentified dormouse;Rodent
-Graphiurus nagtglasii;Graphiure d'Afrique de l'Ouest;Rongeur;LC;Nagtglas's african dormouse;Rodent
-Heliosciure sp.;Heliosciure sp.;Rongeur;NA;Unidentified sun squirrel;Rodent
-Heliosciurus gambianus;Heliosciure de Gambie;Rongeur;LC;Gambian sun squirrel;Rodent
-Heliosciurus rufobrachium;Heliosciure a pattes rousses;Rongeur;LC;Red-legged sun squirrel;Rodent
-Herpestes ichneumon;Mangouste ichneumon;Carnivore;LC;Egyptian mongoose;Carnivore
-Herpestes sanguineus;Mangouste rouge;Carnivore;LC;Common slender mongoose;Carnivore
-Hippopotamus amphibius;Hippopotame amphibie;Hippopotamide;VU;Hippopotamus;Hippopotamus
-Hippotragus equinus;Antilope rouanne;Bovide;LC;Roan antelope;Bovid
-Homo sapiens sapiens - poacher;Braconnier;Humain;NA;Poacher;Human
-Homo sapiens sapiens - camera team;Equipe camera;Humain;NA;Camera trap team;Human
-Homo sapiens sapiens - villager;Humain;Humain;NA;Human;Human
-Hydrictis maculicollis;Loutre a cou tachete;Carnivore;NT;Spotted-neck otter;Carnivore
-Hyemoschus aquaticus;Chevrotain aquatique;Bovide;LC;Water chevrotain;Bovid
-Hylochoerus meinertzhageni;Hylochere;Suide;LC;Forest hog;Suid
-Hystrix cristata;Porc-epic a crete;Rongeur;LC;Crested porcupine;Rodent
-Ichneumia albicauda;Mangouste a queue blanche;Carnivore;LC;White-tailed mongoose;Carnivore
-Indetermine;Espece indeterminee;NA;NA;Unknown;NA
-Kobus ellipsiprymnus defassa;Cobe defassa;Bovide;NT;Defassa waterbuck;Bovid
-Kobus kob;Cobe de Buffon;Bovide;LC;Kob;Bovid
-Leptailurus serval;Serval;Carnivore;LC;Serval;Carnivore
-Lepus victoriae;Lievre des savanes;Rongeur;LC;African savanna hare;Rodent
-Lezard sp.;Lezard sp.;Reptile;NA;Lizard sp.;Reptile
-Liberiictis kuhni;Mangouste du Liberia;Carnivore;VU;Liberian mongoose;Carnivore
-Loutre sp.;Loutre sp.;Carnivore;NA;Otter sp.;Carnivore
-Loxodonta cyclotis;Elephant de foret;Elephantide;CR;African forest elephant;Elephant
-Lupulella adustus;Chacal a flancs rayes;Carnivore;LC;Side-striped jackal;Carnivore
-Mangouste sp.;Mangouste sp.;Carnivore;NA;Mongoose sp.;Carnivore
-Manidae sp.;Pangolin sp.;Pangolin;NA;Pangolin sp.;Pangolin
-Mecistops cataphractus;Faux-gavial d'Afrique;Reptile;CR;Slender-snouted crocodile;Reptile
-Mellivora capensis;Ratel;Carnivore;LC;Honey badger;Carnivore
-Mungos gambianus;Mangouste de Gambie;Carnivore;LC;Gambian mongoose;Carnivore
-Mungos mungo;Mangouste rayee;Carnivore;LC;Banded mongoose;Carnivore
-Mus sp.;Souris sp.;Rongeur;NA;Mouse sp.;Rodent
-Musaraigne sp.;Musaraigne sp.;Rongeur;NA;Unidentified shrew;Rodent
-Myriapoda sp.;Millepatte;Autre;NA;Millipede;Other
-NA;NA;NA;NA;NA;NA
-Image vide;Image vide;NA;NA;Empty image;NA
-Image noire;Image noire;NA;NA;Black image;NA
-Illisible;Video illisible;NA;NA;Unreadable video;NA
-Video vide;Video vide;NA;NA;Empty video;NA
-Naja guineensis;Cobra de foret noir;Reptile;NE;Black forest cobra;Reptile
-Naja savannula;Naja savannula;Reptile;LC;West African banded cobra;Reptile
-Nandinia binotata;Nandinie;Carnivore;LC;African palm civet;Carnivore
-Neotragus pygmaeus;Antilope royale;Bovide;LC;Royal antelope;Bovid
-Orycteropus afer;Oryctérope du Cap;Tubulidente;LC;Aardvark;Aardvark
-Ovis aries;Mouton;Domestique;NA;Sheep;Domestic
-Pan troglodytes verus;Chimpanze;Primate;CR;Western chimpanzee;Primate
-Panthera leo;Lion;Carnivore;VU;Lion;Carnivore
-Panthera pardus;Leopard;Carnivore;VU;Leopard;Carnivore
-Papillon sp.;Papillon sp.;NA;NA;Unidentified butterfly;NA
-Papio papio;Babouin de Guinee;Primate;NT;Guinea baboon;Primate
-Paraxerus poensis;Ecureuil de Fernando Po;Rongeur;LC;Green bush squirrel;Rodent
-Phacochoerus africanus;Phacochere commun;Suide;LC;Common warthog;Suid
-Phataginus tetradactyla;Pangolin a longue queue;Pangolin;VU;Black-bellied pangolin;Pangolin
-Phataginus tricuspis;Pangolin a petites ecailles;Pangolin;EN;White-bellied pangolin;Pangolin
-Philantomba maxwellii;Cephalophe de Maxwell;Bovide;LC;Maxwell's duiker;Bovid
-Piliocolobus badius badius;Colobe bai d'Afrique occidentale;Primate;EN;Bay colobus;Primate
-Poiana leightoni;Linsang de Leighton;Carnivore;VU;West african oyan;Carnivore
-Potamochoerus porcus;Potamochere roux;Suide;LC;Red river hog;Suid
-Procavia capensis;Daman des rochers;Hyracoide;LC;Rock hyrax;Hyrax
-Procolobus verus;Colobe vert olive;Primate;VU;Olive colobus;Primate
-Protoxerus aubinnii;Ecureuil d'Aubin;Rongeur;NT;Slender-tailed squirrel;Rodent
-Protoxerus stangeri;Ecureuil de Stanger;Rongeur;LC;Forest giant squirrel;Rodent
-Reptile sp.;Reptile sp.;Reptile;NA;Reptile sp.;Reptile
-Rongeur sp.;Rongeur sp.;Rongeur;NA;Rodent sp.;Rodent
-Serpent sp.;Serpent sp.;Reptile;NA;Snake sp.;Reptile
-Singe sp.;Singe sp.;Primate;NA;Monkey sp.;Primate
-Smutsia gigantea;Pangolin geant;Pangolin;EN;Giant ground pangolin;Pangolin
-Sylvicapra grimmia;Cephalophe de Grimm;Bovide;LC;Common duiker;Bovid
-Syncerus caffer nanus;Buffle nain;Bovide;NT;African buffalo;Bovid
-Thryonomys swinderianus;Grand aulacode;Rongeur;LC;Greater cane rat;Rodent
-Tortue sp.;Tortue sp.;Reptile;NA;Unidentified tortoise;Reptile
-Tragelaphus eurycerus;Bongo;Bovide;NT;Bongo;Bovid
-Tragelaphus scriptus;Guib harnache;Bovide;LC;Bushbuck;Bovid
-Varanus exanthematicus;Varan des savanes;Reptile;LC;Savanna monitor;Reptile
-Varanus niloticus;Varan du Nil;Reptile;LC;Nile monitor;Reptile
-Varanus sp.;Varan sp.;Reptile;NA;Monitor sp.;Reptile
-Villageois;Homme;Humain;NA;Villager;Human
-Xerus erythropus;Ecureuil fouisseur;Rongeur;LC;Striped ground squirrel;Rodent
+scientific_name;french_name;group_fr;IUCN;english_name;group_en;Guinea;Liberia;Cote_Ivoire
+Amphibien sp.;Amphibien sp.;Autre;NA;Amphibian sp.;Other;y;y;y
+Aonyx capensis;Loutre a joues blanches;Carnivore;NT;African clawless otter;Carnivore;y;y;y
+Araignee sp.;Araignee sp.;Autre;NA;Spider sp.;Other;y;y;y
+Atelerix albiventris;Herisson a ventre blanc;Erinaceomorphe;LC;Four-toed hedgehog;Hedgehog;y;y;y
+Atherurus africanus;Atherure africain;Rongeur;LC;African brush-tailed porcupine;Rodent;y;y;y
+Atilax paludinosus;Mangouste des marais;Carnivore;LC;Marsh Mongoose;Carnivore;y;y;y
+Bos taurus;Vache;Domestique;NA;Cow;Domestic;y;y;y
+Bovide sp.;Bovide sp.;Bovide;NA;Bovid sp.;Bovid;y;y;y
+Canis familiaris;Chien domestique;Domestique;NA;Domestic dog;Domestic;y;y;y
+Capra sp.;Chevre;Domestique;NA;Goat;Domestic;y;y;y
+Caracal aurata;Chat dore;Carnivore;VU;African golden cat;Carnivore;y;y;y
+Caracal caracal;Caracal;Carnivore;LC;Caracal;Carnivore;y;y;y
+Cephalophus dorsalis;Cephalophe a bande dorsale noire;Bovide;NT;Bay duiker;Bovid;y;y;y
+Cephalophus jentinki;Cephalophe de Jentink;Bovide;EN;Jentink's duiker;Bovid;n;y;y
+Cephalophus niger;Cephalophe noir;Bovide;LC;Black duiker;Bovid;y;y;y
+Cephalophus ogilbyi brookei;Cephalophe de Brooke;Bovide;VU;Brooke's duiker;Bovid;n;y;y
+Cephalophus rufilatus;Cephalophe a flancs roux;Bovide;LC;Red-flanked duiker;Bovid;y;y;y
+Cephalophus silvicultor;Cephalophe a dos jaune;Bovide;NT;Yellow-backed duiker;Bovid;y;y;y
+Cephalophus sp.;Cephalophe sp.;Bovide;NA;Duiker sp.;Bovid;y;y;y
+Cephalophus zebra;Cephalophe zebre;Bovide;VU;Zebra duiker;Bovid;n;y;y
+Cercocebus atys;Cercocebe fuligineux;Primate;VU;Sooty mangabey;Primate;y;y;y
+Cercopithecus campbelli;Mone de Campbell;Primate;NT;Campbell's monkey;Primate;y;y;y
+Cercopithecus diana;Cercopitheque diane;Primate;EN;Diana monkey;Primate;n;y;y
+Cercopithecus nictitans stampflii;Cercopitheque hocheur;Primate;EN;Stampfli's putty-nosed monkey;Primate;n;y;y
+Cercopithecus petaurista;Cercopitheque blanc-nez;Primate;NT;Spot-nosed monkey;Primate;y;y;y
+Chiroptere sp.;Chauve-souris sp.;Chiroptere;NA;Bat sp.;Bat;y;y;y
+Chlorocebus sabaeus;Vervet vert;Primate;LC;Green monkey;Primate;y;n;n
+Choeropsis liberiensis;Hippopotame pygmee;Hippopotamide;EN;Pygmy hippopotamus;Hippopotamus;n;y;y
+Civettictis civetta;Civette africaine;Carnivore;LC;African civet;Carnivore;y;y;y
+Colobus polykomos;Colobe blanc-noir;Primate;EN;King colobus;Primate;y;y;y
+Cricetome sp.;Cricetome sp.;Rongeur;NA;Giant pouched rat sp.;Rodent;y;y;y
+Cricetomys emini;Cricetome de foret;Rongeur;LC;Forest giant pouched rat;Rodent;n;y;y
+Cricetomys gambianus;Rat geant de Gambie;Rongeur;LC;Northern giant pouch rat;Rodent;y;y;y
+Crocodile sp.;Crocodile sp.;Reptile;NA;Crocodile sp.;Reptile;y;y;y
+Crocuta crocuta;Hyene tachetee;Carnivore;LC;Spotted hyena;Carnivore;y;n;n
+Crossarchus obscurus;Mangouste brune;Carnivore;LC;Common kusimanse;Carnivore;y;y;y
+Dendrohyrax dorsalis;Daman d'arbre;Autre;NA;Western tree hyrax;Other;n;y;y
+Ecureuil sp.;Ecureuil sp.;Rongeur;NA;Squirrel sp.;Rodent;y;y;y
+Epixerus ebii;Ecureuil d'Ebi;Rongeur;LC;Western palm squirrel;Rodent;n;y;y
+Erythrocebus patas;Patas;Primate;NT;Patas monkey;Primate;y;n;n
+Felin sp.;Felin sp.;Carnivore;NA;Unidentified feline;Carnivore;y;y;y
+Funisciurus pyrropus;Funisciure a pattes rousses;Rongeur;LC;Fire-footed rope squirrel;Rodent;y;y;y
+Galago senegalensis;Galago du Senegal;Primate;LC;Northern lesser galago;Primate;y;n;n
+Galago sp.;Galago sp.;Primate;NA;Galago sp.;Primate;y;y;y
+Galagoides demidoff;Galago de Demidoff;Primate;LC;Demidoff's dwarf galago;Primate;n;y;y
+Galagoides thomasi;Galago de Thomas;Primate;LC;Thomas's dwarf galago;Primate;y;y;y
+Genetta bourloni;Genette de Bourlon;Carnivore;VU;Bourlon's genet;Carnivore;n;y;y
+Genetta genetta;Genette commune;Carnivore;LC;Common genet;Carnivore;y;y;y
+Genetta johnstoni;Genette de Johnston;Carnivore;NT;Johnston's genet;Carnivore;n;y;y
+Genetta pardina;Genette pardine;Carnivore;NT;Pardine genet;Carnivore;y;y;y
+Genetta sp.;Genette sp.;Carnivore;NA;Genet sp.;Carnivore;y;y;y
+Graphiure sp.;Graphiure sp.;Rongeur;NA;Unidentified dormouse;Rodent;n;y;y
+Graphiurus nagtglasii;Graphiure d'Afrique de l'Ouest;Rongeur;LC;Nagtglas's african dormouse;Rodent;n;y;y
+Heliosciure sp.;Heliosciure sp.;Rongeur;NA;Unidentified sun squirrel;Rodent;y;y;y
+Heliosciurus gambianus;Heliosciure de Gambie;Rongeur;LC;Gambian sun squirrel;Rodent;y;y;y
+Heliosciurus rufobrachium;Heliosciure a pattes rousses;Rongeur;LC;Red-legged sun squirrel;Rodent;y;y;y
+Herpestes ichneumon;Mangouste ichneumon;Carnivore;LC;Egyptian mongoose;Carnivore;y;y;y
+Herpestes sanguineus;Mangouste rouge;Carnivore;LC;Common slender mongoose;Carnivore;y;y;y
+Hippopotamus amphibius;Hippopotame amphibie;Hippopotamide;VU;Hippopotamus;Hippopotamus;y;n;n
+Hippotragus equinus;Antilope rouanne;Bovide;LC;Roan antelope;Bovid;n;y;y
+Homo sapiens sapiens - poacher;Braconnier;Humain;NA;Poacher;Human;y;y;y
+Homo sapiens sapiens - camera team;Equipe camera;Humain;NA;Camera trap team;Human;y;y;y
+Homo sapiens sapiens - villager;Humain;Humain;NA;Human;Human;y;y;y
+Hydrictis maculicollis;Loutre a cou tachete;Carnivore;NT;Spotted-neck otter;Carnivore;y;y;y
+Hyemoschus aquaticus;Chevrotain aquatique;Bovide;LC;Water chevrotain;Bovid;n;y;y
+Hylochoerus meinertzhageni;Hylochere;Suide;LC;Forest hog;Suid;y;y;y
+Hystrix cristata;Porc-epic a crete;Rongeur;LC;Crested porcupine;Rodent;y;y;y
+Ichneumia albicauda;Mangouste a queue blanche;Carnivore;LC;White-tailed mongoose;Carnivore;y;y;y
+Indetermine;Espece indeterminee;NA;NA;Unknown;NA;y;y;y
+Kobus ellipsiprymnus defassa;Cobe defassa;Bovide;NT;Defassa waterbuck;Bovid;y;n;n
+Kobus kob;Cobe de Buffon;Bovide;LC;Kob;Bovid;y;n;n
+Leptailurus serval;Serval;Carnivore;LC;Serval;Carnivore;y;y;y
+Lepus victoriae;Lievre des savanes;Rongeur;LC;African savanna hare;Rodent;y;n;n
+Lezard sp.;Lezard sp.;Reptile;NA;Lizard sp.;Reptile;y;y;y
+Liberiictis kuhni;Mangouste du Liberia;Carnivore;VU;Liberian mongoose;Carnivore;n;y;y
+Loutre sp.;Loutre sp.;Carnivore;NA;Otter sp.;Carnivore;y;y;y
+Loxodonta cyclotis;Elephant de foret;Elephantide;CR;African forest elephant;Elephant;y;y;y
+Lupulella adustus;Chacal a flancs rayes;Carnivore;LC;Side-striped jackal;Carnivore;y;n;n
+Mangouste sp.;Mangouste sp.;Carnivore;NA;Mongoose sp.;Carnivore;y;y;y
+Manidae sp.;Pangolin sp.;Pangolin;NA;Pangolin sp.;Pangolin;y;y;y
+Mecistops cataphractus;Faux-gavial d'Afrique;Reptile;CR;Slender-snouted crocodile;Reptile;y;y;y
+Mellivora capensis;Ratel;Carnivore;LC;Honey badger;Carnivore;y;y;y
+Mungos gambianus;Mangouste de Gambie;Carnivore;LC;Gambian mongoose;Carnivore;y;y;y
+Mungos mungo;Mangouste rayee;Carnivore;LC;Banded mongoose;Carnivore;y;n;n
+Mus sp.;Souris sp.;Rongeur;NA;Mouse sp.;Rodent;y;y;y
+Musaraigne sp.;Musaraigne sp.;Rongeur;NA;Unidentified shrew;Rodent;n;y;y
+Myriapoda sp.;Millepatte;Autre;NA;Millipede;Other;n;y;y
+Video noire;Video noire;NA;NA;Black video;NA;y;y;y
+Illisible;Video illisible;NA;NA;Unreadable video;NA;y;y;y
+Video vide;Video vide;NA;NA;Empty video;NA;y;y;y
+Naja guineensis;Cobra de foret noir;Reptile;NE;Black forest cobra;Reptile;y;y;y
+Naja nigricollis;Cobra a cou noir;Reptile;LC;Black-necked spitting cobra;Squamata;y;y;y
+Naja savannula;Naja savannula;Reptile;LC;West African banded cobra;Reptile;y;y;y
+Nandinia binotata;Nandinie;Carnivore;LC;African palm civet;Carnivore;y;y;y
+Neotragus pygmaeus;Antilope royale;Bovide;LC;Royal antelope;Bovid;n;y;y
+Orycteropus afer;Orycterope du Cap;Tubulidente;LC;Aardvark;Aardvark;y;n;n
+Ovis aries;Mouton;Domestique;NA;Sheep;Domestic;y;y;y
+Pan troglodytes verus;Chimpanze;Primate;CR;Western chimpanzee;Primate;y;y;y
+Panthera leo;Lion;Carnivore;VU;Lion;Carnivore;y;n;n
+Panthera pardus;Leopard;Carnivore;VU;Leopard;Carnivore;y;y;y
+Papillon sp.;Papillon sp.;Autre;NA;Unidentified butterfly;Other;y;y;y
+Papio papio;Babouin de Guinee;Primate;NT;Guinea baboon;Primate;y;n;n
+Paraxerus poensis;Ecureuil de Fernando Po;Rongeur;LC;Green bush squirrel;Rodent;y;y;y
+Phacochoerus africanus;Phacochere commun;Suide;LC;Common warthog;Suid;y;n;n
+Phataginus tetradactyla;Pangolin a longue queue;Pangolin;VU;Black-bellied pangolin;Pangolin;y;y;y
+Phataginus tricuspis;Pangolin a petites ecailles;Pangolin;EN;White-bellied pangolin;Pangolin;y;y;y
+Philantomba maxwellii;Cephalophe de Maxwell;Bovide;LC;Maxwell's duiker;Bovid;y;y;y
+Piliocolobus badius badius;Colobe bai d'Afrique occidentale;Primate;EN;Bay colobus;Primate;n;y;y
+Poiana leightoni;Linsang de Leighton;Carnivore;VU;West african oyan;Carnivore;n;y;y
+Potamochoerus porcus;Potamochere roux;Suide;LC;Red river hog;Suid;y;y;y
+Procavia capensis;Daman des rochers;Hyracoide;LC;Rock hyrax;Hyrax;y;y;y
+Procolobus verus;Colobe vert olive;Primate;VU;Olive colobus;Primate;n;y;y
+Protoxerus aubinnii;Ecureuil d'Aubin;Rongeur;NT;Slender-tailed squirrel;Rodent;n;y;y
+Protoxerus stangeri;Ecureuil de Stanger;Rongeur;LC;Forest giant squirrel;Rodent;y;y;y
+Reptile sp.;Reptile sp.;Reptile;NA;Reptile sp.;Reptile;y;y;y
+Rongeur sp.;Rongeur sp.;Rongeur;NA;Rodent sp.;Rodent;y;y;y
+Serpent sp.;Serpent sp.;Reptile;NA;Snake sp.;Reptile;y;y;y
+Singe sp.;Singe sp.;Primate;NA;Monkey sp.;Primate;y;y;y
+Smutsia gigantea;Pangolin geant;Pangolin;EN;Giant ground pangolin;Pangolin;y;y;y
+Sylvicapra grimmia;Cephalophe de Grimm;Bovide;LC;Common duiker;Bovid;y;n;n
+Syncerus caffer nanus;Buffle nain;Bovide;NT;African buffalo;Bovid;y;y;y
+Thryonomys swinderianus;Grand aulacode;Rongeur;LC;Greater cane rat;Rodent;y;y;y
+Tortue sp.;Tortue sp.;Reptile;NA;Unidentified tortoise;Reptile;y;y;y
+Tragelaphus eurycerus;Bongo;Bovide;NT;Bongo;Bovid;n;y;y
+Tragelaphus scriptus;Guib harnache;Bovide;LC;Bushbuck;Bovid;y;n;n
+Varanus exanthematicus;Varan des savanes;Reptile;LC;Savanna monitor;Reptile;y;n;n
+Varanus niloticus;Varan du Nil;Reptile;LC;Nile monitor;Reptile;y;y;y
+Varanus sp.;Varan sp.;Reptile;NA;Monitor sp.;Reptile;y;y;y
+Xerus erythropus;Ecureuil fouisseur;Rongeur;LC;Striped ground squirrel;Rodent;y;y;y
+Accipiter badius;Epervier shikra;Oiseau;LC;Shikra;Bird;y;y;y
+Accipiter erythropus;Epervier de Hartlaub;Oiseau;LC;Red-legged sparrowhawk;Bird;y;y;y
+Accipiter melanoleucus;Autour noir;Oiseau;LC;Black sparrowhawk;Bird;y;y;y
+Accipiter ovampensis;Epervier des Ovampos;Oiseau;LC;Ovambo sparrowhawk;Bird;y;n;n
+Accipitridae sp.;Accipitride sp.;Oiseau;LC;Accipitridae sp.;Bird;y;y;y
+Alethe diademata;Alethe a huppe rousse;Oiseau;LC;White-tailed alethe;Bird;y;y;y
+Anthus sp.;Pipit sp.;Oiseau;NA;Pipit sp.;Bird;y;y;y
+Apaloderma narina;Trogon narina;Oiseau;LC;Narina trogon;Bird;y;y;y
+Ardea sp.;Heron sp.;Oiseau;NA;Heron sp.;Bird;y;y;y
+Batis senegalensis;Pririt du Senegal;Oiseau;LC;Senegal batis;Bird;y;n;y
+Bitis arietans;Vipere heurtante;Reptile;LC;Puff adder;Bird;y;y;y
+Bleda canicapillus;Bulbul fourmilier;Oiseau;LC;Grey-headed bristlebill;Bird;y;y;y
+Bostrychia hagedash;Ibis hagedash;Oiseau;LC;Hadada ibis;Bird;y;y;y
+Bucerotidae sp.;Calao sp.;Oiseau;NA;Hornbill sp.;Bird;y;y;y
+Bucorvus abyssinicus;Bucorve d'Abyssinie;Oiseau;VU;Absyssinian ground hornbill;Bird;y;n;n
+Bubulcus ibis;Heron garde-boeuf;Oiseau;LC;Cattle egret;Bird;y;y;y
+Camaroptera brachyura;Camaroptere a tete grise;Oiseau;LC;Bleating camaroptera;Bird;y;y;y
+Camaroptera brevicaudata;Camaroptere a dos gris;Oiseau;LC;Grey-backed camaroptera;Bird;y;y;y
+Canirallus oculeus;Rale a gorge grise;Oiseau;LC;Grey-throated rail;Bird;y;y;y
+Caprimulgidae sp.;Engoulevent sp.;Oiseau;NA;Nightjar sp.;Bird;y;y;y
+Caprimulgus longipennis;Engoulevent a balanciers;Oiseau;LC;Standard-winged nightjar;Bird;y;y;y
+Centropus leucogaster;Coucal a ventre blanc;Oiseau;LC;Black-throated coucal;Bird;y;y;y
+Centropus senegalensis;Coucal du Senegal;Oiseau;LC;Senegal coucal;Bird;y;y;y
+Chamaetylas poliocephala;Alethe a poitrine brune;Oiseau;LC;Brown-chested alethe;Bird;n;y;y
+Chlorocichla simplex;Bulbul modeste;Oiseau;LC;Simple greenbul;Bird;y;y;y
+Cinnyricinclus leucogaster;Spreo amethyste;Oiseau;LC;Violet-backed starling;Bird;y;n;n
+Circaetus beaudouini;Circaete de Beaudouin;Oiseau;VU;Beaudouin's snake-eagle;Bird;y;n;n
+Circus macrourus;Busard pale;Oiseau;NT;Pallid harrier;Bird;y;y;y
+Cisticola erythrops;Cisticole a face rousse;Oiseau;LC;Red-faced cisticola;Bird;y;y;y
+Cisticola eximius;Cisticole a dos noir;Oiseau;LC;Black-backed cisticola;Bird;y;n;n
+Clamator levaillantii;Coucou de Levaillant;Oiseau;LC;Levaillant's cuckoo;Bird;y;y;y
+Colombe sp.;Colombe sp.;Oiseau;NA;Dove sp.;Bird;y;y;y
+Corythaeola cristata;Touraco geant;Oiseau;LC;Great blue turaco;Bird;y;y;y
+Cossypha albicapillus;Cossyphe a calotte blanche;Oiseau;LC;White-crowned robin-chat;Bird;y;n;n
+Cossypha cyanocampter;Cossyphe a ailes bleues;Oiseau;LC;Blue-shouldered robin-chat;Bird;y;y;y
+Cossypha niveicapilla;Cossyphe a calotte neigeuse;Oiseau;LC;Snowy-crowned robin-chat;Bird;y;y;y
+Cossypha sp.;Cossyphe sp.;Oiseau;NA;Robin-chat sp.;Bird;y;y;y
+Criniger calurus;Bulbul a barbe blanche;Oiseau;LC;Red-tailed greenbul;Bird;y;y;y
+Criniger olivaceus;Bulbul a barbe jaune;Oiseau;VU;Yellow-bearded greenbul;Bird;n;y;y
+Cyanomitra olivacea;Souimanga olivatre de l'Ouest;Oiseau;LC;Olive sunbird;Bird;y;y;y
+Dicrurus atripennis;Drongo de foret;Oiseau;LC;Shining drongo;Bird;y;y;y
+Dicrurus sp.;Drongo sp.;Oiseau;NA;Drongo sp.;Bird;y;y;y
+Erythrocercus mccallii;Erythrocerque a tete rousse;Oiseau;LC;Chestnut-capped flycatcher;Bird;y;y;y
+Euplectes ardens;Euplecte veuve-noire;Oiseau;LC;Red-collared widowbird;Bird;y;y;y
+Ficedula hypoleuca;Gobemouche noir;Oiseau;LC;European pied flycatcher;Bird;y;y;y
+Euschistospiza dybowskii;Senegali a ventre noir;Oiseau;LC;Dybowski's twinspot;Bird;y;n;n
+Francolin sp.;Francolin sp.;Oiseau;NA;Francolin sp.;Bird;y;y;y
+Glaucestrilda coerulescens;Astrild queue-de-vinaigre;Oiseau;LC;Lavender waxbill;Bird;y;n;n
+Gypohierax angolensis;Palmiste africain;Oiseau;LC;Palm-nut vulture;Bird;y;y;y
+Halcyon leucocephala;Martin-chasseur a tete grise;Oiseau;LC;Grey-headed kingfisher;Bird;y;y;y
+Halcyon malimbica;Martin-chasseur a poitrine bleue;Oiseau;LC;Blue-breasted kingfisher;Bird;y;y;y
+Halcyoninae sp.;Martin-chasseur sp.;Oiseau;NA;Kingfisher sp.;Bird;y;y;y
+Hedydipna collaris;Souimanga a collier;Oiseau;LC;Collared sunbird;Bird;y;y;y
+Hibou sp.;Hibou sp.;Oiseau;NA;Owl sp.;Bird;y;y;y
+Himantornis haematopus;Rale a pieds rouges;Oiseau;LC;Nkulengu rail;Bird;n;y;y
+Hyliota violacea;Hyliote a dos vert;Oiseau;LC;Violet-backed hyliota;Bird;n;y;y
+Ixonotus guttatus;Bulbul tachete;Oiseau;LC;Spotted greenbul;Bird;n;y;y
+Kaupifalco monogrammicus;Autour unibande;Oiseau;LC;Lizard buzzard;Bird;y;y;y
+Lagonosticta rubricata;Amarante fonce;Oiseau;LC;African firefinch;Bird;y;y;y
+Lamprotornis caudatus;Choucador a longue queue;Oiseau;LC;Long-tailed glossy starling;Bird;y;n;n
+Lamprotornis chloropterus;Choucador de Swainson;Oiseau;LC;Lesser blue-eared starling;Bird;y;n;n
+Laniarius barbarus;Gonolek de Barbarie;Oiseau;LC;Yellow-crowned gonolek;Bird;y;n;n
+Laniarius turatii;Gonolek de Turati;Oiseau;LC;Turati's boubou;Bird;y;n;n
+Lophoceros nasutus;Calao a bec noir;Oiseau;LC;African grey hornbill;Bird;y;n;n
+Lophoceros semifasciatus;Calao brevibande;Oiseau;LC;West African pied hornbill;Bird;y;y;y
+Malaconotus blanchoti;Gladiateur de Blanchot;Oiseau;LC;Grey-headed bushshrike;Bird;y;n;n
+Melaenornis edolioides;Gobemouche drongo;Oiseau;LC;Northern black-flycatcher;Bird;y;n;n
+Melocichla mentalis;Melocichle a moustaches;Oiseau;LC;Moustached grass-warbler;Bird;y;n;n
+Merops albicollis;Guepier a gorge blanche;Oiseau;LC;White-throated bee-eater;Bird;y;y;y
+Milvus migrans;Milan noir;Oiseau;LC;Black kite;Bird;y;y;y
+Muscicapa striata;Gobemouche gris;Oiseau;LC;Spotted flycatcher;Bird;y;y;y
+Neocossyphus poensis;Neocossyphe a queue blanche;Oiseau;LC;White-tailed ant thrush;Bird;n;y;y
+Nicator chloris;Bulbul Nicator;Oiseau;LC;Western nicator;Bird;y;y;y
+Numida meleagris;Pintade de Numidie;Oiseau;LC;Helmeted guineafowl;Bird;y;n;n
+Oiseau sp.;Oiseau sp.;Oiseau;NA;Bird sp.;Bird;y;y;y
+Pachycoccyx audeberti;Coucou d'Audebert;Oiseau;LC;Thick-billed cuckoo;Bird;y;y;y
+Pardipicus nivosus;Pic tachete;Oiseau;LC;Buff-spotted woodpecker;Bird;y;y;y
+Peliperdix lathami;Francolin de Latham;Oiseau;LC;Forest francolin;Bird;y;y;y
+Phasianidae sp.;Phasianide sp.;Oiseau;NA;Phasianids;Bird;y;y;y
+Phoeniculus purpureus;Irrisor moqueur;Oiseau;LC;Green woodhoopoe;Bird;y;n;n
+Phyllanthus atripennis;Phyllanthe capucin;Oiseau;VU;Grey-hooded capuchin babbler;Bird;y;n;n
+Phyllastrephus baumanni;Bulbul de Baumann;Oiseau;LC;Baumann's greenbul;Bird;y;n;n
+Picathartes gymnocephalus;Picatharte de Guinee;Oiseau;VU;White-necked rockfowl;Bird;y;y;y
+Picidae sp.;Pic sp.;Oiseau;NA;Woodpecker sp.;Bird;y;y;y
+Pitta angolensis;Breve d'Angola;Oiseau;LC;African pitta;Bird;n;y;y
+Ploceus cucullatus;Tisserin gendarme;Oiseau;LC;Village-weaver;Bird;y;y;y
+Ploceus sp.;Tisserin sp.;Oiseau;NA;Weaver sp.;Bird;y;y;y
+Podica senegalensis;Grebifoulque d'Afrique ;Oiseau;LC;African finfoot;Bird;y;y;y
+Pogonornis bidentatus;Barbican bidente ;Oiseau;LC;Double-toothed barbet;Bird;y;n;n
+Pogonornis dubius;Barbican a poitrine rouge;Oiseau;LC;Bearded barbet;Bird;y;n;n
+Polyboroides typus;Gymnogne d'Afrique;Oiseau;LC;African harrier-hawk;Bird;y;y;y
+Prinia erythroptera;Prinia a ailes rousses;Oiseau;LC;Red-winged prinia;Bird;y;n;n
+Prionops plumatus;Bagadais casque;Oiseau;LC;White-crested helmetshrike;Bird;y;n;n
+Psalidoprocne obscura;Hirondelle fanti;Oiseau;LC;Fanti saw-wing;Bird;y;y;y
+Psalidoprocne sp.;Hirondelle sp.;Oiseau;NA;Saw-wing sp.;Bird;y;y;y
+Pternistis ahantensis;Francolin d'Ahanta;Oiseau;LC;Ahanta spurfowl;Bird;y;y;y
+Pternistis bicalcaratus;Francolin a double eperon;Oiseau;LC;Double-spurred spurfowl;Bird;y;y;y
+Ptilopachus petrosus;Poulette des rochers;Oiseau;LC;Stone partridge;Bird;y;n;n
+Ptilostomus afer;Piapiac africain;Oiseau;LC;Piapiac;Bird;y;n;n
+Pycnonotidae sp.;Bulbul sp.;Oiseau;NA;Bulbul sp.;Bird;y;y;y
+Pycnonotus barbatus;Bulbul des jardins;Oiseau;LC;Common bulbul;Bird;y;y;y
+Pyrrhurus scandens;Bulbul a queue rousse;Oiseau;LC;Leaf-love;Bird;y;y;y
+Rhinopomastus aterrimus;Irrisor noir;Oiseau;LC;Black scimitarbill;Bird;y;y;y
+Scopus umbretta;Ombrette africaine;Oiseau;LC;Hamerkop;Bird;y;y;y
+Scotopelia ussheri;Chouette-pecheuse rousse;Oiseau;VU;Rufous fishing-owl;Bird;n;y;y
+Sheppardia polioptera;Cossyphe a sourcils blancs;Oiseau;LC;Grey-winged Akalat;Bird;y;n;y
+Souimanga sp.;Souimanga sp.;Oiseau;NA;Sunbird sp.;Bird;y;y;y
+Spermophaga haematina;Senegali sanguin;Oiseau;LC;Western bluebill;Bird;y;y;y
+Spilopelia senegalensis;Tourterelle maillee;Oiseau;LC;Laughing dove;Bird;y;n;n
+Stelgidillas gracilirostris;Bulbul a bec grele;Oiseau;LC;Slender-billed greenbul;Bird;y;y;y
+Streptopelia hypopyrrha;Tourterelle de l'Adamaoua;Oiseau;LC;Adamawa turtle-dove;Bird;y;n;n
+Streptopelia semitorquata;Tourterelle a collier;Oiseau;LC;Red-eyed dove;Bird;y;y;y
+Streptopelia vinacea;Tourterelle vineuse;Oiseau;LC;Vinaceous dove;Bird;y;n;n
+Strix woodfordii;Chouette africaine;Oiseau;LC;African wood owl;Bird;y;y;y
+Sylvia atricapilla;Fauvette a tete noire;Oiseau;LC;Eurasian blackcap;Bird;y;y;y
+Tauraco persa;Touraco vert;Oiseau;LC;Green turaco;Bird;y;y;y
+Tchagra australis;Tchagra a tete brune;Oiseau;LC;Brown-crowned tchagra;Bird;y;y;y
+Tchagra senegalus;Tchagra a tete noire;Oiseau;LC;Black-crowned tchagra;Bird;y;y;y
+Terpsiphone rufiventer;Tchitrec a ventre roux;Oiseau;LC;Red-bellied paradise-flycatcher;Bird;y;y;y
+Tockus erythrorhynchus;Calao a bec rouge;Oiseau;LC;Red-billed hornbill;Bird;y;n;n
+Turdoides plebejus;Craterope brun;Oiseau;LC;Brown babbler;Bird;y;n;n
+Turdoides reinwardtii;Craterope a tete noire;Oiseau;LC;Blackcap babbler;Bird;y;n;n
+Turdus pelios;Merle africain;Oiseau;LC;African thrush;Bird;y;n;y
+Turtur abyssinicus;Tourtelette d'abyssinie;Oiseau;LC;Black-billed wood-dove;Bird;y;n;n
+Turtur afer;Tourtelette amethystine;Oiseau;LC;Blue-spotted wood-dove;Bird;y;y;y
+Turtur brehmeri;Tourtelette demoiselle;Oiseau;LC;Blue-headed wood-dove;Bird;n;y;y
+Turtur sp.;Tourtelette sp.;Oiseau;NA;Wood-dove sp.;Bird;y;y;y
+Turtur tympanistria;Tourtelette tambourette;Oiseau;LC;Tambourine dove;Bird;y;y;y
+Dendroaspis polylepis;Mamba noir;Reptile;LC;Black mamba;Reptile;y;y;y
+Dendroaspis viridis;Mamba vert de l'Ouest;Reptile;LC;Western green mamba;Reptile;y;y;y
+Accipiter toussenelii;Autour de toussenel;Oiseau;LC;Red-chested goshawk;Bird;y;y;y
+Acrocephalus scirpaceus;Rousserolle effarvatte;Oiseau;LC;Common reed-warbler;Bird;y;y;y
+Agelastes meleagrides;Pintade a poitrine blanche;Oiseau;VU;White-breasted guineafowl;Bird;n;y;y
+Atimastillas flavicollis;Bulbul a gorge claire;Oiseau;LC;Yellow-throated greenbul;Bird;y;n;n
+Baeopogon indicator;Bulbul a queue blanche;Oiseau;LC;Honeyguide greenbul;Bird;y;y;y
+Bleda eximius;Bulbul a queue verte;Oiseau;NT;Green-tailed bristlebill;Bird;n;y;y
+Bleda syndactylus;Bulbul moustac;Oiseau;LC;Red-tailed bristlebill;Bird;n;y;y
+Bostrychia olivacea;Ibis olive;Oiseau;LC;Olive Ibis;Bird;n;y;y
+Buccanodon dowsetti;Barbican a taches jaunes;Oiseau;LC;Yellow-spotted barbet;Bird;n;y;y
+Calyptocichla serinus;Bulbul dore;Oiseau;LC;Golden greenbul;Bird;n;y;y
+Camaroptera chloronota;Camaroptere a dos vert;Oiseau;LC;Olive-green camaroptera;Bird;y;y;y
+Campephaga quiscalina;Echenilleur pourpre;Oiseau;LC;Purple-throated cuckooshrike;Bird;n;y;y
+Ceratogymna atrata;Calao a casque noir;Oiseau;NT;Black-casqued hornbill;Bird;n;y;y
+Ceratogymna elata;Calao a casque jaune;Oiseau;VU;Yellow-casqued hornbill;Bird;n;y;y
+Cisticola lateralis;Cisticole siffleuse;Oiseau;LC;Whistling cisticola;Bird;y;y;y
+Criniger barbatus;Bulbul crinon;Oiseau;LC;Western bearded greenbul;Bird;n;y;y
+Cyanograucalus azureus;Echenilleur bleu;Oiseau;LC;Blue cuckooshrike;Bird;n;y;y
+Cyanomitra cyanolaema;Souimanga a gorge bleue;Oiseau;LC;Blue-throated brown sunbird;Bird;n;y;y
+Dendropicos pyrrhogaster;Pic a ventre de feu;Oiseau;LC;Fire-bellied woodpecker;Bird;n;y;y
+Eidolon helvum;Roussette paillee africaine;Chiroptere;NT;African straw-coloured fruit bat;Bat;y;y;y
+Eurillas curvirostris;Bulbul curvirostre;Oiseau;LC;Plain greenbul;Bird;n;y;y
+Eurillas gracilis;Bulbul gracile;Oiseau;LC;Little grey greenbul;Bird;n;y;y
+Eurillas latirostris;Bulbul a moustaches jaunes;Oiseau;LC;Yellow-whiskered greenbul;Bird;n;y;y
+Guttera verreauxi;Pintade de Verreaux;Oiseau;LC;Western crested guineafowl;Bird;n;y;y
+Halcyon senegalensis;Martin-chasseur du Senegal;Oiseau;LC;Woodland kingfisher;Bird;y;y;y
+Horizocerus albocristatus;Calao a huppe blanche;Oiseau;LC;Western long-tailed hornbill;Bird;n;y;y
+Illadopsis rufipennis;Akalat a poitrine blanche;Oiseau;LC;Pale-breasted illadopsis;Bird;n;y;y
+Ispidina picta;Martin-pecheur pygmee;Oiseau;LC;African pygmy-kingfisher;Bird;y;y;y
+Lonchura fringilloides;Capucin pie;Oiseau;LC;Magpie mannikin;Bird;n;y;y
+Lophoceros camurus;Calao pygmee;Oiseau;LC;Red-billed dwarf hornbill;Bird;n;y;y
+Malimbus nitens;Malimbe a bec bleu;Oiseau;LC;Blue-billed malimbe;Bird;n;y;y
+Pardipicus caroli;Pic a oreillons bruns;Oiseau;LC;Brown-eared woodpecker;Bird;n;y;y
+Phyllastrephus icterinus;Bulbul icterin;Oiseau;LC;Icterine greenbul;Bird;n;y;y
+Pogoniulus subsulphureus;Barbion a gorge jaune;Oiseau;LC;Yellow-throated tinkerbird;Bird;n;y;y
+Stephanoaetus coronatus;Aigle couronne;Oiseau;NT;Crowned eagle;Bird;y;y;y
+Stiphrornis erythrothorax;Rougegorge de foret;Oiseau;LC;Orange-breasted forest-robin;Bird;y;y;y
+Tauraco macrorhynchus;Touraco a gros bec;Oiseau;LC;Yellow-billed turaco;Bird;n;y;y
+Thescelocichla leucopleura;Bulbul des raphias;Oiseau;LC;Swamp palm bulbul;Bird;y;y;y
+Trochocercus nitens;Tchitrec noir;Oiseau;LC;Western crested-flycatcher;Bird;y;y;y
+Tychaedon leucosticta;Agrobate du Ghana;Oiseau;LC;Forest scrub-robin;Bird;y;y;y

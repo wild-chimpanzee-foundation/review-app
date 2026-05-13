@@ -165,6 +165,45 @@ def _migration_v7(conn) -> None:
             )
 
 
+def _migration_v9(conn) -> None:
+    """Add species_collections / species_collection_members tables and Project.collection_id."""
+    tables = {
+        r[0]
+        for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
+    }
+    if "species_collections" not in tables:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE species_collections (
+                    id TEXT PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    is_custom BOOLEAN NOT NULL DEFAULT 0
+                )
+                """
+            )
+        )
+    if "species_collection_members" not in tables:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE species_collection_members (
+                    collection_id TEXT NOT NULL REFERENCES species_collections(id),
+                    species_id TEXT NOT NULL REFERENCES species(id),
+                    PRIMARY KEY (collection_id, species_id)
+                )
+                """
+            )
+        )
+    proj_cols = {r[1] for r in conn.execute(text("PRAGMA table_info(projects)")).fetchall()}
+    if "collection_id" not in proj_cols:
+        conn.execute(
+            text(
+                "ALTER TABLE projects ADD COLUMN collection_id TEXT REFERENCES species_collections(id)"
+            )
+        )
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -219,6 +258,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
             conn.execute(text("UPDATE individual_observations SET count = 1 WHERE count IS NULL")),
         ],
     ),
+    (9, _migration_v9),
 ]
 
 

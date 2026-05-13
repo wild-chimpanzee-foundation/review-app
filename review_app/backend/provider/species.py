@@ -17,19 +17,28 @@ logger = logging.getLogger(__name__)
 class SpeciesMixin(ProviderBase):
     """Species and behavior loading and queries. Requires self.engine."""
 
-    @staticmethod
-    def _parse_species_csv(path: Path | IO[str]) -> list[dict[str, Any]]:
+    _SPECIES_BASE_COLS = frozenset(
+        {"scientific_name", "english_name", "french_name", "group_fr", "group_en", "IUCN"}
+    )
+
+    @classmethod
+    def _parse_species_csv(cls, path: Path | IO[str]) -> list[dict[str, Any]]:
         df = pd.read_csv(path, sep=";")
         if "scientific_name" not in df.columns:
             raise SpeciesError(
                 user_message_key="species_error_csv_format",
                 detail=f"Species CSV at `{path}` must have a `scientific_name` column.",
             )
+        # Any column not in the base set is treated as a collection membership flag (y = present).
+        collection_cols = [c for c in df.columns if c not in cls._SPECIES_BASE_COLS]
         rows = []
         for _, row in df.iterrows():
             sci = str(row.get("scientific_name", "") or "").strip()
             if not sci or sci.lower() in ("na", "nan", "none", ""):
                 continue
+            collections = {
+                col: str(row.get(col, "") or "").strip().lower() == "y" for col in collection_cols
+            }
             rows.append(
                 {
                     "scientific_name": sci,
@@ -48,6 +57,7 @@ class SpeciesMixin(ProviderBase):
                     "iucn": (str(row.get("IUCN", "") or "").strip() or None)
                     if "IUCN" in df.columns
                     else None,
+                    "collections": collections,
                 }
             )
         return rows
@@ -93,7 +103,10 @@ class SpeciesMixin(ProviderBase):
                 ),
                 rows,
             )
-            # Remove species no longer in the CSV that have no observations.
+            # Sync collections first so their FK references are cleared before
+            # we delete species that are no longer in the CSV.
+            self._sync_bundled_collections(conn, rows)
+            # Remove species no longer in the CSV that have no remaining FK references.
             placeholders = ", ".join(f":sn{i}" for i in range(len(rows)))
             params = {f"sn{i}": r["scientific_name"] for i, r in enumerate(rows)}
             conn.execute(
@@ -103,10 +116,178 @@ class SpeciesMixin(ProviderBase):
                     WHERE scientific_name NOT IN ({placeholders})
                     AND is_custom = 0
                     AND id NOT IN (SELECT DISTINCT species_id FROM individual_observations WHERE species_id IS NOT NULL)
+                    AND id NOT IN (SELECT DISTINCT species_id FROM project_species WHERE species_id IS NOT NULL)
+                    AND id NOT IN (SELECT DISTINCT species_id FROM project_species_behaviors WHERE species_id IS NOT NULL)
+                    AND id NOT IN (SELECT DISTINCT species_id FROM species_behaviors WHERE species_id IS NOT NULL)
+                    AND id NOT IN (SELECT DISTINCT species_id FROM species_collection_members WHERE species_id IS NOT NULL)
                     """
                 ),
                 params,
             )
+
+    @staticmethod
+    def _sync_bundled_collections(conn, rows: list[dict[str, Any]]) -> None:
+        """Create/update bundled collections from parsed CSV rows. Idempotent."""
+        all_col_names: set[str] = set()
+        for row in rows:
+            all_col_names.update(row.get("collections", {}).keys())
+        if not all_col_names:
+            logger.debug("No collection columns found in bundled CSV — skipping collection sync")
+            return
+
+        # Ensure a species_collections row exists for each collection name.
+        existing_colls = {
+            r[0]: r[1]
+            for r in conn.execute(text("SELECT name, id FROM species_collections")).fetchall()
+        }
+        for name in all_col_names:
+            if name not in existing_colls:
+                coll_id = str(uuid.uuid4())
+                conn.execute(
+                    text(
+                        "INSERT INTO species_collections (id, name, is_custom) VALUES (:id, :name, 0)"
+                    ),
+                    {"id": coll_id, "name": name},
+                )
+                existing_colls[name] = coll_id
+
+        # Rebuild membership for all bundled collections.
+        bundled_coll_ids = [existing_colls[n] for n in all_col_names if n in existing_colls]
+        if bundled_coll_ids:
+            ids_ph = ", ".join(f":cid{i}" for i in range(len(bundled_coll_ids)))
+            id_params = {f"cid{i}": cid for i, cid in enumerate(bundled_coll_ids)}
+            conn.execute(
+                text(f"DELETE FROM species_collection_members WHERE collection_id IN ({ids_ph})"),
+                id_params,
+            )
+
+        species_map = {
+            r[0]: r[1]
+            for r in conn.execute(text("SELECT scientific_name, id FROM species")).fetchall()
+        }
+        to_insert = []
+        for row in rows:
+            sp_id = species_map.get(row["scientific_name"])
+            if not sp_id:
+                continue
+            for col_name, present in row.get("collections", {}).items():
+                if present:
+                    coll_id = existing_colls.get(col_name)
+                    if coll_id:
+                        to_insert.append({"collection_id": coll_id, "species_id": sp_id})
+        if to_insert:
+            conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO species_collection_members (collection_id, species_id)"
+                    " VALUES (:collection_id, :species_id)"
+                ),
+                to_insert,
+            )
+        logger.debug(
+            "Synced %d bundled collection(s): %s",
+            len(all_col_names),
+            ", ".join(sorted(all_col_names)),
+        )
+
+    def list_collections(self) -> list[dict[str, Any]]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT id, name, is_custom FROM species_collections ORDER BY name")
+            ).fetchall()
+        return [{"id": r[0], "name": r[1], "is_custom": bool(r[2])} for r in rows]
+
+    def get_project_collection(self, project_id: str) -> str | None:
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT collection_id FROM projects WHERE id = :pid"),
+                {"pid": project_id},
+            ).fetchone()
+        return row[0] if row else None
+
+    def set_project_collection(self, project_id: str, collection_id: str | None) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("UPDATE projects SET collection_id = :cid WHERE id = :pid"),
+                {"cid": collection_id, "pid": project_id},
+            )
+        if collection_id is not None:
+            with self.engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT s.scientific_name FROM species s
+                        JOIN species_collection_members m ON m.species_id = s.id
+                        WHERE m.collection_id = :cid
+                        ORDER BY s.scientific_name
+                        """
+                    ),
+                    {"cid": collection_id},
+                ).fetchall()
+            names = [r[0] for r in rows]
+            self.set_project_species(project_id, names)
+            logger.info(
+                "Project %s: applied collection %s → %d species",
+                project_id,
+                collection_id,
+                len(names),
+            )
+        else:
+            logger.info("Project %s: collection cleared", project_id)
+
+    def import_collection_from_csv(self, name: str, content: str) -> int:
+        """Parse a species CSV, upsert species, and create/replace a custom collection."""
+        import io
+
+        rows = self._parse_species_csv(io.StringIO(content))
+        if not rows:
+            raise DataImportError(
+                user_message_key="csv_error_no_valid_rows",
+                detail="No valid rows found. Ensure the CSV uses ';' as separator and has a 'scientific_name' column.",
+            )
+        for row in rows:
+            self._upsert_species(row)
+
+        with self.engine.begin() as conn:
+            existing = conn.execute(
+                text("SELECT id FROM species_collections WHERE name = :name"), {"name": name}
+            ).fetchone()
+            if existing:
+                coll_id = existing[0]
+                conn.execute(
+                    text("DELETE FROM species_collection_members WHERE collection_id = :cid"),
+                    {"cid": coll_id},
+                )
+                conn.execute(
+                    text("UPDATE species_collections SET is_custom = 1 WHERE id = :cid"),
+                    {"cid": coll_id},
+                )
+            else:
+                coll_id = str(uuid.uuid4())
+                conn.execute(
+                    text(
+                        "INSERT INTO species_collections (id, name, is_custom) VALUES (:id, :name, 1)"
+                    ),
+                    {"id": coll_id, "name": name},
+                )
+            species_map = {
+                r[0]: r[1]
+                for r in conn.execute(text("SELECT scientific_name, id FROM species")).fetchall()
+            }
+            members = [
+                {"collection_id": coll_id, "species_id": species_map[r["scientific_name"]]}
+                for r in rows
+                if r["scientific_name"] in species_map
+            ]
+            if members:
+                conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO species_collection_members (collection_id, species_id)"
+                        " VALUES (:collection_id, :species_id)"
+                    ),
+                    members,
+                )
+        logger.info("Imported custom collection %r with %d species", name, len(members))
+        return len(members)
 
     @staticmethod
     def _parse_behaviors_csv(path: Path | IO[str]) -> list[dict[str, Any]]:

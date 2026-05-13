@@ -94,6 +94,7 @@ class SetupWizard:
         annotator_name_cell: list[str] = [""]
         continue_btn_holder: list = [None]
         project_btn_holder: list = [None]
+        collection_select_holder: list = [None]
 
         # ── Shared helpers ────────────────────────────────────────────────────
 
@@ -175,6 +176,11 @@ class SetupWizard:
                 set_annotator_name(annotator_name_cell[0])
 
             project = dp.create_project(project_name, video_dir)
+            collection_id = (
+                collection_select_holder[0].value if collection_select_holder[0] else None
+            ) or None
+            if collection_id:
+                await run.io_bound(dp.set_project_collection, project.id, collection_id)
             switch_project(dp, project.id)
 
             has_videos = await run.io_bound(dp.has_videos_in_db, get_active_project_id())
@@ -355,6 +361,26 @@ class SetupWizard:
                         self.inputs["project_name"].on_value_change(
                             lambda _: update_project_button()
                         )
+
+                    with ui.card().classes("full-width q-mb-md"):
+                        ui.label(t("project_collection_label")).classes(
+                            "text-subtitle1 font-weight-medium q-mb-xs"
+                        )
+                        ui.label(t("project_collection_desc")).classes(
+                            "text-caption text-grey-6 q-mb-md"
+                        )
+                        from review_app.backend.provider.local_data_provider import (
+                            LocalDataProvider as _LDP,
+                        )
+
+                        _colls = _LDP().list_collections()
+                        _coll_opts = {"": t("no_collection")} | {
+                            c["id"]: c["name"] for c in _colls
+                        }
+                        collection_select_holder[0] = ui.select(
+                            options=_coll_opts,
+                            value="",
+                        ).props("outlined dense class=w-full")
 
                     with ui.card().classes("full-width q-mb-md"):
                         ui.label(t("video_dir_label")).classes(
@@ -548,6 +574,24 @@ class SetupWizard:
                         placeholder=t("project_name_placeholder"),
                     ).props("outlined dense class=w-full")
                     self.inputs["project_name"].on_value_change(lambda _: update_project_button())
+
+                with ui.card().classes("full-width q-mb-md"):
+                    ui.label(t("project_collection_label")).classes(
+                        "text-subtitle1 font-weight-medium q-mb-xs"
+                    )
+                    ui.label(t("project_collection_desc")).classes(
+                        "text-caption text-grey-6 q-mb-md"
+                    )
+                    from review_app.backend.provider.local_data_provider import (
+                        LocalDataProvider as _LDP,
+                    )
+
+                    _colls = _LDP().list_collections()
+                    _coll_opts = {"": t("no_collection")} | {c["id"]: c["name"] for c in _colls}
+                    collection_select_holder[0] = ui.select(
+                        options=_coll_opts,
+                        value="",
+                    ).props("outlined dense class=w-full")
 
                 with ui.card().classes("full-width q-mb-md"):
                     ui.label(t("video_dir_label")).classes(

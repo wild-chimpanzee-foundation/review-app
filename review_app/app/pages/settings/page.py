@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import run, ui
 
 from review_app.app.config import get_default_db_path, get_user_data_dir
 from review_app.app.state import (
@@ -81,6 +81,36 @@ def _build_settings_content(container: ui.column):
 
                     ui.button(
                         t("save"), icon="check", color="primary", on_click=save_project_name
+                    ).props("dense")
+
+                ui.separator().classes("q-my-sm")
+                ui.label(t("project_collection_label")).classes("text-subtitle2 q-mb-xs")
+                ui.label(t("project_collection_desc")).classes("text-caption text-grey-6 q-mb-sm")
+                _dp_coll = get_data_provider() or LocalDataProvider()
+                _collections = _dp_coll.list_collections()
+                _coll_options = {"": t("no_collection")} | {
+                    c["id"]: c["name"] for c in _collections
+                }
+                _current_coll = _dp_coll.get_project_collection(active_project_id) or ""
+                with ui.row().classes("w-full items-center gap-sm"):
+                    coll_select = (
+                        ui.select(options=_coll_options, value=_current_coll)
+                        .props("outlined dense")
+                        .classes("col")
+                    )
+
+                    async def save_collection():
+                        cid = coll_select.value or None
+                        _dp2 = get_data_provider() or LocalDataProvider()
+                        await run.io_bound(_dp2.set_project_collection, active_project_id, cid)
+                        if cid:
+                            ui.notify(t("collection_applied"), type="positive")
+                        else:
+                            ui.notify(t("settings_saved"), type="positive")
+                        ui.navigate.to("/settings")
+
+                    ui.button(
+                        t("save"), icon="check", color="primary", on_click=save_collection
                     ).props("dense")
 
         with ui.card().classes("full-width q-mb-lg"):

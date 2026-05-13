@@ -31,6 +31,7 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     last_opened: Mapped[datetime | None] = mapped_column(DateTime)
+    collection_id: Mapped[str | None] = mapped_column(String, ForeignKey("species_collections.id"))
     dirs: Mapped[list[ProjectDir]] = relationship(
         "ProjectDir", backref="project", cascade="all, delete-orphan"
     )
@@ -138,6 +139,26 @@ class ProjectSpeciesBehavior(Base):
     project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id"), primary_key=True)
     species_id: Mapped[str] = mapped_column(String, ForeignKey("species.id"), primary_key=True)
     behavior_id: Mapped[str] = mapped_column(String, ForeignKey("behaviors.id"), primary_key=True)
+
+
+class SpeciesCollection(Base):
+    __tablename__ = "species_collections"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String, unique=True)
+    is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
+    members: Mapped[list[SpeciesCollectionMember]] = relationship(
+        "SpeciesCollectionMember", cascade="all, delete-orphan"
+    )
+
+
+class SpeciesCollectionMember(Base):
+    __tablename__ = "species_collection_members"
+
+    collection_id: Mapped[str] = mapped_column(
+        String, ForeignKey("species_collections.id"), primary_key=True
+    )
+    species_id: Mapped[str] = mapped_column(String, ForeignKey("species.id"), primary_key=True)
 
 
 class IndividualObservation(Base):
