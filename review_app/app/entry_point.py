@@ -13,6 +13,7 @@ from review_app.app.project_picker import build_project_picker
 from review_app.app.setup_wizard import setup_wizard
 from review_app.app.state import (
     get_active_project_id,
+    get_data_provider,
     get_language,
     is_dark_mode,
     load_settings_from_db,
@@ -174,9 +175,11 @@ def shared_header(show_drawer: bool = False):
         with ui.row().classes("w-full items-center q-px-md no-wrap gap-2"):
             _active_pid = get_active_project_id()
             if _active_pid:
-                _header_dp = LocalDataProvider()
+                _header_dp = get_data_provider()
                 _active_proj_name = (
-                    p.name if (p := _header_dp.get_project(_active_pid)) else _active_pid
+                    p.name
+                    if (_header_dp and (p := _header_dp.get_project(_active_pid)))
+                    else _active_pid
                 )
                 project_dialog, refresh_projects = build_project_picker()
                 ui.button(
@@ -494,7 +497,9 @@ if __name__ in {"__main__", "__mp_main__"}:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dev", action="store_true", help="Enable dev mode with auto-reload")
     parser.add_argument("--port", type=int, default=8000, help="Port to run the application on")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (use 0.0.0.0 for network access)")
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="Host to bind to (use 0.0.0.0 for network access)"
+    )
     args, _ = parser.parse_known_args()
 
     gui = GUI()

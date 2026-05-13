@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from review_app.app.state import get_active_project_id, reset_app_state, set_data_provider
+from review_app.app.state import get_active_project_id, get_data_provider, reset_app_state
 from review_app.app.translations import t
 from review_app.app.utils import switch_project
 from review_app.backend.db.backup import BackupError, create_backup
-from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 
 def _warn_missing_dirs(missing: list[str]) -> None:
@@ -24,7 +23,9 @@ def build_project_picker():
 
         def refresh():
             projects_col.clear()
-            _dp = LocalDataProvider()
+            _dp = get_data_provider()
+            if not _dp:
+                return
             projects = _dp.list_projects()
             active_id = get_active_project_id()
             with projects_col:
@@ -36,9 +37,8 @@ def build_project_picker():
 
                         def make_switch(pid):
                             async def do_switch():
-                                new_dp = LocalDataProvider()
-                                set_data_provider(new_dp)
-                                missing = switch_project(new_dp, pid)
+                                dp = get_data_provider()
+                                missing = switch_project(dp, pid)
                                 _warn_missing_dirs(missing)
                                 dialog.close()
                                 ui.navigate.to("/overview")
@@ -64,7 +64,7 @@ def build_project_picker():
                                         )
 
                                     async def confirm():
-                                        del_dp = LocalDataProvider()
+                                        dp = get_data_provider()
                                         try:
                                             create_backup(reason="delete_project")
                                         except BackupError as exc:
@@ -75,14 +75,12 @@ def build_project_picker():
                                                 ),
                                                 type="warning",
                                             )
-                                        del_dp.delete_project(pid)
+                                        dp.delete_project(pid)
                                         confirm_dialog.close()
                                         if pid == get_active_project_id():
-                                            next_dp = LocalDataProvider()
-                                            other = next_dp.get_most_recent_project()
+                                            other = dp.get_most_recent_project()
                                             if other:
-                                                set_data_provider(next_dp)
-                                                missing = switch_project(next_dp, other.id)
+                                                missing = switch_project(dp, other.id)
                                                 _warn_missing_dirs(missing)
                                                 dialog.close()
                                                 ui.navigate.to("/overview")

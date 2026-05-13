@@ -35,7 +35,7 @@ def render_database_section(current_db_path: Path | None) -> None:
     def _get_dp():
         from review_app.app.state import get_data_provider
 
-        return get_data_provider() or LocalDataProvider()
+        return get_data_provider()
 
     def _busy() -> bool:
         if _db_op_lock.locked():

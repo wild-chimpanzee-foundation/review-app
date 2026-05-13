@@ -18,7 +18,6 @@ from review_app.app.state import (
 )
 from review_app.app.translations import t
 from review_app.app.utils import get_or_create_data_provider, sync_with_progress
-from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 from .database import render_database_section
 from .species import render_species_section
@@ -38,7 +37,7 @@ def _build_settings_content(container: ui.column):
     stats = {"videos": 0}
     current_video_dirs: list = []
     try:
-        _dp_stats = LocalDataProvider()
+        _dp_stats = get_data_provider()
         if active_project_id:
             _proj = _dp_stats.get_project(active_project_id)
             current_project_name = _proj.name if _proj else ""
@@ -72,7 +71,7 @@ def _build_settings_content(container: ui.column):
                         if not name:
                             ui.notify(t("project_name_required"), type="warning")
                             return
-                        _dp = get_data_provider() or LocalDataProvider()
+                        _dp = get_data_provider()
                         _dp.update_project_name(active_project_id, name)
                         set_active_project(active_project_id)
                         ui.notify(t("project_name_saved"), type="positive")
@@ -86,7 +85,7 @@ def _build_settings_content(container: ui.column):
                 ui.separator().classes("q-my-sm")
                 ui.label(t("project_collection_label")).classes("text-subtitle2 q-mb-xs")
                 ui.label(t("project_collection_desc")).classes("text-caption text-grey-6 q-mb-sm")
-                _dp_coll = get_data_provider() or LocalDataProvider()
+                _dp_coll = get_data_provider()
                 _collections = _dp_coll.list_collections()
                 _coll_options = {"": t("no_collection")} | {
                     c["id"]: c["name"] for c in _collections
@@ -101,7 +100,7 @@ def _build_settings_content(container: ui.column):
 
                     async def save_collection():
                         cid = coll_select.value or None
-                        _dp2 = get_data_provider() or LocalDataProvider()
+                        _dp2 = get_data_provider()
                         await run.io_bound(_dp2.set_project_collection, active_project_id, cid)
                         if cid:
                             ui.notify(t("collection_applied"), type="positive")
@@ -161,7 +160,7 @@ def _build_settings_content(container: ui.column):
                 dir_sync_dialog = ui.dialog()
 
                 async def sync_dir():
-                    _dp = get_data_provider() or LocalDataProvider()
+                    _dp = get_data_provider()
                     dir_sync_dialog.clear()
                     with dir_sync_dialog, ui.card().classes("q-pa-lg").style("min-width: 360px"):
                         ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
@@ -198,7 +197,7 @@ def _build_settings_content(container: ui.column):
 
         with ui.expansion(t("advanced_settings"), icon="settings").classes("full-width q-mb-lg"):
             with ui.column().classes("w-full gap-lg q-pa-md"):
-                _dp = get_data_provider() or LocalDataProvider()
+                _dp = get_data_provider()
                 if active_project_id:
                     lang = get_language()
                     with ui.expansion(t("project_species_settings"), icon="pets").classes(
