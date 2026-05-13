@@ -3,6 +3,8 @@ from nicegui import ui
 from review_app.app.state import get_playback_speed, is_autoplay, is_muted, set_playback_speed
 from review_app.app.translations import t
 
+SPEED_OPTIONS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+
 
 def render_custom_video_player(video_url, duration, vid_key):
     """Render a video component with mouse-wheel zoom, drag-to-pan, and custom controls."""
@@ -32,26 +34,9 @@ def render_custom_video_player(video_url, duration, vid_key):
             except (ValueError, TypeError):
                 return "00:00"
 
-        speed_options = [
-            0.25,
-            0.5,
-            0.75,
-            1.0,
-            1.25,
-            1.5,
-            2.0,
-            3.0,
-            4.0,
-            5.0,
-            6.0,
-            7.0,
-            8.0,
-            9.0,
-            10.0,
-        ]
         speed_options_html = "".join(
             f'<option value="{s}" {"selected" if s == float(get_playback_speed().replace("x", "")) else ""}>{s}x</option>'
-            for s in speed_options
+            for s in SPEED_OPTIONS
         )
 
         ui.html(f'''
