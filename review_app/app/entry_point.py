@@ -370,7 +370,7 @@ class GUI:
 
         ui.timer(0.1, do_sync, once=True)
 
-    def start(self, dev_mode=False, port=8000):
+    def start(self, dev_mode=False, port=8000, host="127.0.0.1"):
         from nicegui import app, ui
 
         from review_app.app.config import get_user_data_dir as _get_udd
@@ -478,7 +478,7 @@ class GUI:
 
         ui.run(
             title="Video Annotation",
-            host="127.0.0.1",
+            host=host,
             port=port,
             show=True,
             reload=dev_mode,
@@ -494,13 +494,14 @@ if __name__ in {"__main__", "__mp_main__"}:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dev", action="store_true", help="Enable dev mode with auto-reload")
     parser.add_argument("--port", type=int, default=8000, help="Port to run the application on")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (use 0.0.0.0 for network access)")
     args, _ = parser.parse_known_args()
 
     gui = GUI()
     try:
         if __name__ == "__main__":
             _check_port(args.port)
-        gui.start(dev_mode=args.dev, port=args.port)
+        gui.start(dev_mode=args.dev, port=args.port, host=args.host)
     except KeyboardInterrupt:
         pass
     except OSError as exc:
