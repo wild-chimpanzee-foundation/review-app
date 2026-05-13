@@ -5,7 +5,12 @@ import io
 import pandas as pd
 from nicegui import run, ui
 
-from review_app.app.state import get_active_project_id, get_state_val, set_state_val
+from review_app.app.state import (
+    get_active_project_id,
+    get_annotator_name,
+    get_state_val,
+    set_state_val,
+)
 from review_app.app.translations import t
 from review_app.app.utils import user_error_message
 from review_app.backend.utils import df_to_records
@@ -47,8 +52,17 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
 
         async def do_export() -> None:
             try:
+                from datetime import date
+
                 df = await run.io_bound(dp.export_annotations_csv, get_active_project_id())
-                ui.download(df.to_csv(index=False).encode("utf-8"), "annotations.csv")
+                project_name = (
+                    df["project_name"].iloc[0].replace(" ", "_")
+                    if not df.empty and "project_name" in df.columns
+                    else "project"
+                )
+                annotator = get_annotator_name().replace(" ", "_")
+                filename = f"annotations_{project_name}_{annotator}_{date.today()}.csv"
+                ui.download(df.to_csv(index=False).encode("utf-8"), filename)
             except Exception as exc:
                 ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
 
