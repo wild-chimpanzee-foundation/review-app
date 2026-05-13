@@ -109,10 +109,12 @@ class ImportMixin(ProviderBase):
     ) -> tuple[dict[str, str], dict[str, str]]:
         """
         Build two lookups for matching CSV file paths to DB video_ids.
-        by_suffix keys include both parent/name (with ext) and parent/stem (without ext)
-        so that CSV paths match regardless of whether the extension is present or differs.
-        - by_suffix: {(parent_dir/name).lower() -> video_id, (parent_dir/stem).lower() -> video_id}
-        - by_stem:   {stem.lower() -> video_id}  — fallback, only for unambiguous stems
+
+        - by_suffix: keyed by both the full relative path from a project scan dir AND
+          the legacy parent_dir/name form, so CSVs produced by the pipeline (which use the
+          full relative path) and manually-edited CSVs (which may use just parent/name) both
+          match. Extension-less variants are included so the extension need not be present.
+        - by_stem: {stem.lower() -> video_id} — last-resort fallback, only for unique stems.
         """
         with self.engine.connect() as conn:
             df = pd.read_sql(
@@ -123,17 +125,38 @@ class ImportMixin(ProviderBase):
                 conn,
                 params={"pid": active_project_id} if active_project_id else {},
             )
+            scan_dirs: list[Path] = []
+            if active_project_id:
+                rows = conn.execute(
+                    text("SELECT path FROM project_dirs WHERE project_id = :pid"),
+                    {"pid": active_project_id},
+                ).fetchall()
+                scan_dirs = [Path(r[0]) for r in rows]
+
         by_suffix: dict[str, str] = {}
         stem_to_id: dict[str, str] = {}
         stem_count: dict[str, int] = {}
         for _, row in df.iterrows():
             p = Path(str(row["video_path"]))
             vid = str(row["video_id"])
+
+            # Full relative path from each project scan dir (primary match)
+            for scan_dir in scan_dirs:
+                try:
+                    rel = p.relative_to(scan_dir)
+                    by_suffix[str(rel).lower()] = vid
+                    by_suffix[str(rel.with_suffix("")).lower()] = vid
+                except ValueError:
+                    continue
+
+            # Legacy parent_dir/name fallback
             by_suffix[f"{p.parent.name}/{p.name}".lower()] = vid
             by_suffix[f"{p.parent.name}/{p.stem}".lower()] = vid
+
             stem = p.stem.lower()
             stem_to_id[stem] = vid
             stem_count[stem] = stem_count.get(stem, 0) + 1
+
         by_stem = {s: vid for s, vid in stem_to_id.items() if stem_count[s] == 1}
         return by_suffix, by_stem
 
@@ -178,17 +201,22 @@ class ImportMixin(ProviderBase):
             p = Path(raw_path)
 
             video_id = (
-                by_suffix.get(f"{p.parent.name}/{p.name}".lower())
+                by_suffix.get(raw_path.lower())
+                or by_suffix.get(str(p.with_suffix("")).lower())
+                or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
                 or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
                 or by_stem.get(p.stem.lower())
             )
             if video_id:
-                if by_suffix.get(f"{p.parent.name}/{p.name}".lower()) or by_suffix.get(
-                    f"{p.parent.name}/{p.stem}".lower()
+                if by_stem.get(p.stem.lower()) == video_id and not (
+                    by_suffix.get(raw_path.lower())
+                    or by_suffix.get(str(p.with_suffix("")).lower())
+                    or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
+                    or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
                 ):
-                    matched_suffix += 1
-                else:
                     matched_stem += 1
+                else:
+                    matched_suffix += 1
 
             if video_id is None:
                 unmatched_paths.append(raw_path)
@@ -270,7 +298,9 @@ class ImportMixin(ProviderBase):
                 return raw
             p = Path(raw)
             return (
-                by_suffix.get(f"{p.parent.name}/{p.name}".lower())
+                by_suffix.get(raw.lower())
+                or by_suffix.get(str(p.with_suffix("")).lower())
+                or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
                 or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
                 or by_stem.get(p.stem.lower())
                 or raw
@@ -279,7 +309,7 @@ class ImportMixin(ProviderBase):
         src["path"] = src["path"].astype(str).str.strip().map(_resolve_path)
 
         species_mask = src["annotation_type"].str.strip().str.lower() == "species"
-        unique_species = src.loc[species_mask, "value_text"].dropna().str.strip().unique()
+        unique_species = src.loc[species_mask, "value_text"].dropna().astype(str).str.strip().unique()
         unique_species = {str(s) for s in unique_species if str(s).strip()}
 
         variant_map = self._build_species_variant_map()
@@ -629,10 +659,7 @@ class ImportMixin(ProviderBase):
                 .reset_index()
             )
             blank_probs = (
-                model_df[
-                    (model_df["annotation_type"] == "blank_non_blank")
-                    & (model_df["value_text"].str.lower().str.strip() == "blank")
-                ]
+                model_df[model_df["annotation_type"] == "blank_non_blank"]
                 .groupby("video_id")["probability"]
                 .max()
                 .rename("blank_prob")

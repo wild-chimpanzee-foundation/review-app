@@ -76,7 +76,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 set_state_val("match_preview", stats)
                 config_ui.refresh()
             except Exception as exc:
-                ui.notify(f"{t('error')}: {exc}", type="negative")
+                ui.notify(f"{t('error')}: {user_error_message(exc)}", type="negative")
             finally:
                 loading_dialog.close()
 
@@ -647,6 +647,6 @@ async def _validate_wide(dp, loading_dialog, path_col, ann_maps, refresh_results
         refresh_results()
         await ui.run_javascript(_SCROLL_TO_CTA)
     except Exception as exc:
-        ui.notify(f"{t('error')}: {exc}", type="negative")
+        ui.notify(f"{t('error')}: {user_error_message(exc)}", type="negative")
     finally:
         loading_dialog.close()

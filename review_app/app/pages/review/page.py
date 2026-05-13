@@ -254,14 +254,17 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
     video, model_ann = await asyncio.gather(video_task, model_ann_task)
 
     default_behavior = "does_not_react"
-    if model_ann is not None and not model_ann.empty:
-        behavior_rows = model_ann[
-            (model_ann["annotation_type"] == "behavior")
-            & (model_ann["value_text"].notna())
-            & (model_ann["value_text"].str.lower() != "dummy")
-        ]["value_text"]
-        if not behavior_rows.empty:
-            default_behavior = behavior_rows.mode().iloc[0]
+    try:
+        if model_ann is not None and not model_ann.empty:
+            behavior_rows = model_ann[
+                (model_ann["annotation_type"] == "behavior")
+                & (model_ann["value_text"].notna())
+                & (model_ann["value_text"].fillna("").str.lower() != "dummy")
+            ]["value_text"]
+            if not behavior_rows.empty:
+                default_behavior = behavior_rows.mode().iloc[0]
+    except Exception:
+        logger.exception("Failed to compute default behavior from model annotations")
 
     if not video:
         # Queue can become stale after DB reset/re-sync or ID format changes.

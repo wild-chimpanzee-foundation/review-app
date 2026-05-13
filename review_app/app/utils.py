@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 def user_error_message(exc: Exception) -> str:
     if hasattr(exc, "user_message_key"):
         return t(exc.user_message_key)
+    logger.exception("Unexpected error: %s", exc)
     return str(exc)
 
 

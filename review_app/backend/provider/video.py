@@ -234,7 +234,8 @@ class VideoMixin(ProviderBase):
             for p in sorted(scan_dir.rglob("*")):
                 if p.suffix.lower() not in VIDEO_EXTENSIONS:
                     continue
-                camera_id = p.parent.name if p.parent != scan_dir else "default"
+                rel = p.parent.relative_to(scan_dir)
+                camera_id = str(rel) if str(rel) != "." else "default"
                 rows.append({"video_path": str(p), "camera_id": camera_id})
 
         if not rows:
