@@ -50,8 +50,14 @@ def _resolve_behavior(behaviors_map, current_value=None):
     return None
 
 
-def _new_annotation(species, behavior, duration_sec, source=None, probability=None):
-    ann = {"species": species, "behavior": behavior, "start_sec": 0.0, "end_sec": duration_sec}
+def _new_annotation(species, behavior, duration_sec, source=None, probability=None, count=1):
+    ann = {
+        "species": species,
+        "behavior": behavior,
+        "start_sec": 0.0,
+        "end_sec": duration_sec,
+        "count": count,
+    }
     if source:
         ann["source"] = source
         ann["probability"] = probability
@@ -67,6 +73,8 @@ def _init_annotation_state(video, default_species, default_behavior):
             is_blank = True
         else:
             is_blank = False
+            raw_count = video.get("consensus_count")
+            initial_count = max(1, int(round(raw_count))) if raw_count is not None else 1
             selections = [
                 _new_annotation(
                     default_species,
@@ -74,6 +82,7 @@ def _init_annotation_state(video, default_species, default_behavior):
                     video.get("duration_sec"),
                     source="model" if default_species else None,
                     probability=video.get("max_species_confidence") if default_species else None,
+                    count=initial_count,
                 )
             ]
 

@@ -5,6 +5,7 @@ _data_provider = None
 _annotator_name: str = "default"
 _blank_threshold: float = 0.75
 _species_threshold: float = 0.75
+_obj_detection_threshold: float = 0.75
 _active_project_id: str | None = None
 _dark_mode: bool = True
 _language: str = "en"
@@ -50,7 +51,7 @@ def set_data_provider(dp):
 
 
 def reset_app_state() -> None:
-    global _annotator_name, _blank_threshold, _species_threshold, _active_project_id
+    global _annotator_name, _blank_threshold, _species_threshold, _obj_detection_threshold, _active_project_id
     global _dark_mode, _language, _playback_speed, _autoplay, _muted, _auto_transcode
     global _tour_completed, _data_provider
     global _filters, _video_queue, _current_video_idx, _review_selections, _session
@@ -58,6 +59,7 @@ def reset_app_state() -> None:
     _annotator_name = "default"
     _blank_threshold = 0.75
     _species_threshold = 0.75
+    _obj_detection_threshold = 0.75
     _dark_mode = True
     _language = "en"
     _playback_speed = "1x"
@@ -80,7 +82,7 @@ def _parse_bool(raw: str | None, default: bool) -> bool:
 
 
 def load_settings_from_db(dp) -> None:
-    global _annotator_name, _blank_threshold, _species_threshold, _active_project_id
+    global _annotator_name, _blank_threshold, _species_threshold, _obj_detection_threshold, _active_project_id
     global _dark_mode, _language, _autoplay, _muted, _auto_transcode
     global _tour_completed
     _annotator_name = dp.get_setting("annotator_name", "default")
@@ -88,6 +90,8 @@ def load_settings_from_db(dp) -> None:
     _blank_threshold = float(raw_blank) if raw_blank is not None else 0.75
     raw_species = dp.get_setting("species_threshold")
     _species_threshold = float(raw_species) if raw_species is not None else 0.75
+    raw_obj = dp.get_setting("obj_detection_threshold")
+    _obj_detection_threshold = float(raw_obj) if raw_obj is not None else 0.75
     _active_project_id = dp.get_setting("active_project_id")
     _dark_mode = _parse_bool(dp.get_setting("dark_mode"), True)
     _language = dp.get_setting("language", "en")
@@ -197,6 +201,17 @@ def set_species_threshold(value: float) -> None:
     _species_threshold = value
     if dp := get_data_provider():
         dp.set_setting("species_threshold", value)
+
+
+def get_obj_detection_threshold() -> float:
+    return _obj_detection_threshold
+
+
+def set_obj_detection_threshold(value: float) -> None:
+    global _obj_detection_threshold
+    _obj_detection_threshold = value
+    if dp := get_data_provider():
+        dp.set_setting("obj_detection_threshold", value)
 
 
 def get_playback_speed():

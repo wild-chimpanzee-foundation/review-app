@@ -298,3 +298,11 @@ Tauraco macrorhynchus;Touraco a gros bec;Oiseau;LC;Yellow-billed turaco;Bird;n;y
 Thescelocichla leucopleura;Bulbul des raphias;Oiseau;LC;Swamp palm bulbul;Bird;y;y;y
 Trochocercus nitens;Tchitrec noir;Oiseau;LC;Western crested-flycatcher;Bird;y;y;y
 Tychaedon leucosticta;Agrobate du Ghana;Oiseau;LC;Forest scrub-robin;Bird;y;y;y
+bicycle;Vélo;Détection d'objets;NA;Bicycle;Object Detection;y;y;y
+car;Voiture;Détection d'objets;NA;Car;Object Detection;y;y;y
+motorcycle;Moto;Détection d'objets;NA;Motorcycle;Object Detection;y;y;y
+bus;Bus;Détection d'objets;NA;Bus;Object Detection;y;y;y
+truck;Camion;Détection d'objets;NA;Truck;Object Detection;y;y;y
+boat;Bateau;Détection d'objets;NA;Boat;Object Detection;y;y;y
+train;Train;Détection d'objets;NA;Train;Object Detection;y;y;y
+airplane;Avion;Détection d'objets;NA;Airplane;Object Detection;y;y;y

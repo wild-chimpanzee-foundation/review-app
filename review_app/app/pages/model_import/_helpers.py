@@ -28,8 +28,16 @@ def auto_suggest_mappings(columns: list[str]) -> list[dict]:
                     "annotation_type": "species",
                     "value_col": col,
                     "prob_col": f"prob_{model}" if f"prob_{model}" in col_set else "",
+                    "count_col": "",
                 }
             )
+
+    for model_sug in [s for s in suggestions if s["annotation_type"] == "species"]:
+        model = model_sug["model_name"]
+        for pattern in (f"count_{model}", f"{model}_count", "num_objects"):
+            if pattern in col_set:
+                model_sug["count_col"] = pattern
+                break
 
     blank_found = False
     for model in detected_models:
@@ -46,6 +54,7 @@ def auto_suggest_mappings(columns: list[str]) -> list[dict]:
                         "annotation_type": "blank_non_blank",
                         "value_col": "",
                         "prob_col": pattern,
+                        "count_col": "",
                     }
                 )
                 blank_found = True
@@ -59,6 +68,7 @@ def auto_suggest_mappings(columns: list[str]) -> list[dict]:
                         "annotation_type": "blank_non_blank",
                         "value_col": "",
                         "prob_col": blank_col,
+                        "count_col": "",
                     }
                 )
                 break

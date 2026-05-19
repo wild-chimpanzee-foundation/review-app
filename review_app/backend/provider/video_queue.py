@@ -54,7 +54,7 @@ class QueueMixin(ProviderBase):
                     GROUP BY b.key
                     UNION ALL
                     SELECT 'possible_species', ma.value_text FROM model_annotations ma
-                    WHERE ma.annotation_type = 'species' AND ma.value_text IS NOT NULL AND TRIM(ma.value_text) <> '' {ma_exists}
+                    WHERE ma.annotation_type IN ('species', 'object_detection') AND ma.value_text IS NOT NULL AND TRIM(ma.value_text) <> '' {ma_exists}
                     GROUP BY ma.value_text
                     UNION ALL
                     SELECT 'model_behavior', ma.value_text FROM model_annotations ma
@@ -190,7 +190,7 @@ class QueueMixin(ProviderBase):
                     COUNT(DISTINCT value_text)         AS distinct_top1,
                     COUNT(*)                           AS model_count
                 FROM model_annotations
-                WHERE annotation_type = 'species'
+                WHERE annotation_type IN ('species', 'object_detection')
                 GROUP BY video_id
             ),
             needs_review AS (
@@ -261,7 +261,7 @@ class QueueMixin(ProviderBase):
                 EXISTS (
                     SELECT 1 FROM model_annotations ma
                     WHERE ma.video_id = v.video_id
-                    AND ma.annotation_type = 'species'
+                    AND ma.annotation_type IN ('species', 'object_detection')
                     AND ma.value_text IN ({phs})
                 )""")
 
@@ -272,7 +272,7 @@ class QueueMixin(ProviderBase):
                     SELECT 1 FROM model_annotations ma
                     JOIN species s ON s.scientific_name = ma.value_text
                     WHERE ma.video_id = v.video_id
-                    AND ma.annotation_type = 'species'
+                    AND ma.annotation_type IN ('species', 'object_detection')
                     AND (s.group_en = :ps_group OR s.group_fr = :ps_group)
                 )""")
 
@@ -412,7 +412,7 @@ class QueueMixin(ProviderBase):
             species_max_prob AS (
                 SELECT video_id, SUM(COALESCE(probability, 0)) AS max_species_prob
                 FROM model_annotations
-                WHERE annotation_type = 'species'
+                WHERE annotation_type IN ('species', 'object_detection')
                 AND value_text = :species_sort_val
                 GROUP BY video_id
             )""")
@@ -423,7 +423,7 @@ class QueueMixin(ProviderBase):
                 FROM (
                     SELECT video_id, SUM(COALESCE(probability, 0)) AS prob_sum
                     FROM model_annotations
-                    WHERE annotation_type = 'species'
+                    WHERE annotation_type IN ('species', 'object_detection')
                     GROUP BY video_id, value_text
                 ) _sp
                 GROUP BY video_id
