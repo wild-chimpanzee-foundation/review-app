@@ -85,6 +85,27 @@ async def setup_overview():
                     ui.label(str(value)).classes(f"text-h5 font-weight-bold {extra_class}")
                     ui.label(label).classes("text-caption text-grey-6")
 
+        # Missing videos banner
+        missing_videos_df = stats.get("missing_videos")
+        missing_count = 0 if missing_videos_df is None else len(missing_videos_df)
+        if missing_count:
+            with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
+                with ui.card().classes("col q-pa-md"):
+                    with (
+                        ui.expansion(
+                            t("missing_videos_banner", n=missing_count),
+                            icon="warning",
+                        )
+                        .classes("full-width q-mb-lg text-warning")
+                        .props("header-class='text-warning'")
+                    ):
+                        with ui.scroll_area().style("max-height: 300px"):
+                            with ui.column().classes("q-pa-sm gap-xs"):
+                                for _, mv in missing_videos_df.iterrows():
+                                    ui.label(mv["video_path"]).classes(
+                                        "text-body2 text-mono text-grey-8"
+                                    )
+
         # Annotation progress bar
         blank = int(lb.get("blank", 0))
         non_blank = int(lb.get("non_blank", 0))

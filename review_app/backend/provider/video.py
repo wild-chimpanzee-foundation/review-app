@@ -254,7 +254,7 @@ class VideoMixin(ProviderBase):
         with self.Session() as session:
             if scanned.empty:
                 session.commit()
-                return {"scanned": 0, "added": 0, "updated": 0}
+                return {"scanned": 0, "added": 0, "updated": 0, "removed": 0}
 
             # Deduplicate by (video_path, project_id)
             existing = {
@@ -272,13 +272,17 @@ class VideoMixin(ProviderBase):
 
             new_rows = scanned[~scanned["video_path"].isin(existing)]
             existing_df = scanned[scanned["video_path"].isin(existing)]
+            orphaned_paths = [p for p in existing if p not in scanned["video_path"].values]
 
             total_scanned = len(scanned)
+            n_new = len(new_rows)
+            n_existing = len(existing_df)
+
+            if progress_callback:
+                progress_callback(0, total_scanned, "")
+
             probe_results: dict[Path, tuple] = {}
             if not new_rows.empty:
-                n_new = len(new_rows)
-                n_existing = total_scanned - n_new
-
                 def _offset_callback(current, total, filename):
                     if progress_callback:
                         progress_callback(n_existing + current, total_scanned, filename)
@@ -287,6 +291,7 @@ class VideoMixin(ProviderBase):
                     [Path(r) for r in new_rows["video_path"]],
                     progress_callback=_offset_callback,
                 )
+
 
             if not new_rows.empty:
                 insert_rows = []
@@ -326,7 +331,8 @@ class VideoMixin(ProviderBase):
                     text("""
                         UPDATE videos
                         SET camera_id    = :camera_id,
-                            last_seen_at = :last_seen_at
+                            last_seen_at = :last_seen_at,
+                            is_missing   = 0
                         WHERE video_path = :video_path
                           AND project_id IS :project_id
                     """),
@@ -340,6 +346,17 @@ class VideoMixin(ProviderBase):
                         for _, row in existing_df.iterrows()
                     ],
                 )
+                if progress_callback:
+                    progress_callback(n_existing, total_scanned, "")
+
+            if orphaned_paths:
+                session.execute(
+                    text(
+                        "UPDATE videos SET is_missing = 1"
+                        " WHERE video_path = :p AND project_id IS :pid"
+                    ),
+                    [{"p": p, "pid": active_project_id} for p in orphaned_paths],
+                )
 
             session.commit()
 
@@ -350,12 +367,14 @@ class VideoMixin(ProviderBase):
             "scanned": len(scanned),
             "added": len(new_rows),
             "updated": len(existing_df),
+            "removed": len(orphaned_paths),
         }
         logger.info(
-            "Video sync complete: scanned=%d added=%d updated=%d (project=%s)",
+            "Video sync complete: scanned=%d added=%d updated=%d removed=%d (project=%s)",
             result["scanned"],
             result["added"],
             result["updated"],
+            result["removed"],
             active_project_id,
         )
         return result
@@ -444,10 +463,10 @@ class VideoMixin(ProviderBase):
 
             input_path = Path(video.video_path)
             if not input_path.exists():
-                raise VideoError(
-                    user_message_key="video_error_file_not_found",
-                    detail=f"Video file not found: {input_path}",
-                )
+                video.is_missing = True
+                session.commit()
+                return {"success": False, "error": f"File not found on disk: {input_path}"}
+
 
             from review_app.app.config import get_user_data_dir
 
@@ -498,3 +517,23 @@ class VideoMixin(ProviderBase):
 
             logger.info("Transcode complete: %s", sidecar_path)
             return {"success": True, "new_path": str(sidecar_path)}
+
+    def count_missing_videos(self, project_id: str) -> int:
+        with self.engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT COUNT(*) FROM videos WHERE project_id = :pid AND is_missing = 1"),
+                {"pid": project_id},
+            )
+            return result.scalar() or 0
+
+    def delete_missing_videos(self, project_id: str) -> int:
+        with self.Session() as session:
+            videos = (
+                session.query(Video)
+                .filter_by(project_id=project_id, is_missing=True)
+                .all()
+            )
+            for v in videos:
+                session.delete(v)
+            session.commit()
+        return len(videos)

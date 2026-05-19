@@ -47,6 +47,14 @@ class StatsMixin(ProviderBase):
                 params=p,
             )
 
+            stats["missing_videos"] = pd.read_sql(
+                text(
+                    f"SELECT video_path, camera_id FROM videos WHERE is_missing = 1 {'AND project_id = :pid' if active_project_id else ''} ORDER BY video_path"
+                ),
+                conn,
+                params=p,
+            )
+
             stats["labeling"] = (
                 pd.read_sql(
                     text(f"""

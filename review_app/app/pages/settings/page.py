@@ -37,16 +37,12 @@ def _build_settings_content(container: ui.column):
     active_project_id = get_active_project_id()
     current_project_name = ""
 
-    stats = {"videos": 0}
     current_video_dirs: list = []
     try:
         _dp_stats = get_data_provider()
         if active_project_id:
             _proj = _dp_stats.get_project(active_project_id)
             current_project_name = _proj.name if _proj else ""
-        stats["videos"] = (
-            _dp_stats.get_overview_stats(active_project_id).get("videos", {}).get("total", 0)
-        )
         current_video_dirs = (
             [Path(d.path) for d in _dp_stats.get_project_dirs(active_project_id)]
             if active_project_id
@@ -116,18 +112,6 @@ def _build_settings_content(container: ui.column):
                     ).props("dense")
 
         with ui.card().classes("full-width q-mb-lg"):
-            ui.label(t("current_status")).classes("text-subtitle1 font-weight-medium q-mb-md")
-            with ui.row().classes("w-full gap-md"):
-                with ui.card().classes("col text-center"):
-                    ui.label(str(stats["videos"])).classes("text-h5 font-weight-bold")
-                    ui.label(t("videos_in_db")).classes("text-caption text-grey-6")
-                with ui.card().classes("col text-center"):
-                    ui.label(
-                        str(current_db_path) if current_db_path else t("not_available")
-                    ).classes("text-body2")
-                    ui.label(t("database")).classes("text-caption text-grey-6")
-
-        with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("items-center q-mb-sm"):
                 ui.icon("person", size="sm").classes("text-primary q-mr-sm")
                 ui.label(t("annotator_label")).classes("text-subtitle1 font-weight-medium")
@@ -184,11 +168,16 @@ def _build_settings_content(container: ui.column):
                                 ui.label(t("sync_stat_scanned", n=sync_stats["scanned"])).classes(
                                     "text-body2"
                                 )
-                                ui.label(t("sync_stat_added", n=sync_stats["added"])).classes(
-                                    "text-body2 text-positive"
-                                )
-                                ui.label(t("sync_stat_updated", n=sync_stats["updated"])).classes(
-                                    "text-body2 text-grey-6"
+                                if sync_stats.get("added", 0) > 0:
+                                    ui.label(t("sync_stat_added", n=sync_stats["added"])).classes(
+                                        "text-body2 text-positive"
+                                    )
+                                ui.label(
+                                    t("sync_stat_removed", n=sync_stats.get("removed", 0))
+                                ).classes(
+                                    "text-body2 text-warning"
+                                    if sync_stats.get("removed", 0) > 0
+                                    else "text-body2 text-grey-6"
                                 )
                         ui.button(
                             t("close"), on_click=dir_sync_dialog.close, color="primary"
@@ -197,6 +186,54 @@ def _build_settings_content(container: ui.column):
                 ui.button(
                     t("sync_videos_label"), icon="sync", color="primary", on_click=sync_dir
                 ).props("dense")
+
+                missing_count = 0
+                try:
+                    missing_count = _dp_stats.count_missing_videos(active_project_id)
+                except Exception:
+                    pass
+
+                if missing_count:
+                    ui.separator().classes("q-my-sm")
+
+                    delete_missing_dialog = ui.dialog().props("persistent")
+
+                    async def do_delete_missing():
+                        delete_missing_dialog.close()
+                        _dp = get_data_provider()
+                        n = await run.io_bound(_dp.delete_missing_videos, active_project_id)
+                        ui.notify(t("delete_missing_videos_success", n=n), type="positive")
+                        await asyncio.sleep(0.3)
+                        ui.navigate.to("/settings")
+
+                    with delete_missing_dialog, ui.card().classes("q-pa-lg"):
+                        ui.label(t("delete_missing_videos_confirm")).classes("text-h6 q-mb-sm")
+                        ui.label(t("delete_missing_videos_warning")).classes(
+                            "text-body2 text-negative q-mb-lg"
+                        )
+                        with ui.row().classes("w-full justify-end gap-sm"):
+                            ui.button(t("cancel"), on_click=delete_missing_dialog.close).props(
+                                "flat"
+                            )
+                            ui.button(
+                                t("yes_delete"),
+                                icon="delete_forever",
+                                color="negative",
+                                on_click=do_delete_missing,
+                            )
+
+                    with ui.row().classes("items-center gap-sm q-mt-xs"):
+                        ui.label(
+                            t("delete_missing_videos_label")
+                            + f" ({missing_count})"
+                        ).classes("text-body2 text-grey-7")
+                        ui.space()
+                        ui.button(
+                            t("delete_missing_videos_label"),
+                            icon="video_file",
+                            color="negative",
+                            on_click=delete_missing_dialog.open,
+                        ).props("dense outline")
 
         with ui.expansion(t("advanced_settings"), icon="settings").classes("full-width q-mb-lg"):
             with ui.column().classes("w-full gap-lg q-pa-md"):

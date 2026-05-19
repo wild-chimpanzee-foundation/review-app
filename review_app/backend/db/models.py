@@ -68,6 +68,7 @@ class Video(Base):
     duration_sec: Mapped[float | None] = mapped_column(Float)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     is_valid: Mapped[bool | None] = mapped_column(Boolean)
+    is_missing: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     is_web_safe: Mapped[bool | None] = mapped_column(Boolean)
     validation_error: Mapped[str | None] = mapped_column(String)
     transcoded_path: Mapped[str | None] = mapped_column(String)

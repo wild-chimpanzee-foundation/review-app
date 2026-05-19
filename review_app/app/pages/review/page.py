@@ -220,7 +220,11 @@ def _render_ai_annotations(model_ann, global_species_map):
                         with ui.row().classes("items-center gap-x-2"):
                             _display_val = _val
                             _count = _models[0].get("count")
-                            if _ann_type == "object_detection" and _count is not None and _count > 0:
+                            if (
+                                _ann_type == "object_detection"
+                                and _count is not None
+                                and _count > 0
+                            ):
                                 _count_str = (
                                     f"{int(_count)}" if _count == int(_count) else f"{_count:.1f}"
                                 )
@@ -329,7 +333,12 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
                 "col text-caption text-center"
             ).style("white-space: nowrap; overflow: hidden; text-overflow: ellipsis;")
             with ui.row().classes("col justify-end items-center gap-xs no-wrap"):
-                queue_label = ui.label().classes("text-caption no-wrap")
+                queue_input = (
+                    ui.number(min=1, max=len(queue), value=current_idx + 1, step=1)
+                    .props("dense borderless hide-bottom-space input-class='text-caption text-right'")
+                    .style("width: 42px")
+                )
+                ui.label(f"/ {len(queue)}").classes("text-caption no-wrap")
                 ui.button(
                     icon="info_outline",
                     on_click=lambda: show_info_dialog(t("info_queue_title"), t("info_queue_body")),
@@ -346,10 +355,10 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
                 .classes("col")
                 .on("change", lambda e: navigate_to(int(e.args)))
             )
-            queue_label.bind_text_from(
-                slider,
-                "value",
-                backward=lambda v: t("queue_label", current=int(v) + 1, total=len(queue)),
+            queue_input.bind_value_from(slider, "value", backward=lambda v: int(v) + 1)
+            queue_input.on(
+                "keydown.enter",
+                lambda: navigate_to(max(0, min(int(queue_input.value or 1) - 1, len(queue) - 1))),
             )
             with ui.button(on_click=lambda: navigate(1)).props("flat dense") as next_btn:
                 with ui.row().classes("items-center gap-xs no-wrap"):
@@ -611,6 +620,9 @@ async def setup_review():
                 height: 100% !important;
                 object-fit: contain !important;
             }
+            input[type=number]::-webkit-inner-spin-button,
+            input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+            input[type=number] { -moz-appearance: textfield; }
         </style>
     """,
         shared=True,

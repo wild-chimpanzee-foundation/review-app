@@ -167,6 +167,8 @@ class QueueMixin(ProviderBase):
         joins: list[str] = []
         where: list[str] = []
 
+        where.append("v.is_missing = 0")
+
         if active_project_id:
             params["pid"] = active_project_id
             where.append("v.project_id = :pid")
