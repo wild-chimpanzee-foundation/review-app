@@ -124,6 +124,7 @@ class SpeciesMixin(ProviderBase):
                 ),
                 params,
             )
+        self._resync_projects_for_bundled_collections()
 
     @staticmethod
     def _sync_bundled_collections(conn, rows: list[dict[str, Any]]) -> None:
@@ -188,6 +189,26 @@ class SpeciesMixin(ProviderBase):
             len(all_col_names),
             ", ".join(sorted(all_col_names)),
         )
+
+    def _resync_projects_for_bundled_collections(self) -> None:
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT p.id, p.collection_id
+                    FROM projects p
+                    JOIN species_collections sc ON sc.id = p.collection_id
+                    WHERE p.collection_id IS NOT NULL AND sc.is_custom = 0
+                    """
+                )
+            ).fetchall()
+        for project_id, collection_id in rows:
+            self.set_project_collection(project_id, collection_id)
+            logger.debug(
+                "Re-synced project_species for project %s from bundled collection %s",
+                project_id,
+                collection_id,
+            )
 
     def list_collections(self) -> list[dict[str, Any]]:
         with self.engine.connect() as conn:
