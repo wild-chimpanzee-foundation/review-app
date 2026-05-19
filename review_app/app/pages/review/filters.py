@@ -1,6 +1,6 @@
 from nicegui import run, ui
 
-from review_app.app.pages.review.tags import _tag_label
+from review_app.app.pages.review.tags import _tag_label, tag_selector
 from review_app.app.state import (
     get_active_project_id,
     get_blank_threshold,
@@ -209,43 +209,16 @@ async def render_filter_drawer(
             _init_selected_tags = filters.get("selected_tags", [])
             if not isinstance(_init_selected_tags, list):
                 _init_selected_tags = []
-            selected_tags_set = {"keys": set(_init_selected_tags)}
-            chip_refs: dict[str, tuple] = {}
+            selected_tag_keys: set[str] = set(_init_selected_tags)
 
             if all_tags:
-                ui.label(t("tag_filter")).classes("text-caption q-mb-xs")
-                with ui.element("div").style(
-                    "max-height: 160px; overflow-y: auto; overflow-x: hidden; width: 100%;"
-                ):
-                    with ui.row().classes("w-full gap-xs flex-wrap items-center q-mb-xs"):
-                        for _tag in all_tags:
-                            _key = _tag["key"]
-                            _is_active = _key in selected_tags_set["keys"]
-                            _color = _tag.get("color") or "grey"
-                            _icon = _tag.get("icon") or "label"
-                            _chip = ui.chip(
-                                _tag_label(_tag),
-                                icon=_icon,
-                                color=_color if _is_active else "grey-5",
-                            ).props("clickable dense")
-                            if not _is_active:
-                                _chip.props("outline")
-                            chip_refs[_key] = (_chip, _color)
 
-                            async def _toggle_chip(k=_key):
-                                _c, _ac = chip_refs[k]
-                                if k in selected_tags_set["keys"]:
-                                    selected_tags_set["keys"].discard(k)
-                                    _c._props["color"] = "grey-5"
-                                    _c.props(add="outline")
-                                else:
-                                    selected_tags_set["keys"].add(k)
-                                    _c._props["color"] = _ac
-                                    _c.props(remove="outline")
-                                _c.update()
-                                await apply_filters()
+                async def on_tag_toggle(_tag_key: str):
+                    await apply_filters()
 
-                            _chip.on_click(_toggle_chip)
+                refresh_tags = tag_selector(
+                    sorted(all_tags, key=_tag_label), selected_tag_keys, on_tag_toggle
+                )
             multiple_annotators_cb = ui.checkbox(
                 t("multiple_annotators_filter"),
                 value=bool(filters.get("selected_multiple_annotators", False)),
@@ -275,11 +248,9 @@ async def render_filter_drawer(
                 is_review_later.value = False
                 annotator_filter.value = []
                 multiple_annotators_cb.value = False
-                selected_tags_set["keys"].clear()
-                for _c, _ac in chip_refs.values():
-                    _c._props["color"] = "grey-5"
-                    _c.props(add="outline")
-                    _c.update()
+                selected_tag_keys.clear()
+                if all_tags:
+                    refresh_tags()
                 web_safe_only_cb.value = False
                 sort_select.value = "camera"
                 sort_dir[0] = "desc"
@@ -306,7 +277,7 @@ async def render_filter_drawer(
                     "selected_multiple_annotators": multiple_annotators_cb.value,
                     "selected_needs_review": needs_review_filter.value,
                     "web_safe_only": web_safe_only_cb.value,
-                    "selected_tags": list(selected_tags_set["keys"]),
+                    "selected_tags": list(selected_tag_keys),
                 }
                 update_filters(**new_filters)
                 new_queue = await run.io_bound(
