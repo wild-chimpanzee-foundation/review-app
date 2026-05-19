@@ -23,6 +23,7 @@ class AnnotationMixin(ProviderBase):
         video_id: str,
         blank_threshold: float = 0.75,
         species_threshold: float = 0.75,
+        obj_detection_threshold: float = 0.75,
     ) -> dict[str, Any] | None:
         with self.engine.connect() as conn:
             detail_df = pd.read_sql(
@@ -41,21 +42,25 @@ class AnnotationMixin(ProviderBase):
                         WHERE ma.annotation_type = 'blank_non_blank'
                     ),
                     model_species_consensus AS (
-                        SELECT video_id, value_text AS classification_consensus
+                        SELECT video_id, value_text AS classification_consensus, consensus_count
                         FROM (
                             SELECT
                                 video_id,
                                 value_text,
+                                avg_count AS consensus_count,
                                 ROW_NUMBER() OVER (
                                     PARTITION BY video_id
-                                    ORDER BY avg_prob DESC, model_count DESC
+                                    ORDER BY is_obj_high_conf DESC, avg_prob DESC, model_count DESC
                                 ) AS rn
                             FROM (
                                 SELECT video_id, value_text,
                                        AVG(COALESCE(probability, 0.0)) AS avg_prob,
-                                       COUNT(*) AS model_count
+                                       COUNT(*) AS model_count,
+                                       -- object_detection rows above threshold take priority over species in consensus ranking
+                                       MAX(CASE WHEN annotation_type = 'object_detection' AND COALESCE(probability, 0.0) >= :obj_thr THEN 1 ELSE 0 END) AS is_obj_high_conf,
+                                       AVG(value_num) AS avg_count
                                 FROM model_annotations
-                                WHERE annotation_type = 'species'
+                                WHERE annotation_type IN ('species', 'object_detection')
                                   AND COALESCE(probability, 0.0) >= :min_prob
                                   AND value_text IS NOT NULL
                                   AND TRIM(value_text) <> ''
@@ -69,7 +74,7 @@ class AnnotationMixin(ProviderBase):
                         FROM (
                             SELECT video_id, AVG(COALESCE(probability, 0.0)) AS prob_sum
                             FROM model_annotations
-                            WHERE annotation_type = 'species'
+                            WHERE annotation_type IN ('species', 'object_detection')
                             GROUP BY video_id, value_text
                         ) _sp
                         GROUP BY video_id
@@ -135,6 +140,7 @@ class AnnotationMixin(ProviderBase):
                         ms.behavior_prediction,
                         ms.individual_count,
                         msc.classification_consensus,
+                        msc.consensus_count,
                         COALESCE(mbe.behavior_prediction, 'unlabeled') AS model_behavior_prediction,
                         CASE
                             WHEN vl.is_blank IS NOT NULL THEN CASE WHEN vl.is_blank = 1 THEN 'blank' ELSE 'non_blank' END
@@ -159,7 +165,11 @@ class AnnotationMixin(ProviderBase):
                     """
                 ),
                 conn,
-                params={"video_id": video_id, "min_prob": self._consensus_min_probability},
+                params={
+                    "video_id": video_id,
+                    "min_prob": self._consensus_min_probability,
+                    "obj_thr": obj_detection_threshold,
+                },
             )
 
             manual_rows = pd.read_sql(
@@ -262,6 +272,16 @@ class AnnotationMixin(ProviderBase):
 
         return row
 
+    def delete_model_annotations(self, project_id: str | None) -> int:
+        if not project_id:
+            raise ValueError("project_id is required to delete model annotations")
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                text("DELETE FROM model_annotations WHERE project_id = :pid"),
+                {"pid": project_id},
+            )
+        return result.rowcount
+
     def get_model_annotations(self, video_id: str) -> pd.DataFrame:
         with self.engine.connect() as conn:
             model_df = pd.read_sql(
@@ -271,7 +291,10 @@ class AnnotationMixin(ProviderBase):
                         model_name,
                         annotation_type,
                         value_text,
+                        value_num,
                         probability,
+                        t_start_sec,
+                        t_end_sec,
                         updated_at AS created_at
                     FROM model_annotations
                     WHERE video_id = :video_id
@@ -287,7 +310,10 @@ class AnnotationMixin(ProviderBase):
                     "model_name",
                     "annotation_type",
                     "value_text",
+                    "value_num",
                     "probability",
+                    "t_start_sec",
+                    "t_end_sec",
                     "created_at",
                 ]
             )

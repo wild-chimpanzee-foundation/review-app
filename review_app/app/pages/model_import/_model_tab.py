@@ -222,7 +222,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             df_to_import = cleaned_df.copy()
             mappings = get_state_val("species_mappings", {})
             if mappings:
-                mask = df_to_import["annotation_type"] == "species"
+                mask = df_to_import["annotation_type"].isin({"species", "object_detection"})
                 df_to_import.loc[mask, "value_text"] = df_to_import.loc[
                     mask, "value_text"
                 ].replace(mappings)
@@ -434,6 +434,7 @@ def _render_annotation_mappings(ann_mappings: list, col_opts_none: dict, config_
                 t("ann_col_type"),
                 t("ann_col_value"),
                 t("ann_col_prob"),
+                t("ann_col_count"),
             ):
                 ui.label(lbl).classes("col text-caption")
             ui.element("div").style("min-width:32px")
@@ -458,8 +459,13 @@ def _render_annotation_mappings(ann_mappings: list, col_opts_none: dict, config_
                 .props("outlined dense")
                 .classes("col")
             )
+            count_sel = (
+                ui.select(options=col_opts_none, value=m.get("count_col", ""))
+                .props("outlined dense")
+                .classes("col")
+            )
 
-            def make_updater(idx, ni, ts, vs, ps):
+            def make_updater(idx, ni, ts, vs, ps, cs):
                 def _upd():
                     ms = get_state_val("ann_mappings") or []
                     if idx < len(ms):
@@ -469,17 +475,19 @@ def _render_annotation_mappings(ann_mappings: list, col_opts_none: dict, config_
                                 "annotation_type": ts.value,
                                 "value_col": vs.value or "",
                                 "prob_col": ps.value or "",
+                                "count_col": cs.value or "",
                             }
                         )
                         set_state_val("ann_mappings", ms)
 
                 return _upd
 
-            upd = make_updater(i, name_in, type_sel, val_sel, prob_sel)
+            upd = make_updater(i, name_in, type_sel, val_sel, prob_sel, count_sel)
             name_in.on_value_change(upd)
             type_sel.on_value_change(upd)
             val_sel.on_value_change(upd)
             prob_sel.on_value_change(upd)
+            count_sel.on_value_change(upd)
 
             def make_remover(idx):
                 def _rem():
@@ -495,7 +503,13 @@ def _render_annotation_mappings(ann_mappings: list, col_opts_none: dict, config_
     def add_row():
         ms = get_state_val("ann_mappings") or []
         ms.append(
-            {"model_name": "", "annotation_type": "species", "value_col": "", "prob_col": ""}
+            {
+                "model_name": "",
+                "annotation_type": "species",
+                "value_col": "",
+                "prob_col": "",
+                "count_col": "",
+            }
         )
         set_state_val("ann_mappings", ms)
         config_ui.refresh()

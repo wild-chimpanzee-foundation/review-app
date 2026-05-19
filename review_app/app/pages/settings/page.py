@@ -10,10 +10,12 @@ from review_app.app.state import (
     get_blank_threshold,
     get_data_provider,
     get_language,
+    get_obj_detection_threshold,
     get_species_threshold,
     set_active_project,
     set_annotator_name,
     set_blank_threshold,
+    set_obj_detection_threshold,
     set_species_threshold,
 )
 from review_app.app.translations import t
@@ -30,6 +32,7 @@ def _build_settings_content(container: ui.column):
     initial_annotator = get_annotator_name()
     initial_blank_threshold = get_blank_threshold()
     initial_species_threshold = get_species_threshold()
+    initial_obj_detection_threshold = get_obj_detection_threshold()
 
     active_project_id = get_active_project_id()
     current_project_name = ""
@@ -221,6 +224,12 @@ def _build_settings_content(container: ui.column):
                     )
                     species_threshold_slider = ui.slider(
                         min=0.0, max=1.0, step=0.05, value=initial_species_threshold
+                    ).props("label label-always class=q-mb-md")
+                    ui.label(t("obj_detection_threshold_label")).classes(
+                        "text-caption text-grey-6 q-mb-xs"
+                    )
+                    obj_detection_threshold_slider = ui.slider(
+                        min=0.0, max=1.0, step=0.05, value=initial_obj_detection_threshold
                     ).props("label label-always")
 
                     with ui.row().classes("w-full justify-end q-mt-sm"):
@@ -228,6 +237,7 @@ def _build_settings_content(container: ui.column):
                         def save_thresholds():
                             set_blank_threshold(blank_threshold_slider.value)
                             set_species_threshold(species_threshold_slider.value)
+                            set_obj_detection_threshold(obj_detection_threshold_slider.value)
                             ui.notify(t("settings_saved"), type="positive")
 
                         ui.button(
@@ -235,7 +245,7 @@ def _build_settings_content(container: ui.column):
                         ).props("dense")
 
                 with ui.expansion(t("database_management"), icon="storage").classes("full-width"):
-                    render_database_section(current_db_path)
+                    render_database_section(current_db_path, active_project_id)
 
         with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("w-full items-center q-mb-md"):

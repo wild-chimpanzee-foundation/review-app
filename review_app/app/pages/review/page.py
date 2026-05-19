@@ -18,6 +18,7 @@ from review_app.app.state import (
     get_current_idx,
     get_filters,
     get_language,
+    get_obj_detection_threshold,
     get_queue,
     get_species_threshold,
     get_state_val,
@@ -141,6 +142,7 @@ def _render_ai_annotations(model_ann, global_species_map):
         _ann_type = _row.get("annotation_type", "")
         _value = _row.get("value_text", "") or ""
         _prob = _row.get("probability")
+        _vnum = _row.get("value_num")
 
         if _ann_type == "blank_non_blank":
             threshold = get_blank_threshold() or 0.0
@@ -150,7 +152,7 @@ def _render_ai_annotations(model_ann, global_species_map):
                 _value = t("non_blank") if _prob < threshold else t("blank")
             else:
                 _value = t("blank") if str(_value).lower() == "blank" else t("non_blank")
-        elif _ann_type == "species":
+        elif _ann_type in {"species", "object_detection"}:
             _value = global_species_map.get(_value, _value)
 
         _color = get_probability_color(_prob) if _prob is not None else "grey"
@@ -161,7 +163,12 @@ def _render_ai_annotations(model_ann, global_species_map):
             groups[_ann_type][_value] = []
 
         groups[_ann_type][_value].append(
-            {"model": _row.get("model_name", ""), "prob": _prob, "color": _color}
+            {
+                "model": _row.get("model_name", ""),
+                "prob": _prob,
+                "color": _color,
+                "count": _vnum,
+            }
         )
         groups[_ann_type][_value].sort(
             key=lambda x: (x["prob"] is not None, x["prob"]), reverse=True
@@ -181,10 +188,11 @@ def _render_ai_annotations(model_ann, global_species_map):
         rename_map = {
             "species": t("species_annotations"),
             "blank_non_blank": t("blank_annotations"),
+            "object_detection": t("object_detection_annotations"),
         }
         first_ann_type = True
         for _ann_type, _predictions in groups.items():
-            ann_type_display = rename_map.get(_ann_type, _ann_type.capitalize())
+            ann_type_display = rename_map.get(_ann_type, _ann_type.capitalize().replace("_", " "))
             with ui.row().classes("items-center gap-xs q-mt-xs q-mb-none"):
                 ui.label(ann_type_display).classes("text-micro  text-italic")
                 if first_ann_type:
@@ -210,7 +218,14 @@ def _render_ai_annotations(model_ann, global_species_map):
                         "w-full items-center justify-between q-pa-xs rounded-borders bg-white/5 border border-white/5"
                     ):
                         with ui.row().classes("items-center gap-x-2"):
-                            ui.label(_val).classes("text-caption text-bold")
+                            _display_val = _val
+                            _count = _models[0].get("count")
+                            if _ann_type == "object_detection" and _count is not None and _count > 0:
+                                _count_str = (
+                                    f"{int(_count)}" if _count == int(_count) else f"{_count:.1f}"
+                                )
+                                _display_val += f" (x{_count_str})"
+                            ui.label(_display_val).classes("text-caption text-bold")
                             if len(_models) > 1:
                                 ui.badge(f"{len(_models)}").props("color=blue-6 outline size=xs")
                         with ui.row().classes("gap-x-1"):
@@ -250,6 +265,7 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
         selected_video_id,
         get_blank_threshold(),
         get_species_threshold(),
+        get_obj_detection_threshold(),
     )
     model_ann_task = run.io_bound(dp.get_model_annotations, selected_video_id)
     video, model_ann = await asyncio.gather(video_task, model_ann_task)

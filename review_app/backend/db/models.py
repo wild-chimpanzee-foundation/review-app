@@ -12,6 +12,8 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -180,8 +182,13 @@ class IndividualObservation(Base):
 class ModelAnnotation(Base):
     __tablename__ = "model_annotations"
     __table_args__ = (
-        UniqueConstraint(
-            "video_id", "model_name", "annotation_type", name="uq_model_ann_identity"
+        Index(
+            "uq_model_ann_identity",
+            "video_id",
+            "model_name",
+            "annotation_type",
+            func.coalesce(text("value_text"), ""),
+            unique=True,
         ),
     )
 

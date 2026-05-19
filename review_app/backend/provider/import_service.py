@@ -164,7 +164,7 @@ class ImportMixin(ProviderBase):
 
     @staticmethod
     def _normalize_annotation_type(annotation_type: str) -> str:
-        supported = {"blank_non_blank", "species", "behavior"}
+        supported = {"blank_non_blank", "species", "behavior", "object_detection"}
         normalized = (annotation_type or "").strip().lower()
         if normalized not in supported:
             raise DataImportError(
@@ -227,6 +227,7 @@ class ImportMixin(ProviderBase):
                 ann_type = m.get("annotation_type", "species")
                 value_col = m.get("value_col", "").strip()
                 prob_col = m.get("prob_col", "").strip()
+                count_col = m.get("count_col", "").strip()
 
                 if not model_name:
                     continue
@@ -245,7 +246,12 @@ class ImportMixin(ProviderBase):
                     pv = pd.to_numeric(src_row[prob_col], errors="coerce")
                     probability = None if pd.isna(pv) else float(pv)
 
-                if value_text is not None or probability is not None:
+                value_num: float | None = None
+                if count_col and count_col in src_row.index:
+                    cv = pd.to_numeric(src_row[count_col], errors="coerce")
+                    value_num = None if pd.isna(cv) else float(cv)
+
+                if value_text is not None or probability is not None or value_num is not None:
                     rows.append(
                         {
                             "path": video_id,
@@ -253,11 +259,19 @@ class ImportMixin(ProviderBase):
                             "model_name": model_name,
                             "value_text": value_text,
                             "probability": probability,
+                            "value_num": value_num,
                         }
                     )
 
         empty = pd.DataFrame(
-            columns=["path", "annotation_type", "model_name", "value_text", "probability"]
+            columns=[
+                "path",
+                "annotation_type",
+                "model_name",
+                "value_text",
+                "probability",
+                "value_num",
+            ]
         )
         stats: dict[str, Any] = {
             "total_rows": len(df),
@@ -308,7 +322,9 @@ class ImportMixin(ProviderBase):
 
         src["path"] = src["path"].astype(str).str.strip().map(_resolve_path)
 
-        species_mask = src["annotation_type"].str.strip().str.lower() == "species"
+        species_mask = (
+            src["annotation_type"].str.strip().str.lower().isin({"species", "object_detection"})
+        )
         unique_species = (
             src.loc[species_mask, "value_text"].dropna().astype(str).str.strip().unique()
         )
@@ -387,7 +403,7 @@ class ImportMixin(ProviderBase):
             value_num = pd.to_numeric(row.get("value_num"), errors="coerce")
             value_num = None if pd.isna(value_num) else float(value_num)
 
-            if annotation_type == "species" and value_text:
+            if annotation_type in {"species", "object_detection"} and value_text:
                 original_value = value_text
                 mapped_to = mappings.get(original_value)
                 if mapped_to:
@@ -469,8 +485,9 @@ class ImportMixin(ProviderBase):
                     VALUES
                         (:id, :project_id, :video_id, :annotation_type, :model_name,
                          :value_text, :value_num, :probability, :t_start_sec, :t_end_sec, :updated_at)
-                    ON CONFLICT(video_id, model_name, annotation_type) DO UPDATE SET
-                        value_text  = excluded.value_text,
+                    -- value_text is part of the conflict key, so it cannot be updated here.
+                    -- To correct a misspelled value_text, delete the row first then re-import.
+                    ON CONFLICT(video_id, model_name, annotation_type, COALESCE(value_text, '')) DO UPDATE SET
                         value_num   = excluded.value_num,
                         probability = excluded.probability,
                         t_start_sec = excluded.t_start_sec,
@@ -656,7 +673,7 @@ class ImportMixin(ProviderBase):
             # needs_review: flag=1 when models disagree on species or blank signal is weak
             all_video_ids = model_df["video_id"].unique()
             species_agg = (
-                model_df[model_df["annotation_type"] == "species"]
+                model_df[model_df["annotation_type"].isin({"species", "object_detection"})]
                 .groupby("video_id")
                 .agg(distinct_top1=("value_text", "nunique"), model_count=("value_text", "count"))
                 .reset_index()

@@ -127,7 +127,7 @@ class StatsMixin(ProviderBase):
                     COUNT(*)             AS predictions,
                     ROUND(AVG(probability), 3) AS avg_confidence
                 FROM model_annotations
-                WHERE annotation_type = 'species'
+                WHERE annotation_type IN ('species', 'object_detection')
                 AND value_text IS NOT NULL
                 {af}
                 GROUP BY model_name, value_text
@@ -149,7 +149,7 @@ class StatsMixin(ProviderBase):
                             ORDER BY COALESCE(probability, 0) DESC
                         ) AS rn
                     FROM model_annotations
-                    WHERE annotation_type = 'species' {af}
+                    WHERE annotation_type IN ('species', 'object_detection') {af}
                 ),
                 manual AS (
                     SELECT DISTINCT io.video_id, s.scientific_name AS manual_species

@@ -165,7 +165,7 @@ def _migration_v7(conn) -> None:
             )
 
 
-def _migration_v10(conn) -> None:
+def _migration_v12(conn) -> None:
     """Seed additional built-in tags. Idempotent."""
     import uuid as _uuid
 
@@ -260,6 +260,60 @@ def _migration_v9(conn) -> None:
         )
 
 
+def _migration_v11(conn) -> None:
+    """Replace inline UNIQUE(video_id, model_name, annotation_type) with an expression index
+    that includes value_text so multiple object_detection rows per video are allowed.
+    SQLite cannot drop inline table constraints, so we recreate the table."""
+    conn.execute(text("DROP INDEX IF EXISTS uq_model_ann_identity"))
+    conn.execute(
+        text("""
+            CREATE TABLE model_annotations_new (
+                id TEXT PRIMARY KEY,
+                project_id TEXT REFERENCES projects(id),
+                video_id TEXT NOT NULL REFERENCES videos(video_id),
+                annotation_type TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                value_text TEXT,
+                value_num REAL,
+                probability REAL,
+                t_start_sec REAL,
+                t_end_sec REAL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+    )
+    conn.execute(
+        text("""
+            INSERT INTO model_annotations_new
+            SELECT id, project_id, video_id, annotation_type, model_name,
+                   value_text, value_num, probability, t_start_sec, t_end_sec, updated_at
+            FROM model_annotations
+        """)
+    )
+    conn.execute(text("DROP TABLE model_annotations"))
+    conn.execute(text("ALTER TABLE model_annotations_new RENAME TO model_annotations"))
+    conn.execute(
+        text(
+            "CREATE UNIQUE INDEX uq_model_ann_identity "
+            "ON model_annotations(video_id, model_name, annotation_type, COALESCE(value_text, ''))"
+        )
+    )
+    conn.execute(
+        text("CREATE INDEX idx_model_annotations_project_id ON model_annotations(project_id)")
+    )
+    conn.execute(
+        text("CREATE INDEX idx_model_annotations_video_id ON model_annotations(video_id)")
+    )
+    conn.execute(
+        text(
+            "CREATE INDEX idx_model_annotations_annotation_type ON model_annotations(annotation_type)"
+        )
+    )
+    conn.execute(
+        text("CREATE INDEX idx_model_annotations_model_name ON model_annotations(model_name)")
+    )
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -315,9 +369,25 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
         ],
     ),
     (9, _migration_v9),
-    (10, _migration_v10),
     (
-        11,
+        # v10 adds the expression index to the existing table (inline UNIQUE constraint stays).
+        # v11 supersedes this by doing a full table recreate to drop the inline constraint.
+        # v10 must remain here for DBs that already applied it.
+        10,
+        lambda conn: [
+            conn.execute(text("DROP INDEX IF EXISTS uq_model_ann_identity")),
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_model_ann_identity "
+                    "ON model_annotations(video_id, model_name, annotation_type, COALESCE(value_text, ''))"
+                )
+            ),
+        ],
+    ),
+    (11, _migration_v11),
+    (12, _migration_v12),
+    (
+        13,
         lambda conn: [
             conn.execute(
                 text(
