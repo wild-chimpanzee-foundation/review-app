@@ -309,7 +309,9 @@ class ImportMixin(ProviderBase):
         src["path"] = src["path"].astype(str).str.strip().map(_resolve_path)
 
         species_mask = src["annotation_type"].str.strip().str.lower() == "species"
-        unique_species = src.loc[species_mask, "value_text"].dropna().astype(str).str.strip().unique()
+        unique_species = (
+            src.loc[species_mask, "value_text"].dropna().astype(str).str.strip().unique()
+        )
         unique_species = {str(s) for s in unique_species if str(s).strip()}
 
         variant_map = self._build_species_variant_map()
@@ -616,14 +618,17 @@ class ImportMixin(ProviderBase):
                 params=params,
             )
 
+        all_builtin_keys = sorted(t["key"] for t in self.get_all_tags() if not t["is_custom"])
+        # One 0/1 column per built-in tag — always present even if no video has it
+        for key in all_builtin_keys:
+            flagged = (
+                tags_df.loc[tags_df["key"] == key, "video_id"]
+                if not tags_df.empty
+                else pd.Series([], dtype=str)
+            )
+            base_df[f"tag_{key}"] = base_df["video_id"].isin(flagged).astype(int)
+        # Custom tags combined in one column
         if not tags_df.empty:
-            builtin_keys = tags_df.loc[tags_df["is_custom"] == 0, "key"].unique().tolist()
-            # One 0/1 column per built-in tag
-            for key in sorted(builtin_keys):
-                col = f"tag_{key}"
-                flagged = tags_df.loc[tags_df["key"] == key, "video_id"]
-                base_df[col] = base_df["video_id"].isin(flagged).astype(int)
-            # Custom tags combined in one column
             custom_tags = tags_df[tags_df["is_custom"] == 1].copy()
             if not custom_tags.empty:
                 custom_agg = (
@@ -635,8 +640,6 @@ class ImportMixin(ProviderBase):
             else:
                 base_df["custom_tags"] = None
         else:
-            for key in ["fire", "nice_shot", "broken_metadata"]:
-                base_df[f"tag_{key}"] = 0
             base_df["custom_tags"] = None
 
         if not model_df.empty:
@@ -685,6 +688,11 @@ class ImportMixin(ProviderBase):
             base_df = base_df.merge(model_wide, on="video_id", how="left")
 
         base_df = base_df.drop(columns=["video_id"], errors="ignore")
+
+        # Move tag columns to the end
+        tag_cols = [c for c in base_df.columns if c.startswith("tag_") or c == "custom_tags"]
+        other_cols = [c for c in base_df.columns if c not in tag_cols]
+        base_df = base_df[other_cols + tag_cols]
 
         # Format float timestamp columns as fixed-decimal strings so that to_csv() writes them
         # quoted. Without this, LibreOffice with European locale settings misreads "60.085" as
@@ -814,7 +822,14 @@ class ImportMixin(ProviderBase):
             if pd.notna(rl_raw) and bool(int(rl_raw)):
                 self.set_review_later(str(video_id), True)
 
-            # Restore tags
+            # Restore tags — auto-create missing custom tags so they survive cross-DB import
+            if "custom_tags" in df.columns:
+                raw = first.get("custom_tags")
+                if pd.notna(raw) and str(raw).strip():
+                    for k in str(raw).split(","):
+                        k = k.strip()
+                        if k:
+                            self.create_custom_tag(name_en=k)
             tag_keys = _extract_tag_keys(first, df.columns)
             if tag_keys is not None:
                 self.set_video_tags(str(video_id), tag_keys, append=append)
