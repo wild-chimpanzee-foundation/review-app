@@ -423,12 +423,26 @@ class GUI:
                 self.dp = dp
                 load_settings_from_db(dp)
 
-                from review_app.backend.db.backup import BackupError, create_backup
+                from datetime import datetime, timezone
 
-                try:
-                    create_backup(reason="startup")
-                except BackupError:
-                    pass
+                from review_app.backend.db.backup import (
+                    BackupError,
+                    create_backup,
+                    list_backups,
+                )
+
+                recent = list_backups()
+                if recent and (datetime.now(timezone.utc) - recent[0]["timestamp"]).total_seconds() < 600:
+                    logger.info("Skipping startup backup — last backup is less than 10 minutes old")
+                else:
+                    try:
+                        create_backup(reason="startup")
+                    except BackupError:
+                        pass
+
+                from review_app.backend.provider.video import cleanup_orphaned_transcoded_files
+
+                cleanup_orphaned_transcoded_files(dp.engine, transcoded_cache)
 
                 active_pid = get_active_project_id()
                 if active_pid and dp.get_project(active_pid):
@@ -472,6 +486,16 @@ class GUI:
         def _backup_on_shutdown():
             logger.info("Shutting down")
             if self.dp and self.dp.engine:
+                from sqlalchemy import text
+
+                try:
+                    with self.dp.engine.connect() as conn:
+                        conn.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+                        conn.execute(text("VACUUM"))
+                    logger.info("WAL checkpoint and VACUUM completed")
+                except Exception:
+                    logger.warning("DB maintenance on shutdown failed", exc_info=True)
+
                 from review_app.backend.db.backup import BackupError, create_backup
 
                 try:

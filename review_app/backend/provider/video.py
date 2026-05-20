@@ -537,3 +537,23 @@ class VideoMixin(ProviderBase):
                 session.delete(v)
             session.commit()
         return len(videos)
+
+
+def cleanup_orphaned_transcoded_files(engine: Any, cache_dir: Path) -> int:
+    """Delete .mp4 files in cache_dir that are not referenced by any Video.transcoded_path."""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT transcoded_path FROM videos WHERE transcoded_path IS NOT NULL"))
+            known = {row[0] for row in rows}
+        removed = 0
+        for f in cache_dir.glob("*.mp4"):
+            if str(f) not in known:
+                logger.info("Removing orphaned transcoded cache file: %s", f)
+                f.unlink(missing_ok=True)
+                removed += 1
+        if removed:
+            logger.info("Removed %d orphaned transcoded cache file(s)", removed)
+        return removed
+    except Exception:
+        logger.warning("Failed to clean up orphaned transcoded cache files", exc_info=True)
+        return 0
