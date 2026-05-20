@@ -299,11 +299,19 @@ Tauraco macrorhynchus;Touraco a gros bec;Oiseau;LC;Yellow-billed turaco;Bird;n;y
 Thescelocichla leucopleura;Bulbul des raphias;Oiseau;LC;Swamp palm bulbul;Bird;y;y;y
 Trochocercus nitens;Tchitrec noir;Oiseau;LC;Western crested-flycatcher;Bird;y;y;y
 Tychaedon leucosticta;Agrobate du Ghana;Oiseau;LC;Forest scrub-robin;Bird;y;y;y
-bicycle;Vélo;Détection d'objets;NA;Bicycle;Object Detection;y;y;y
-car;Voiture;Détection d'objets;NA;Car;Object Detection;y;y;y
-motorcycle;Moto;Détection d'objets;NA;Motorcycle;Object Detection;y;y;y
-bus;Bus;Détection d'objets;NA;Bus;Object Detection;y;y;y
-truck;Camion;Détection d'objets;NA;Truck;Object Detection;y;y;y
-boat;Bateau;Détection d'objets;NA;Boat;Object Detection;y;y;y
-train;Train;Détection d'objets;NA;Train;Object Detection;y;y;y
-airplane;Avion;Détection d'objets;NA;Airplane;Object Detection;y;y;y
+bicycle_moving;Vélo en mouvement;Objet en mouvement;NA;Bicycle (moving);Object Moving;y;y;y
+car_moving;Voiture en mouvement;Objet en mouvement;NA;Car (moving);Object Moving;y;y;y
+motorcycle_moving;Moto en mouvement;Objet en mouvement;NA;Motorcycle (moving);Object Moving;y;y;y
+bus_moving;Bus en mouvement;Objet en mouvement;NA;Bus (moving);Object Moving;y;y;y
+truck_moving;Camion en mouvement;Objet en mouvement;NA;Truck (moving);Object Moving;y;y;y
+boat_moving;Bateau en mouvement;Objet en mouvement;NA;Boat (moving);Object Moving;y;y;y
+train_moving;Train en mouvement;Objet en mouvement;NA;Train (moving);Object Moving;y;y;y
+airplane_moving;Avion en mouvement;Objet en mouvement;NA;Airplane (moving);Object Moving;y;y;y
+bicycle_stationary;Vélo à l'arrêt;Objet à l'arrêt;NA;Bicycle (stationary);Object Stationary;y;y;y
+car_stationary;Voiture à l'arrêt;Objet à l'arrêt;NA;Car (stationary);Object Stationary;y;y;y
+motorcycle_stationary;Moto à l'arrêt;Objet à l'arrêt;NA;Motorcycle (stationary);Object Stationary;y;y;y
+bus_stationary;Bus à l'arrêt;Objet à l'arrêt;NA;Bus (stationary);Object Stationary;y;y;y
+truck_stationary;Camion à l'arrêt;Objet à l'arrêt;NA;Truck (stationary);Object Stationary;y;y;y
+boat_stationary;Bateau à l'arrêt;Objet à l'arrêt;NA;Boat (stationary);Object Stationary;y;y;y
+train_stationary;Train à l'arrêt;Objet à l'arrêt;NA;Train (stationary);Object Stationary;y;y;y
+airplane_stationary;Avion à l'arrêt;Objet à l'arrêt;NA;Airplane (stationary);Object Stationary;y;y;y

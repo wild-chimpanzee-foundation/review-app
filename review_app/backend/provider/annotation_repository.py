@@ -197,12 +197,56 @@ class AnnotationMixin(ProviderBase):
                 {"video_id": video_id},
             ).fetchall()
 
+            suggestion_rows = pd.read_sql(
+                text(
+                    """
+                    SELECT value_text AS species, annotation_type,
+                           AVG(COALESCE(probability, 0.0)) AS avg_prob,
+                           AVG(value_num) AS avg_count
+                    FROM model_annotations
+                    WHERE video_id = :video_id
+                      AND annotation_type IN ('species', 'object_detection')
+                      AND COALESCE(probability, 0.0) >= :min_prob
+                      AND value_text IS NOT NULL AND TRIM(value_text) != ''
+                    GROUP BY value_text, annotation_type
+                    ORDER BY avg_prob DESC
+                    """
+                ),
+                conn,
+                params={"video_id": video_id, "min_prob": self._consensus_min_probability},
+            )
+
         if detail_df.empty:
             return None
 
+        suggestions = []
+        if not suggestion_rows.empty:
+            sp_rows = suggestion_rows[
+                (suggestion_rows["annotation_type"] == "species")
+                & (suggestion_rows["avg_prob"] >= species_threshold)
+            ].head(1)
+            for _, r in sp_rows.iterrows():
+                suggestions.append({
+                    "species": r["species"],
+                    "probability": float(r["avg_prob"]),
+                    "count": max(1, int(round(r["avg_count"]))) if pd.notna(r.get("avg_count")) else 1,
+                })
+            obj_rows = suggestion_rows[
+                (suggestion_rows["annotation_type"] == "object_detection")
+                & (suggestion_rows["avg_prob"] >= obj_detection_threshold)
+            ]
+            for _, r in obj_rows.iterrows():
+                suggestions.append({
+                    "species": r["species"],
+                    "probability": float(r["avg_prob"]),
+                    "count": max(1, int(round(r["avg_count"]))) if pd.notna(r.get("avg_count")) else 1,
+                })
+
         video_tag_keys = [r[0] for r in tag_rows]
+        row_dict = detail_df.iloc[0].to_dict()
+        row_dict["model_suggestions"] = suggestions
         return self._build_video_detail_row(
-            detail_df.iloc[0].to_dict(),
+            row_dict,
             manual_rows,
             blank_threshold,
             species_threshold,

@@ -73,18 +73,32 @@ def _init_annotation_state(video, default_species, default_behavior):
             is_blank = True
         else:
             is_blank = False
-            raw_count = video.get("consensus_count")
-            initial_count = max(1, int(round(raw_count))) if raw_count is not None else 1
-            selections = [
-                _new_annotation(
-                    default_species,
-                    default_behavior,
-                    video.get("duration_sec"),
-                    source="model" if default_species else None,
-                    probability=video.get("max_species_confidence") if default_species else None,
-                    count=initial_count,
-                )
-            ]
+            model_suggestions = video.get("model_suggestions") or []
+            if model_suggestions:
+                selections = [
+                    _new_annotation(
+                        s["species"],
+                        default_behavior,
+                        video.get("duration_sec"),
+                        source="model",
+                        probability=s["probability"],
+                        count=s["count"],
+                    )
+                    for s in model_suggestions
+                ]
+            else:
+                raw_count = video.get("consensus_count")
+                initial_count = max(1, int(round(raw_count))) if raw_count is not None else 1
+                selections = [
+                    _new_annotation(
+                        default_species,
+                        default_behavior,
+                        video.get("duration_sec"),
+                        source="model" if default_species else None,
+                        probability=video.get("max_species_confidence") if default_species else None,
+                        count=initial_count,
+                    )
+                ]
 
     set_state_val("review_is_blank", is_blank)
     set_selections(selections)
