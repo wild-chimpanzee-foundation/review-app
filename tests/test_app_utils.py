@@ -4,7 +4,7 @@ from review_app.app.utils import get_probability_color, user_error_message
 
 class TestUserErrorMessage:
     def test_with_user_message_key(self, monkeypatch):
-        monkeypatch.setattr("review_app.app.state._language", "en")
+        monkeypatch.setattr("review_app.app.translations.get_language", lambda: "en")
 
         exc = Exception("detail")
         exc.user_message_key = "error_generic"
@@ -17,7 +17,7 @@ class TestUserErrorMessage:
         assert result == "plain error message"
 
     def test_with_subclass_default_key(self, monkeypatch):
-        monkeypatch.setattr("review_app.app.state._language", "en")
+        monkeypatch.setattr("review_app.app.translations.get_language", lambda: "en")
 
         from review_app.backend.errors import DataImportError, SpeciesError, VideoError
 
@@ -31,7 +31,7 @@ class TestUserErrorMessage:
             assert result == TRANSLATIONS["en"][expected_key]
 
     def test_with_custom_user_message_key(self, monkeypatch):
-        monkeypatch.setattr("review_app.app.state._language", "en")
+        monkeypatch.setattr("review_app.app.translations.get_language", lambda: "en")
 
         from review_app.backend.errors import AppError
 

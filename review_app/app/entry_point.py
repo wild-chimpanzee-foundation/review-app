@@ -13,11 +13,11 @@ from review_app.app.project_picker import build_project_picker
 from review_app.app.setup_wizard import setup_wizard
 from review_app.app.state import (
     get_active_project_id,
+    get_annotator_name,
     get_data_provider,
     get_language,
     is_dark_mode,
     load_settings_from_db,
-    set_active_project,
     set_dark_mode,
     set_data_provider,
     set_language,
@@ -229,6 +229,23 @@ def shared_header(show_drawer: bool = False):
                 )
                 ui.button(icon="dark_mode", on_click=toggle_dark).props("flat round color=white")
 
+                annotator = get_annotator_name()
+                if annotator:
+                    with (
+                        ui.button(icon="person").props("flat round color=white").tooltip(annotator)
+                    ):
+                        with ui.menu().props("auto-close"):
+                            ui.menu_item(annotator).props("disabled")
+                            ui.separator()
+
+                            def _do_logout():
+                                from review_app.app.state import clear_session
+
+                                clear_session(keep_prefs=True)
+                                ui.navigate.to("/login")
+
+                            ui.menu_item(t("login_logout"), on_click=_do_logout)
+
     return drawer, toggle_drawer
 
 
@@ -247,14 +264,21 @@ class GUI:
         self._startup_error: Exception | None = None
 
     def main_page(self):
-        from nicegui import ui
+        from nicegui import app, ui
 
         if self._startup_error:
             ui.navigate.to("/db-error")
+        elif not app.storage.user.get("annotator_name"):
+            ui.navigate.to("/login")
         elif get_active_project_id():
             ui.navigate.to("/overview")
         else:
             ui.navigate.to("/setup")
+
+    def login_page(self):
+        from review_app.app.pages.login import setup_login
+
+        setup_login()
 
     def db_error_page(self):
         from nicegui import ui
@@ -319,21 +343,37 @@ class GUI:
                 ).props("color=negative")
 
     async def overview_page(self):
+        from review_app.app.utils import require_login
+
+        if not require_login():
+            return
         from review_app.app.pages.overview import setup_overview
 
         await setup_overview()
 
     async def review_page(self):
+        from review_app.app.utils import require_login
+
+        if not require_login():
+            return
         from review_app.app.pages.review import setup_review
 
         await setup_review()
 
     async def model_import_page(self):
+        from review_app.app.utils import require_login
+
+        if not require_login():
+            return
         from review_app.app.pages.model_import import setup_model_import
 
         await setup_model_import()
 
     async def settings_page(self):
+        from review_app.app.utils import require_login
+
+        if not require_login():
+            return
         from review_app.app.pages.settings import setup_settings
 
         await setup_settings()
@@ -341,6 +381,10 @@ class GUI:
     def setup_page(self):
         from nicegui import ui
 
+        from review_app.app.utils import require_login
+
+        if not require_login():
+            return
         shared_header()
 
         def on_setup_complete():
@@ -382,7 +426,7 @@ class GUI:
         _udd.mkdir(parents=True, exist_ok=True)
         _setup_logging(_udd, dev_mode)
 
-        logger.info("Starting (dev=%s, port=%d, data_dir=%s)", dev_mode, port, _udd)
+        logger.info("Starting (dev=%s, port=%d, host=%s, data_dir=%s)", dev_mode, port, host, _udd)
 
         @app.on_page_exception
         def custom_error_page(exception: Exception):
@@ -401,6 +445,7 @@ class GUI:
                 ui.button(t("go_home_btn"), on_click=lambda: ui.navigate.to("/"), icon="home")
 
         ui.page("/")(self.main_page)
+        ui.page("/login")(self.login_page)
         ui.page("/db-error")(self.db_error_page)
         ui.page("/overview")(self.overview_page)
         ui.page("/review")(self.review_page)
@@ -423,47 +468,32 @@ class GUI:
                 self.dp = dp
                 load_settings_from_db(dp)
 
-                from datetime import datetime, timezone
+                from review_app.backend.db.backup import BackupError, create_backup
 
-                from review_app.backend.db.backup import (
-                    BackupError,
-                    create_backup,
-                    list_backups,
-                )
+                try:
+                    create_backup(reason="startup")
+                except BackupError:
+                    pass
 
-                recent = list_backups()
-                if recent and (datetime.now(timezone.utc) - recent[0]["timestamp"]).total_seconds() < 600:
-                    logger.info("Skipping startup backup — last backup is less than 10 minutes old")
-                else:
-                    try:
-                        create_backup(reason="startup")
-                    except BackupError:
-                        pass
-
-                from review_app.backend.provider.video import cleanup_orphaned_transcoded_files
-
-                cleanup_orphaned_transcoded_files(dp.engine, transcoded_cache)
-
-                active_pid = get_active_project_id()
-                if active_pid and dp.get_project(active_pid):
-                    dp.touch_project(active_pid)
-                else:
+                # Determine and persist the global default project in the DB.
+                # Per-user active project is loaded at login via load_session_defaults().
+                _default_pid = dp.get_setting("active_project_id")
+                if not (_default_pid and dp.get_project(_default_pid)):
                     proj = dp.get_most_recent_project()
                     if proj:
-                        set_active_project(proj.id)
+                        dp.set_setting("active_project_id", proj.id)
                         dp.touch_project(proj.id)
+                        _default_pid = proj.id
 
-                active_pid = get_active_project_id()
-                active_proj = dp.get_project(active_pid) if active_pid else None
-                logger.info(
-                    "Active project: %s (id=%s)",
-                    active_proj.name if active_proj else "none",
-                    active_pid or "none",
-                )
+                logger.info("Default project: %s", _default_pid or "none")
 
-                set_media_dirs(
-                    [Path(d.path) for d in dp.get_project_dirs(get_active_project_id())]
-                )
+                # Load media dirs from all projects so any user can serve their videos.
+                all_dirs = [
+                    Path(d.path)
+                    for proj in dp.list_projects()
+                    for d in dp.get_project_dirs(proj.id)
+                ]
+                set_media_dirs(all_dirs)
             except Exception as e:
                 logger.exception("Could not initialize data provider at startup")
                 self._startup_error = e
@@ -486,16 +516,6 @@ class GUI:
         def _backup_on_shutdown():
             logger.info("Shutting down")
             if self.dp and self.dp.engine:
-                from sqlalchemy import text
-
-                try:
-                    with self.dp.engine.connect() as conn:
-                        conn.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
-                        conn.execute(text("VACUUM"))
-                    logger.info("WAL checkpoint and VACUUM completed")
-                except Exception:
-                    logger.warning("DB maintenance on shutdown failed", exc_info=True)
-
                 from review_app.backend.db.backup import BackupError, create_backup
 
                 try:
@@ -510,6 +530,7 @@ class GUI:
             show=True,
             reload=dev_mode,
             storage_secret=storage_secret,
+            session_middleware_kwargs={"max_age": 90 * 24 * 60 * 60},
         )
 
 

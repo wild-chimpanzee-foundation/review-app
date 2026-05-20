@@ -49,7 +49,7 @@ class TestDefaultFilters:
 
 
 class TestResetAppState:
-    def test_resets_to_defaults(self):
+    def test_resets_everything_when_keep_prefs_is_false(self):
         state.set_active_project("proj-x")
         state.set_current_idx(10)
         state.set_annotator_name("bob")
@@ -58,11 +58,11 @@ class TestResetAppState:
         state.set_autoplay(False)
         state.update_filters(search_query="hello")
 
-        state.reset_app_state()
+        state.reset_app_state(keep_prefs=False)
 
         assert state.get_active_project_id() is None
         assert state.get_current_idx() == 0
-        assert state.get_annotator_name() == "default"
+        assert state.get_annotator_name() == ""
         assert state.is_dark_mode() is True
         assert state.get_language() == "en"
         assert state.is_autoplay() is True
@@ -70,6 +70,19 @@ class TestResetAppState:
         assert state.get_selections() == []
         assert state.get_state_val("foo") is None
         assert state.get_filters() == state._DEFAULT_FILTERS
+
+    def test_preserves_prefs_by_default(self):
+        state.set_dark_mode(False)
+        state.set_language("fr")
+        state.set_autoplay(False)
+        state.set_active_project("proj-x")
+
+        state.reset_app_state()  # keep_prefs=True by default
+
+        assert state.is_dark_mode() is False
+        assert state.get_language() == "fr"
+        assert state.is_autoplay() is False
+        assert state.get_active_project_id() is None  # Should be cleared as it's session state
 
 
 class TestLoadSettingsFromDb:
@@ -91,8 +104,9 @@ class TestLoadSettingsFromDb:
                 return values.get(key, default)
 
         state.load_settings_from_db(MockDP())
+        state.load_session_defaults(MockDP())
 
-        assert state.get_annotator_name() == "alice"
+        assert state.get_annotator_name() == ""
         assert state.get_blank_threshold() == 0.5
         assert state.get_species_threshold() == 0.6
         assert state.get_active_project_id() == "proj-123"
@@ -109,15 +123,16 @@ class TestLoadSettingsFromDb:
                 return default
 
         state.load_settings_from_db(MockDP())
+        state.load_session_defaults(MockDP())
 
-        assert state.get_annotator_name() == "default"
+        assert state.get_annotator_name() == ""
         assert state.get_blank_threshold() == 0.75
         assert state.get_species_threshold() == 0.75
         assert state.get_active_project_id() is None
         assert state.is_dark_mode() is True
         assert state.get_language() == "en"
         assert state.is_autoplay() is True
-        assert state.is_muted() is True
+        assert state.is_muted() is False
         assert state.is_auto_transcode() is True
         assert state.is_tour_completed() is False
 
@@ -139,15 +154,10 @@ class TestSaveUserPrefsToDb:
 
         state.save_user_prefs_to_db(MockDP())
 
-        assert calls["dark_mode"] is False
-        assert calls["language"] == "fr"
-        assert calls["autoplay"] is False
-        assert calls["muted"] is False
-        assert calls["auto_transcode"] is False
-        assert calls["tour_completed"] is True
+        # In multi-user app, saving user preferences to the global DB table is a no-op
+        assert not calls
 
     def test_does_not_persist_annotator_or_thresholds(self):
-        """Preferences that are not 'simple user prefs' should not be in this call."""
         calls = {}
 
         class MockDP:
@@ -155,6 +165,4 @@ class TestSaveUserPrefsToDb:
                 calls[key] = val
 
         state.save_user_prefs_to_db(MockDP())
-        assert "annotator_name" not in calls
-        assert "blank_threshold" not in calls
-        assert "active_project_id" not in calls
+        assert not calls

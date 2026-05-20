@@ -597,6 +597,11 @@ TRANSLATIONS = {
         "species_error_csv_not_found": "Species CSV file not found",
         "species_error_csv_empty": "Species CSV is empty",
         "species_error_unknown": "Unknown species: '{name}'",
+        # Login
+        "login_title": "Who are you?",
+        "login_name_required": "Please enter your name.",
+        "login_continue": "Continue",
+        "login_logout": "Sign out",
     },
     ##
     ##
@@ -1196,6 +1201,11 @@ TRANSLATIONS = {
         "species_error_csv_not_found": "Fichier CSV d'espèces introuvable",
         "species_error_csv_empty": "Le CSV d'espèces est vide",
         "species_error_unknown": "Espèce inconnue : '{name}'",
+        # Login
+        "login_title": "Qui êtes-vous ?",
+        "login_name_required": "Veuillez saisir votre nom.",
+        "login_continue": "Continuer",
+        "login_logout": "Se déconnecter",
     },
 }
 

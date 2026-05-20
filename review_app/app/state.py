@@ -2,24 +2,23 @@ from typing import Any
 
 _data_provider = None
 
-_annotator_name: str = "default"
-_blank_threshold: float = 0.75
-_species_threshold: float = 0.75
-_obj_detection_threshold: float = 0.75
-_active_project_id: str | None = None
-_dark_mode: bool = True
-_language: str = "en"
-_playback_speed: str = "1x"
-_autoplay: bool = True
-_muted: bool = False
-_auto_transcode: bool = True
-_tour_completed: bool = False
+GLOBAL_DEFAULTS: dict[str, Any] = {
+    "blank_threshold": 0.75,
+    "species_threshold": 0.75,
+    "obj_detection_threshold": 0.75,
+    "auto_transcode": True,
+    "dark_mode": True,
+    "language": "en",
+    "autoplay": True,
+    "muted": False,
+    "tour_completed": False,
+    "playback_speed": "1x",
+}
 
-_filters: dict[str, Any] = {}
-_video_queue: list = []
-_current_video_idx: int = 0
-_review_selections: list = []
-_session: dict[str, Any] = {}
+_blank_threshold: float = GLOBAL_DEFAULTS["blank_threshold"]
+_species_threshold: float = GLOBAL_DEFAULTS["species_threshold"]
+_obj_detection_threshold: float = GLOBAL_DEFAULTS["obj_detection_threshold"]
+_auto_transcode: bool = GLOBAL_DEFAULTS["auto_transcode"]
 
 _DEFAULT_FILTERS: dict[str, Any] = {
     "search_query": "",
@@ -50,29 +49,40 @@ def set_data_provider(dp):
     _data_provider = dp
 
 
-def reset_app_state() -> None:
-    global _annotator_name, _blank_threshold, _species_threshold, _obj_detection_threshold, _active_project_id
-    global _dark_mode, _language, _playback_speed, _autoplay, _muted, _auto_transcode
-    global _tour_completed, _data_provider
-    global _filters, _video_queue, _current_video_idx, _review_selections, _session
-    _active_project_id = None
-    _annotator_name = "default"
-    _blank_threshold = 0.75
-    _species_threshold = 0.75
-    _obj_detection_threshold = 0.75
-    _dark_mode = True
-    _language = "en"
-    _playback_speed = "1x"
-    _autoplay = True
-    _muted = False
-    _auto_transcode = True
-    _tour_completed = False
+def reset_app_state(keep_prefs: bool = True) -> None:
+    global _blank_threshold, _species_threshold, _obj_detection_threshold, _auto_transcode
+    global _data_provider
+    _blank_threshold = GLOBAL_DEFAULTS["blank_threshold"]
+    _species_threshold = GLOBAL_DEFAULTS["species_threshold"]
+    _obj_detection_threshold = GLOBAL_DEFAULTS["obj_detection_threshold"]
+    _auto_transcode = GLOBAL_DEFAULTS["auto_transcode"]
     _data_provider = None
-    _filters = _DEFAULT_FILTERS.copy()
-    _video_queue = []
-    _current_video_idx = 0
-    _review_selections = []
-    _session = {}
+    clear_session(keep_prefs=keep_prefs)
+
+
+def clear_session(keep_prefs: bool = True) -> None:
+    """Clear per-user session storage. Optionally preserve environment preferences."""
+    try:
+        from nicegui import app
+
+        storage = app.storage.user
+        if keep_prefs:
+            # Keys to preserve across logout
+            PREF_KEYS = {
+                "dark_mode",
+                "language",
+                "autoplay",
+                "muted",
+                "tour_completed",
+                "playback_speed",
+            }
+            saved = {k: v for k, v in storage.items() if k in PREF_KEYS}
+            storage.clear()
+            storage.update(saved)
+        else:
+            storage.clear()
+    except Exception:
+        pass
 
 
 def _parse_bool(raw: str | None, default: bool) -> bool:
@@ -82,103 +92,138 @@ def _parse_bool(raw: str | None, default: bool) -> bool:
 
 
 def load_settings_from_db(dp) -> None:
-    global _annotator_name, _blank_threshold, _species_threshold, _obj_detection_threshold, _active_project_id
-    global _dark_mode, _language, _autoplay, _muted, _auto_transcode
-    global _tour_completed
-    _annotator_name = dp.get_setting("annotator_name", "default")
+    """Load server-global settings (thresholds). Call once at startup."""
+    global _blank_threshold, _species_threshold, _obj_detection_threshold, _auto_transcode
     raw_blank = dp.get_setting("blank_threshold")
-    _blank_threshold = float(raw_blank) if raw_blank is not None else 0.75
+    _blank_threshold = (
+        float(raw_blank) if raw_blank is not None else GLOBAL_DEFAULTS["blank_threshold"]
+    )
     raw_species = dp.get_setting("species_threshold")
-    _species_threshold = float(raw_species) if raw_species is not None else 0.75
+    _species_threshold = (
+        float(raw_species) if raw_species is not None else GLOBAL_DEFAULTS["species_threshold"]
+    )
     raw_obj = dp.get_setting("obj_detection_threshold")
-    _obj_detection_threshold = float(raw_obj) if raw_obj is not None else 0.75
-    _active_project_id = dp.get_setting("active_project_id")
-    _dark_mode = _parse_bool(dp.get_setting("dark_mode"), True)
-    _language = dp.get_setting("language", "en")
-    _autoplay = _parse_bool(dp.get_setting("autoplay"), True)
-    _muted = _parse_bool(dp.get_setting("muted"), True)
-    _auto_transcode = _parse_bool(dp.get_setting("auto_transcode"), True)
-    _tour_completed = _parse_bool(dp.get_setting("tour_completed"), False)
+    _obj_detection_threshold = (
+        float(raw_obj) if raw_obj is not None else GLOBAL_DEFAULTS["obj_detection_threshold"]
+    )
+    _auto_transcode = _parse_bool(
+        dp.get_setting("auto_transcode"), GLOBAL_DEFAULTS["auto_transcode"]
+    )
+
+
+def load_session_defaults(dp=None) -> None:
+    """Prime per-session storage with DB defaults. Only sets keys not already present."""
+    from nicegui import app
+
+    storage = app.storage.user
+    for key in [
+        "dark_mode",
+        "language",
+        "autoplay",
+        "muted",
+        "tour_completed",
+        "playback_speed",
+    ]:
+        if key not in storage:
+            raw = dp.get_setting(key) if dp else None
+            default = GLOBAL_DEFAULTS[key]
+            if isinstance(default, bool):
+                storage[key] = _parse_bool(raw, default)
+            else:
+                storage[key] = raw if raw is not None else default
+
+    if "active_project_id" not in storage:
+        storage["active_project_id"] = dp.get_setting("active_project_id") if dp else None
 
 
 def save_user_prefs_to_db(dp) -> None:
-    """Flush current session preferences into a freshly created DB."""
-    for key, val in [
-        ("dark_mode", _dark_mode),
-        ("language", _language),
-        ("autoplay", _autoplay),
-        ("muted", _muted),
-        ("auto_transcode", _auto_transcode),
-        ("tour_completed", _tour_completed),
-    ]:
-        dp.set_setting(key, val)
+    """No-op: prefs now live in app.storage.user, not the DB."""
+    pass
 
 
 def set_active_project(project_id: str | None) -> None:
-    global _active_project_id
-    _active_project_id = project_id
-    if dp := get_data_provider():
-        dp.set_setting("active_project_id", project_id)
+    from nicegui import app
+
+    app.storage.user["active_project_id"] = project_id
 
 
 def get_active_project_id() -> str | None:
-    return _active_project_id
+    from nicegui import app
+
+    return app.storage.user.get("active_project_id")
 
 
 def get_queue():
-    return _video_queue
+    from nicegui import app
+
+    return app.storage.user.get("video_queue", [])
 
 
 def set_queue(queue: list):
-    global _video_queue
-    _video_queue = queue
+    from nicegui import app
+
+    app.storage.user["video_queue"] = list(queue)
 
 
 def get_current_idx():
-    return _current_video_idx
+    from nicegui import app
+
+    return app.storage.user.get("current_video_idx", 0)
 
 
 def set_current_idx(idx: int):
-    global _current_video_idx
-    _current_video_idx = idx
+    from nicegui import app
+
+    app.storage.user["current_video_idx"] = idx
 
 
 def get_selections():
-    return list(_review_selections)
+    from nicegui import app
+
+    return list(app.storage.user.get("review_selections", []))
 
 
 def set_selections(selections: list):
-    global _review_selections
-    _review_selections = list(selections)
+    from nicegui import app
+
+    app.storage.user["review_selections"] = list(selections)
 
 
 def get_filters():
-    if not _filters:
+    from nicegui import app
+
+    filters = app.storage.user.get("filters", {})
+    if not filters:
         return _DEFAULT_FILTERS.copy()
-    return _filters.copy()
+    return dict(filters)
 
 
 def update_filters(**kwargs):
-    global _filters
-    if not _filters:
-        _filters.update(_DEFAULT_FILTERS)
-    _filters.update(kwargs)
+    from nicegui import app
+
+    filters = dict(app.storage.user.get("filters", {}))
+    if not filters:
+        filters = _DEFAULT_FILTERS.copy()
+    filters.update(kwargs)
+    app.storage.user["filters"] = filters
 
 
 def reset_filters() -> None:
-    global _filters
-    _filters = _DEFAULT_FILTERS.copy()
+    from nicegui import app
+
+    app.storage.user["filters"] = _DEFAULT_FILTERS.copy()
 
 
-def get_annotator_name():
-    return _annotator_name
+def get_annotator_name() -> str:
+    from nicegui import app
+
+    return app.storage.user.get("annotator_name", "")
 
 
 def set_annotator_name(name: str) -> None:
-    global _annotator_name
-    _annotator_name = name
-    if dp := get_data_provider():
-        dp.set_setting("annotator_name", name)
+    from nicegui import app
+
+    app.storage.user["annotator_name"] = name
 
 
 def get_blank_threshold() -> float:
@@ -214,38 +259,43 @@ def set_obj_detection_threshold(value: float) -> None:
         dp.set_setting("obj_detection_threshold", value)
 
 
-def get_playback_speed():
-    return _playback_speed
+def get_playback_speed() -> str:
+    from nicegui import app
+
+    return app.storage.user.get("playback_speed", "1x")
 
 
 def set_playback_speed(speed: str):
-    global _playback_speed
-    _playback_speed = speed
+    from nicegui import app
+
+    app.storage.user["playback_speed"] = speed
 
 
-def is_autoplay():
-    return _autoplay
+def is_autoplay() -> bool:
+    from nicegui import app
+
+    return app.storage.user.get("autoplay", True)
 
 
 def set_autoplay(enabled: bool):
-    global _autoplay
-    _autoplay = enabled
-    if dp := get_data_provider():
-        dp.set_setting("autoplay", enabled)
+    from nicegui import app
+
+    app.storage.user["autoplay"] = enabled
 
 
-def is_muted():
-    return _muted
+def is_muted() -> bool:
+    from nicegui import app
+
+    return app.storage.user.get("muted", False)
 
 
 def set_muted(enabled: bool):
-    global _muted
-    _muted = enabled
-    if dp := get_data_provider():
-        dp.set_setting("muted", enabled)
+    from nicegui import app
+
+    app.storage.user["muted"] = enabled
 
 
-def is_auto_transcode():
+def is_auto_transcode() -> bool:
     return _auto_transcode
 
 
@@ -256,42 +306,57 @@ def set_auto_transcode(enabled: bool):
         dp.set_setting("auto_transcode", enabled)
 
 
-def is_dark_mode():
-    return _dark_mode
+def is_dark_mode() -> bool:
+    try:
+        from nicegui import app
+
+        return app.storage.user.get("dark_mode", True)
+    except Exception:
+        return True
 
 
 def set_dark_mode(enabled: bool):
-    global _dark_mode
-    _dark_mode = enabled
-    if dp := get_data_provider():
-        dp.set_setting("dark_mode", enabled)
+    from nicegui import app
+
+    app.storage.user["dark_mode"] = enabled
 
 
 def get_language() -> str:
-    return _language
+    try:
+        from nicegui import app
+
+        return app.storage.user.get("language", "en")
+    except Exception:
+        return "en"
 
 
 def set_language(lang: str) -> None:
-    global _language
-    _language = lang
-    if dp := get_data_provider():
-        dp.set_setting("language", lang)
+    from nicegui import app
+
+    app.storage.user["language"] = lang
 
 
 def is_tour_completed() -> bool:
-    return _tour_completed
+    from nicegui import app
+
+    return app.storage.user.get("tour_completed", False)
 
 
 def set_tour_completed(value: bool = True) -> None:
-    global _tour_completed
-    _tour_completed = value
-    if dp := get_data_provider():
-        dp.set_setting("tour_completed", value)
+    from nicegui import app
+
+    app.storage.user["tour_completed"] = value
 
 
 def get_state_val(key: str, default: Any = None) -> Any:
-    return _session.get(key, default)
+    from nicegui import app
+
+    return app.storage.user.get("session", {}).get(key, default)
 
 
 def set_state_val(key: str, value: Any):
-    _session[key] = value
+    from nicegui import app
+
+    session = dict(app.storage.user.get("session", {}))
+    session[key] = value
+    app.storage.user["session"] = session

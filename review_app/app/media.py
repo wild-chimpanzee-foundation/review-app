@@ -13,6 +13,13 @@ def set_media_dirs(dirs: list[Path | str]) -> None:
     _video_dirs.extend(Path(d).resolve() for d in dirs)
 
 
+def add_media_dirs(dirs: list[Path | str]) -> None:
+    for d in dirs:
+        p = Path(d).resolve()
+        if p not in _video_dirs:
+            _video_dirs.append(p)
+
+
 def setup_media_route() -> None:
     from nicegui import app as nicegui_app
     from nicegui.app.range_response import get_range_response

@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 _db_op_lock = asyncio.Lock()
 
 
-def render_database_section(current_db_path: Path | None, active_project_id: str | None = None) -> None:
+def render_database_section(
+    current_db_path: Path | None, active_project_id: str | None = None
+) -> None:
     def _get_dp():
         from review_app.app.state import get_data_provider
 
@@ -124,9 +126,12 @@ def render_database_section(current_db_path: Path | None, active_project_id: str
                         new_dp.touch_project(proj.id)
                     else:
                         set_active_project(None)
-                set_media_dirs(
-                    [Path(d.path) for d in new_dp.get_project_dirs(get_active_project_id())]
-                )
+                all_dirs = [
+                    Path(d.path)
+                    for _p in new_dp.list_projects()
+                    for d in new_dp.get_project_dirs(_p.id)
+                ]
+                set_media_dirs(all_dirs)
 
                 ui.notify(t("restore_success"), type="positive")
                 await asyncio.sleep(0.5)
@@ -253,9 +258,9 @@ def render_database_section(current_db_path: Path | None, active_project_id: str
                     remove_db_sidecars(current_db_path)
                 else:
                     old_dp.engine.dispose()
-                reset_app_state()
+                reset_app_state(keep_prefs=True)
                 ui.notify(t("database_reset"), type="positive")
-                ui.navigate.to("/setup")
+                ui.navigate.to("/login")
 
         with reset_dialog, ui.card().classes("q-pa-lg"):
             ui.label(t("reset_confirm")).classes("text-h6 q-mb-sm")

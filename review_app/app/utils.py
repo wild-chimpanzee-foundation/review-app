@@ -8,6 +8,15 @@ from review_app.app.translations import t
 logger = logging.getLogger(__name__)
 
 
+def require_login() -> bool:
+    from nicegui import app, ui
+
+    if not app.storage.user.get("annotator_name"):
+        ui.navigate.to("/login")
+        return False
+    return True
+
+
 def user_error_message(exc: Exception) -> str:
     if hasattr(exc, "user_message_key"):
         return t(exc.user_message_key)
@@ -78,7 +87,6 @@ def switch_project(dp, project_id: str) -> None:
     """Update all session state when activating a project. Caller handles navigation."""
     from pathlib import Path
 
-    from review_app.app.media import set_media_dirs
     from review_app.app.state import (
         reset_filters,
         set_active_project,
@@ -96,7 +104,9 @@ def switch_project(dp, project_id: str) -> None:
 
     dirs = dp.get_project_dirs(project_id) or []
     missing = [d.path for d in dirs if not Path(d.path).exists()]
-    set_media_dirs([Path(d.path) for d in dirs])
+    from review_app.app.media import add_media_dirs
+
+    add_media_dirs([Path(d.path) for d in dirs])
     return missing
 
 

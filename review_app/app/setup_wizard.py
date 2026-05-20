@@ -91,7 +91,6 @@ class SetupWizard:
         db_path = get_default_db_path()
         adding_to_existing = db_path.exists() and _db_has_projects(db_path)
 
-        annotator_name_cell: list[str] = [""]
         continue_btn_holder: list = [None]
         project_btn_holder: list = [None]
         collection_select_holder: list = [None]
@@ -101,11 +100,7 @@ class SetupWizard:
         def update_continue_button():
             btn = continue_btn_holder[0]
             if btn is not None:
-                name_ok = bool(
-                    self.inputs.get("annotator_name")
-                    and self.inputs["annotator_name"].value.strip()
-                )
-                btn.set_enabled(name_ok and self.ffmpeg_ok)
+                btn.set_enabled(self.ffmpeg_ok)
 
         def update_project_button():
             btn = project_btn_holder[0]
@@ -159,9 +154,8 @@ class SetupWizard:
 
             from review_app.app.state import (
                 get_active_project_id,
+                load_session_defaults,
                 load_settings_from_db,
-                save_user_prefs_to_db,
-                set_annotator_name,
                 set_data_provider,
             )
             from review_app.app.utils import switch_project
@@ -172,8 +166,7 @@ class SetupWizard:
             if adding_to_existing:
                 load_settings_from_db(dp)
             else:
-                save_user_prefs_to_db(dp)
-                set_annotator_name(annotator_name_cell[0])
+                load_session_defaults(dp)
 
             project = dp.create_project(project_name, video_dir)
             collection_id = (
@@ -256,20 +249,6 @@ class SetupWizard:
                                 value=get_language(),
                                 on_change=change_language,
                             ).props("dense outlined").classes("q-mt-xs")
-
-                    with ui.card().classes("full-width q-mb-md"):
-                        ui.label(t("annotator_label")).classes(
-                            "text-subtitle1 font-weight-medium q-mb-xs"
-                        )
-                        ui.label(t("annotator_setup_desc")).classes(
-                            "text-caption text-grey-6 q-mb-md"
-                        )
-                        self.inputs["annotator_name"] = ui.input(
-                            placeholder=t("annotator_name_placeholder"),
-                        ).props("outlined dense class=w-full")
-                        self.inputs["annotator_name"].on_value_change(
-                            lambda _: update_continue_button()
-                        )
 
                     with ui.card().classes("full-width q-mb-md"):
                         with ui.row().classes("items-center gap-sm"):
@@ -422,6 +401,7 @@ class SetupWizard:
                     async def do_wizard_restore(backup_path: Path):
                         from review_app.app.media import set_media_dirs
                         from review_app.app.state import (
+                            load_session_defaults,
                             load_settings_from_db,
                             set_active_project,
                             set_data_provider,
@@ -455,16 +435,17 @@ class SetupWizard:
                             dp = LocalDataProvider()
                             set_data_provider(dp)
                             load_settings_from_db(dp)
+                            load_session_defaults(dp)
                             proj = dp.get_most_recent_project()
                             if proj:
                                 set_active_project(proj.id)
                                 dp.touch_project(proj.id)
-                            set_media_dirs(
-                                [
-                                    Path(d.path)
-                                    for d in dp.get_project_dirs(proj.id if proj else None)
-                                ]
-                            )
+                            all_dirs = [
+                                Path(d.path)
+                                for _p in dp.list_projects()
+                                for d in dp.get_project_dirs(_p.id)
+                            ]
+                            set_media_dirs(all_dirs)
                         except Exception as exc:
                             if lbl:
                                 lbl.set_text(t("restore_failed", error=str(exc)))
@@ -543,7 +524,6 @@ class SetupWizard:
                             restore_status_label[0].visible = False
 
                 def go_to_step_choice():
-                    annotator_name_cell[0] = self.inputs["annotator_name"].value.strip()
                     step1.visible = False
                     step_choice.visible = True
 

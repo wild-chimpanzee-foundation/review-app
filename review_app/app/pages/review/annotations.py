@@ -95,7 +95,9 @@ def _init_annotation_state(video, default_species, default_behavior):
                         default_behavior,
                         video.get("duration_sec"),
                         source="model" if default_species else None,
-                        probability=video.get("max_species_confidence") if default_species else None,
+                        probability=video.get("max_species_confidence")
+                        if default_species
+                        else None,
                         count=initial_count,
                     )
                 ]
@@ -117,17 +119,10 @@ def _filter_species_by_group(species_map: dict, species_groups: dict, group: str
     return {sci: label for sci, label in species_map.items() if species_groups.get(sci) == group}
 
 
-@ui.refreshable
-def render_annotation_section(
-    video,
-    species_map,
-    species_groups,
-    dp,
-    default_species,
-    default_behavior,
-    render_video_section_callback,
-    render_filter_drawer_callback,
-):
+def render_annotation_section_body(page, video, default_species, default_behavior):
+    species_map = page.species_map
+    species_groups = page.species_groups
+    dp = page.dp
     # Always reinitialize state when the rendered video differs from what state belongs to
     cached_video_id = get_state_val("review_state_video_id")
     if cached_video_id != video.get("video_id"):
@@ -143,7 +138,7 @@ def render_annotation_section(
         if 0 <= idx < len(new_sels):
             new_sels.pop(idx)
             set_selections(new_sels)
-        render_annotation_section.refresh()
+        page.render_annotation_section.refresh()
 
     def set_not_blank():
         set_state_val("review_is_blank", False)
@@ -153,7 +148,7 @@ def render_annotation_section(
                 _new_annotation(default_species, default_behavior, video.get("duration_sec"))
             ]
         set_selections(existing)
-        render_annotation_section.refresh()
+        page.render_annotation_section.refresh()
 
     # UI Rendering
     if is_blank:
@@ -200,7 +195,7 @@ def render_annotation_section(
             new_sels.insert(0, _new_annotation(first, default_behavior, video.get("duration_sec")))
             set_selections(new_sels)
             set_state_val("review_is_blank", False)
-            render_annotation_section.refresh()
+            page.render_annotation_section.refresh()
 
         with ui.element("div").style(
             "overflow-y: auto; overflow-x: hidden; max-height: calc(100vh - 360px); width: 100%;"
@@ -421,15 +416,15 @@ def render_annotation_section(
             return
         _advance_to_next(selected_video_id)
         _clear_review_state()
-        render_video_section_callback.refresh()
-        render_filter_drawer_callback.refresh()
+        page.render_video_section.refresh()
+        page.render_filter_drawer.refresh()
 
     async def submit():
         if not await update_annotation():
             return
         set_state_val("review_state_video_id", None)
-        render_video_section_callback.refresh()
-        render_filter_drawer_callback.refresh()
+        page.render_video_section.refresh()
+        page.render_filter_drawer.refresh()
 
     async def mark_review_later():
         if get_state_val("submit_in_progress"):
@@ -440,7 +435,7 @@ def render_annotation_section(
             ui.notify(t("marked_review_later"), type="info")
             _advance_to_next(selected_video_id)
             _clear_review_state()
-            render_video_section_callback.refresh()
+            page.render_video_section.refresh()
         finally:
             set_state_val("submit_in_progress", False)
 
@@ -466,8 +461,8 @@ def render_annotation_section(
             if go_next:
                 _advance_to_next(selected_video_id)
             _clear_review_state()
-            render_video_section_callback.refresh()
-            render_filter_drawer_callback.refresh()
+            page.render_video_section.refresh()
+            page.render_filter_drawer.refresh()
         finally:
             set_state_val("submit_in_progress", False)
 

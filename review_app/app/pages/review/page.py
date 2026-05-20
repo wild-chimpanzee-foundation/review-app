@@ -7,8 +7,8 @@ from urllib.parse import quote
 from nicegui import run, ui
 
 from review_app.app.onboarding import show_info_dialog, show_tour_if_needed
-from review_app.app.pages.review.annotations import render_annotation_section
-from review_app.app.pages.review.filters import render_filter_drawer  # noqa: F401 (refreshable)
+from review_app.app.pages.review.annotations import render_annotation_section_body
+from review_app.app.pages.review.filters import render_filter_drawer_body
 from review_app.app.pages.review.tags import render_video_tags
 from review_app.app.pages.review.video_player import SPEED_OPTIONS, render_custom_video_player
 from review_app.app.state import (
@@ -40,40 +40,57 @@ from review_app.backend.utils import df_to_records
 logger = logging.getLogger(__name__)
 
 
-def navigate(direction: int):
-    queue = get_queue()
-    new_idx = get_current_idx() + direction
-    if 0 <= new_idx < len(queue):
-        navigate_to(new_idx)
+class ReviewPage:
+    def __init__(self, dp, species_map, species_groups, global_species_map):
+        self.dp = dp
+        self.species_map = species_map
+        self.species_groups = species_groups
+        self.global_species_map = global_species_map
 
+    def navigate(self, direction: int):
+        queue = get_queue()
+        new_idx = get_current_idx() + direction
+        if 0 <= new_idx < len(queue):
+            self.navigate_to(new_idx)
 
-def navigate_to(idx: int):
-    from nicegui import context as ui_context
+    def navigate_to(self, idx: int):
+        from nicegui import context as ui_context
 
-    queue = get_queue()
-    idx = max(0, min(idx, len(queue) - 1))
-    # Debounce to prevent rapid overlap
-    token = str(uuid.uuid4())
-    set_state_val("nav_token", token)
-    set_state_val("is_loading", True)
-    client = ui_context.client  # capture before task loses slot context
+        queue = get_queue()
+        idx = max(0, min(idx, len(queue) - 1))
+        token = str(uuid.uuid4())
+        set_state_val("nav_token", token)
+        set_state_val("is_loading", True)
+        client = ui_context.client  # capture before task loses slot context
 
-    async def _do_nav():
-        await asyncio.sleep(0.1)
-        if get_state_val("nav_token") == token:
-            set_current_idx(idx)
-            set_state_val("review_active_id", None)
-            set_state_val("pending_blank_confirm", False)
-            set_state_val("review_state_video_id", None)
-            set_state_val("review_is_blank", None)
-            set_selections([])
-            set_state_val("is_loading", False)
-            if queue and idx < len(queue):
-                video_id = queue[idx]
-                client.run_javascript(f"history.pushState(null, '', '/review?v={video_id}')")
-            render_video_section.refresh()
+        async def _do_nav():
+            await asyncio.sleep(0.1)
+            if get_state_val("nav_token") == token:
+                set_current_idx(idx)
+                set_state_val("review_active_id", None)
+                set_state_val("pending_blank_confirm", False)
+                set_state_val("review_state_video_id", None)
+                set_state_val("review_is_blank", None)
+                set_selections([])
+                set_state_val("is_loading", False)
+                if queue and idx < len(queue):
+                    video_id = queue[idx]
+                    client.run_javascript(f"history.pushState(null, '', '/review?v={video_id}')")
+                self.render_video_section.refresh()
 
-    asyncio.create_task(_do_nav())
+        asyncio.create_task(_do_nav())
+
+    @ui.refreshable_method
+    async def render_video_section(self):
+        await _render_video_section_body(self)
+
+    @ui.refreshable_method
+    def render_annotation_section(self, video, default_species, default_behavior):
+        render_annotation_section_body(self, video, default_species, default_behavior)
+
+    @ui.refreshable_method
+    async def render_filter_drawer(self):
+        await render_filter_drawer_body(self)
 
 
 def _render_no_videos_match():
@@ -252,8 +269,9 @@ def _render_ai_annotations(model_ann, global_species_map):
                                             pass
 
 
-@ui.refreshable
-async def render_video_section(dp, species_map, species_groups, global_species_map):
+async def _render_video_section_body(page: ReviewPage):
+    dp = page.dp
+    global_species_map = page.global_species_map
     queue = get_queue()
     if not queue:
         _render_no_videos_match()
@@ -302,7 +320,7 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
         if fresh_queue and fresh_queue != queue:
             set_queue(fresh_queue)
             set_current_idx(max(0, min(current_idx, len(fresh_queue) - 1)))
-            render_video_section.refresh()
+            page.render_video_section.refresh()
             return
         ui.label(t("video_load_error")).classes("text-h6 text-negative")
         return
@@ -335,7 +353,9 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
             with ui.row().classes("col justify-end items-center gap-xs no-wrap"):
                 queue_input = (
                     ui.number(min=1, max=len(queue), value=current_idx + 1, step=1)
-                    .props("dense borderless hide-bottom-space input-class='text-caption text-right'")
+                    .props(
+                        "dense borderless hide-bottom-space input-class='text-caption text-right'"
+                    )
                     .style("width: 42px")
                 )
                 ui.label(f"/ {len(queue)}").classes("text-caption no-wrap")
@@ -344,7 +364,7 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
                     on_click=lambda: show_info_dialog(t("info_queue_title"), t("info_queue_body")),
                 ).props("flat round dense size=xs color=grey-6")
         with ui.row().classes("w-full items-center gap-xs q-mt-none"):
-            with ui.button(on_click=lambda: navigate(-1)).props("flat dense") as prev_btn:
+            with ui.button(on_click=lambda: page.navigate(-1)).props("flat dense") as prev_btn:
                 with ui.row().classes("items-center gap-xs no-wrap"):
                     ui.icon("chevron_left")
                     ui.badge("P").props("color=grey-9").classes("text-caption")
@@ -353,14 +373,16 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
                 ui.slider(min=0, max=max(len(queue) - 1, 1), step=1, value=current_idx)
                 .props("dense color=primary")
                 .classes("col")
-                .on("change", lambda e: navigate_to(int(e.args)))
+                .on("change", lambda e: page.navigate_to(int(e.args)))
             )
             queue_input.bind_value_from(slider, "value", backward=lambda v: int(v) + 1)
             queue_input.on(
                 "keydown.enter",
-                lambda: navigate_to(max(0, min(int(queue_input.value or 1) - 1, len(queue) - 1))),
+                lambda: page.navigate_to(
+                    max(0, min(int(queue_input.value or 1) - 1, len(queue) - 1))
+                ),
             )
-            with ui.button(on_click=lambda: navigate(1)).props("flat dense") as next_btn:
+            with ui.button(on_click=lambda: page.navigate(1)).props("flat dense") as next_btn:
                 with ui.row().classes("items-center gap-xs no-wrap"):
                     ui.badge("N").props("color=grey-9").classes("text-caption")
                     ui.icon("chevron_right")
@@ -378,7 +400,7 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
                         result = await run.io_bound(dp.transcode_video, selected_video_id)
                         if result.get("success"):
                             ui.notify(t("video_transcoded"), type="positive")
-                            render_video_section.refresh()
+                            page.render_video_section.refresh()
                             return
                         ui.label(
                             t("transcode_failed", error=result.get("error", "unknown error"))
@@ -388,7 +410,7 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
                         result = await run.io_bound(dp.transcode_video, selected_video_id)
                         if result.get("success"):
                             ui.notify(t("video_transcoded"), type="positive")
-                            render_video_section.refresh()
+                            page.render_video_section.refresh()
                         else:
                             ui.notify(
                                 t("transcode_failed", error=result.get("error", "unknown error")),
@@ -529,16 +551,7 @@ async def render_video_section(dp, species_map, species_groups, global_species_m
                 consensus = video.get("classification_consensus")
                 default_species = consensus or None
 
-                render_annotation_section(
-                    video,
-                    species_map,
-                    species_groups,
-                    dp,
-                    default_species,
-                    default_behavior,
-                    render_video_section,
-                    render_filter_drawer,
-                )
+                page.render_annotation_section(video, default_species, default_behavior)
 
 
 async def setup_review():
@@ -632,14 +645,14 @@ async def setup_review():
     assert left_drawer is not None
     left_drawer.classes("review-sidebar")
 
+    page = ReviewPage(dp, species_map, species_groups, global_species_map)
+
     with left_drawer:
-        await render_filter_drawer(
-            dp, species_map, species_groups, navigate_to, render_video_section
-        )
+        await page.render_filter_drawer()
 
     with ui.column().classes("w-full q-pa-xs"):
         with ui.element("div").style("width: 100%; max-width: 1900px; margin: 0 auto"):
-            await render_video_section(dp, species_map, species_groups, global_species_map)
+            await page.render_video_section()
 
     ui.run_javascript("document.activeElement?.blur()")
 

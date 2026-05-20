@@ -224,3 +224,19 @@ def provider_with_project(tmp_db, mock_probe):
     assert len(dirs) == 1
 
     return dp, project, dirs[0]
+
+
+@pytest.fixture(autouse=True)
+def mock_nicegui_user_storage():
+    """Autouse fixture to mock NiceGUI's session-based app.storage.user with an in-memory dict."""
+    from unittest.mock import PropertyMock, patch
+
+    import nicegui.storage
+
+    mock_dict = {}
+    patcher = patch.object(
+        nicegui.storage.Storage, "user", new_callable=PropertyMock, return_value=mock_dict
+    )
+    patcher.start()
+    yield mock_dict
+    patcher.stop()

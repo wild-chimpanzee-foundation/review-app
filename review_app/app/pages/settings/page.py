@@ -23,7 +23,7 @@ from review_app.app.utils import get_or_create_data_provider, sync_with_progress
 
 from .database import render_database_section
 from .species import render_species_section
-from .tags import render_tags_section
+from .tags import TagsSection
 
 
 def _build_settings_content(container: ui.column):
@@ -223,10 +223,9 @@ def _build_settings_content(container: ui.column):
                             )
 
                     with ui.row().classes("items-center gap-sm q-mt-xs"):
-                        ui.label(
-                            t("delete_missing_videos_label")
-                            + f" ({missing_count})"
-                        ).classes("text-body2 text-grey-7")
+                        ui.label(t("delete_missing_videos_label") + f" ({missing_count})").classes(
+                            "text-body2 text-grey-7"
+                        )
                         ui.space()
                         ui.button(
                             t("delete_missing_videos_label"),
@@ -246,7 +245,7 @@ def _build_settings_content(container: ui.column):
                         render_species_section(_dp, active_project_id, lang)
 
                 with ui.expansion(t("settings_tags_section"), icon="label").classes("full-width"):
-                    render_tags_section(_dp)
+                    TagsSection(_dp).render()
 
                 with ui.expansion(t("blank_detection"), icon="tune").classes("full-width"):
                     ui.label(t("blank_detection_desc")).classes("text-caption text-grey-6 q-mb-md")

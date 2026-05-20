@@ -275,7 +275,7 @@ class VideoMixin(ProviderBase):
             orphaned_paths = [p for p in existing if p not in scanned["video_path"].values]
 
             total_scanned = len(scanned)
-            n_new = len(new_rows)
+
             n_existing = len(existing_df)
 
             if progress_callback:
@@ -283,6 +283,7 @@ class VideoMixin(ProviderBase):
 
             probe_results: dict[Path, tuple] = {}
             if not new_rows.empty:
+
                 def _offset_callback(current, total, filename):
                     if progress_callback:
                         progress_callback(n_existing + current, total_scanned, filename)
@@ -291,7 +292,6 @@ class VideoMixin(ProviderBase):
                     [Path(r) for r in new_rows["video_path"]],
                     progress_callback=_offset_callback,
                 )
-
 
             if not new_rows.empty:
                 insert_rows = []
@@ -467,7 +467,6 @@ class VideoMixin(ProviderBase):
                 session.commit()
                 return {"success": False, "error": f"File not found on disk: {input_path}"}
 
-
             from review_app.app.config import get_user_data_dir
 
             tmp_dir = get_user_data_dir() / "transcoded_cache"
@@ -528,11 +527,7 @@ class VideoMixin(ProviderBase):
 
     def delete_missing_videos(self, project_id: str) -> int:
         with self.Session() as session:
-            videos = (
-                session.query(Video)
-                .filter_by(project_id=project_id, is_missing=True)
-                .all()
-            )
+            videos = session.query(Video).filter_by(project_id=project_id, is_missing=True).all()
             for v in videos:
                 session.delete(v)
             session.commit()
@@ -543,7 +538,9 @@ def cleanup_orphaned_transcoded_files(engine: Any, cache_dir: Path) -> int:
     """Delete .mp4 files in cache_dir that are not referenced by any Video.transcoded_path."""
     try:
         with engine.connect() as conn:
-            rows = conn.execute(text("SELECT transcoded_path FROM videos WHERE transcoded_path IS NOT NULL"))
+            rows = conn.execute(
+                text("SELECT transcoded_path FROM videos WHERE transcoded_path IS NOT NULL")
+            )
             known = {row[0] for row in rows}
         removed = 0
         for f in cache_dir.glob("*.mp4"):

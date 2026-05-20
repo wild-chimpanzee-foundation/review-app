@@ -19,18 +19,16 @@ from review_app.app.state import (
 from review_app.app.translations import t
 
 
-@ui.refreshable
-async def render_filter_drawer(
-    dp,
-    species_map,
-    species_groups,
-    navigate_to_callback,
-    render_video_section_callback,
-):
+async def render_filter_drawer_body(page):
+    dp = page.dp
+    species_map = page.species_map
+    species_groups = page.species_groups
+    project_id = get_active_project_id()
+    language = get_language()
     filter_options, behavior_display_map, all_tags = await run.io_bound(
         lambda: (
-            dp.get_queue_filter_options(get_active_project_id()),
-            dp.get_behavior_display_map(lang=get_language()),
+            dp.get_queue_filter_options(project_id),
+            dp.get_behavior_display_map(lang=language),
             dp.get_all_tags(),
         )
     )
@@ -290,7 +288,7 @@ async def render_filter_drawer(
                     get_active_project_id(),
                 )
                 set_queue(new_queue)
-                navigate_to_callback(0)
+                page.navigate_to(0)
                 ui.run_javascript("document.activeElement?.blur()")
 
             ui.button(t("reset_filters"), on_click=reset_filters, color="negative").classes(
@@ -333,7 +331,7 @@ async def render_filter_drawer(
                     get_active_project_id(),
                 )
                 set_queue(new_queue)
-                navigate_to_callback(0)
+                page.navigate_to(0)
 
             async def toggle_dir():
                 sort_dir[0] = "asc" if sort_dir[0] == "desc" else "desc"
@@ -354,7 +352,7 @@ async def render_filter_drawer(
                 value=is_autoplay(),
                 on_change=lambda e: (
                     set_autoplay(e.value),
-                    render_video_section_callback.refresh(),
+                    page.render_video_section.refresh(),
                 ),
             )
             ui.checkbox(
@@ -362,7 +360,7 @@ async def render_filter_drawer(
                 value=is_muted(),
                 on_change=lambda e: (
                     set_muted(e.value),
-                    render_video_section_callback.refresh(),
+                    page.render_video_section.refresh(),
                 ),
             )
             ui.checkbox(

@@ -85,7 +85,10 @@ def build_project_picker():
                                                 dialog.close()
                                                 ui.navigate.to("/overview")
                                             else:
+                                                from review_app.app.state import set_active_project
+
                                                 reset_app_state()
+                                                set_active_project(None)
                                                 dialog.close()
                                                 ui.navigate.to("/setup")
                                         else:

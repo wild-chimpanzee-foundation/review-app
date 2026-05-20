@@ -4,34 +4,40 @@ from review_app.app.pages.review.tags import _color_picker, _tag_label
 from review_app.app.translations import t
 
 
-@ui.refreshable
-def render_tags_section(dp) -> None:
-    all_tags = dp.get_all_tags()
-    builtin_tags = [tag for tag in all_tags if not tag["is_custom"]]
-    custom_tags = [tag for tag in all_tags if tag["is_custom"]]
+class TagsSection:
+    def __init__(self, dp):
+        self.dp = dp
 
-    ui.label(t("settings_tags_builtin_label")).classes("text-caption text-grey-6 q-mb-xs")
-    with ui.row().classes("gap-xs flex-wrap q-mb-md"):
-        for tag in builtin_tags:
-            color = tag.get("color") or "grey"
-            icon = tag.get("icon") or "label"
-            ui.chip(_tag_label(tag), icon=icon, color=color).props("outline")
+    @ui.refreshable_method
+    def render(self) -> None:
+        dp = self.dp
+        all_tags = dp.get_all_tags()
+        builtin_tags = [tag for tag in all_tags if not tag["is_custom"]]
+        custom_tags = [tag for tag in all_tags if tag["is_custom"]]
 
-    with ui.row().classes("items-center justify-between w-full q-mb-xs"):
-        ui.label(t("settings_tags_custom_label")).classes("text-caption text-grey-6")
-        ui.button(
-            t("add_tag_btn"), icon="add", on_click=lambda: _open_add_tag_dialog(dp, all_tags)
-        ).props("size=sm outline color=primary")
+        ui.label(t("settings_tags_builtin_label")).classes("text-caption text-grey-6 q-mb-xs")
+        with ui.row().classes("gap-xs flex-wrap q-mb-md"):
+            for tag in builtin_tags:
+                color = tag.get("color") or "grey"
+                icon = tag.get("icon") or "label"
+                ui.chip(_tag_label(tag), icon=icon, color=color).props("outline")
 
-    if not custom_tags:
-        ui.label(t("settings_tags_no_custom")).classes("text-caption text-grey-5 q-mb-sm")
-    else:
-        with ui.column().classes("w-full gap-sm q-mb-sm"):
-            for tag in custom_tags:
-                _render_custom_tag_row(dp, tag)
+        with ui.row().classes("items-center justify-between w-full q-mb-xs"):
+            ui.label(t("settings_tags_custom_label")).classes("text-caption text-grey-6")
+            ui.button(
+                t("add_tag_btn"), icon="add", on_click=lambda: _open_add_tag_dialog(self, all_tags)
+            ).props("size=sm outline color=primary")
+
+        if not custom_tags:
+            ui.label(t("settings_tags_no_custom")).classes("text-caption text-grey-5 q-mb-sm")
+        else:
+            with ui.column().classes("w-full gap-sm q-mb-sm"):
+                for tag in custom_tags:
+                    _render_custom_tag_row(self, tag)
 
 
-def _open_add_tag_dialog(dp, all_tags: list) -> None:
+def _open_add_tag_dialog(section: TagsSection, all_tags: list) -> None:
+    dp = section.dp
     state = {"color": "teal", "name_input": None, "name_fr_input": None, "submitting": False}
 
     async def confirm_add():
@@ -63,7 +69,7 @@ def _open_add_tag_dialog(dp, all_tags: list) -> None:
         finally:
             state["submitting"] = False
         dlg.close()
-        render_tags_section.refresh()
+        section.render.refresh()
 
     with ui.dialog() as dlg, ui.card().classes("q-pa-md").style("min-width: 380px"):
         ui.label(t("add_tag_warning_title")).classes("text-subtitle2 q-mb-sm")
@@ -81,7 +87,8 @@ def _open_add_tag_dialog(dp, all_tags: list) -> None:
     dlg.open()
 
 
-def _render_custom_tag_row(dp, tag: dict) -> None:
+def _render_custom_tag_row(section: TagsSection, tag: dict) -> None:
+    dp = section.dp
     color = tag.get("color") or "grey"
 
     def open_edit_dialog():
@@ -96,7 +103,7 @@ def _render_custom_tag_row(dp, tag: dict) -> None:
             dp.update_tag_names(tag["key"], name, name_fr)
             dp.update_tag_color(tag["key"], state["color"])
             dlg.close()
-            render_tags_section.refresh()
+            section.render.refresh()
 
         with ui.dialog() as dlg, ui.card().classes("q-pa-md").style("min-width: 340px"):
             ui.label(t("settings_tags_edit_title")).classes("text-subtitle2 q-mb-sm")
@@ -127,7 +134,7 @@ def _render_custom_tag_row(dp, tag: dict) -> None:
     def _confirm_delete(dlg):
         dp.delete_custom_tag(tag["key"])
         dlg.close()
-        render_tags_section.refresh()
+        section.render.refresh()
 
     with ui.row().classes("w-full items-center gap-sm"):
         ui.chip(_tag_label(tag), icon="label", color=color).props("outline")
