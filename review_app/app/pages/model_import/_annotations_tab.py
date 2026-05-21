@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 from nicegui import run, ui
 
@@ -14,6 +16,7 @@ from review_app.app.utils import user_error_message
 from review_app.backend.utils import df_to_records
 
 from ._helpers import (
+    col_val,
     get_df_from_state,
     make_col_selects,
     read_upload_file,
@@ -43,10 +46,6 @@ def _is_app_format(columns: list[str]) -> bool:
     return ("video_path" in col_set or "video_id" in col_set) and "is_blank" in col_set
 
 
-def _col_val(key: str) -> str:
-    return get_state_val(key) or ""
-
-
 def setup_annotations_tab(dp, loading_dialog) -> None:
     # ── Export ────────────────────────────────────────────────────────────────
     with ui.card().classes("full-width q-pa-md q-mb-md"):
@@ -55,8 +54,6 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
 
         async def do_export() -> None:
             try:
-                from datetime import date
-
                 df = await run.io_bound(dp.export_annotations_csv, get_active_project_id())
                 project_name = (
                     df["project_name"].iloc[0].replace(" ", "_")
@@ -71,10 +68,8 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
 
         async def do_export_ai() -> None:
             try:
-                from datetime import date
-
-                df = await run.io_bound(dp.export_model_annotations_csv, get_active_project_id())
                 project_id = get_active_project_id()
+                df = await run.io_bound(dp.export_model_annotations_csv, project_id)
                 project_name = project_id.replace(" ", "_") if project_id else "project"
                 filename = f"ai_annotations_{project_name}_{date.today()}.csv"
                 ui.download(df.to_csv(index=False).encode("utf-8"), filename)
@@ -284,13 +279,13 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                                 dp.validate_historic_csv,
                                 df,
                                 get_active_project_id(),
-                                _col_val("ann_folder_col"),
-                                _col_val("ann_video_col"),
-                                _col_val("ann_species_col"),
-                                _col_val("ann_data_type_col"),
-                                _col_val("ann_data_type_val"),
+                                col_val("ann_folder_col"),
+                                col_val("ann_video_col"),
+                                col_val("ann_species_col"),
+                                col_val("ann_data_type_col"),
+                                col_val("ann_data_type_val"),
                                 mappings,
-                                _col_val("ann_is_blank_col"),
+                                col_val("ann_is_blank_col"),
                                 get_state_val("ann_tag_cols") or [],
                             )
                             set_state_val("ann_validation", result)
@@ -332,18 +327,18 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         dp.import_historic_csv,
                         df,
                         get_active_project_id(),
-                        _col_val("ann_folder_col"),
-                        _col_val("ann_video_col"),
-                        _col_val("ann_species_col"),
-                        _col_val("ann_data_type_col"),
-                        _col_val("ann_data_type_val"),
-                        _col_val("ann_behavior_col"),
-                        _col_val("ann_count_col"),
-                        _col_val("ann_observer_col"),
-                        _col_val("ann_timestamp_col"),
+                        col_val("ann_folder_col"),
+                        col_val("ann_video_col"),
+                        col_val("ann_species_col"),
+                        col_val("ann_data_type_col"),
+                        col_val("ann_data_type_val"),
+                        col_val("ann_behavior_col"),
+                        col_val("ann_count_col"),
+                        col_val("ann_observer_col"),
+                        col_val("ann_timestamp_col"),
                         get_state_val("manual_import_mode") or "override",
                         get_state_val(_MAPPINGS_KEY) or {},
-                        _col_val("ann_is_blank_col"),
+                        col_val("ann_is_blank_col"),
                         get_state_val("ann_tag_cols") or [],
                     )
                     msg = t("imported_historic", count=result["imported"])
@@ -465,13 +460,13 @@ async def _run_validate(dp, loading_dialog, results_ui, results_container) -> No
             dp.validate_historic_csv,
             df,
             get_active_project_id(),
-            _col_val("ann_folder_col"),
-            _col_val("ann_video_col"),
-            _col_val("ann_species_col"),
-            _col_val("ann_data_type_col"),
-            _col_val("ann_data_type_val"),
+            col_val("ann_folder_col"),
+            col_val("ann_video_col"),
+            col_val("ann_species_col"),
+            col_val("ann_data_type_col"),
+            col_val("ann_data_type_val"),
             mappings,
-            _col_val("ann_is_blank_col"),
+            col_val("ann_is_blank_col"),
             get_state_val("ann_tag_cols") or [],
         )
         set_state_val("ann_validation", result)

@@ -6,7 +6,7 @@ from review_app.app.state import get_active_project_id, get_state_val, set_state
 from review_app.app.translations import t
 from review_app.app.utils import user_error_message
 
-from ._helpers import get_df_from_state, make_col_selects, read_upload_file
+from ._helpers import col_val, get_df_from_state, make_col_selects, read_upload_file
 
 _TEMPLATE_CSV = "path,created_at,latitude,longitude\nparent_dir/video.mp4,2024-06-01T08:30:00Z,46.9481,7.4474\n"
 _NONE_VALUE = ""
@@ -14,10 +14,6 @@ _NONE_VALUE = ""
 _REQUIRED_COLS = ("meta_folder_col", "meta_file_col")
 _OPTIONAL_COLS = ("meta_datetime_col", "meta_lat_col", "meta_lon_col")
 _SOURCE_EPSG_KEY = "meta_source_epsg"
-
-
-def _col_val(key: str) -> str:
-    return get_state_val(key) or ""
 
 
 def _source_epsg() -> int | None:
@@ -136,11 +132,11 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
                         dp.import_video_metadata_csv,
                         df,
                         get_active_project_id(),
-                        _col_val("meta_folder_col"),
-                        _col_val("meta_file_col"),
-                        _col_val("meta_datetime_col"),
-                        _col_val("meta_lat_col"),
-                        _col_val("meta_lon_col"),
+                        col_val("meta_folder_col"),
+                        col_val("meta_file_col"),
+                        col_val("meta_datetime_col"),
+                        col_val("meta_lat_col"),
+                        col_val("meta_lon_col"),
                         _source_epsg(),
                     )
                     msg = t("metadata_imported", count=result["updated"])
@@ -237,8 +233,8 @@ async def _run_validate(dp, loading_dialog, results_ui, results_container) -> No
             dp.validate_metadata_csv,
             df,
             get_active_project_id(),
-            _col_val("meta_folder_col"),
-            _col_val("meta_file_col"),
+            col_val("meta_folder_col"),
+            col_val("meta_file_col"),
         )
         set_state_val("meta_validation", result)
         results_container.visible = True

@@ -15,6 +15,10 @@ def get_df_from_state(key: str) -> pd.DataFrame | None:
     return pd.DataFrame(data) if data is not None else None
 
 
+def col_val(key: str) -> str:
+    return get_state_val(key) or ""
+
+
 def read_upload_file(content: bytes) -> pd.DataFrame:
     for encoding in ("utf-8-sig", "latin-1"):
         for quoting in (csv.QUOTE_MINIMAL, csv.QUOTE_NONE):
