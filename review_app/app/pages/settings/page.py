@@ -6,14 +6,12 @@ from nicegui import run, ui
 from review_app.app.config import get_default_db_path, get_user_data_dir
 from review_app.app.state import (
     get_active_project_id,
-    get_annotator_name,
     get_blank_threshold,
     get_data_provider,
     get_language,
     get_obj_detection_threshold,
     get_species_threshold,
     set_active_project,
-    set_annotator_name,
     set_blank_threshold,
     set_obj_detection_threshold,
     set_species_threshold,
@@ -29,7 +27,6 @@ from .tags import TagsSection
 def _build_settings_content(container: ui.column):
     current_db_path = get_default_db_path()
 
-    initial_annotator = get_annotator_name()
     initial_blank_threshold = get_blank_threshold()
     initial_species_threshold = get_species_threshold()
     initial_obj_detection_threshold = get_obj_detection_threshold()
@@ -110,26 +107,6 @@ def _build_settings_content(container: ui.column):
                     ui.button(
                         t("save"), icon="check", color="primary", on_click=save_collection
                     ).props("dense")
-
-        with ui.card().classes("full-width q-mb-lg"):
-            with ui.row().classes("items-center q-mb-sm"):
-                ui.icon("person", size="sm").classes("text-primary q-mr-sm")
-                ui.label(t("annotator_label")).classes("text-subtitle1 font-weight-medium")
-            with ui.row().classes("w-full items-center gap-sm"):
-                annotator_input = (
-                    ui.input(t("annotator_name"), value=initial_annotator)
-                    .props("outlined dense")
-                    .classes("col")
-                )
-
-                def save_annotator():
-                    name = annotator_input.value.strip() or "default"
-                    set_annotator_name(name)
-                    ui.notify(t("settings_saved"), type="positive")
-
-                ui.button(t("save"), icon="check", color="primary", on_click=save_annotator).props(
-                    "dense"
-                )
 
         if active_project_id:
             with ui.card().classes("full-width q-mb-lg"):
