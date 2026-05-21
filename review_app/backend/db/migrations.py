@@ -165,62 +165,6 @@ def _migration_v7(conn) -> None:
             )
 
 
-def _migration_v12(conn) -> None:
-    """Seed additional built-in tags. Idempotent."""
-    import uuid as _uuid
-
-    new_builtin_tags = [
-        ("nice_video", "Nice Video", "Belle vidéo", "amber", "thumb_up"),
-        ("funny", "Funny", "Drôle", "purple", "sentiment_very_satisfied"),
-        ("incorrect_time", "Incorrect Time", "Heure incorrecte", "orange", "schedule"),
-        ("incorrect_date", "Incorrect Date", "Date incorrecte", "orange", "event_busy"),
-        ("rain", "Rain", "Pluie", "blue", "water_drop"),
-        ("wind", "Wind", "Vent", "teal", "air"),
-        ("blurry", "Blurry", "Flou", "grey", "blur_on"),
-        ("backlight", "Backlight", "Contre-jour", "yellow", "wb_sunny"),
-        ("injured", "Injured", "Animal blessé", "red", "healing"),
-        ("disease", "Disease", "Animal malade", "deep-orange", "sick"),
-        ("reference_video", "Reference Video", "Vidéo de référence", "indigo", "bookmark"),
-        ("cam_too_high", "Cam Too High", "Cam trop haute", "brown", "arrow_upward"),
-        ("cam_too_low", "Cam Too Low", "Cam trop basse", "brown", "arrow_downward"),
-        (
-            "cam_displaced_by_animal",
-            "Cam Displaced by Animal",
-            "Cam déplacée par animal",
-            "brown",
-            "pets",
-        ),
-        (
-            "cam_displaced_by_human",
-            "Cam Displaced by Human",
-            "Cam déplacée par humain",
-            "brown",
-            "person",
-        ),
-        ("cam_on_ground", "Cam on Ground", "Cam au sol", "brown", "landscape"),
-        ("different_view_angle", "Different View Angle", "Angle de vue différent", "cyan", "360"),
-        ("branch_leaf", "Branch/Leaf", "Branche/Feuille", "green", "eco"),
-        ("vegetation_growth", "Vegetation Growth", "Croissance végétation", "green", "grass"),
-    ]
-    for key, name_en, name_fr, color, icon in new_builtin_tags:
-        existing = conn.execute(text("SELECT id FROM tags WHERE key = :k"), {"k": key}).fetchone()
-        if existing is None:
-            conn.execute(
-                text(
-                    "INSERT INTO tags (id, key, name_en, name_fr, color, icon, is_custom) "
-                    "VALUES (:id, :key, :name_en, :name_fr, :color, :icon, 0)"
-                ),
-                {
-                    "id": str(_uuid.uuid4()),
-                    "key": key,
-                    "name_en": name_en,
-                    "name_fr": name_fr,
-                    "color": color,
-                    "icon": icon,
-                },
-            )
-
-
 def _migration_v9(conn) -> None:
     """Add species_collections / species_collection_members tables and Project.collection_id."""
     tables = {
@@ -312,6 +256,109 @@ def _migration_v11(conn) -> None:
     conn.execute(
         text("CREATE INDEX idx_model_annotations_model_name ON model_annotations(model_name)")
     )
+
+
+def _migration_v12(conn) -> None:
+    """Seed additional built-in tags. Idempotent."""
+    import uuid as _uuid
+
+    new_builtin_tags = [
+        ("nice_video", "Nice Video", "Belle vidéo", "amber", "thumb_up"),
+        ("funny", "Funny", "Drôle", "purple", "sentiment_very_satisfied"),
+        ("incorrect_time", "Incorrect Time", "Heure incorrecte", "orange", "schedule"),
+        ("incorrect_date", "Incorrect Date", "Date incorrecte", "orange", "event_busy"),
+        ("rain", "Rain", "Pluie", "blue", "water_drop"),
+        ("wind", "Wind", "Vent", "teal", "air"),
+        ("blurry", "Blurry", "Flou", "grey", "blur_on"),
+        ("backlight", "Backlight", "Contre-jour", "yellow", "wb_sunny"),
+        ("injured", "Injured", "Animal blessé", "red", "healing"),
+        ("disease", "Disease", "Animal malade", "deep-orange", "sick"),
+        ("reference_video", "Reference Video", "Vidéo de référence", "indigo", "bookmark"),
+        ("cam_too_high", "Cam Too High", "Cam trop haute", "brown", "arrow_upward"),
+        ("cam_too_low", "Cam Too Low", "Cam trop basse", "brown", "arrow_downward"),
+        (
+            "cam_displaced_by_animal",
+            "Cam Displaced by Animal",
+            "Cam déplacée par animal",
+            "brown",
+            "pets",
+        ),
+        (
+            "cam_displaced_by_human",
+            "Cam Displaced by Human",
+            "Cam déplacée par humain",
+            "brown",
+            "person",
+        ),
+        ("cam_on_ground", "Cam on Ground", "Cam au sol", "brown", "landscape"),
+        ("different_view_angle", "Different View Angle", "Angle de vue différent", "cyan", "360"),
+        ("branch_leaf", "Branch/Leaf", "Branche/Feuille", "green", "eco"),
+        ("vegetation_growth", "Vegetation Growth", "Croissance végétation", "green", "grass"),
+    ]
+    for key, name_en, name_fr, color, icon in new_builtin_tags:
+        existing = conn.execute(text("SELECT id FROM tags WHERE key = :k"), {"k": key}).fetchone()
+        if existing is None:
+            conn.execute(
+                text(
+                    "INSERT INTO tags (id, key, name_en, name_fr, color, icon, is_custom) "
+                    "VALUES (:id, :key, :name_en, :name_fr, :color, :icon, 0)"
+                ),
+                {
+                    "id": str(_uuid.uuid4()),
+                    "key": key,
+                    "name_en": name_en,
+                    "name_fr": name_fr,
+                    "color": color,
+                    "icon": icon,
+                },
+            )
+
+
+def _migration_v15(conn) -> None:
+    """Convert custom tags that shadow built-in keys into proper built-ins. Idempotent."""
+    builtin_tags = [
+        ("fire", "Fire", "Feu", "deep-orange", "local_fire_department"),
+        ("nice_video", "Nice Video", "Belle vidéo", "amber", "thumb_up"),
+        ("funny", "Funny", "Drôle", "purple", "sentiment_very_satisfied"),
+        ("incorrect_time", "Incorrect Time", "Heure incorrecte", "orange", "schedule"),
+        ("incorrect_date", "Incorrect Date", "Date incorrecte", "orange", "event_busy"),
+        ("rain", "Rain", "Pluie", "blue", "water_drop"),
+        ("wind", "Wind", "Vent", "teal", "air"),
+        ("blurry", "Blurry", "Flou", "grey", "blur_on"),
+        ("backlight", "Backlight", "Contre-jour", "yellow", "wb_sunny"),
+        ("injured", "Injured", "Animal blessé", "red", "healing"),
+        ("disease", "Disease", "Animal malade", "deep-orange", "sick"),
+        ("reference_video", "Reference Video", "Vidéo de référence", "indigo", "bookmark"),
+        ("cam_too_high", "Cam Too High", "Cam trop haute", "brown", "arrow_upward"),
+        ("cam_too_low", "Cam Too Low", "Cam trop basse", "brown", "arrow_downward"),
+        (
+            "cam_displaced_by_animal",
+            "Cam Displaced by Animal",
+            "Cam déplacée par animal",
+            "brown",
+            "pets",
+        ),
+        (
+            "cam_displaced_by_human",
+            "Cam Displaced by Human",
+            "Cam déplacée par humain",
+            "brown",
+            "person",
+        ),
+        ("cam_on_ground", "Cam on Ground", "Cam au sol", "brown", "landscape"),
+        ("different_view_angle", "Different View Angle", "Angle de vue différent", "cyan", "360"),
+        ("branch_leaf", "Branch/Leaf", "Branche/Feuille", "green", "eco"),
+        ("vegetation_growth", "Vegetation Growth", "Croissance végétation", "green", "grass"),
+    ]
+    for key, name_en, name_fr, color, icon in builtin_tags:
+        conn.execute(
+            text(
+                "UPDATE tags SET name_en = :name_en, name_fr = :name_fr, color = :color, "
+                "icon = :icon, is_custom = 0 "
+                "WHERE key = :key AND is_custom = 1"
+            ),
+            {"key": key, "name_en": name_en, "name_fr": name_fr, "color": color, "icon": icon},
+        )
 
 
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
@@ -413,6 +460,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
             else None
         ),
     ),
+    (15, _migration_v15),
 ]
 
 
