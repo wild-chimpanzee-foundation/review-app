@@ -122,17 +122,3 @@ Capreolus capreolus;grazing;Grazing;Pâturage
 ```
 
 Rows with a specific `scientific_name` are applied on top of any `*` rows for that species only.
-
-## Keyboard shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Submit and go to next |
-| `N` / `P` | Next / previous video |
-| `B` | Mark as blank |
-| `M` | Flag for review later |
-| `Space` | Play / pause |
-| `← →` | Seek |
-| `S` / `D` | Speed up / down |
-| `[` / `]` | Brightness |
-| `{` / `}` | Contrast |

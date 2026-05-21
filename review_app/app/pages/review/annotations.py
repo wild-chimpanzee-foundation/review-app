@@ -196,11 +196,13 @@ def render_annotation_section_body(page, video, default_species, default_behavio
                         _shortcut_badge("A")
                 add_species_btn._props["data-shortcut"] = "add-species"
             for i, sel in enumerate(selections):
-                with (
+                ann_card = (
                     ui.card()
                     .classes("full-width q-pa-md q-mb-sm")
                     .style("border: 2px solid var(--q-primary)")
-                ):
+                )
+                ann_card._props["data-annotation-idx"] = str(i)
+                with ann_card:
                     active_project_id = get_active_project_id()
                     behaviors_map = dp.get_behavior_display_map(
                         lang=get_language(),

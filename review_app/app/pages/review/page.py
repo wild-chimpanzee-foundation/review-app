@@ -744,6 +744,30 @@ async def setup_review():
                 });
                 observer.observe(document.body, { childList: true, subtree: true });
 
+                // J/K annotation card selection (visual highlight only — Tab to enter)
+                let __selectedAnnotationIdx = -1;
+
+                function __clearAnnotationSelection() {
+                    document.querySelectorAll('[data-annotation-idx]').forEach(c => {
+                        c.style.borderColor = 'var(--q-primary)';
+                    });
+                    __selectedAnnotationIdx = -1;
+                }
+
+                function __selectAnnotationCard(idx) {
+                    __clearAnnotationSelection();
+                    const card = document.querySelector('[data-annotation-idx="' + idx + '"]');
+                    if (!card) return;
+                    card.style.borderColor = 'var(--q-warning)';
+                    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                    __selectedAnnotationIdx = idx;
+                }
+
+                document.addEventListener('click', function(e) {
+                    if (__selectedAnnotationIdx >= 0 && !e.target.closest('[data-annotation-idx]'))
+                        __clearAnnotationSelection();
+                });
+
                 // Global keyboard listener that targets the active video or UI elements
                 const SPEED_STEPS = """
         + str(SPEED_OPTIONS)
@@ -752,13 +776,39 @@ async def setup_review():
                 document.addEventListener('keydown', function(e) {
                     if (e.key === 'Escape') {
                         document.activeElement?.blur();
+                        if (__selectedAnnotationIdx >= 0) { __clearAnnotationSelection(); return; }
                         return;
                     }
                     if (document.querySelector('.q-dialog')) return;
                     const tag = e.target.tagName.toLowerCase();
-                    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+                    const inInput = tag === 'input' || tag === 'textarea' || tag === 'select';
                     if (e.target.isContentEditable) return;
                     if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+                    if (inInput) return;
+
+                    // J/K: visually select next/prev annotation card
+                    if (e.key === 'j' || e.key === 'J' || e.key === 'k' || e.key === 'K') {
+                        const cards = Array.from(document.querySelectorAll('[data-annotation-idx]'));
+                        if (cards.length > 0) {
+                            e.preventDefault();
+                            const isNext = e.key === 'j' || e.key === 'J';
+                            const targetIdx = isNext
+                                ? (__selectedAnnotationIdx + 1) % cards.length
+                                : ((__selectedAnnotationIdx - 1) + cards.length) % cards.length;
+                            __selectAnnotationCard(targetIdx);
+                            return;
+                        }
+                    }
+
+                    // Tab: focus first input of the selected annotation card
+                    if (e.key === 'Tab' && __selectedAnnotationIdx >= 0) {
+                        e.preventDefault();
+                        const card = document.querySelector('[data-annotation-idx="' + __selectedAnnotationIdx + '"]');
+                        __clearAnnotationSelection();
+                        card?.querySelector('input')?.focus();
+                        return;
+                    }
 
                     // Priority shortcuts: Submit, Next, Prev, Blank
                     if (e.key === 'Enter') {

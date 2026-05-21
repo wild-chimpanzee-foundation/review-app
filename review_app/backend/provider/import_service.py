@@ -9,6 +9,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from review_app.app.config import CSV_TEMPLATES
+from review_app.app.state import get_blank_threshold
 from review_app.backend.errors import DataImportError
 from review_app.backend.provider.base import ProviderBase
 
@@ -599,8 +600,6 @@ class ImportMixin(ProviderBase):
                         s.scientific_name         AS species,
                         b.key                     AS behavior,
                         io.count,
-                        io.start_sec,
-                        io.end_sec
                     FROM videos v
                     LEFT JOIN projects p ON p.id = v.project_id
                     LEFT JOIN video_labels vl ON vl.video_id = v.video_id
@@ -608,7 +607,7 @@ class ImportMixin(ProviderBase):
                     LEFT JOIN species s ON s.id = io.species_id
                     LEFT JOIN behaviors b ON b.id = io.behavior_id
                     WHERE 1=1 {vid_pid}
-                    ORDER BY v.camera_id, v.video_path, io.start_sec
+                    ORDER BY v.camera_id, v.video_path, v.created_at
                 """),
                 conn,
                 params=params,
@@ -670,38 +669,6 @@ class ImportMixin(ProviderBase):
             prob_wide.columns = [f"{c}__prob" for c in prob_wide.columns]
             model_wide = value_wide.join(prob_wide, how="outer").reset_index()
 
-            # needs_review: flag=1 when models disagree on species or blank signal is weak
-            all_video_ids = model_df["video_id"].unique()
-            species_agg = (
-                model_df[model_df["annotation_type"].isin({"species", "object_detection"})]
-                .groupby("video_id")
-                .agg(distinct_top1=("value_text", "nunique"), model_count=("value_text", "count"))
-                .reset_index()
-            )
-            blank_probs = (
-                model_df[model_df["annotation_type"] == "blank_non_blank"]
-                .groupby("video_id")["probability"]
-                .max()
-                .rename("blank_prob")
-                .reset_index()
-            )
-            nr = pd.DataFrame({"video_id": all_video_ids})
-            nr = nr.merge(species_agg, on="video_id", how="left")
-            nr = nr.merge(blank_probs, on="video_id", how="left")
-            nr[["blank_prob", "distinct_top1", "model_count"]] = nr[
-                ["blank_prob", "distinct_top1", "model_count"]
-            ].fillna(0.0)
-            thr = 0.75
-            nr["needs_review"] = (
-                ~(
-                    (nr["blank_prob"] >= thr)
-                    | ((nr["distinct_top1"] == 1) & (nr["model_count"] >= 1))
-                )
-            ).astype(int)
-            model_wide = model_wide.merge(
-                nr[["video_id", "needs_review"]], on="video_id", how="left"
-            )
-
             base_df = base_df.merge(model_wide, on="video_id", how="left")
 
         base_df = base_df.drop(columns=["video_id"], errors="ignore")
@@ -714,7 +681,7 @@ class ImportMixin(ProviderBase):
         # Format float timestamp columns as fixed-decimal strings so that to_csv() writes them
         # quoted. Without this, LibreOffice with European locale settings misreads "60.085" as
         # the integer 60085 (treating "." as a thousands separator).
-        for col in ("duration_sec", "start_sec", "end_sec"):
+        for col in "duration_sec":
             if col in base_df.columns:
                 base_df[col] = base_df[col].apply(lambda v: f"{v:.3f}" if pd.notna(v) else "")
 
@@ -839,8 +806,8 @@ class ImportMixin(ProviderBase):
             if pd.notna(rl_raw) and bool(int(rl_raw)):
                 self.set_review_later(str(video_id), True)
 
-            # Restore tags — auto-create missing custom tags so they survive cross-DB import
             if "custom_tags" in df.columns:
+                # Restore tags — auto-create missing custom tags so they survive cross-DB import
                 raw = first.get("custom_tags")
                 if pd.notna(raw) and str(raw).strip():
                     for k in str(raw).split(","):
