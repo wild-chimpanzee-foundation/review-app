@@ -7,7 +7,7 @@ from urllib.parse import quote
 from nicegui import run, ui
 
 from review_app.app.onboarding import show_info_dialog, show_tour_if_needed
-from review_app.app.pages.review.annotations import render_annotation_section_body
+from review_app.app.pages.review.annotations import _shortcut_badge, render_annotation_section_body
 from review_app.app.pages.review.filters import render_filter_drawer_body
 from review_app.app.pages.review.tags import render_video_tags
 from review_app.app.pages.review.video_player import SPEED_OPTIONS, render_custom_video_player
@@ -211,6 +211,7 @@ def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
             "object_detection": t("object_detection_annotations"),
         }
         first_ann_type = True
+        _shortcut_idx = 0
         for _ann_type, _predictions in groups.items():
             ann_type_display = rename_map.get(_ann_type, _ann_type.capitalize().replace("_", " "))
             with ui.row().classes("items-center gap-xs q-mt-xs q-mb-none"):
@@ -224,7 +225,10 @@ def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
                         ),
                     ).props("flat round dense size=xs color=grey-6")
                     first_ann_type = False
-            _clickable = on_add_species is not None and _ann_type in {"species", "object_detection"}
+            _clickable = on_add_species is not None and _ann_type in {
+                "species",
+                "object_detection",
+            }
             with ui.column().classes("w-full gap-y-1"):
                 for _val, _pred_data in sorted(
                     _predictions.items(),
@@ -242,9 +246,17 @@ def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
                         + (" cursor-pointer" if _clickable else "")
                     )
                     _count = _models[0].get("count")
-                    _click_count = max(1, int(round(_count))) if (_count is not None and _count == _count) else 1
+                    _click_count = (
+                        max(1, int(round(_count)))
+                        if (_count is not None and _count == _count)
+                        else 1
+                    )
+                    if _clickable:
+                        _shortcut_idx += 1
                     with ui.row().classes(_row_classes) as _ann_row:
                         with ui.row().classes("items-center gap-x-2"):
+                            if _clickable and _shortcut_idx <= 9:
+                                _shortcut_badge(str(_shortcut_idx))
                             _display_val = _val
                             if (
                                 _ann_type == "object_detection"
@@ -284,6 +296,8 @@ def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
                             "click",
                             lambda _e, sk=_species_key, cc=_click_count: on_add_species(sk, cc),
                         )
+                        if _shortcut_idx <= 9:
+                            _ann_row._props["data-shortcut"] = f"add-ai-{_shortcut_idx}"
 
 
 async def _render_video_section_body(page: ReviewPage):
@@ -544,6 +558,7 @@ async def _render_video_section_body(page: ReviewPage):
                 await render_video_tags(selected_video_id, dp, get_annotator_name())
 
         with ui.column().style("flex: 1; min-width: 300px; max-width: 560px;"):
+
             def _on_add_ai_species(species_key: str, count: int):
                 sels = get_selections()
                 sels.insert(
@@ -559,9 +574,12 @@ async def _render_video_section_body(page: ReviewPage):
                 )
                 set_selections(sels)
                 set_state_val("review_is_blank", False)
+                set_state_val("focus_new_count", True)
                 page.render_annotation_section.refresh()
 
-            _render_ai_annotations(model_ann, global_species_map, on_add_species=_on_add_ai_species)
+            _render_ai_annotations(
+                model_ann, global_species_map, on_add_species=_on_add_ai_species
+            )
             with ui.card().classes("full-width"):
                 with ui.row().classes("items-center w-full q-mb-none"):
                     ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium")
@@ -574,6 +592,7 @@ async def _render_video_section_body(page: ReviewPage):
                         .props(
                             f"flat round dense {'color=orange' if is_review_later else 'color=grey-6'}"
                         )
+                        .classes("tour-target-review-later")
                         .tooltip(t("review_later"))
                     )
                     ui.button(
@@ -754,9 +773,18 @@ async def setup_review():
                     } else if (e.key === 'b' || e.key === 'B') {
                         e.preventDefault();
                         document.querySelector('[data-shortcut="mark-blank"]')?.click();
+                    } else if (e.key === 'a' || e.key === 'A') {
+                        e.preventDefault();
+                        document.querySelector('[data-shortcut="add-species"]')?.click();
+                    } else if (e.key === 'c' || e.key === 'C') {
+                        e.preventDefault();
+                        document.querySelector('[data-shortcut="clear-annotations"]')?.click();
                     } else if (e.key === 'm' || e.key === 'M') {
                         e.preventDefault();
                         document.querySelector('[data-shortcut="mark-unknown"]')?.click();
+                    } else if (e.key >= '1' && e.key <= '9') {
+                        const target = document.querySelector('[data-shortcut="add-ai-' + e.key + '"]');
+                        if (target) { e.preventDefault(); target.click(); }
                     }
 
                     // Video playback shortcuts - delegated to the first visible video element

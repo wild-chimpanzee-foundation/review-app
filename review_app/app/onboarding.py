@@ -1,3 +1,5 @@
+import json
+
 from nicegui import ui
 
 from review_app.app.state import get_state_val, is_tour_completed, set_tour_completed
@@ -17,35 +19,25 @@ _TOUR_CSS = """
 </style>
 """
 
-# Default CSS selectors for each step (None = no highlight, dialog centers itself).
-# show_tour() may override per-step targets at runtime (e.g. when AI annotations are missing).
-_STEP_TARGETS = [
-    None,  # 0: Welcome
-    ".tour-target-queue",  # 1: Review Queue
-    ".tour-target-filters",  # 2: Filters
-    ".tour-target-ai-predictions",  # 3: AI Predictions
-    ".tour-target-action-buttons",  # 4: Blank vs Non-blank
-    ".tour-target-review-later",  # 5: Review Later
-    ".tour-target-shortcuts",  # 6: Keyboard Shortcuts
-    None,  # 7: Done
-]
-
-# Highlights the target element and repositions the tour dialog near it.
+# Highlights target elements and repositions the tour dialog near the first one.
+# sels: JSON array of CSS selectors — each selector can match multiple DOM elements.
 # Uses a 60ms timeout so the dialog has time to render before measuring its size.
 _STEP_JS = """
-(function(sel) {
+(function(sels) {
     document.querySelectorAll('.tour-highlight').forEach(function(el) {
         el.classList.remove('tour-highlight');
     });
 
-    var target = sel ? document.querySelector(sel) : null;
-    if (target) {
-        target.classList.add('tour-highlight');
-    }
+    var targets = [];
+    sels.forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) { targets.push(el); });
+    });
+    targets.forEach(function(el) { el.classList.add('tour-highlight'); });
 
+    var primary = targets[0] || null;
     var extraDelay = 0;
-    if (target) {
-        target.querySelectorAll('.q-expansion-item:not([aria-expanded="true"])').forEach(function(exp) {
+    if (primary) {
+        primary.querySelectorAll('.q-expansion-item:not([aria-expanded="true"])').forEach(function(exp) {
             var header = exp.querySelector('.q-expansion-item__container > .q-item');
             if (header) { header.click(); extraDelay = 350; }
         });
@@ -66,7 +58,7 @@ _STEP_JS = """
         var gap = 20;
         var pad = 16;
 
-        if (!target) {
+        if (!primary) {
             inner.style.top  = Math.max(pad, (vh - dh) / 2) + 'px';
             inner.style.left = Math.max(pad, (vw - dw) / 2) + 'px';
             inner.style.bottom = '';
@@ -74,14 +66,14 @@ _STEP_JS = """
             return;
         }
 
-        // Scroll target into view if off-screen, then position
-        var tr = target.getBoundingClientRect();
+        // Scroll primary target into view if off-screen, then position
+        var tr = primary.getBoundingClientRect();
         if (tr.top < 0 || tr.bottom > vh) {
-            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            primary.scrollIntoView({ behavior: 'smooth', block: 'center' });
             // Re-measure after scroll settles
-            setTimeout(function() { positionNear(target, dw, dh, vw, vh, gap, pad, inner); }, 320);
+            setTimeout(function() { positionNear(primary, dw, dh, vw, vh, gap, pad, inner); }, 320);
         } else {
-            positionNear(target, dw, dh, vw, vh, gap, pad, inner);
+            positionNear(primary, dw, dh, vw, vh, gap, pad, inner);
         }
     }, 60 + extraDelay);
 
@@ -106,17 +98,20 @@ _STEP_JS = """
         inner.style.bottom = '';
         inner.style.right  = '';
     }
-})("%s");
+})(%s);
 """
 
 
-def _step_js(step: int) -> str:
-    target = _STEP_TARGETS[step] if step < len(_STEP_TARGETS) else None
-    return _STEP_JS % (target or "")
+def _target_js_arg(target: str | list[str] | None) -> str:
+    if target is None:
+        return "[]"
+    if isinstance(target, str):
+        return json.dumps([target])
+    return json.dumps(target)
 
 
 def _clear_highlight() -> None:
-    ui.run_javascript(_STEP_JS % "")
+    ui.run_javascript(_STEP_JS % "[]")
 
 
 def show_info_dialog(title: str, body: str) -> None:
@@ -133,50 +128,36 @@ def show_info_dialog(title: str, body: str) -> None:
 
 
 def show_tour(t) -> None:
-    has_ai_annotations = get_state_val("has_ai_annotations", True)
+    has_ai = get_state_val("has_ai_annotations", True)
     ui.add_head_html(_TOUR_CSS, shared=True)
 
-    step_targets = [
-        None,  # 0: Welcome
-        ".tour-target-queue",  # 1: Review Queue
-        ".tour-target-filters",  # 2: Filters
-        ".tour-target-ai-predictions" if has_ai_annotations else None,  # 3: AI Predictions
-        ".tour-target-action-buttons",  # 4: Blank vs Non-blank
-        ".tour-target-review-later",  # 5: Review Later
-        ".tour-target-shortcuts",  # 6: Keyboard Shortcuts
-        None,  # 7: Done
-    ]
+    ai_target = ".tour-target-ai-predictions" if has_ai else None
 
+    # Each step: (css_selector_or_None, title, body)
     steps = [
-        (t("tour_step_1_title"), t("tour_step_1_body")),
-        (t("tour_step_2_title"), t("tour_step_2_body")),
-        (t("tour_step_filters_title"), t("tour_step_filters_body")),
-        (
-            t("tour_step_3_title") if has_ai_annotations else t("tour_step_3_no_ai_title"),
-            t("tour_step_3_body") if has_ai_annotations else t("tour_step_3_no_ai_body"),
-        ),
-        (t("tour_step_4_title"), t("tour_step_4_body")),
-        (t("tour_step_5_title"), t("tour_step_5_body")),
-        (t("tour_step_shortcuts_title"), t("tour_step_shortcuts_body")),
-        (t("tour_step_6_title"), t("tour_step_6_body")),
+        (None,                          t("tour_step_1_title"),                                          t("tour_step_1_body")),
+        (".tour-target-queue",          t("tour_step_2_title"),                                          t("tour_step_2_body")),
+        (".tour-target-filters",        t("tour_step_filters_title"),                                    t("tour_step_filters_body")),
+        (ai_target,                     t("tour_step_3_title") if has_ai else t("tour_step_3_no_ai_title"), t("tour_step_3_body") if has_ai else t("tour_step_3_no_ai_body")),
+        (ai_target,                     t("tour_step_ai_click_title"),                                   t("tour_step_ai_click_body")),
+        (".tour-target-action-buttons", t("tour_step_4_title"),                                          t("tour_step_4_body")),
+        (".tour-target-review-later",   t("tour_step_5_title"),                                          t("tour_step_5_body")),
+        (".tour-target-shortcuts",      t("tour_step_shortcuts_title"),                                  t("tour_step_shortcuts_body")),
+        (None,                          t("tour_step_6_title"),                                          t("tour_step_6_body")),
     ]
 
     state = {"step": 0}
     els: dict = {}
 
-    def _target_js(step):
-        target = step_targets[step] if step < len(step_targets) else None
-        return _STEP_JS % (target or "")
-
     def update():
         n = state["step"]
-        total = len(steps)
-        els["progress"].text = f"{n + 1} / {total}"
-        els["title"].text = steps[n][0]
-        els["body"].text = steps[n][1]
+        target, title, body = steps[n]
+        els["progress"].text = f"{n + 1} / {len(steps)}"
+        els["title"].text = title
+        els["body"].text = body
         els["prev"].set_visibility(n > 0)
-        els["next"].text = t("tour_finish") if n == total - 1 else t("tour_next")
-        ui.run_javascript(_target_js(n))
+        els["next"].text = t("tour_finish") if n == len(steps) - 1 else t("tour_next")
+        ui.run_javascript(_STEP_JS % _target_js_arg(target))
 
     def go_prev():
         state["step"] -= 1

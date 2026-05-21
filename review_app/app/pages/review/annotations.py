@@ -86,10 +86,6 @@ def _init_annotation_state(video, default_species, default_behavior):
                     )
                     for s in model_suggestions
                 ]
-            else:
-                selections = [
-                    _new_annotation(None, default_behavior, video.get("duration_sec"))
-                ]
 
     set_state_val("review_is_blank", is_blank)
     set_selections(selections)
@@ -179,20 +175,26 @@ def render_annotation_section_body(page, video, default_species, default_behavio
     else:
 
         def add_species():
-            first = selections[0]["species"] if selections else default_species
             new_sels = get_selections()
-            new_sels.insert(0, _new_annotation(first, default_behavior, video.get("duration_sec")))
+            new_sels.insert(0, _new_annotation(None, default_behavior, video.get("duration_sec")))
             set_selections(new_sels)
             set_state_val("review_is_blank", False)
+            set_state_val("focus_new_species", True)
             page.render_annotation_section.refresh()
 
         with ui.element("div").style(
             "overflow-y: auto; overflow-x: hidden; max-height: calc(100vh - 360px); width: 100%;"
         ):
             with ui.row().classes("w-full justify-center q-mb-xs"):
-                ui.button(t("add_species"), icon="add", on_click=add_species).props(
+                with ui.button(on_click=add_species).props(
                     "size=md color=primary outline"
-                ).style("border-style: dashed")
+                ).style("border-style: dashed") as add_species_btn:
+                    with ui.row().classes("items-center justify-between w-full q-px-xs"):
+                        with ui.row().classes("items-center gap-xs col justify-center"):
+                            ui.icon("add", size="sm")
+                            ui.label(t("add_species"))
+                        _shortcut_badge("A")
+                add_species_btn._props["data-shortcut"] = "add-species"
             for i, sel in enumerate(selections):
                 with (
                     ui.card()
@@ -236,6 +238,9 @@ def render_annotation_section_body(page, video, default_species, default_behavio
                             .props("outlined dense")
                             .classes("col")
                         )
+                        if i == 0 and get_state_val("focus_new_species"):
+                            set_state_val("focus_new_species", False)
+                            sp.run_method("focus")
 
                     with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
                         bp = (
@@ -262,6 +267,9 @@ def render_annotation_section_body(page, video, default_species, default_behavio
                             .props("outlined dense")
                             .classes("col")
                         )
+                        if i == 0 and get_state_val("focus_new_count"):
+                            set_state_val("focus_new_count", False)
+                            ct.run_method("focus")
 
                         def step_count(idx, delta, c=ct):
                             new_sels = get_selections()
@@ -459,6 +467,21 @@ def render_annotation_section_body(page, video, default_species, default_behavio
         "position: sticky; bottom: 0; z-index: 10; background: inherit; "
         "padding-top: 8px; border-top: 1px solid rgba(128,128,128,0.15);"
     ):
+        def clear_annotations():
+            set_selections([])
+            set_state_val("review_is_blank", False)
+            page.render_annotation_section.refresh()
+
+        with ui.row().classes("w-full justify-end q-mb-xs"):
+            with ui.button(on_click=clear_annotations).props(
+                "flat dense color=grey size=sm"
+            ) as clear_btn:
+                with ui.row().classes("items-center gap-xs q-px-xs"):
+                    ui.icon("clear_all", size="xs")
+                    ui.label(t("clear_annotations")).classes("text-caption")
+                    _shortcut_badge("C")
+            clear_btn._props["data-shortcut"] = "clear-annotations"
+
         with ui.row().classes("w-full gap-sm q-mt-sm tour-target-action-buttons"):
             with (
                 ui.button(on_click=submit_and_next, color="warning")
