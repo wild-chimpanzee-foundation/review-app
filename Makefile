@@ -27,4 +27,4 @@ build:
 	uv run pyinstaller video_annotation.spec --clean
 
 changelog:
-	uvx git-cliff --latest
+	uvx git-cliff --unreleased

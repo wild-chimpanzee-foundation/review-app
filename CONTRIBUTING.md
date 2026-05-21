@@ -124,7 +124,7 @@ git push origin v1.2.0
 To preview the changelog for the upcoming release locally:
 
 ```bash
-uvx git-cliff --latest
+uvx git-cliff --unreleased
 ```
 
 To build locally:
