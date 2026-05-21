@@ -49,7 +49,12 @@ class LocalDataProvider(
 
         self._db_path = self.db_dir / DEFAULT_DB_FILENAME
 
-        self.engine = create_engine(f"sqlite:///{self._db_path}")
+        self.engine = create_engine(
+            f"sqlite:///{self._db_path}",
+            connect_args={"check_same_thread": False},
+            pool_size=20,
+            max_overflow=0,
+        )
 
         @event.listens_for(self.engine, "connect")
         def set_sqlite_pragma(conn, _):

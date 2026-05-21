@@ -19,7 +19,8 @@ def require_login() -> bool:
 
 def user_error_message(exc: Exception) -> str:
     if hasattr(exc, "user_message_key"):
-        return t(exc.user_message_key)
+        kwargs = {k: v for k, v in vars(exc).items() if k not in ("detail", "user_message_key")}
+        return t(exc.user_message_key, **kwargs)
     logger.exception("Unexpected error: %s", exc)
     return str(exc)
 

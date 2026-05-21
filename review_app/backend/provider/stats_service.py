@@ -145,44 +145,6 @@ class StatsMixin(ProviderBase):
                 params=p,
             ).to_dict(orient="records")
 
-            stats["model_human_agreement"] = pd.read_sql(
-                text(f"""
-                WITH top_model AS (
-                    SELECT
-                        video_id,
-                        model_name,
-                        value_text AS predicted_species,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY video_id, model_name
-                            ORDER BY COALESCE(probability, 0) DESC
-                        ) AS rn
-                    FROM model_annotations
-                    WHERE annotation_type IN ('species', 'object_detection') {af}
-                ),
-                manual AS (
-                    SELECT DISTINCT io.video_id, s.scientific_name AS manual_species
-                    FROM individual_observations io
-                    JOIN species s ON s.id = io.species_id
-                    WHERE 1=1 {af.replace("project_id", "io.project_id") if af else ""}
-                )
-                SELECT
-                    tm.model_name,
-                    COUNT(*)                                              AS compared,
-                    SUM(CASE WHEN tm.predicted_species = m.manual_species
-                            THEN 1 ELSE 0 END)                         AS agreed,
-                    ROUND(
-                        100.0 * SUM(CASE WHEN tm.predicted_species = m.manual_species
-                                        THEN 1 ELSE 0 END) / COUNT(*), 1
-                    )                                                     AS agreement_pct
-                FROM top_model tm
-                JOIN manual m ON m.video_id = tm.video_id
-                WHERE tm.rn = 1
-                GROUP BY tm.model_name
-            """),
-                conn,
-                params=p,
-            ).to_dict(orient="records")
-
             stats["camera_summary"] = pd.read_sql(
                 text(f"""
                 SELECT
@@ -204,7 +166,7 @@ class StatsMixin(ProviderBase):
         return stats
 
     def get_video_locations(self, active_project_id: str | None = None) -> list[dict]:
-        """Return distinct (lat, lon, camera_id, count) tuples for all geotagged videos."""
+        """Return one marker per camera_id (avg lat/lon) for all geotagged videos."""
         p = {"pid": active_project_id} if active_project_id else {}
         pf = "WHERE latitude IS NOT NULL AND longitude IS NOT NULL" + (
             " AND project_id = :pid" if active_project_id else ""
@@ -213,13 +175,13 @@ class StatsMixin(ProviderBase):
             return pd.read_sql(
                 text(f"""
                 SELECT
-                    ROUND(latitude, 6)  AS latitude,
-                    ROUND(longitude, 6) AS longitude,
+                    ROUND(AVG(latitude), 6)  AS latitude,
+                    ROUND(AVG(longitude), 6) AS longitude,
                     camera_id,
-                    COUNT(*)            AS video_count
+                    COUNT(*)                 AS video_count
                 FROM videos
                 {pf}
-                GROUP BY ROUND(latitude, 6), ROUND(longitude, 6), camera_id
+                GROUP BY camera_id
                 ORDER BY video_count DESC
                 """),
                 conn,

@@ -835,6 +835,9 @@ async def setup_review():
                     } else if (e.key >= '1' && e.key <= '9') {
                         const target = document.querySelector('[data-shortcut="add-ai-' + e.key + '"]');
                         if (target) { e.preventDefault(); target.click(); }
+                    } else if (e.key === 't' || e.key === 'T') {
+                        e.preventDefault();
+                        document.querySelector('[data-shortcut="focus-tags"]')?.focus();
                     }
 
                     // Video playback shortcuts - delegated to the first visible video element

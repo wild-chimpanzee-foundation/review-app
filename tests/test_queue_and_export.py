@@ -283,12 +283,22 @@ def test_export_unannotated_video_appears_once(populated_provider):
     assert v4_rows.iloc[0]["is_annotated"] == 0
 
 
-def test_export_model_columns_present(populated_provider):
-    """model_a predictions should appear as dynamic columns."""
+def test_export_no_model_columns(populated_provider):
+    """Manual export must not contain any AI model columns."""
     dp, _ = populated_provider
     df = dp.export_annotations_csv(active_project_id=None)
     model_cols = [c for c in df.columns if "model_a" in c]
-    assert len(model_cols) > 0
+    assert len(model_cols) == 0
+
+
+def test_export_model_annotations_csv(populated_provider):
+    """export_model_annotations_csv should return model_a rows with expected columns."""
+    dp, _ = populated_provider
+    df = dp.export_model_annotations_csv(active_project_id=None)
+    assert {"video_path", "model_name", "annotation_type", "value_text", "probability"}.issubset(
+        df.columns
+    )
+    assert df["model_name"].str.contains("model_a").any()
 
 
 # ---------------------------------------------------------------------------

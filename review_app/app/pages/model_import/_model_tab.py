@@ -1,5 +1,3 @@
-import io
-
 import pandas as pd
 from nicegui import run, ui
 
@@ -14,6 +12,7 @@ from ._helpers import (
     auto_suggest_path_col,
     get_df_from_state,
     is_long_format,
+    read_upload_file,
     render_species_mappings,
 )
 
@@ -84,7 +83,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             loading_dialog.open()
             try:
                 content = await e.file.read()
-                raw_df = pd.read_csv(io.BytesIO(content), sep=None, engine="python")
+                raw_df = read_upload_file(content)
                 columns = list(raw_df.columns)
                 sample = raw_df.head(3).to_dict(orient="records")
 
@@ -125,7 +124,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             multiple=False,
             label=t("choose_csv"),
             auto_upload=True,
-        )
+        ).props("accept=.csv,.tsv,.txt")
 
     # ── Step 2: Configure & Validate ─────────────────────────────────────────
     with step2_header:
@@ -365,6 +364,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                     apply_fn=apply_mappings_model,
                     update_import_button=update_import_button,
                     can_apply=can_apply,
+                    project_id=get_active_project_id(),
                 )
 
             # Error details

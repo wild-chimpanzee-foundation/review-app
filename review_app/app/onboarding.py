@@ -135,15 +135,19 @@ def show_tour(t) -> None:
 
     # Each step: (css_selector_or_None, title, body)
     steps = [
-        (None,                          t("tour_step_1_title"),                                          t("tour_step_1_body")),
-        (".tour-target-queue",          t("tour_step_2_title"),                                          t("tour_step_2_body")),
-        (".tour-target-filters",        t("tour_step_filters_title"),                                    t("tour_step_filters_body")),
-        (ai_target,                     t("tour_step_3_title") if has_ai else t("tour_step_3_no_ai_title"), t("tour_step_3_body") if has_ai else t("tour_step_3_no_ai_body")),
-        (ai_target,                     t("tour_step_ai_click_title"),                                   t("tour_step_ai_click_body")),
-        (".tour-target-action-buttons", t("tour_step_4_title"),                                          t("tour_step_4_body")),
-        (".tour-target-review-later",   t("tour_step_5_title"),                                          t("tour_step_5_body")),
-        (".tour-target-shortcuts",      t("tour_step_shortcuts_title"),                                  t("tour_step_shortcuts_body")),
-        (None,                          t("tour_step_6_title"),                                          t("tour_step_6_body")),
+        (None, t("tour_step_1_title"), t("tour_step_1_body")),
+        (".tour-target-queue", t("tour_step_2_title"), t("tour_step_2_body")),
+        (".tour-target-filters", t("tour_step_filters_title"), t("tour_step_filters_body")),
+        (
+            ai_target,
+            t("tour_step_3_title") if has_ai else t("tour_step_3_no_ai_title"),
+            t("tour_step_3_body") if has_ai else t("tour_step_3_no_ai_body"),
+        ),
+        (ai_target, t("tour_step_ai_click_title"), t("tour_step_ai_click_body")),
+        (".tour-target-action-buttons", t("tour_step_4_title"), t("tour_step_4_body")),
+        (".tour-target-review-later", t("tour_step_5_title"), t("tour_step_5_body")),
+        (".tour-target-shortcuts", t("tour_step_shortcuts_title"), t("tour_step_shortcuts_body")),
+        (None, t("tour_step_6_title"), t("tour_step_6_body")),
     ]
 
     state = {"step": 0}

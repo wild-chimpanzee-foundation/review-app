@@ -132,6 +132,7 @@ def shared_header(show_drawer: bool = False):
         _shortcut_row("1 – 9", t("shortcut_add_ai"))
         _shortcut_row("J / K", t("shortcut_next_annotation"))
         _shortcut_row("Tab", t("shortcut_enter_annotation"))
+        _shortcut_row("T", t("shortcut_focus_tags"))
 
         ui.label(t("shortcuts_review")).classes("text-caption text-grey-5 text-uppercase q-mt-md")
         ui.separator().classes("q-mb-xs")

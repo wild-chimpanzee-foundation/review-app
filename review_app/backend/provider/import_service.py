@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from pyproj import Transformer
 from sqlalchemy import text
 
 from review_app.app.config import CSV_TEMPLATES
-from review_app.app.state import get_blank_threshold
 from review_app.backend.errors import DataImportError
 from review_app.backend.provider.base import ProviderBase
 
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 BLANK_SENTINEL = "__blank__"
 _FALSY = {"", "0", "false", "False", "nan", "none", "None", "no"}
+_BLANK_SPECIES = {"Vide", "Video vide", "Indetermine", "Espece indeterminee", "NA", "nan", ""}
 
 
 def _apply_historic_tags(
@@ -33,25 +35,22 @@ def _apply_historic_tags(
     provider.set_video_tags(video_id, tag_keys, append=append)
 
 
-def _extract_tag_keys(row: dict | Any, columns) -> list[str] | None:
-    """Parse tag_* and custom_tags columns from an exported CSV row.
+def _extract_builtin_tag_keys(row: dict | Any, columns) -> list[str] | None:
+    """Parse tag_* columns from an exported CSV row.
 
-    Returns None if no tag columns are present in the CSV (so callers can skip
+    Returns None if no tag_* columns are present (so callers can skip
     set_video_tags entirely and leave existing tags untouched).
+    Custom tags are handled separately so their keys can be normalized
+    via create_custom_tag before being passed to set_video_tags.
     """
     tag_cols = [c for c in columns if c.startswith("tag_")]
-    has_custom = "custom_tags" in columns
-    if not tag_cols and not has_custom:
+    if not tag_cols:
         return None
     keys: list[str] = []
     for col in tag_cols:
         val = row.get(col)
         if pd.notna(val) and str(val).strip() == "1":
             keys.append(col[4:])  # strip "tag_" prefix
-    if has_custom:
-        raw = row.get("custom_tags")
-        if pd.notna(raw) and str(raw).strip():
-            keys.extend(k.strip() for k in str(raw).split(",") if k.strip())
     return keys
 
 
@@ -137,6 +136,9 @@ class ImportMixin(ProviderBase):
         by_suffix: dict[str, str] = {}
         stem_to_id: dict[str, str] = {}
         stem_count: dict[str, int] = {}
+        # cam_prefix/stem fallback: e.g. "BDR72_681625_.../DCIM/.../DSCF0001.mp4" → "bdr72/dscf0001"
+        cam_stem_to_id: dict[str, str] = {}
+        cam_stem_count: dict[str, int] = {}
         for _, row in df.iterrows():
             p = Path(str(row["video_path"]))
             vid = str(row["video_id"])
@@ -147,6 +149,12 @@ class ImportMixin(ProviderBase):
                     rel = p.relative_to(scan_dir)
                     by_suffix[str(rel).lower()] = vid
                     by_suffix[str(rel.with_suffix("")).lower()] = vid
+                    # Short cam-ID prefix (first _-segment of the top-level folder)
+                    if rel.parts:
+                        cam_prefix = rel.parts[0].split("_")[0].lower()
+                        key = f"{cam_prefix}/{p.stem.lower()}"
+                        cam_stem_to_id[key] = vid
+                        cam_stem_count[key] = cam_stem_count.get(key, 0) + 1
                 except ValueError:
                     continue
 
@@ -159,6 +167,10 @@ class ImportMixin(ProviderBase):
             stem_count[stem] = stem_count.get(stem, 0) + 1
 
         by_stem = {s: vid for s, vid in stem_to_id.items() if stem_count[s] == 1}
+        # Merge unambiguous cam-prefix entries into by_suffix
+        for key, vid in cam_stem_to_id.items():
+            if cam_stem_count[key] == 1:
+                by_suffix.setdefault(key, vid)
         return by_suffix, by_stem
 
     # ── Annotation type validation ────────────────────────────────────────────
@@ -503,34 +515,89 @@ class ImportMixin(ProviderBase):
 
     # ── Video metadata CSV import ─────────────────────────────────────────────
 
+    def validate_metadata_csv(
+        self,
+        df: pd.DataFrame,
+        active_project_id: str | None,
+        folder_col: str = "",
+        file_col: str = "",
+    ) -> dict[str, Any]:
+        """Dry-run path matching; returns {total, matched, unmatched} without writing to the DB."""
+        by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
+        matched = 0
+        unmatched_paths: list[str] = []
+        for _, row in df.iterrows():
+            raw_path = self._meta_resolve_path(row, folder_col, file_col)
+            p = Path(raw_path)
+            video_id = (
+                by_suffix.get(raw_path.lower())
+                or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
+                or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
+                or by_stem.get(p.stem.lower())
+            )
+            if video_id:
+                matched += 1
+            else:
+                unmatched_paths.append(raw_path)
+        return {
+            "total": len(df),
+            "matched": matched,
+            "unmatched": len(unmatched_paths),
+            "unmatched_paths": unmatched_paths[:50],
+        }
+
+    @staticmethod
+    def _meta_resolve_path(row: Any, folder_col: str, file_col: str) -> str:
+        if folder_col and file_col:
+            folder = str(row.get(folder_col, "")).strip()
+            file_ = str(row.get(file_col, "")).strip()
+            return f"{folder}/{file_}"
+        return str(row.get("path", "")).strip()
+
     def import_video_metadata_csv(
-        self, df: pd.DataFrame, active_project_id: str | None
+        self,
+        df: pd.DataFrame,
+        active_project_id: str | None,
+        folder_col: str = "",
+        file_col: str = "",
+        datetime_col: str = "created_at",
+        lat_col: str = "latitude",
+        lon_col: str = "longitude",
+        source_epsg: int | None = None,
     ) -> dict[str, Any]:
         """
-        Update video rows from a CSV with columns: path (required), created_at, latitude, longitude.
-        Uses the same path-matching logic as model annotation import.
+        Update video rows from a CSV/Excel with columns for path, created_at, latitude, longitude.
+        When folder_col and file_col are provided the path is constructed as folder/file;
+        otherwise the 'path' column is used.
+        When source_epsg is given, coordinates are reprojected to WGS84 before storing.
         Returns {"updated": int, "skipped": list[str]}.
         """
-        if "path" not in df.columns:
+        use_mapped_path = bool(folder_col and file_col)
+        if not use_mapped_path and "path" not in df.columns:
             raise DataImportError(
                 user_message_key="csv_error_missing_column_video_path",
                 detail="Metadata CSV must contain a 'path' column",
             )
 
+        transformer: Transformer | None = None
+        if source_epsg:
+            transformer = Transformer.from_crs(source_epsg, 4326, always_xy=True)
+
         by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
-        has_created_at = "created_at" in df.columns
-        has_latitude = "latitude" in df.columns
-        has_longitude = "longitude" in df.columns
+        has_created_at = datetime_col and datetime_col in df.columns
+        has_latitude = lat_col and lat_col in df.columns
+        has_longitude = lon_col and lon_col in df.columns
 
         updated = 0
         skipped: list[str] = []
 
         with self.engine.begin() as conn:
             for _, row in df.iterrows():
-                raw_path = str(row.get("path", "")).strip()
+                raw_path = self._meta_resolve_path(row, folder_col, file_col)
                 p = Path(raw_path)
                 video_id = (
-                    by_suffix.get(f"{p.parent.name}/{p.name}".lower())
+                    by_suffix.get(raw_path.lower())
+                    or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
                     or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
                     or by_stem.get(p.stem.lower())
                 )
@@ -539,21 +606,34 @@ class ImportMixin(ProviderBase):
                     continue
 
                 fields: dict[str, Any] = {}
-                if has_created_at and not pd.isna(row["created_at"]):
+                if has_created_at and not pd.isna(row[datetime_col]):
                     try:
                         fields["created_at"] = pd.to_datetime(
-                            row["created_at"], utc=True
+                            row[datetime_col], utc=True
                         ).to_pydatetime()
                     except Exception:
                         pass
-                if has_latitude and not pd.isna(row["latitude"]):
+                if has_latitude and has_longitude and not pd.isna(row[lat_col]) and not pd.isna(row[lon_col]):
                     try:
-                        fields["latitude"] = float(str(row["latitude"]).replace(",", "."))
+                        raw_lat = float(str(row[lat_col]).replace(",", "."))
+                        raw_lon = float(str(row[lon_col]).replace(",", "."))
+                        if transformer:
+                            wgs_lon, wgs_lat = transformer.transform(raw_lon, raw_lat)
+                            fields["latitude"] = wgs_lat
+                            fields["longitude"] = wgs_lon
+                        else:
+                            fields["latitude"] = raw_lat
+                            fields["longitude"] = raw_lon
                     except (ValueError, TypeError):
                         pass
-                if has_longitude and not pd.isna(row["longitude"]):
+                elif has_latitude and not pd.isna(row[lat_col]):
                     try:
-                        fields["longitude"] = float(str(row["longitude"]).replace(",", "."))
+                        fields["latitude"] = float(str(row[lat_col]).replace(",", "."))
+                    except (ValueError, TypeError):
+                        pass
+                elif has_longitude and not pd.isna(row[lon_col]):
+                    try:
+                        fields["longitude"] = float(str(row[lon_col]).replace(",", "."))
                     except (ValueError, TypeError):
                         pass
 
@@ -578,7 +658,6 @@ class ImportMixin(ProviderBase):
     def export_annotations_csv(self, active_project_id: str | None) -> pd.DataFrame:
         params = {"pid": active_project_id} if active_project_id else {}
         vid_pid = "AND v.project_id = :pid" if active_project_id else ""
-        ma_pid = "AND project_id = :pid" if active_project_id else ""
         with self.engine.connect() as conn:
             base_df = pd.read_sql(
                 text(f"""
@@ -600,6 +679,8 @@ class ImportMixin(ProviderBase):
                         s.scientific_name         AS species,
                         b.key                     AS behavior,
                         io.count,
+                        io.start_sec,
+                        io.end_sec
                     FROM videos v
                     LEFT JOIN projects p ON p.id = v.project_id
                     LEFT JOIN video_labels vl ON vl.video_id = v.video_id
@@ -619,16 +700,6 @@ class ImportMixin(ProviderBase):
                     FROM video_tags vt
                     JOIN tags t ON t.id = vt.tag_id
                     WHERE EXISTS (SELECT 1 FROM videos v WHERE v.video_id = vt.video_id {vid_pid})
-                """),
-                conn,
-                params=params,
-            )
-
-            model_df = pd.read_sql(
-                text(f"""
-                    SELECT video_id, model_name, annotation_type, value_text, probability
-                    FROM model_annotations
-                    WHERE 1=1 {ma_pid}
                 """),
                 conn,
                 params=params,
@@ -658,19 +729,6 @@ class ImportMixin(ProviderBase):
         else:
             base_df["custom_tags"] = None
 
-        if not model_df.empty:
-            model_df["col"] = model_df["model_name"] + "__" + model_df["annotation_type"]
-            value_wide = model_df.pivot_table(
-                index="video_id", columns="col", values="value_text", aggfunc="first"
-            )
-            prob_wide = model_df.pivot_table(
-                index="video_id", columns="col", values="probability", aggfunc="first"
-            )
-            prob_wide.columns = [f"{c}__prob" for c in prob_wide.columns]
-            model_wide = value_wide.join(prob_wide, how="outer").reset_index()
-
-            base_df = base_df.merge(model_wide, on="video_id", how="left")
-
         base_df = base_df.drop(columns=["video_id"], errors="ignore")
 
         # Move tag columns to the end
@@ -686,6 +744,31 @@ class ImportMixin(ProviderBase):
                 base_df[col] = base_df[col].apply(lambda v: f"{v:.3f}" if pd.notna(v) else "")
 
         return base_df
+
+    def export_model_annotations_csv(self, active_project_id: str | None) -> pd.DataFrame:
+        params = {"pid": active_project_id} if active_project_id else {}
+        ma_pid = "AND ma.project_id = :pid" if active_project_id else ""
+        with self.engine.connect() as conn:
+            df = pd.read_sql(
+                text(f"""
+                    SELECT
+                        v.video_path,
+                        ma.model_name,
+                        ma.annotation_type,
+                        ma.value_text,
+                        ma.value_num,
+                        ma.probability,
+                        ma.t_start_sec,
+                        ma.t_end_sec
+                    FROM model_annotations ma
+                    JOIN videos v ON v.video_id = ma.video_id
+                    WHERE 1=1 {ma_pid}
+                    ORDER BY v.video_path, ma.model_name, ma.annotation_type
+                """),
+                conn,
+                params=params,
+            )
+        return df
 
     def import_annotations_csv(
         self, df: pd.DataFrame, active_project_id: str | None, mode: str = "override"
@@ -730,6 +813,8 @@ class ImportMixin(ProviderBase):
         imported = 0
         skipped: list[str] = []
         append = mode == "append"
+        observations_by_annotator: Counter[str] = Counter()
+        all_custom_keys: set[str] = set()
 
         for video_id, group in df.groupby("video_id", sort=False, dropna=False):
             if pd.isna(video_id) or video_id not in known_ids:
@@ -755,6 +840,7 @@ class ImportMixin(ProviderBase):
                     active_project_id=active_project_id,
                     append=append,
                 )
+                observations_by_annotator[blank_labeled_by or ""] += 1
             else:
                 selections = []
                 for _, row in group.iterrows():
@@ -800,23 +886,32 @@ class ImportMixin(ProviderBase):
                         active_project_id=active_project_id,
                         append=append,
                     )
+                    for sel in selections:
+                        observations_by_annotator[sel.get("labeled_by") or ""] += 1
 
             # Restore review_later
             rl_raw = first.get("review_later") if "review_later" in group.columns else None
             if pd.notna(rl_raw) and bool(int(rl_raw)):
                 self.set_review_later(str(video_id), True)
 
+            # Auto-create missing custom tags and collect their normalized keys so
+            # set_video_tags receives keys that actually exist in the DB.
+            normalized_custom_keys: list[str] = []
             if "custom_tags" in df.columns:
-                # Restore tags — auto-create missing custom tags so they survive cross-DB import
                 raw = first.get("custom_tags")
                 if pd.notna(raw) and str(raw).strip():
                     for k in str(raw).split(","):
                         k = k.strip()
                         if k:
-                            self.create_custom_tag(name_en=k)
-            tag_keys = _extract_tag_keys(first, df.columns)
-            if tag_keys is not None:
-                self.set_video_tags(str(video_id), tag_keys, append=append)
+                            normalized_custom_keys.append(self.create_custom_tag(name_en=k))
+            builtin_tag_keys = _extract_builtin_tag_keys(first, df.columns)
+            if builtin_tag_keys is not None or normalized_custom_keys:
+                self.set_video_tags(
+                    str(video_id),
+                    (builtin_tag_keys or []) + normalized_custom_keys,
+                    append=append,
+                )
+            all_custom_keys.update(normalized_custom_keys)
 
             imported += 1
 
@@ -830,7 +925,12 @@ class ImportMixin(ProviderBase):
         logger.info(
             "Annotations CSV import complete: imported=%d skipped=%d", imported, len(skipped)
         )
-        return {"imported": imported, "skipped": skipped}
+        return {
+            "imported": imported,
+            "skipped": skipped,
+            "by_annotator": dict(observations_by_annotator),
+            "custom_tags": len(all_custom_keys),
+        }
 
     # ── Historic CSV import ───────────────────────────────────────────────────
 
@@ -883,7 +983,10 @@ class ImportMixin(ProviderBase):
         video_df, skipped_installation, groups, skipped = self._filter_and_group_historic(
             df, active_project_id, folder_col, video_col, data_type_col, data_type_val
         )
-        variant_map = self._build_species_variant_map()
+        valid_for_project = set(self.get_valid_species(active_project_id))
+        variant_map = {
+            k: v for k, v in self._build_species_variant_map().items() if v in valid_for_project
+        }
 
         unknown_species: set[str] = set()
         seen_unmatched: set[str] = set()
@@ -898,7 +1001,7 @@ class ImportMixin(ProviderBase):
             for rows in groups.values():
                 for row in rows:
                     sp = str(row.get(species_col, "")).strip()
-                    if not sp or sp in ("Vide", "NA", "nan"):
+                    if not sp or sp in _BLANK_SPECIES:
                         continue
                     if sp in species_mappings:
                         mapped = species_mappings[sp]
@@ -951,7 +1054,10 @@ class ImportMixin(ProviderBase):
         _, _, groups, skipped = self._filter_and_group_historic(
             df, active_project_id, folder_col, video_col, data_type_col, data_type_val
         )
-        variant_map = self._build_species_variant_map()
+        valid_for_project = set(self.get_valid_species(active_project_id))
+        variant_map = {
+            k: v for k, v in self._build_species_variant_map().items() if v in valid_for_project
+        }
         append = mode == "append"
 
         imported = 0
@@ -974,7 +1080,7 @@ class ImportMixin(ProviderBase):
                 else [
                     r
                     for r in rows
-                    if str(r.get(species_col, "")).strip() not in ("Vide", "NA", "nan", "")
+                    if str(r.get(species_col, "")).strip() not in _BLANK_SPECIES
                     and species_mappings.get(str(r.get(species_col, "")).strip()) != BLANK_SENTINEL
                 ]
             )
@@ -1020,7 +1126,7 @@ class ImportMixin(ProviderBase):
                 row_labeled_at = None
                 if row_ts is not None and not (isinstance(row_ts, float) and pd.isna(row_ts)):
                     try:
-                        row_labeled_at = pd.to_datetime(row_ts)
+                        row_labeled_at = pd.to_datetime(row_ts, dayfirst=True)
                     except Exception:
                         pass
 

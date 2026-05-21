@@ -1,3 +1,5 @@
+import csv
+import io
 from typing import Callable
 
 import pandas as pd
@@ -11,6 +13,38 @@ from review_app.backend.provider.import_service import BLANK_SENTINEL
 def get_df_from_state(key: str) -> pd.DataFrame | None:
     data = get_state_val(key)
     return pd.DataFrame(data) if data is not None else None
+
+
+def read_upload_file(content: bytes) -> pd.DataFrame:
+    for encoding in ("utf-8-sig", "latin-1"):
+        for quoting in (csv.QUOTE_MINIMAL, csv.QUOTE_NONE):
+            try:
+                return pd.read_csv(
+                    io.BytesIO(content), sep=None, engine="python",
+                    encoding=encoding, quoting=quoting,
+                )
+            except UnicodeDecodeError:
+                break  # wrong encoding, try next
+            except Exception:
+                continue  # parse error, try next quoting
+    raise ValueError("Could not parse file — try saving as UTF-8 CSV")
+
+
+def make_col_selects(specs: list[tuple[str, dict]]) -> list[tuple[str, object]]:
+    result = []
+    for key, opts in specs:
+        sel = (
+            ui.select(
+                label=t(key),
+                options=opts,
+                value=get_state_val(key) or "",
+            )
+            .props("outlined dense")
+            .classes("col")
+        )
+        sel._props["hint"] = t(key + "_hint")
+        result.append((key, sel))
+    return result
 
 
 def auto_suggest_mappings(columns: list[str]) -> list[dict]:
@@ -103,12 +137,13 @@ def render_species_mappings(
     can_apply: bool,
     mappings_state_key: str = "species_mappings",
     show_blank_option: bool = False,
+    project_id: str | None = None,
 ) -> None:
     """Shared species-mapping editor used by both the model-import and historic-import tabs."""
     ui.label(t("species_mappings")).classes("text-subtitle1 font-weight-medium q-mb-sm")
     ui.label(t("edit_mappings_desc")).classes("text-caption q-mb-md")
 
-    species_map = dp.get_species_display_map(get_language())
+    species_map = dp.get_species_display_map(get_language(), project_id)
     blank_opt = {BLANK_SENTINEL: f"— {t('map_to_blank_video')} —"} if show_blank_option else {}
     select_options = {"": "", **blank_opt, **species_map}
 

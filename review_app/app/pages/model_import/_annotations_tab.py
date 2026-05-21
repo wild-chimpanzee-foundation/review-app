@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import io
-
 import pandas as pd
 from nicegui import run, ui
 
@@ -15,7 +13,12 @@ from review_app.app.translations import t
 from review_app.app.utils import user_error_message
 from review_app.backend.utils import df_to_records
 
-from ._helpers import get_df_from_state, render_species_mappings
+from ._helpers import (
+    get_df_from_state,
+    make_col_selects,
+    read_upload_file,
+    render_species_mappings,
+)
 
 _MAPPINGS_KEY = "ann_species_mappings"
 
@@ -66,9 +69,25 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
             except Exception as exc:
                 ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
 
-        ui.button(t("export_annotations"), icon="download", on_click=do_export).props(
-            "flat color=primary"
-        )
+        async def do_export_ai() -> None:
+            try:
+                from datetime import date
+
+                df = await run.io_bound(dp.export_model_annotations_csv, get_active_project_id())
+                project_id = get_active_project_id()
+                project_name = project_id.replace(" ", "_") if project_id else "project"
+                filename = f"ai_annotations_{project_name}_{date.today()}.csv"
+                ui.download(df.to_csv(index=False).encode("utf-8"), filename)
+            except Exception as exc:
+                ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
+
+        with ui.row().classes("gap-sm"):
+            ui.button(t("export_annotations"), icon="download", on_click=do_export).props(
+                "flat color=primary"
+            )
+            ui.button(t("export_ai_annotations"), icon="download", on_click=do_export_ai).props(
+                "flat color=primary"
+            )
 
     # ── Import ────────────────────────────────────────────────────────────────
     with ui.card().classes("full-width q-pa-md q-mb-md"):
@@ -111,7 +130,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     "text-caption text-grey q-mb-xs q-mt-sm"
                 )
                 with ui.row().classes("w-full gap-md q-mb-sm items-end"):
-                    sels = _make_col_selects(
+                    sels = make_col_selects(
                         [
                             ("ann_folder_col", required_opts),
                             ("ann_video_col", required_opts),
@@ -122,7 +141,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     "text-caption text-grey q-mb-xs q-mt-sm"
                 )
                 with ui.row().classes("w-full gap-md q-mb-sm items-end"):
-                    sels += _make_col_selects(
+                    sels += make_col_selects(
                         [
                             ("ann_species_col", required_opts),
                             ("ann_behavior_col", optional_opts),
@@ -136,7 +155,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     "text-caption text-grey q-mb-xs q-mt-sm"
                 )
                 with ui.row().classes("w-full gap-md q-mb-sm items-end"):
-                    sels += _make_col_selects([("ann_is_blank_col", optional_opts)])
+                    sels += make_col_selects([("ann_is_blank_col", optional_opts)])
 
                     tag_sel = (
                         ui.select(
@@ -152,7 +171,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     tag_sel._props["hint"] = t("ann_tag_cols_hint")
 
                 with ui.row().classes("w-full gap-md q-mb-sm items-end"):
-                    sels += _make_col_selects([("ann_data_type_col", optional_opts)])
+                    sels += make_col_selects([("ann_data_type_col", optional_opts)])
 
                     data_type_val_sel = (
                         ui.select(
@@ -297,6 +316,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         can_apply=can_apply,
                         mappings_state_key=_MAPPINGS_KEY,
                         show_blank_option=True,
+                        project_id=get_active_project_id(),
                     )
 
             ui.separator().classes("q-my-md")
@@ -351,7 +371,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
             loading_dialog.open()
             try:
                 content = await e.file.read()
-                df = pd.read_csv(io.BytesIO(content), sep=None, engine="python")
+                df = read_upload_file(content)
                 columns = list(df.columns)
 
                 if _is_app_format(columns):
@@ -370,11 +390,32 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         get_active_project_id(),
                         mode=get_state_val("manual_import_mode") or "override",
                     )
-                    msg = t("imported_annotations", count=result["imported"])
-                    if result["skipped"]:
-                        msg += t("skipped_annotations", count=len(result["skipped"]))
-                    import_status.set_text(msg)
-                    ui.notify(msg, type="positive")
+                    summary = t("imported_annotations", count=result["imported"])
+                    by_ann = {k: v for k, v in result.get("by_annotator", {}).items() if k}
+                    if by_ann:
+                        ann_str = ", ".join(
+                            f"{name}: {count}"
+                            for name, count in sorted(by_ann.items(), key=lambda x: -x[1])
+                        )
+                        summary += " " + t("import_by_annotator", summary=ann_str)
+                    if result.get("custom_tags"):
+                        summary += " " + t("import_custom_tags", count=result["custom_tags"])
+                    skipped = result.get("skipped", [])
+                    notify_type = "positive"
+                    if skipped:
+                        skip_msg = t("skipped_annotations", count=len(skipped))
+                        if len(skipped) <= 5:
+                            skip_msg += " (" + ", ".join(skipped) + ")"
+                        else:
+                            skip_msg += (
+                                " ("
+                                + ", ".join(skipped[:5])
+                                + f", +{len(skipped) - 5} {t('more')})"
+                            )
+                        summary += " " + skip_msg
+                        notify_type = "warning"
+                    import_status.set_text(summary)
+                    ui.notify(summary, type=notify_type)
                 else:
                     # External format: show column config + validate
                     set_state_val("ann_format", "external")
@@ -407,27 +448,10 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
             multiple=False,
             label=t("choose_annotations_csv"),
             auto_upload=True,
-        ).props("accept=.csv")
+        ).props("accept=.csv,.tsv,.txt")
 
     with results_container:
         results_ui()
-
-
-def _make_col_selects(specs: list[tuple[str, dict]]) -> list[tuple[str, object]]:
-    result = []
-    for key, opts in specs:
-        sel = (
-            ui.select(
-                label=t(key),
-                options=opts,
-                value=get_state_val(key) or "",
-            )
-            .props("outlined dense")
-            .classes("col")
-        )
-        sel._props["hint"] = t(key + "_hint")
-        result.append((key, sel))
-    return result
 
 
 async def _run_validate(dp, loading_dialog, results_ui, results_container) -> None:

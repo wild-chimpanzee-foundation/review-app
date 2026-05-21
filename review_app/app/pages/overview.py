@@ -34,6 +34,8 @@ async def setup_overview():
         await run.io_bound(dp.get_overview_stats, pid),
         await run.io_bound(dp.get_video_locations, pid),
     )
+    if stats is None:
+        return
 
     def go_review(**filters):
         reset_filters()

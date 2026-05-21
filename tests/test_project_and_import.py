@@ -327,6 +327,22 @@ def test_import_tags_round_trip_append(clean_provider):
     assert "fire" in tags  # was not in CSV, must survive
 
 
+def test_import_custom_tag_mixed_case_applied(clean_provider):
+    """Custom tags with mixed case / spaces must be created AND applied, not just created."""
+    dp = clean_provider
+    paths = _video_paths(dp)
+    v1_id = paths[next(p for p in paths if p.endswith("v1.mp4"))]
+
+    dp.update_manual_review(v1_id, [], is_blank=True)
+    df = pd.DataFrame([{"video_path": next(p for p in paths if p.endswith("v1.mp4")),
+                        "is_blank": 1,
+                        "custom_tags": "My Cool Tag"}])
+    dp.import_annotations_csv(df, active_project_id=None)
+
+    tags = set(dp.get_video_tags(v1_id))
+    assert "my_cool_tag" in tags
+
+
 # ---------------------------------------------------------------------------
 # get_overview_stats
 # ---------------------------------------------------------------------------

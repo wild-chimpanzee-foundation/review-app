@@ -57,7 +57,9 @@ def _color_picker(initial_color: str | None, on_select):
             btns[c] = btn
 
 
-def tag_selector(all_tags: list[dict], active_keys: set[str], on_toggle) -> callable:
+def tag_selector(
+    all_tags: list[dict], active_keys: set[str], on_toggle, shortcut: str | None = None
+) -> callable:
     """
     Renders a searchable tag dropdown. active_keys is a shared mutable set that the
     component reads and writes. on_toggle(tag_key) is called after each toggle.
@@ -156,6 +158,8 @@ def tag_selector(all_tags: list[dict], active_keys: set[str], on_toggle) -> call
                 .props("borderless dense")
                 .style("min-width: 60px; flex: 1;")
             )
+            if shortcut:
+                search_input._props["data-shortcut"] = shortcut
 
             def _filtered_remaining():
                 query = search_state["query"].lower()
@@ -206,4 +210,4 @@ async def render_video_tags(video_id: str, dp, annotator: str | None):
     async def on_toggle(tag_key: str):
         await run.io_bound(dp.toggle_video_tag, video_id, tag_key, annotator)
 
-    tag_selector(all_tags, active_keys, on_toggle)
+    tag_selector(all_tags, active_keys, on_toggle, shortcut="focus-tags")

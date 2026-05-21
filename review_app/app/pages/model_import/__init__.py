@@ -82,4 +82,4 @@ async def setup_model_import():
             with ui.tab_panel(tab_annotations):
                 setup_annotations_tab(dp, loading_dialog)
             with ui.tab_panel(tab_metadata):
-                setup_metadata_tab(dp)
+                setup_metadata_tab(dp, loading_dialog)

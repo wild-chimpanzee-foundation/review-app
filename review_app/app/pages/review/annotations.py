@@ -186,9 +186,11 @@ def render_annotation_section_body(page, video, default_species, default_behavio
             "overflow-y: auto; overflow-x: hidden; max-height: calc(100vh - 360px); width: 100%;"
         ):
             with ui.row().classes("w-full justify-center q-mb-xs"):
-                with ui.button(on_click=add_species).props(
-                    "size=md color=primary outline"
-                ).style("border-style: dashed") as add_species_btn:
+                with (
+                    ui.button(on_click=add_species)
+                    .props("size=md color=primary outline")
+                    .style("border-style: dashed") as add_species_btn
+                ):
                     with ui.row().classes("items-center justify-between w-full q-px-xs"):
                         with ui.row().classes("items-center gap-xs col justify-center"):
                             ui.icon("add", size="sm")
@@ -469,6 +471,7 @@ def render_annotation_section_body(page, video, default_species, default_behavio
         "position: sticky; bottom: 0; z-index: 10; background: inherit; "
         "padding-top: 8px; border-top: 1px solid rgba(128,128,128,0.15);"
     ):
+
         def clear_annotations():
             set_selections([])
             set_state_val("review_is_blank", False)
