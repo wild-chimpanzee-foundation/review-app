@@ -20,6 +20,7 @@ from review_app.app.state import (
     get_language,
     get_obj_detection_threshold,
     get_queue,
+    get_selections,
     get_species_threshold,
     get_state_val,
     is_auto_transcode,
@@ -142,7 +143,7 @@ def _render_no_videos_match():
                         ui.label(display).classes("text-caption text-weight-medium")
 
 
-def _render_ai_annotations(model_ann, global_species_map):
+def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
     if model_ann is None or model_ann.empty:
         return
 
@@ -153,11 +154,13 @@ def _render_ai_annotations(model_ann, global_species_map):
         except (TypeError, ValueError):
             return False
 
+    # groups[ann_type][display_val] = {"key": original_value_text, "models": [...]}
     groups: dict = {}
 
     for _row in df_to_records(model_ann, 20):
         _ann_type = _row.get("annotation_type", "")
-        _value = _row.get("value_text", "") or ""
+        _original_key = _row.get("value_text", "") or ""
+        _value = _original_key
         _prob = _row.get("probability")
         _vnum = _row.get("value_num")
 
@@ -177,9 +180,9 @@ def _render_ai_annotations(model_ann, global_species_map):
         if _ann_type not in groups:
             groups[_ann_type] = {}
         if _value not in groups[_ann_type]:
-            groups[_ann_type][_value] = []
+            groups[_ann_type][_value] = {"key": _original_key, "models": []}
 
-        groups[_ann_type][_value].append(
+        groups[_ann_type][_value]["models"].append(
             {
                 "model": _row.get("model_name", ""),
                 "prob": _prob,
@@ -187,7 +190,7 @@ def _render_ai_annotations(model_ann, global_species_map):
                 "count": _vnum,
             }
         )
-        groups[_ann_type][_value].sort(
+        groups[_ann_type][_value]["models"].sort(
             key=lambda x: (x["prob"] is not None, x["prob"]), reverse=True
         )
 
@@ -221,22 +224,28 @@ def _render_ai_annotations(model_ann, global_species_map):
                         ),
                     ).props("flat round dense size=xs color=grey-6")
                     first_ann_type = False
+            _clickable = on_add_species is not None and _ann_type in {"species", "object_detection"}
             with ui.column().classes("w-full gap-y-1"):
-                for _val, _models in sorted(
+                for _val, _pred_data in sorted(
                     _predictions.items(),
                     key=lambda x: (
-                        sum(m["prob"] for m in x[1] if m["prob"] is not None)
-                        / max(sum(1 for m in x[1] if m["prob"] is not None), 1),
-                        len(x[1]),
+                        sum(m["prob"] for m in x[1]["models"] if m["prob"] is not None)
+                        / max(sum(1 for m in x[1]["models"] if m["prob"] is not None), 1),
+                        len(x[1]["models"]),
                     ),
                     reverse=True,
                 ):
-                    with ui.row().classes(
+                    _models = _pred_data["models"]
+                    _species_key = _pred_data["key"]
+                    _row_classes = (
                         "w-full items-center justify-between q-pa-xs rounded-borders bg-white/5 border border-white/5"
-                    ):
+                        + (" cursor-pointer" if _clickable else "")
+                    )
+                    _count = _models[0].get("count")
+                    _click_count = max(1, int(round(_count))) if (_count is not None and _count == _count) else 1
+                    with ui.row().classes(_row_classes) as _ann_row:
                         with ui.row().classes("items-center gap-x-2"):
                             _display_val = _val
-                            _count = _models[0].get("count")
                             if (
                                 _ann_type == "object_detection"
                                 and _count is not None
@@ -249,7 +258,7 @@ def _render_ai_annotations(model_ann, global_species_map):
                             ui.label(_display_val).classes("text-caption text-bold")
                             if len(_models) > 1:
                                 ui.badge(f"{len(_models)}").props("color=blue-6 outline size=xs")
-                        with ui.row().classes("gap-x-1"):
+                        with ui.row().classes("gap-x-1 items-center"):
                             for _m in _models:
                                 with ui.element("div").style(
                                     "display:inline-flex; align-items:center; gap:4px; "
@@ -267,6 +276,14 @@ def _render_ai_annotations(model_ann, global_species_map):
                                             ).style(f"color: {prob_color};")
                                         except (ValueError, TypeError):
                                             pass
+                            if _clickable:
+                                ui.icon("add_circle_outline", size="xs").classes("text-grey-5")
+                    if _clickable:
+                        _ann_row.tooltip(t("tooltip_add_ai_annotation"))
+                        _ann_row.on(
+                            "click",
+                            lambda _e, sk=_species_key, cc=_click_count: on_add_species(sk, cc),
+                        )
 
 
 async def _render_video_section_body(page: ReviewPage):
@@ -527,7 +544,24 @@ async def _render_video_section_body(page: ReviewPage):
                 await render_video_tags(selected_video_id, dp, get_annotator_name())
 
         with ui.column().style("flex: 1; min-width: 300px; max-width: 560px;"):
-            _render_ai_annotations(model_ann, global_species_map)
+            def _on_add_ai_species(species_key: str, count: int):
+                sels = get_selections()
+                sels.insert(
+                    0,
+                    {
+                        "species": species_key,
+                        "behavior": default_behavior,
+                        "start_sec": 0.0,
+                        "end_sec": video.get("duration_sec"),
+                        "count": min(count, 11),
+                        "source": "model",
+                    },
+                )
+                set_selections(sels)
+                set_state_val("review_is_blank", False)
+                page.render_annotation_section.refresh()
+
+            _render_ai_annotations(model_ann, global_species_map, on_add_species=_on_add_ai_species)
             with ui.card().classes("full-width"):
                 with ui.row().classes("items-center w-full q-mb-none"):
                     ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium")

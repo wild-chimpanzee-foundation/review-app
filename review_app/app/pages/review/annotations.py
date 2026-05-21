@@ -87,19 +87,8 @@ def _init_annotation_state(video, default_species, default_behavior):
                     for s in model_suggestions
                 ]
             else:
-                raw_count = video.get("consensus_count")
-                initial_count = max(1, int(round(raw_count))) if raw_count is not None else 1
                 selections = [
-                    _new_annotation(
-                        default_species,
-                        default_behavior,
-                        video.get("duration_sec"),
-                        source="model" if default_species else None,
-                        probability=video.get("max_species_confidence")
-                        if default_species
-                        else None,
-                        count=initial_count,
-                    )
+                    _new_annotation(None, default_behavior, video.get("duration_sec"))
                 ]
 
     set_state_val("review_is_blank", is_blank)
@@ -260,7 +249,7 @@ def render_annotation_section_body(page, video, default_species, default_behavio
                             .style("flex: 2; min-width: 120px;")
                         )
 
-                    current_count = sel.get("count") or 1
+                    current_count = min(sel.get("count") or 1, 11)
                     count_options = {i: str(i) for i in range(1, 11)}
                     count_options[11] = ">10"
                     with ui.row().classes("items-center gap-xs q-mt-sm w-full"):
