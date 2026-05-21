@@ -1,3 +1,5 @@
+import asyncio
+
 from nicegui import run, ui
 
 from review_app.app.translations import get_language, t
@@ -86,6 +88,9 @@ def tag_selector(
             active_keys.discard(tag_key)
         else:
             active_keys.add(tag_key)
+        search_state["query"] = ""
+        if search_state["input"]:
+            search_state["input"].value = ""
         render_active_chips.refresh()
         render_menu_chips.refresh()
         await on_toggle(tag_key)
@@ -175,15 +180,30 @@ def tag_selector(
                 remaining = _filtered_remaining()
                 if len(remaining) == 1:
                     await toggle_tag(remaining[0]["key"])
-                    search_state["query"] = ""
-                    search_state["input"].value = ""
 
             def on_search_change(e):
                 search_state["query"] = e.value or ""
                 render_menu_chips.refresh()
 
+            async def on_blur():
+                await asyncio.sleep(0.15)
+                search_state["query"] = ""
+                search_state["input"].value = ""
+                is_open["value"] = False
+                render_menu_chips.refresh()
+                render_dropdown.refresh()
+
+            async def on_backspace():
+                if search_state["query"]:
+                    return
+                active = [t for t in all_tags if t["key"] in active_keys]
+                if active:
+                    await toggle_tag(active[-1]["key"])
+
             search_input.on("click", js_handler="(e) => e.stopPropagation()")
             search_input.on("focus", lambda: open_menu())
+            search_input.on("blur", lambda: on_blur())
+            search_input.on("keydown.backspace", lambda _: on_backspace())
             # intercept at keydown to block global shortcuts before they fire
             search_input.on(
                 "keydown.enter", js_handler="(e) => { e.stopPropagation(); e.preventDefault(); }"
