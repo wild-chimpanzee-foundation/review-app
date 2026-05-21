@@ -566,7 +566,7 @@ class ImportMixin(ProviderBase):
         source_epsg: int | None = None,
     ) -> dict[str, Any]:
         """
-        Update video rows from a CSV/Excel with columns for path, created_at, latitude, longitude.
+        Update video rows from a CSV with columns for path, created_at, latitude, longitude.
         When folder_col and file_col are provided the path is constructed as folder/file;
         otherwise the 'path' column is used.
         When source_epsg is given, coordinates are reprojected to WGS84 before storing.
