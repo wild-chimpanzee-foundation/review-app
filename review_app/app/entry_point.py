@@ -118,7 +118,7 @@ def shared_header(show_drawer: bool = False):
         def _shortcut_row(key: str, label: str):
             with ui.row().classes("w-full items-center justify-between q-py-xs"):
                 ui.label(label).classes("text-body2")
-                ui.badge(key).props("color=grey-9 outline").classes("text-caption")
+                ui.badge(key).props("color=grey-9").classes("text-caption")
 
         ui.label(t("shortcuts_global")).classes("text-caption text-grey-5 text-uppercase q-mt-sm")
         ui.separator().classes("q-mb-xs")
@@ -132,6 +132,7 @@ def shared_header(show_drawer: bool = False):
         _shortcut_row("1 – 9", t("shortcut_add_ai"))
         _shortcut_row("J / K", t("shortcut_next_annotation"))
         _shortcut_row("Tab", t("shortcut_enter_annotation"))
+        _shortcut_row("X", t("shortcut_delete_annotation"))
         _shortcut_row("T", t("shortcut_focus_tags"))
 
         ui.label(t("shortcuts_review")).classes("text-caption text-grey-5 text-uppercase q-mt-md")

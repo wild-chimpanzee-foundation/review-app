@@ -81,7 +81,7 @@ async def render_filter_drawer_body(page):
             ).props("outlined dense class=full-width clearable")
             possible_species_filter = ui.select(
                 label=t("species_model_filter"),
-                options={v: species_map.get(v, v) for v in possible_species_values},
+                options={v: species_map.get(v, v) for v in sorted(possible_species_values, key=lambda v: species_map.get(v, v))},
                 value=selected_possible_species,
                 with_input=True,
                 multiple=True,
@@ -145,7 +145,7 @@ async def render_filter_drawer_body(page):
             ).props("outlined dense class=full-width clearable")
             species_filter = ui.select(
                 label=t("species_manual_filter"),
-                options={v: species_map.get(v, v) for v in species_values},
+                options={v: species_map.get(v, v) for v in sorted(species_values, key=lambda v: species_map.get(v, v))},
                 value=selected_species,
                 with_input=True,
                 multiple=True,

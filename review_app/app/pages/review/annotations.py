@@ -100,8 +100,10 @@ def _build_group_options(species_groups: dict) -> dict[str, str]:
 
 def _filter_species_by_group(species_map: dict, species_groups: dict, group: str) -> dict:
     if not group:
-        return species_map
-    return {sci: label for sci, label in species_map.items() if species_groups.get(sci) == group}
+        items = species_map.items()
+    else:
+        items = ((sci, label) for sci, label in species_map.items() if species_groups.get(sci) == group)
+    return dict(sorted(items, key=lambda x: x[1]))
 
 
 def render_annotation_section_body(page, video, default_species, default_behavior):
@@ -316,9 +318,10 @@ def render_annotation_section_body(page, video, default_species, default_behavio
                                 "text-caption text-warning"
                             ).tooltip(t("predicted_not_in_list_tooltip"))
                         ui.element("div").classes("col")
-                        ui.button(
+                        del_btn = ui.button(
                             icon="delete", on_click=lambda idx=i: delete_selection(idx)
                         ).props("flat color=negative dense")
+                        del_btn._props["data-shortcut"] = "delete-annotation"
 
                     def update_sel(idx, sp_el, bp_el, ct_el):
                         new_sels = get_selections()

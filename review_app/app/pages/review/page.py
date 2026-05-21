@@ -810,6 +810,15 @@ async def setup_review():
                         return;
                     }
 
+                    // X: delete the selected annotation card
+                    if ((e.key === 'x' || e.key === 'X') && __selectedAnnotationIdx >= 0) {
+                        e.preventDefault();
+                        const card = document.querySelector('[data-annotation-idx="' + __selectedAnnotationIdx + '"]');
+                        __clearAnnotationSelection();
+                        card?.querySelector('[data-shortcut="delete-annotation"]')?.click();
+                        return;
+                    }
+
                     // Priority shortcuts: Submit, Next, Prev, Blank
                     if (e.key === 'Enter') {
                         e.preventDefault();
