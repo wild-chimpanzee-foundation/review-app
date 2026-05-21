@@ -16,6 +16,12 @@ Install pre-commit hooks (runs ruff lint + format on every commit):
 uv run pre-commit install
 ```
 
+Activate the commit message hook (enforces conventional commit format):
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## Running the app
 
 ```bash
@@ -98,11 +104,27 @@ Pre-commit hooks enforce both on every commit. Run `make ci` before pushing to c
 
 ## Building a release
 
-Push a version tag — GitHub Actions builds executables for Linux, Windows, and macOS and attaches them to a release:
+Commit messages must follow [conventional commits](https://www.conventionalcommits.org/) — the format is enforced by the commit-msg hook and used to auto-generate changelogs:
+
+```
+feat: add species filter
+fix: handle missing videos
+refactor: extract col_val helper
+```
+
+Types that appear in the changelog: `feat`, `fix`, `refactor`, `perf`, `docs`. Types that are valid but hidden: `chore`, `test`, `ci`, `build`.
+
+Push a version tag — GitHub Actions builds executables for Linux, Windows, and macOS, generates a changelog, and attaches everything to a release:
 
 ```bash
 git tag v1.2.0
 git push origin v1.2.0
+```
+
+To preview the changelog for the upcoming release locally:
+
+```bash
+uvx git-cliff --latest
 ```
 
 To build locally:
