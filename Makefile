@@ -1,4 +1,4 @@
-.PHONY: test coverage lint format run build ci
+.PHONY: test coverage lint format run build ci changelog
 
 ci:
 	uv run ruff check review_app/ tests/
@@ -25,3 +25,6 @@ dev:
 
 build:
 	uv run pyinstaller video_annotation.spec --clean
+
+changelog:
+	uvx git-cliff --latest
