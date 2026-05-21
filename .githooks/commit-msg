@@ -1,0 +1,25 @@
+#!/bin/sh
+# Enforce conventional commit format: type: description
+MSG=$(cat "$1")
+
+# Ignore merge commits, fixup commits, and empty messages
+case "$MSG" in
+  Merge*|fixup!*|squash!*) exit 0 ;;
+esac
+
+PATTERN='^(feat|fix|refactor|perf|docs|test|chore|ci|build)(\(.+\))?: .+'
+
+if ! echo "$MSG" | grep -qE "$PATTERN"; then
+  echo ""
+  echo "  Commit message does not follow conventional commit format."
+  echo ""
+  echo "  Expected:  <type>: <description>"
+  echo "  Examples:  feat: add species filter"
+  echo "             fix: handle missing videos"
+  echo "             refactor: extract col_val helper"
+  echo ""
+  echo "  Types: feat, fix, refactor, perf, docs, test, chore, ci, build"
+  echo "  (chore/test/ci/build are valid but won't appear in the changelog)"
+  echo ""
+  exit 1
+fi

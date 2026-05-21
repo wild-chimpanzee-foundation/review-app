@@ -105,6 +105,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        id: cliff
+        with:
+          config: cliff.toml
+          args: --latest --strip header
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -119,7 +128,7 @@ jobs:
         with:
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-          generate_release_notes: true
+          body: ${{ steps.cliff.outputs.content }}
           files: |
             artifacts/**/VideoAnnotation-*
         env:
