@@ -404,12 +404,14 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     ),
     (
         14,
-        lambda conn: conn.execute(
-            text("ALTER TABLE videos ADD COLUMN is_missing INTEGER NOT NULL DEFAULT 0")
-        )
-        if "is_missing"
-        not in {r[1] for r in conn.execute(text("PRAGMA table_info(videos)")).fetchall()}
-        else None,
+        lambda conn: (
+            conn.execute(
+                text("ALTER TABLE videos ADD COLUMN is_missing INTEGER NOT NULL DEFAULT 0")
+            )
+            if "is_missing"
+            not in {r[1] for r in conn.execute(text("PRAGMA table_info(videos)")).fetchall()}
+            else None
+        ),
     ),
 ]
 

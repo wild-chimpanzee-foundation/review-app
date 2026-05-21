@@ -36,12 +36,14 @@ class TestAutoSuggestMappings:
             "annotation_type": "species",
             "value_col": "top_1_species_a",
             "prob_col": "prob_species_a",
+            "count_col": "",
         }
         assert result[1] == {
             "model_name": "species_b",
             "annotation_type": "species",
             "value_col": "top_1_species_b",
             "prob_col": "prob_species_b",
+            "count_col": "",
         }
 
     def test_prob_col_empty_when_missing(self):

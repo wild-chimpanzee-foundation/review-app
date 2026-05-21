@@ -106,7 +106,10 @@ def test_get_model_annotations_empty_when_no_data(populated_provider):
         "model_name",
         "annotation_type",
         "value_text",
+        "value_num",
         "probability",
+        "t_start_sec",
+        "t_end_sec",
         "created_at",
     ]
 

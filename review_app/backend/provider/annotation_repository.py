@@ -226,21 +226,29 @@ class AnnotationMixin(ProviderBase):
                 & (suggestion_rows["avg_prob"] >= species_threshold)
             ].head(1)
             for _, r in sp_rows.iterrows():
-                suggestions.append({
-                    "species": r["species"],
-                    "probability": float(r["avg_prob"]),
-                    "count": max(1, int(round(r["avg_count"]))) if pd.notna(r.get("avg_count")) else 1,
-                })
+                suggestions.append(
+                    {
+                        "species": r["species"],
+                        "probability": float(r["avg_prob"]),
+                        "count": max(1, int(round(r["avg_count"])))
+                        if pd.notna(r.get("avg_count"))
+                        else 1,
+                    }
+                )
             obj_rows = suggestion_rows[
                 (suggestion_rows["annotation_type"] == "object_detection")
                 & (suggestion_rows["avg_prob"] >= obj_detection_threshold)
             ]
             for _, r in obj_rows.iterrows():
-                suggestions.append({
-                    "species": r["species"],
-                    "probability": float(r["avg_prob"]),
-                    "count": max(1, int(round(r["avg_count"]))) if pd.notna(r.get("avg_count")) else 1,
-                })
+                suggestions.append(
+                    {
+                        "species": r["species"],
+                        "probability": float(r["avg_prob"]),
+                        "count": max(1, int(round(r["avg_count"])))
+                        if pd.notna(r.get("avg_count"))
+                        else 1,
+                    }
+                )
 
         video_tag_keys = [r[0] for r in tag_rows]
         row_dict = detail_df.iloc[0].to_dict()
