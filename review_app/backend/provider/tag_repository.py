@@ -185,38 +185,3 @@ class TagMixin(ProviderBase):
             conn.execute(text("DELETE FROM video_tags WHERE tag_id = :tid"), {"tid": tag_row[0]})
             conn.execute(text("DELETE FROM tags WHERE id = :tid"), {"tid": tag_row[0]})
         logger.info("Deleted custom tag: key=%s", key)
-
-    def auto_apply_broken_metadata_tags(self, project_id: str | None) -> int:
-        """Apply the broken_metadata tag to all videos with validation_error IS NOT NULL.
-
-        Only adds the tag where it's missing; never removes it. Returns the number of rows inserted.
-        """
-        with self.engine.begin() as conn:
-            tag_row = conn.execute(
-                text("SELECT id FROM tags WHERE key = 'broken_metadata'")
-            ).fetchone()
-            if tag_row is None:
-                return 0
-            tag_id = tag_row[0]
-            now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-            pid_filter = "AND v.project_id = :pid" if project_id else ""
-            result = conn.execute(
-                text(f"""
-                    INSERT INTO video_tags (video_id, tag_id, tagged_by, tagged_at)
-                    SELECT v.video_id, :tag_id, NULL, :now
-                    FROM videos v
-                    WHERE v.validation_error IS NOT NULL
-                      {pid_filter}
-                      AND NOT EXISTS (
-                          SELECT 1 FROM video_tags vt
-                          WHERE vt.video_id = v.video_id AND vt.tag_id = :tag_id
-                      )
-                """),
-                {"tag_id": tag_id, "now": now, "pid": project_id}
-                if project_id
-                else {"tag_id": tag_id, "now": now},
-            )
-        count = result.rowcount
-        if count:
-            logger.info("Auto-applied broken_metadata tag to %d video(s)", count)
-        return count

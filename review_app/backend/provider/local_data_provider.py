@@ -106,11 +106,9 @@ class LocalDataProvider(
         video_dir: Path | None = None,
         active_project_id: str | None = None,
     ) -> dict[str, int]:
-        result = self._sync_videos_table(
+        return self._sync_videos_table(
             progress_callback, video_dir=video_dir, active_project_id=active_project_id
         )
-        self.auto_apply_broken_metadata_tags(active_project_id)
-        return result
 
     @property
     def db_path(self) -> Path:
