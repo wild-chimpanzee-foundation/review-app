@@ -361,6 +361,61 @@ def _migration_v15(conn) -> None:
         )
 
 
+def _migration_v17(conn) -> None:
+    """Idempotent re-run of v11: ensure model_annotations uses a named expression index
+    on (video_id, model_name, annotation_type, COALESCE(value_text, '')) instead of the
+    old inline UNIQUE(video_id, model_name, annotation_type). DBs where v11 ran correctly
+    already have the named index and skip the table recreation."""
+    has_expr_index = conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type='index' AND name='uq_model_ann_identity'")
+    ).fetchone()
+    if has_expr_index:
+        return
+    conn.execute(text("DROP INDEX IF EXISTS uq_model_ann_identity"))
+    conn.execute(
+        text("""
+            CREATE TABLE model_annotations_new (
+                id TEXT PRIMARY KEY,
+                project_id TEXT REFERENCES projects(id),
+                video_id TEXT NOT NULL REFERENCES videos(video_id),
+                annotation_type TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                value_text TEXT,
+                value_num REAL,
+                probability REAL,
+                t_start_sec REAL,
+                t_end_sec REAL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+    )
+    conn.execute(
+        text("""
+            INSERT INTO model_annotations_new
+            SELECT id, project_id, video_id, annotation_type, model_name,
+                   value_text, value_num, probability, t_start_sec, t_end_sec, updated_at
+            FROM model_annotations
+        """)
+    )
+    conn.execute(text("DROP TABLE model_annotations"))
+    conn.execute(text("ALTER TABLE model_annotations_new RENAME TO model_annotations"))
+    conn.execute(
+        text(
+            "CREATE UNIQUE INDEX uq_model_ann_identity "
+            "ON model_annotations(video_id, model_name, annotation_type, COALESCE(value_text, ''))"
+        )
+    )
+    for idx_sql in [
+        "CREATE INDEX IF NOT EXISTS idx_model_annotations_project_id ON model_annotations(project_id)",
+        "CREATE INDEX IF NOT EXISTS idx_model_annotations_video_id ON model_annotations(video_id)",
+        "CREATE INDEX IF NOT EXISTS idx_model_annotations_annotation_type ON model_annotations(annotation_type)",
+        "CREATE INDEX IF NOT EXISTS idx_model_annotations_model_name ON model_annotations(model_name)",
+        "CREATE INDEX IF NOT EXISTS idx_model_ann_type_text_video ON model_annotations(annotation_type, value_text, video_id)",
+        "CREATE INDEX IF NOT EXISTS idx_model_ann_blank_probe ON model_annotations(annotation_type, video_id, probability)",
+    ]:
+        conn.execute(text(idx_sql))
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -489,6 +544,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
             ),
         ],
     ),
+    (17, _migration_v17),
 ]
 
 

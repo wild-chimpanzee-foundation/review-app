@@ -343,93 +343,74 @@ class SetupWizard:
                 existing = await run.io_bound(dp.get_all_annotators)
                 logged_in = app.storage.user.get("annotator_name", "")
                 if existing:
-                    # Auto-map when exactly one unknown and the logged-in user is already in the
-                    # DB — the common case where the annotator typed their name at login before
-                    # importing the bundle.
-                    if len(unknown_annotators) == 1 and logged_in in existing:
-                        annotator_map = {unknown_annotators[0]: logged_in}
-                        ui.notify(
+                    resolve_dlg = ui.dialog().props("persistent")
+                    state = {"confirmed": False}
+                    rows = []
+
+                    with resolve_dlg, ui.card().classes("q-pa-lg").style("min-width: 520px"):
+                        ui.label(t("bundle_annotator_check_title")).classes("text-h6 q-mb-sm")
+                        ui.label(
                             t(
-                                "bundle_annotator_auto_mapped",
-                                bundle_name=unknown_annotators[0],
-                                local_name=logged_in,
-                            ),
-                            type="info",
-                        )
-                    else:
-                        resolve_dlg = ui.dialog().props("persistent")
-                        state = {"confirmed": False}
-                        rows = []
+                                "bundle_annotator_check_desc",
+                                names=", ".join(unknown_annotators),
+                            )
+                        ).classes("text-caption text-grey-6 q-mb-md")
 
-                        with resolve_dlg, ui.card().classes("q-pa-lg").style("min-width: 520px"):
-                            ui.label(t("bundle_annotator_check_title")).classes("text-h6 q-mb-sm")
-                            ui.label(
-                                t(
-                                    "bundle_annotator_check_desc",
-                                    names=", ".join(unknown_annotators),
+                        for name in unknown_annotators:
+                            default_action = (
+                                t("bundle_annotator_map_to")
+                                if logged_in in existing
+                                else t("bundle_annotator_create")
+                            )
+                            default_target = logged_in if logged_in in existing else existing[0]
+                            with ui.row().classes("items-center gap-sm w-full q-mb-sm"):
+                                ui.label(name).classes("text-body2 font-weight-bold").style(
+                                    "min-width: 120px"
                                 )
-                            ).classes("text-caption text-grey-6 q-mb-md")
-
-                            for name in unknown_annotators:
-                                # Default to mapping the logged-in user when applicable.
-                                default_action = (
-                                    t("bundle_annotator_map_to")
-                                    if logged_in in existing
-                                    else t("bundle_annotator_create")
-                                )
-                                default_target = (
-                                    logged_in if logged_in in existing else existing[0]
-                                )
-                                with ui.row().classes("items-center gap-sm w-full q-mb-sm"):
-                                    ui.label(name).classes("text-body2 font-weight-bold").style(
-                                        "min-width: 120px"
+                                radio = ui.radio(
+                                    [
+                                        t("bundle_annotator_create"),
+                                        t("bundle_annotator_map_to"),
+                                    ],
+                                    value=default_action,
+                                ).props("inline")
+                                sel = (
+                                    ui.select(
+                                        {a: a for a in existing},
+                                        value=default_target,
+                                        visible=(default_action == t("bundle_annotator_map_to")),
                                     )
-                                    radio = ui.radio(
-                                        [
-                                            t("bundle_annotator_create"),
-                                            t("bundle_annotator_map_to"),
-                                        ],
-                                        value=default_action,
-                                    ).props("inline")
-                                    sel = (
-                                        ui.select(
-                                            {a: a for a in existing},
-                                            value=default_target,
-                                            visible=(
-                                                default_action == t("bundle_annotator_map_to")
-                                            ),
-                                        )
-                                        .props("outlined dense")
-                                        .classes("w-48")
-                                    )
+                                    .props("outlined dense")
+                                    .classes("w-48")
+                                )
 
-                                    def _on_radio(e, s=sel):
-                                        s.visible = e.value == t("bundle_annotator_map_to")
+                                def _on_radio(e, s=sel):
+                                    s.visible = e.value == t("bundle_annotator_map_to")
 
-                                    radio.on_value_change(_on_radio)
-                                    rows.append({"name": name, "radio": radio, "select": sel})
+                                radio.on_value_change(_on_radio)
+                                rows.append({"name": name, "radio": radio, "select": sel})
 
-                            def _confirm():
-                                state["confirmed"] = True
-                                resolve_dlg.close()
+                        def _confirm():
+                            state["confirmed"] = True
+                            resolve_dlg.close()
 
-                            with ui.row().classes("q-mt-md gap-sm justify-end"):
-                                ui.button(t("cancel"), on_click=resolve_dlg.close).props("flat")
-                                ui.button(t("confirm"), on_click=_confirm, color="primary")
+                        with ui.row().classes("q-mt-md gap-sm justify-end"):
+                            ui.button(t("cancel"), on_click=resolve_dlg.close).props("flat")
+                            ui.button(t("confirm"), on_click=_confirm, color="primary")
 
-                        resolve_dlg.open()
-                        await resolve_dlg.wait_for_close()
+                    resolve_dlg.open()
+                    await resolve_dlg.wait_for_close()
 
-                        if not state["confirmed"]:
-                            result_col.visible = True
-                            return
+                    if not state["confirmed"]:
+                        result_col.visible = True
+                        return
 
-                        annotator_map = {}
-                        for row in rows:
-                            if row["radio"].value == t("bundle_annotator_create"):
-                                annotator_map[row["name"]] = row["name"]
-                            else:
-                                annotator_map[row["name"]] = row["select"].value
+                    annotator_map = {}
+                    for row in rows:
+                        if row["radio"].value == t("bundle_annotator_create"):
+                            annotator_map[row["name"]] = row["name"]
+                        else:
+                            annotator_map[row["name"]] = row["select"].value
                 else:
                     annotator_map = {n: n for n in unknown_annotators}
 
@@ -447,7 +428,11 @@ class SetupWizard:
                 }
                 for comp_key, label in comp_names.items():
                     if comp_key in results and "error" not in results[comp_key]:
-                        n = results[comp_key].get("imported") or results[comp_key].get("updated") or 0
+                        n = (
+                            results[comp_key].get("imported")
+                            or results[comp_key].get("updated")
+                            or 0
+                        )
                         errors = results[comp_key].get("errors", 0)
                         entry = f"{label}: {n}"
                         if errors:
