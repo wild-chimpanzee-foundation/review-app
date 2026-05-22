@@ -68,21 +68,21 @@ class AssignmentMixin(ProviderBase):
     def auto_distribute(
         self, project_id: str, annotator_names: list[str]
     ) -> dict[str, list[str]]:
-        """Greedily assign cameras to annotators to balance video counts.
+        """Greedily assign cameras to annotators to balance total hours.
 
         Sorts cameras by video_count DESC, then assigns each to the annotator
-        with the fewest videos so far (standard list-scheduling heuristic).
+        with the fewest hours so far (standard list-scheduling heuristic).
         Returns {annotator_name: [camera_id, ...]}.
         """
         if not annotator_names:
             return {}
         cameras = self.get_camera_stats(project_id)
-        loads: dict[str, int] = {n: 0 for n in annotator_names}
+        loads: dict[str, float] = {n: 0.0 for n in annotator_names}
         assignment: dict[str, list[str]] = {n: [] for n in annotator_names}
         for cam in cameras:
             least_loaded = min(loads, key=lambda n: loads[n])
             assignment[least_loaded].append(cam["camera_id"])
-            loads[least_loaded] += cam["video_count"]
+            loads[least_loaded] += cam["hours"]
         return assignment
 
     def apply_distribution(

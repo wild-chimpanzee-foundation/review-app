@@ -552,7 +552,7 @@ class ImportMixin(ProviderBase):
             folder = str(row.get(folder_col, "")).strip()
             file_ = str(row.get(file_col, "")).strip()
             return f"{folder}/{file_}"
-        return str(row.get("path", "")).strip()
+        return str(row.get("path") or row.get("video_path") or "").strip()
 
     def import_video_metadata_csv(
         self,
@@ -573,10 +573,10 @@ class ImportMixin(ProviderBase):
         Returns {"updated": int, "skipped": list[str]}.
         """
         use_mapped_path = bool(folder_col and file_col)
-        if not use_mapped_path and "path" not in df.columns:
+        if not use_mapped_path and "path" not in df.columns and "video_path" not in df.columns:
             raise DataImportError(
                 user_message_key="csv_error_missing_column_video_path",
-                detail="Metadata CSV must contain a 'path' column",
+                detail="Metadata CSV must contain a 'path' or 'video_path' column",
             )
 
         transformer: Transformer | None = None
@@ -587,16 +587,28 @@ class ImportMixin(ProviderBase):
         has_created_at = datetime_col and datetime_col in df.columns
         has_latitude = lat_col and lat_col in df.columns
         has_longitude = lon_col and lon_col in df.columns
+        has_assignment = "assigned_to" in df.columns
+
+        if has_assignment:
+            all_annotators = {
+                str(a).strip() for a in df["assigned_to"].dropna().unique() if str(a).strip()
+            }
+            for a in all_annotators:
+                self.add_annotator(a)
+
+        path_to_id = {v.lower(): k for k, v in self._known_video_map(active_project_id).items()}
 
         updated = 0
         skipped: list[str] = []
+        now_str = self._utcnow_dt().isoformat()
 
         with self.engine.begin() as conn:
             for _, row in df.iterrows():
                 raw_path = self._meta_resolve_path(row, folder_col, file_col)
                 p = Path(raw_path)
                 video_id = (
-                    by_suffix.get(raw_path.lower())
+                    path_to_id.get(raw_path.lower())
+                    or by_suffix.get(raw_path.lower())
                     or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
                     or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
                     or by_stem.get(p.stem.lower())
@@ -637,18 +649,27 @@ class ImportMixin(ProviderBase):
                     except (ValueError, TypeError):
                         pass
 
-                if not fields:
-                    continue
+                if fields:
+                    set_clause = ", ".join(f"{k} = :{k}" for k in fields)
+                    fields["video_id"] = video_id
+                    fields["pid"] = active_project_id
+                    pid_clause = " AND project_id = :pid" if active_project_id else ""
+                    conn.execute(
+                        text(f"UPDATE videos SET {set_clause} WHERE video_id = :video_id{pid_clause}"),
+                        fields,
+                    )
+                    updated += 1
 
-                set_clause = ", ".join(f"{k} = :{k}" for k in fields)
-                fields["video_id"] = video_id
-                fields["pid"] = active_project_id
-                pid_clause = " AND project_id = :pid" if active_project_id else ""
-                conn.execute(
-                    text(f"UPDATE videos SET {set_clause} WHERE video_id = :video_id{pid_clause}"),
-                    fields,
-                )
-                updated += 1
+                if has_assignment:
+                    annotator = str(row["assigned_to"]).strip() if pd.notna(row["assigned_to"]) else None
+                    if annotator:
+                        conn.execute(
+                            text("""
+                                INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at)
+                                VALUES (:video_id, :annotator, :now)
+                            """),
+                            {"video_id": video_id, "annotator": annotator, "now": now_str},
+                        )
 
         logger.info("Video metadata import: %d updated, %d skipped", updated, len(skipped))
         return {"updated": updated, "skipped": skipped}
@@ -670,6 +691,7 @@ class ImportMixin(ProviderBase):
                         v.latitude,
                         v.longitude,
                         v.duration_sec,
+                        va.assigned_to,
                         CAST(vl.is_blank AS INTEGER)      AS is_blank,
                         CAST(vl.review_later AS INTEGER)  AS review_later,
                         CASE WHEN vl.is_blank IS NOT NULL THEN 1 ELSE 0 END AS is_annotated,
@@ -684,6 +706,7 @@ class ImportMixin(ProviderBase):
                     FROM videos v
                     LEFT JOIN projects p ON p.id = v.project_id
                     LEFT JOIN video_labels vl ON vl.video_id = v.video_id
+                    LEFT JOIN video_assignments va ON va.video_id = v.video_id
                     LEFT JOIN individual_observations io ON io.video_id = v.video_id
                     LEFT JOIN species s ON s.id = io.species_id
                     LEFT JOIN behaviors b ON b.id = io.behavior_id
@@ -824,6 +847,7 @@ class ImportMixin(ProviderBase):
         append = mode == "append"
         observations_by_annotator: Counter[str] = Counter()
         all_custom_keys: set[str] = set()
+        now_str = self._utcnow_dt().isoformat()
 
         for video_id, group in df.groupby("video_id", sort=False, dropna=False):
             if pd.isna(video_id) or video_id not in known_ids:
@@ -832,6 +856,21 @@ class ImportMixin(ProviderBase):
                 continue
 
             first = group.iloc[0]
+
+            # Restore video assignment
+            if "assigned_to" in group.columns:
+                annotator = str(first["assigned_to"]).strip() if pd.notna(first["assigned_to"]) else None
+                if annotator:
+                    self.add_annotator(annotator)
+                    with self.engine.begin() as conn:
+                        conn.execute(
+                            text("""
+                                INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at)
+                                VALUES (:video_id, :annotator, :now)
+                            """),
+                            {"video_id": video_id, "annotator": annotator, "now": now_str},
+                        )
+
             is_blank_raw = first["is_blank"]
             is_blank = bool(int(is_blank_raw)) if pd.notna(is_blank_raw) else None
             blank_labeled_by = (
@@ -1176,7 +1215,7 @@ class ImportMixin(ProviderBase):
     def _export_metadata_csv(
         self, project_id: str, camera_ids: list[str] | None = None
     ) -> str:
-        """Export video metadata (path, camera, recorded_at, lat, lon) as CSV."""
+        """Export video metadata (path, camera, recorded_at, lat, lon, assigned_to) as CSV."""
         params: dict[str, Any] = {"pid": project_id}
         cam_filter = ""
         if camera_ids:
@@ -1187,8 +1226,15 @@ class ImportMixin(ProviderBase):
         with self.engine.connect() as conn:
             df = pd.read_sql(
                 text(f"""
-                    SELECT v.video_path, v.camera_id, v.created_at, v.latitude, v.longitude
+                    SELECT 
+                        v.video_path, 
+                        v.camera_id, 
+                        v.created_at, 
+                        v.latitude, 
+                        v.longitude,
+                        va.assigned_to
                     FROM videos v
+                    LEFT JOIN video_assignments va ON va.video_id = v.video_id
                     WHERE v.project_id = :pid AND v.is_missing = 0 {cam_filter}
                     ORDER BY v.camera_id, v.video_path
                 """),
