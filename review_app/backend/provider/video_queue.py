@@ -190,10 +190,10 @@ class QueueMixin(ProviderBase):
             nr_species AS (
                 SELECT video_id,
                     MAX(COALESCE(probability, 0.0))   AS max_sp,
-                    COUNT(DISTINCT value_text)         AS distinct_top1,
-                    COUNT(*)                           AS model_count
+                    COUNT(DISTINCT value_text)         AS distinct_species,
+                    AVG(COALESCE(probability, 0.0))    AS avg_sp
                 FROM model_annotations
-                WHERE annotation_type IN ('species', 'object_detection')
+                WHERE annotation_type = 'species'
                 GROUP BY video_id
             ),
             needs_review AS (
@@ -201,7 +201,7 @@ class QueueMixin(ProviderBase):
                     CASE
                         WHEN COALESCE(nb.blank_prob, 0.0) >= :blank_thr
                          AND COALESCE(ns.max_sp, 0.0) < :species_thr THEN 0
-                        WHEN ns.distinct_top1 = 1 AND ns.model_count >= 1 THEN 0
+                        WHEN ns.distinct_species = 1 AND COALESCE(ns.avg_sp, 0.0) >= :species_thr THEN 0
                         ELSE 1
                     END AS needs_review_flag
                 FROM videos v
