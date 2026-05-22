@@ -461,6 +461,34 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
         ),
     ),
     (15, _migration_v15),
+    (
+        16,
+        lambda conn: [
+            conn.execute(
+                text("""
+                    CREATE TABLE IF NOT EXISTS annotators (
+                        name TEXT PRIMARY KEY,
+                        created_at TEXT NOT NULL
+                    )
+                """)
+            ),
+            conn.execute(
+                text("""
+                    CREATE TABLE IF NOT EXISTS video_assignments (
+                        video_id TEXT PRIMARY KEY REFERENCES videos(video_id),
+                        assigned_to TEXT NOT NULL REFERENCES annotators(name),
+                        assigned_at TEXT NOT NULL
+                    )
+                """)
+            ),
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_video_assignments_assigned_to "
+                    "ON video_assignments(assigned_to)"
+                )
+            ),
+        ],
+    ),
 ]
 
 

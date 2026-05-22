@@ -151,6 +151,7 @@ class QueueMixin(ProviderBase):
         ).strip()
         selected_annotation_status = filters.get("selected_annotation_status", "All")
         selected_is_review_later = filters.get("selected_is_review_later", False)
+        assigned_to_filter = (filters.get("assigned_to") or "").strip()
         selected_sort = filters.get("selected_sort", "camera")
         selected_sort_direction = filters.get("selected_sort_direction", "desc")
         sort_dir = "DESC" if selected_sort_direction == "desc" else "ASC"
@@ -380,6 +381,14 @@ class QueueMixin(ProviderBase):
                     FROM individual_observations io
                     WHERE io.video_id = v.video_id AND io.labeled_by IS NOT NULL
                 ) > 1""")
+
+        if assigned_to_filter:
+            params["assigned_to"] = assigned_to_filter
+            where.append("""
+                EXISTS (
+                    SELECT 1 FROM video_assignments va
+                    WHERE va.video_id = v.video_id AND va.assigned_to = :assigned_to
+                )""")
 
         if selected_tags:
             for i, v in enumerate(selected_tags):

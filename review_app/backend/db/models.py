@@ -234,6 +234,21 @@ class AppSetting(Base):
     value: Mapped[str | None] = mapped_column(String)
 
 
+class Annotator(Base):
+    __tablename__ = "annotators"
+
+    name: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class VideoAssignment(Base):
+    __tablename__ = "video_assignments"
+
+    video_id: Mapped[str] = mapped_column(String, ForeignKey("videos.video_id"), primary_key=True)
+    assigned_to: Mapped[str] = mapped_column(String, ForeignKey("annotators.name"), index=True)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 Index(
     "idx_individual_video_species",
     IndividualObservation.video_id,
