@@ -394,9 +394,11 @@ def render_annotation_section_body(page, video, default_species, default_behavio
             sels = get_selections()
             is_b = get_state_val("review_is_blank", False)
             if not is_b and not sels:
+                annotator = get_annotator_name()
                 await run.io_bound(
-                    dp.update_manual_review, selected_video_id, [], is_blank=None, labeled_by=None
+                    dp.update_manual_review, selected_video_id, [], is_blank=True, labeled_by=annotator
                 )
+                ui.notify(t("marked_blank"), type="positive")
                 return True
             annotator = get_annotator_name()
             labeled_sels = [{**s, "labeled_by": annotator} for s in sels]
