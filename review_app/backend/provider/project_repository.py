@@ -138,7 +138,7 @@ class ProjectMixin(ProviderBase):
             transcoded_paths = [
                 Path(p)
                 for (p,) in s.query(Video.transcoded_path)
-                .filter(Video.project_id == project_id, Video.transcoded_path != None)
+                .filter(Video.project_id == project_id, Video.transcoded_path is not None)
                 .all()
             ]
 
@@ -158,7 +158,9 @@ class ProjectMixin(ProviderBase):
             s.query(VideoLabel).filter(VideoLabel.video_id.in_(v_sub)).delete(
                 synchronize_session=False
             )
-            s.query(VideoTag).filter(VideoTag.video_id.in_(v_sub)).delete(synchronize_session=False)
+            s.query(VideoTag).filter(VideoTag.video_id.in_(v_sub)).delete(
+                synchronize_session=False
+            )
             s.query(VideoAssignment).filter(VideoAssignment.video_id.in_(v_sub)).delete(
                 synchronize_session=False
             )

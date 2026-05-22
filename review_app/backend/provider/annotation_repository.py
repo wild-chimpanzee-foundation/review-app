@@ -223,12 +223,8 @@ class AnnotationMixin(ProviderBase):
 
         suggestions = []
         if not suggestion_rows.empty:
-            all_sp_rows = suggestion_rows[
-                suggestion_rows["annotation_type"] == "species"
-            ]
-            sp_rows = all_sp_rows[
-                all_sp_rows["avg_prob"] >= species_threshold
-            ]
+            all_sp_rows = suggestion_rows[suggestion_rows["annotation_type"] == "species"]
+            sp_rows = all_sp_rows[all_sp_rows["avg_prob"] >= species_threshold]
             # Only recommend when every species model predicts the same species
             # (exactly 1 distinct species at any confidence) AND it passes threshold
             if len(all_sp_rows) == 1 and len(sp_rows) == 1:

@@ -169,7 +169,9 @@ class SetupWizard:
                     "metadata": t("bundle_component_metadata"),
                 }
                 labels = [comp_names.get(c, c) for c in contents]
-                preview_text = t("wizard_bundle_preview", contents=", ".join(labels)) if labels else ""
+                preview_text = (
+                    t("wizard_bundle_preview", contents=", ".join(labels)) if labels else ""
+                )
                 bundle_bytes[0] = raw
                 if bundle_preview_label[0]:
                     bundle_preview_label[0].set_text(preview_text)
@@ -347,11 +349,16 @@ class SetupWizard:
                 }
                 for comp_key, label in comp_names.items():
                     if comp_key in results and "error" not in results[comp_key]:
-                        n = results[comp_key].get("imported") or results[comp_key].get("updated") or 0
+                        n = (
+                            results[comp_key].get("imported")
+                            or results[comp_key].get("updated")
+                            or 0
+                        )
                         parts.append(f"{label}: {n}")
                 bundle_summary = ", ".join(parts) if parts else "—"
             except Exception as exc:
                 from review_app.app.utils import user_error_message
+
                 ui.notify(t("bundle_error", msg=user_error_message(exc)), type="negative")
 
             with result_col:

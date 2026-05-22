@@ -17,9 +17,7 @@ class AssignmentMixin(ProviderBase):
 
     def get_all_annotators(self) -> list[str]:
         with self.engine.connect() as conn:
-            rows = conn.execute(
-                text("SELECT name FROM annotators ORDER BY name")
-            ).fetchall()
+            rows = conn.execute(text("SELECT name FROM annotators ORDER BY name")).fetchall()
         return [r[0] for r in rows]
 
     def add_annotator(self, name: str) -> None:
@@ -58,16 +56,11 @@ class AssignmentMixin(ProviderBase):
                 """),
                 {"pid": project_id},
             ).fetchall()
-        return [
-            {"camera_id": r[0], "video_count": r[1], "hours": round(r[2], 2)}
-            for r in rows
-        ]
+        return [{"camera_id": r[0], "video_count": r[1], "hours": round(r[2], 2)} for r in rows]
 
     # ── Distribution algorithm ────────────────────────────────────────────────
 
-    def auto_distribute(
-        self, project_id: str, annotator_names: list[str]
-    ) -> dict[str, list[str]]:
+    def auto_distribute(self, project_id: str, annotator_names: list[str]) -> dict[str, list[str]]:
         """Greedily assign cameras to annotators to balance total hours.
 
         Sorts cameras by video_count DESC, then assigns each to the annotator
@@ -85,9 +78,7 @@ class AssignmentMixin(ProviderBase):
             loads[least_loaded] += cam["hours"]
         return assignment
 
-    def apply_distribution(
-        self, project_id: str, assignment: dict[str, list[str]]
-    ) -> int:
+    def apply_distribution(self, project_id: str, assignment: dict[str, list[str]]) -> int:
         """Write VideoAssignment rows for the given camera→annotator mapping.
 
         Replaces any existing assignments for cameras mentioned in the mapping.

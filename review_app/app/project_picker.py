@@ -77,7 +77,10 @@ def build_project_picker():
                                         if _busy():
                                             return
 
-                                        with ui.dialog().props("persistent") as loading_dialog, ui.card().classes("q-pa-lg items-center gap-md"):
+                                        with (
+                                            ui.dialog().props("persistent") as loading_dialog,
+                                            ui.card().classes("q-pa-lg items-center gap-md"),
+                                        ):
                                             ui.spinner(size="lg")
                                             ui.label(t("deleting")).classes("text-body1")
                                         loading_dialog.open()

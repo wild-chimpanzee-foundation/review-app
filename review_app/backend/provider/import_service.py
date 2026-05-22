@@ -625,7 +625,12 @@ class ImportMixin(ProviderBase):
                         ).to_pydatetime()
                     except Exception:
                         pass
-                if has_latitude and has_longitude and not pd.isna(row[lat_col]) and not pd.isna(row[lon_col]):
+                if (
+                    has_latitude
+                    and has_longitude
+                    and not pd.isna(row[lat_col])
+                    and not pd.isna(row[lon_col])
+                ):
                     try:
                         raw_lat = float(str(row[lat_col]).replace(",", "."))
                         raw_lon = float(str(row[lon_col]).replace(",", "."))
@@ -655,13 +660,17 @@ class ImportMixin(ProviderBase):
                     fields["pid"] = active_project_id
                     pid_clause = " AND project_id = :pid" if active_project_id else ""
                     conn.execute(
-                        text(f"UPDATE videos SET {set_clause} WHERE video_id = :video_id{pid_clause}"),
+                        text(
+                            f"UPDATE videos SET {set_clause} WHERE video_id = :video_id{pid_clause}"
+                        ),
                         fields,
                     )
                     updated += 1
 
                 if has_assignment:
-                    annotator = str(row["assigned_to"]).strip() if pd.notna(row["assigned_to"]) else None
+                    annotator = (
+                        str(row["assigned_to"]).strip() if pd.notna(row["assigned_to"]) else None
+                    )
                     if annotator:
                         conn.execute(
                             text("""
@@ -859,7 +868,9 @@ class ImportMixin(ProviderBase):
 
             # Restore video assignment
             if "assigned_to" in group.columns:
-                annotator = str(first["assigned_to"]).strip() if pd.notna(first["assigned_to"]) else None
+                annotator = (
+                    str(first["assigned_to"]).strip() if pd.notna(first["assigned_to"]) else None
+                )
                 if annotator:
                     self.add_annotator(annotator)
                     with self.engine.begin() as conn:
@@ -1212,9 +1223,7 @@ class ImportMixin(ProviderBase):
 
     # ── Project bundle export / import ────────────────────────────────────────
 
-    def _export_metadata_csv(
-        self, project_id: str, camera_ids: list[str] | None = None
-    ) -> str:
+    def _export_metadata_csv(self, project_id: str, camera_ids: list[str] | None = None) -> str:
         """Export video metadata (path, camera, recorded_at, lat, lon, assigned_to) as CSV."""
         params: dict[str, Any] = {"pid": project_id}
         cam_filter = ""
@@ -1315,7 +1324,8 @@ class ImportMixin(ProviderBase):
                     n.replace(".csv", "")
                     for n in names
                     if n.endswith(".csv")
-                    and n.replace(".csv", "") in ("species", "tags", "model_annotations", "metadata")
+                    and n.replace(".csv", "")
+                    in ("species", "tags", "model_annotations", "metadata")
                 ]
 
             if "species" in manifest_contents and "species.csv" in names:
@@ -1340,7 +1350,9 @@ class ImportMixin(ProviderBase):
                 content = zf.read("model_annotations.csv").decode("utf-8")
                 try:
                     df = pd.read_csv(_io.StringIO(content))
-                    cleaned_df, errors_df, _, _ = self.validate_model_csv(df, active_project_id=project_id)
+                    cleaned_df, errors_df, _, _ = self.validate_model_csv(
+                        df, active_project_id=project_id
+                    )
                     if not cleaned_df.empty:
                         stats = self.import_model_csv(cleaned_df, project_id)
                         results["model_annotations"] = stats

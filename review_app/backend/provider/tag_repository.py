@@ -185,13 +185,15 @@ class TagMixin(ProviderBase):
         writer = csv.writer(buf)
         writer.writerow(["key", "name_en", "name_fr", "color", "icon"])
         for tag in tags:
-            writer.writerow([
-                tag.get("key") or "",
-                tag.get("name_en") or "",
-                tag.get("name_fr") or "",
-                tag.get("color") or "",
-                tag.get("icon") or "",
-            ])
+            writer.writerow(
+                [
+                    tag.get("key") or "",
+                    tag.get("name_en") or "",
+                    tag.get("name_fr") or "",
+                    tag.get("color") or "",
+                    tag.get("icon") or "",
+                ]
+            )
         return buf.getvalue()
 
     def import_tags_from_csv(self, content: str) -> int:
@@ -235,7 +237,13 @@ class TagMixin(ProviderBase):
                             "UPDATE tags SET name_en = :name_en, name_fr = :name_fr, "
                             "color = :color, icon = :icon WHERE key = :key AND is_custom = 1"
                         ),
-                        {"key": key, "name_en": name_en, "name_fr": name_fr, "color": color, "icon": icon},
+                        {
+                            "key": key,
+                            "name_en": name_en,
+                            "name_fr": name_fr,
+                            "color": color,
+                            "icon": icon,
+                        },
                     )
             count += 1
         return count

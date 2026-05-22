@@ -24,8 +24,11 @@ def read_upload_file(content: bytes) -> pd.DataFrame:
         for quoting in (csv.QUOTE_MINIMAL, csv.QUOTE_NONE):
             try:
                 return pd.read_csv(
-                    io.BytesIO(content), sep=None, engine="python",
-                    encoding=encoding, quoting=quoting,
+                    io.BytesIO(content),
+                    sep=None,
+                    engine="python",
+                    encoding=encoding,
+                    quoting=quoting,
                 )
             except UnicodeDecodeError:
                 break  # wrong encoding, try next

@@ -102,7 +102,9 @@ def _filter_species_by_group(species_map: dict, species_groups: dict, group: str
     if not group:
         items = species_map.items()
     else:
-        items = ((sci, label) for sci, label in species_map.items() if species_groups.get(sci) == group)
+        items = (
+            (sci, label) for sci, label in species_map.items() if species_groups.get(sci) == group
+        )
     return dict(sorted(items, key=lambda x: x[1]))
 
 
@@ -396,7 +398,11 @@ def render_annotation_section_body(page, video, default_species, default_behavio
             if not is_b and not sels:
                 annotator = get_annotator_name()
                 await run.io_bound(
-                    dp.update_manual_review, selected_video_id, [], is_blank=True, labeled_by=annotator
+                    dp.update_manual_review,
+                    selected_video_id,
+                    [],
+                    is_blank=True,
+                    labeled_by=annotator,
                 )
                 ui.notify(t("marked_blank"), type="positive")
                 return True
