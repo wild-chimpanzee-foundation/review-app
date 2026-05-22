@@ -26,7 +26,18 @@ logger = logging.getLogger(__name__)
 class ProjectMixin(ProviderBase):
     """Project and ProjectDir CRUD. Requires self.engine, self.Session, self._utcnow_dt."""
 
+    def _unique_project_name(self, base: str) -> str:
+        with self.Session() as s:
+            existing = {r[0] for r in s.execute(text("SELECT name FROM projects")).fetchall()}
+        if base not in existing:
+            return base
+        i = 2
+        while f"{base} ({i})" in existing:
+            i += 1
+        return f"{base} ({i})"
+
     def create_project(self, name: str, video_dir: str) -> Project:
+        name = self._unique_project_name(name)
         project = Project(id=str(uuid.uuid4()), name=name)
         with self.Session() as s:
             s.add(project)
@@ -138,7 +149,7 @@ class ProjectMixin(ProviderBase):
             transcoded_paths = [
                 Path(p)
                 for (p,) in s.query(Video.transcoded_path)
-                .filter(Video.project_id == project_id, Video.transcoded_path != None)
+                .filter(Video.project_id == project_id, Video.transcoded_path is not None)
                 .all()
                 if p
             ]

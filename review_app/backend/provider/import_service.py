@@ -595,16 +595,12 @@ class ImportMixin(ProviderBase):
 
         if has_assignment:
             if annotator_map is not None:
-                target_names = {
-                    v for v in annotator_map.values() if v is not None
-                }
+                target_names = {v for v in annotator_map.values() if v is not None}
                 for a in target_names:
                     self.add_annotator(a)
             else:
                 all_annotators = {
-                    str(a).strip()
-                    for a in df["assigned_to"].dropna().unique()
-                    if str(a).strip()
+                    str(a).strip() for a in df["assigned_to"].dropna().unique() if str(a).strip()
                 }
                 for a in all_annotators:
                     self.add_annotator(a)
@@ -681,13 +677,9 @@ class ImportMixin(ProviderBase):
                     updated += 1
 
                 if has_assignment:
-                    raw = (
-                        str(row["assigned_to"]).strip() if pd.notna(row["assigned_to"]) else None
-                    )
+                    raw = str(row["assigned_to"]).strip() if pd.notna(row["assigned_to"]) else None
                     if raw:
-                        annotator = (
-                            annotator_map.get(raw) if annotator_map is not None else raw
-                        )
+                        annotator = annotator_map.get(raw) if annotator_map is not None else raw
                         if annotator:
                             conn.execute(
                                 text("""
@@ -799,12 +791,15 @@ class ImportMixin(ProviderBase):
     ) -> pd.DataFrame:
         params: dict[str, Any] = {"pid": active_project_id} if active_project_id else {}
         v_pid = "AND v.project_id = :pid" if active_project_id else ""
-        cam_filter = ""
-        if camera_ids:
+        if camera_ids is None:
+            cam_filter = ""
+        elif camera_ids:
             placeholders = ", ".join(f":c{i}" for i in range(len(camera_ids)))
             for i, c in enumerate(camera_ids):
                 params[f"c{i}"] = c
             cam_filter = f"AND v.camera_id IN ({placeholders})"
+        else:
+            cam_filter = "AND 1=0"
 
         with self.engine.connect() as conn:
             df = pd.read_sql(
@@ -1252,11 +1247,7 @@ class ImportMixin(ProviderBase):
             df = pd.read_csv(io.BytesIO(zf.read("metadata.csv")))
         if "assigned_to" not in df.columns:
             return []
-        names = {
-            str(a).strip()
-            for a in df["assigned_to"].dropna().unique()
-            if str(a).strip()
-        }
+        names = {str(a).strip() for a in df["assigned_to"].dropna().unique() if str(a).strip()}
         known = set(self.get_all_annotators())
         return sorted(names - known)
 
@@ -1265,12 +1256,15 @@ class ImportMixin(ProviderBase):
     def _export_metadata_csv(self, project_id: str, camera_ids: list[str] | None = None) -> str:
         """Export video metadata (path, camera, recorded_at, lat, lon, assigned_to) as CSV."""
         params: dict[str, Any] = {"pid": project_id}
-        cam_filter = ""
-        if camera_ids:
+        if camera_ids is None:
+            cam_filter = ""
+        elif camera_ids:
             placeholders = ", ".join(f":c{i}" for i in range(len(camera_ids)))
             for i, c in enumerate(camera_ids):
                 params[f"c{i}"] = c
             cam_filter = f"AND v.camera_id IN ({placeholders})"
+        else:
+            cam_filter = "AND 1=0"
         with self.engine.connect() as conn:
             df = pd.read_sql(
                 text(f"""
@@ -1414,7 +1408,9 @@ class ImportMixin(ProviderBase):
                 content = zf.read("metadata.csv").decode("utf-8")
                 try:
                     df = pd.read_csv(_io.StringIO(content))
-                    stats = self.import_video_metadata_csv(df, project_id, annotator_map=annotator_map)
+                    stats = self.import_video_metadata_csv(
+                        df, project_id, annotator_map=annotator_map
+                    )
                     results["metadata"] = stats
                 except Exception as exc:
                     results["metadata"] = {"error": str(exc)}
@@ -1425,8 +1421,8 @@ class ImportMixin(ProviderBase):
         """Build one bundle ZIP per annotator and wrap them in an outer ZIP.
 
         Each inner ZIP is named bundle_<annotator>_<today>.zip and contains only
-        that annotator's assigned cameras. Unassigned annotators get a full-project
-        bundle (no camera filter). Returns raw outer ZIP bytes.
+        that annotator's assigned cameras. Annotators with no camera assignments
+        get an empty bundle. Returns raw outer ZIP bytes.
         """
         import io
         import zipfile
@@ -1439,7 +1435,9 @@ class ImportMixin(ProviderBase):
         outer_buf = io.BytesIO()
         with zipfile.ZipFile(outer_buf, "w", compression=zipfile.ZIP_DEFLATED) as outer:
             for annotator in annotators:
-                camera_ids = [c for c, a in camera_map.items() if a == annotator] or None
+                camera_ids = [c for c, a in camera_map.items() if a == annotator]
+                if not camera_ids:
+                    continue
                 bundle_bytes = self.export_project_bundle(project_id, include, camera_ids)
                 safe_name = annotator.replace(" ", "_")
                 outer.writestr(f"bundle_{safe_name}_{today}.zip", bundle_bytes)

@@ -78,15 +78,24 @@ class AssignmentMixin(ProviderBase):
             loads[least_loaded] += cam["hours"]
         return assignment
 
-    def apply_distribution(self, project_id: str, assignment: dict[str, list[str]]) -> int:
+    def apply_distribution(
+        self,
+        project_id: str,
+        assignment: dict[str, list[str]],
+        clear_cameras: list[str] | None = None,
+    ) -> int:
         """Write VideoAssignment rows for the given camera→annotator mapping.
 
         Replaces any existing assignments for cameras mentioned in the mapping.
+        `clear_cameras` lists cameras explicitly unassigned (assigned to nobody);
+        their existing rows are deleted and no new row is inserted.
         Returns the total number of video rows assigned.
         """
         now = datetime.now(timezone.utc).isoformat()
         total = 0
-        all_cameras = [cam for cams in assignment.values() for cam in cams]
+        all_cameras = list(
+            {cam for cams in assignment.values() for cam in cams} | set(clear_cameras or [])
+        )
         with self.engine.begin() as conn:
             if all_cameras:
                 placeholders = ",".join(f":c{i}" for i in range(len(all_cameras)))
@@ -187,3 +196,98 @@ class AssignmentMixin(ProviderBase):
         for camera_id, assigned_to in rows:
             cameras[camera_id] = assigned_to
         return cameras
+
+    def export_annotator_videos(
+        self,
+        project_id: str,
+        progress_callback=None,
+        max_workers: int = 4,
+        output_dir: str | None = None,
+        annotators: list[str] | None = None,
+    ) -> list[dict]:
+        """Copy each annotator's assigned videos into a folder under output_dir.
+
+        Defaults to <first_project_dir>/annotator_exports/ when output_dir is None.
+        Folders are created at <output_dir>/<annotator_name>/ preserving the camera
+        subfolder structure. Files are copied in parallel using a thread pool.
+
+        progress_callback(done: int, total: int) is called after each file is copied.
+
+        Returns a list of {annotator, path, video_count} dicts for each folder written.
+        """
+        import shutil
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from pathlib import Path
+
+        dirs = self.get_project_dirs(project_id)
+        if not dirs:
+            raise RuntimeError("Project has no video directory configured.")
+        project_root = Path(dirs[0].path)
+        if output_dir:
+            exports_root = Path(output_dir)
+        else:
+            exports_root = project_root / "annotator_exports"
+        exports_root.mkdir(parents=True, exist_ok=True)
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text("""
+                    SELECT va.assigned_to, v.video_path
+                    FROM video_assignments va
+                    JOIN videos v ON v.video_id = va.video_id
+                    WHERE v.project_id = :pid AND v.is_missing = 0
+                    ORDER BY va.assigned_to, v.video_path
+                """),
+                {"pid": project_id},
+            ).fetchall()
+
+        annotator_filter = set(annotators) if annotators else None
+        by_annotator: dict[str, list[str]] = {}
+        for annotator, video_path in rows:
+            if annotator_filter is not None and annotator not in annotator_filter:
+                continue
+            by_annotator.setdefault(annotator, []).append(video_path)
+
+        def _safe_dirname(name: str) -> str:
+            import re
+
+            return re.sub(r'[<>:"/\\|?*\s]+', "_", name).strip("_") or "unknown"
+
+        # Build dest dirs and (src, dest) copy list up front
+        results = []
+        copy_tasks: list[tuple[Path, Path]] = []
+        for annotator, paths in by_annotator.items():
+            safe_name = _safe_dirname(annotator)
+            dest_dir = exports_root / safe_name
+            dest_dir.mkdir(exist_ok=True)
+            for video_path in paths:
+                src = Path(video_path)
+                if not src.exists():
+                    continue
+                try:
+                    rel = src.relative_to(project_root)
+                except ValueError:
+                    rel = Path(src.name)
+                dest = dest_dir / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                copy_tasks.append((src, dest))
+            results.append(
+                {"annotator": annotator, "path": str(dest_dir), "video_count": len(paths)}
+            )
+
+        total = len(copy_tasks)
+        done = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(shutil.copy2, src, dest): (src, dest) for src, dest in copy_tasks
+            }
+            for future in as_completed(futures):
+                future.result()
+                done += 1
+                if progress_callback:
+                    progress_callback(done, total)
+
+        logger.info(
+            "Exported %d files across %d annotators → %s", total, len(results), exports_root
+        )
+        return results

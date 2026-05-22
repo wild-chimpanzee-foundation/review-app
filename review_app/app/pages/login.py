@@ -15,9 +15,7 @@ async def setup_login():
     shared_header()
 
     dp = await get_or_create_data_provider()
-    existing_annotators = (
-        await run.io_bound(dp.get_all_annotators) if dp else []
-    )
+    existing_annotators = await run.io_bound(dp.get_all_annotators) if dp else []
 
     with ui.column().classes("w-full items-center justify-center").style("min-height: 80vh"):
         with ui.card().classes("q-pa-xl").style("min-width: 360px; max-width: 480px"):
@@ -30,10 +28,14 @@ async def setup_login():
 
             if existing_annotators:
                 options = {a: a for a in existing_annotators}
-                name_select = ui.select(
-                    options=options,
-                    label=t("login_select_label"),
-                ).props("outlined dense class=w-full").classes("q-mb-md")
+                name_select = (
+                    ui.select(
+                        options=options,
+                        label=t("login_select_label"),
+                    )
+                    .props("outlined dense class=w-full")
+                    .classes("q-mb-md")
+                )
 
                 def _on_create_new(e):
                     if name_select:
@@ -47,9 +49,13 @@ async def setup_login():
                 cb.on_value_change(_on_create_new)
                 create_new_check.append(cb)
 
-            inp = ui.input(
-                placeholder=t("annotator_name_placeholder"),
-            ).props("outlined dense class=w-full").classes("q-mb-md")
+            inp = (
+                ui.input(
+                    placeholder=t("annotator_name_placeholder"),
+                )
+                .props("outlined dense class=w-full")
+                .classes("q-mb-md")
+            )
             name_input.append(inp)
 
             if existing_annotators:
