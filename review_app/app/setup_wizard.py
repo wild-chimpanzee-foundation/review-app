@@ -190,6 +190,57 @@ class SetupWizard:
                     post_sync.visible = False
                     with post_sync:
                         ui.separator()
+
+                        # Bundle import option
+                        with ui.card().classes("full-width q-pa-sm bg-blue-1").props("flat bordered"):
+                            ui.label(t("wizard_bundle_import_label")).classes(
+                                "text-subtitle2 font-weight-medium q-mb-xs"
+                            )
+                            ui.label(t("wizard_bundle_import_desc")).classes(
+                                "text-caption text-grey-7 q-mb-sm"
+                            )
+                            bundle_status: list = [None]
+
+                            async def handle_bundle(e):
+                                try:
+                                    zip_bytes = e.content.read()
+                                    results = await run.io_bound(
+                                        dp.import_project_bundle, project.id, zip_bytes
+                                    )
+                                    parts = []
+                                    comp_names = {
+                                        "species": t("bundle_component_species"),
+                                        "tags": t("bundle_component_tags"),
+                                        "model_annotations": t("bundle_component_model_annotations"),
+                                        "metadata": t("bundle_component_metadata"),
+                                    }
+                                    for key, label in comp_names.items():
+                                        if key in results and "error" not in results[key]:
+                                            n = results[key].get("imported") or results[key].get("updated") or 0
+                                            parts.append(f"{label}: {n}")
+                                    summary = ", ".join(parts) if parts else "—"
+                                    msg = t("wizard_bundle_imported", summary=summary)
+                                    if bundle_status[0]:
+                                        bundle_status[0].set_text(msg)
+                                        bundle_status[0].classes("text-positive", remove="text-negative")
+                                    ui.notify(msg, type="positive")
+                                except Exception as exc:
+                                    from review_app.app.utils import user_error_message
+                                    msg = t("bundle_error", msg=user_error_message(exc))
+                                    if bundle_status[0]:
+                                        bundle_status[0].set_text(msg)
+                                        bundle_status[0].classes("text-negative", remove="text-positive")
+                                    ui.notify(msg, type="negative")
+
+                            ui.upload(
+                                on_upload=handle_bundle,
+                                multiple=False,
+                                label=t("wizard_bundle_import_btn"),
+                                auto_upload=True,
+                            ).props("accept=.zip flat color=primary").classes("full-width")
+                            bundle_status[0] = ui.label("").classes("text-caption q-mt-xs")
+
+                        ui.separator()
                         ui.label(t("wizard_import_suggestion")).classes("text-body2 q-mt-xs")
                         ui.button(
                             t("wizard_go_to_import_btn"),
