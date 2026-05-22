@@ -158,7 +158,7 @@ async def setup_distribution():
                 bundle_result_container.visible = False
                 bundle_result_ui.refresh(None)
                 try:
-                    zip_bytes = e.content.read()
+                    zip_bytes = await e.file.read()
                     results = await run.io_bound(
                         dp.import_project_bundle, project_id, zip_bytes
                     )
@@ -192,7 +192,7 @@ async def setup_distribution():
 
             async def handle_batch_upload(e):
                 try:
-                    content = e.content.read().decode("utf-8")
+                    content = (await e.file.read()).decode("utf-8")
                     import io as _io
                     df = pd.read_csv(_io.StringIO(content))
                     result = await run.io_bound(

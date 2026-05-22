@@ -203,7 +203,7 @@ class SetupWizard:
 
                             async def handle_bundle(e):
                                 try:
-                                    zip_bytes = e.content.read()
+                                    zip_bytes = await e.file.read()
                                     results = await run.io_bound(
                                         dp.import_project_bundle, project.id, zip_bytes
                                     )
