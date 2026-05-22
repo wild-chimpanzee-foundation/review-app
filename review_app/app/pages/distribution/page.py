@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from datetime import date
 
 import pandas as pd
@@ -19,17 +20,22 @@ class DistributionSection:
         self.dp = dp
         self.project_id = project_id
         self._pending: dict[str, str | None] = {}
+        self._active_annotators: set[str] | None = None
+        self.camera_stats: list[dict] = []
 
     @ui.refreshable_method
     def render(self) -> None:
         dp = self.dp
         pid = self.project_id
         annotators = dp.get_all_annotators()
-        camera_stats = dp.get_camera_stats(pid)
+        self.camera_stats = dp.get_camera_stats(pid)
         camera_assignment = dp.get_camera_assignment_map(pid)
         for cam in camera_assignment:
             if cam not in self._pending:
                 self._pending[cam] = camera_assignment[cam]
+
+        if self._active_annotators is None:
+            self._active_annotators = {v for v in self._pending.values() if v is not None}
 
         # ── Annotator registry ─────────────────────────────────────────────────
         ui.label(t("distribution_annotators_label")).classes("text-caption text-grey-6 q-mb-xs")
@@ -41,8 +47,10 @@ class DistributionSection:
             if not name:
                 return
             await run.io_bound(dp.add_annotator, name)
+            self._active_annotators.add(name)
             name_input[0].value = ""
             self.render.refresh()
+            self.render_summary.refresh()
 
         with ui.row().classes("items-center gap-sm q-mb-sm"):
             inp = (
@@ -61,71 +69,61 @@ class DistributionSection:
         else:
             with ui.row().classes("gap-xs flex-wrap q-mb-md"):
                 for ann in annotators:
-                    with ui.chip(ann, icon="person", removable=True).props(
-                        "outline color=primary"
-                    ) as chip:
-                        pass
+                    active = ann in self._active_annotators
 
-                    async def _on_remove(a=ann):
-                        with ui.dialog() as dlg, ui.card().classes("q-pa-md"):
-                            ui.label(t("distribution_remove_annotator_confirm", name=a)).classes(
-                                "text-body2 q-mb-md"
-                            )
-                            with ui.row().classes("gap-sm justify-end"):
-                                ui.button(t("cancel"), on_click=dlg.close).props("flat")
-                                ui.button(
-                                    t("delete"),
-                                    on_click=lambda d=dlg, name=a: _do_remove(d, name),
-                                    color="negative",
-                                ).props("unelevated")
-                        dlg.open()
+                    def _toggle(a=ann):
+                        if a in self._active_annotators:
+                            self._active_annotators.discard(a)
+                            self._pending = {k: None if v == a else v for k, v in self._pending.items()}
+                        else:
+                            self._active_annotators.add(a)
+                        self.render.refresh()
+                        self.render_summary.refresh()
 
-                    chip.on("remove", _on_remove)
-
-        async def _do_remove(dlg, name: str) -> None:
-            dlg.close()
-            await run.io_bound(dp.remove_annotator, name)
-            self._pending = {k: None if v == name else v for k, v in self._pending.items()}
-            self.render.refresh()
+                    chip = ui.chip(ann, icon="person", on_click=_toggle)
+                    chip.props("clickable")
+                    if active:
+                        chip.props("color=primary")
+                    else:
+                        chip.props("outline color=grey-6")
 
         # ── Camera assignment ──────────────────────────────────────────────────
         ui.separator().classes("q-my-sm")
         ui.label(t("distribution_cameras_label")).classes("text-caption text-grey-6 q-mb-xs")
 
-        if not camera_stats:
+        if not self.camera_stats:
             ui.label(t("distribution_no_cameras")).classes("text-caption text-grey-5")
             return
 
         annotator_options = {a: a for a in annotators}
 
         async def auto_distribute():
-            if not annotators:
+            if not self._active_annotators:
                 ui.notify(t("distribution_no_annotators"), type="warning")
                 return
-            result = await run.io_bound(dp.auto_distribute, pid, annotators)
+            result = await run.io_bound(dp.auto_distribute, pid, list(self._active_annotators))
             self._pending = {c: None for c in self._pending}
             for ann, cams in result.items():
                 for cam in cams:
                     self._pending[cam] = ann
             self.render.refresh()
+            self.render_summary.refresh()
 
         async def apply_distribution():
-            assignment: dict[str, list[str]] = {a: [] for a in annotators}
+            assignment: dict[str, list[str]] = {}
             for cam, ann in self._pending.items():
-                if ann and ann in assignment:
-                    assignment[ann].append(cam)
+                if ann:
+                    assignment.setdefault(ann, []).append(cam)
             n = await run.io_bound(dp.apply_distribution, pid, assignment)
-            filled = sum(1 for cams in assignment.values() if cams)
+            filled = len(assignment)
             ui.notify(t("distribution_applied", n=n, annotators=filled), type="positive")
             self.render.refresh()
+            self.render_summary.refresh()
 
         with ui.row().classes("gap-sm q-mb-sm"):
             ui.button(
                 t("distribution_auto_btn"), icon="auto_fix_high", on_click=auto_distribute
             ).props("outline color=secondary size=sm").tooltip(t("distribution_auto_tooltip"))
-            ui.button(
-                t("distribution_apply_btn"), icon="check", on_click=apply_distribution
-            ).props("unelevated color=primary size=sm")
 
         with ui.grid(columns="1fr auto auto 200px").classes(
             "w-full gap-x-md gap-y-xs items-center"
@@ -143,7 +141,7 @@ class DistributionSection:
                 "text-caption text-grey-6 font-weight-bold"
             )
 
-            for cam in camera_stats:
+            for cam in self.camera_stats:
                 cam_id = cam["camera_id"]
                 ui.label(cam_id).classes("text-body2")
                 ui.label(str(cam["video_count"])).classes("text-body2 text-right")
@@ -157,13 +155,29 @@ class DistributionSection:
                 def _make_handler(c):
                     def _on_change(e):
                         self._pending[c] = e.value or None
+                        self.render_summary.refresh()
 
                     return _on_change
 
                 sel.on_value_change(_make_handler(cam_id))
 
-        # ── Current distribution summary ───────────────────────────────────────
-        summary = dp.get_assignment_summary(pid)
+        ui.button(
+            t("distribution_apply_btn"), icon="check", on_click=apply_distribution
+        ).props("unelevated color=primary size=sm").classes("q-mt-sm")
+
+    @ui.refreshable_method
+    def render_summary(self) -> None:
+        annotator_map: dict[str, dict] = {}
+        for cam in self.camera_stats:
+            ann = self._pending.get(cam["camera_id"])
+            if ann is None:
+                continue
+            if ann not in annotator_map:
+                annotator_map[ann] = {"annotator": ann, "cameras": 0, "video_count": 0, "hours": 0.0}
+            annotator_map[ann]["cameras"] += 1
+            annotator_map[ann]["video_count"] += cam["video_count"]
+            annotator_map[ann]["hours"] = round(annotator_map[ann]["hours"] + cam["hours"], 2)
+        summary = sorted(annotator_map.values(), key=lambda r: r["annotator"])
         if summary:
             ui.separator().classes("q-my-sm")
             ui.label(t("distribution_summary_label")).classes("text-caption text-grey-6 q-mb-xs")
@@ -205,7 +219,9 @@ async def setup_distribution():
                 ui.icon("group", size="sm").classes("text-primary q-mr-sm")
                 ui.label(t("distribution_title")).classes("text-subtitle1 font-weight-medium")
             ui.label(t("distribution_desc")).classes("text-caption text-grey-6 q-mb-md")
-            DistributionSection(dp, project_id).render()
+            section = DistributionSection(dp, project_id)
+            section.render()
+            section.render_summary()
 
         # ── Bundle Export ─────────────────────────────────────────────────────
         with ui.card().classes("full-width q-mb-lg"):
@@ -250,7 +266,7 @@ async def setup_distribution():
             async def download_bundle():
                 include = _get_include()
                 if not include:
-                    ui.notify(t("bundle_include_label"), type="warning")
+                    ui.notify(t("bundle_include_required"), type="warning")
                     return
 
                 chosen_annotator = annotator_select.value or None
@@ -277,7 +293,7 @@ async def setup_distribution():
                     return
                 include = _get_include()
                 if not include:
-                    ui.notify(t("bundle_include_label"), type="warning")
+                    ui.notify(t("bundle_include_required"), type="warning")
                     return
                 try:
                     zip_bytes = await run.io_bound(dp.export_all_bundles, project_id, include)
@@ -294,65 +310,6 @@ async def setup_distribution():
                     t("bundle_download_all_btn"), icon="folder_zip", on_click=download_all_bundles
                 ).props("outline color=primary").tooltip(t("bundle_download_all_tooltip"))
 
-        # ── Bundle Import ─────────────────────────────────────────────────────
-        with ui.card().classes("full-width q-mb-lg"):
-            with ui.row().classes("items-center q-mb-sm"):
-                ui.icon("unarchive", size="sm").classes("text-primary q-mr-sm")
-                ui.label(t("bundle_import_title")).classes("text-subtitle1 font-weight-medium")
-            ui.label(t("bundle_import_desc")).classes("text-caption text-grey-6 q-mb-md")
-
-            bundle_result_container = ui.column().classes("w-full q-mt-md")
-            bundle_result_container.visible = False
-
-            @ui.refreshable
-            def bundle_result_ui(results: dict | None = None):
-                bundle_result_container.clear()
-                if not results:
-                    return
-                with bundle_result_container:
-                    ui.label(t("bundle_import_result_title")).classes("text-subtitle2 q-mb-sm")
-                    component_labels = {
-                        "species": t("bundle_component_species"),
-                        "tags": t("bundle_component_tags"),
-                        "model_annotations": t("bundle_component_model_annotations"),
-                        "metadata": t("bundle_component_metadata"),
-                    }
-                    for key, label in component_labels.items():
-                        if key in results:
-                            r = results[key]
-                            if "error" in r:
-                                status = t("bundle_error", msg=r["error"])
-                                color = "negative"
-                            else:
-                                n = r.get("imported") or r.get("updated") or 0
-                                status = t("bundle_imported_n", n=n)
-                                color = "positive"
-                            with ui.row().classes("items-center gap-sm"):
-                                ui.badge(label, color="grey").props("outline")
-                                ui.label(status).classes(f"text-{color}")
-
-            async def handle_bundle_upload(e):
-                bundle_result_container.visible = False
-                bundle_result_ui.refresh(None)
-                try:
-                    zip_bytes = await e.file.read()
-                    results = await run.io_bound(dp.import_project_bundle, project_id, zip_bytes)
-                    bundle_result_container.visible = True
-                    bundle_result_ui.refresh(results)
-                    ui.notify(t("bundle_import_title"), type="positive")
-                except Exception as exc:
-                    ui.notify(t("bundle_error", msg=user_error_message(exc)), type="negative")
-
-            ui.upload(
-                on_upload=handle_bundle_upload,
-                multiple=False,
-                label=t("bundle_import_btn"),
-                auto_upload=True,
-            ).props("accept=.zip")
-
-            with bundle_result_container:
-                bundle_result_ui()
-
         # ── Batch Annotation Import ───────────────────────────────────────────
         with ui.card().classes("full-width q-mb-lg"):
             with ui.row().classes("items-center q-mb-sm"):
@@ -366,9 +323,7 @@ async def setup_distribution():
             async def handle_batch_upload(e):
                 try:
                     content = (await e.file.read()).decode("utf-8")
-                    import io as _io
-
-                    df = pd.read_csv(_io.StringIO(content))
+                    df = pd.read_csv(io.StringIO(content))
                     result = await run.io_bound(
                         dp.import_annotations_csv, df, project_id, "append"
                     )
