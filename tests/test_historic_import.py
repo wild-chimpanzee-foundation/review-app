@@ -260,13 +260,21 @@ def test_import_append_preserves_existing(historic_provider):
     assert len(detail["manual_selections"]) == 2
 
 
-def test_import_fallback_stem_matching(historic_provider):
-    """Empty folder col should still match via video stem when stem is unambiguous."""
+def test_import_fallback_stem_with_camera_match(historic_provider):
+    """When folder matches the DB camera_id by substring, cam-stem fallback resolves correctly."""
     ids = _ids(historic_provider)
-    df = pd.DataFrame([_row(folder="", video="v1", species="deer")])
+    # "cam_a" exactly matches the DB camera_id for v1.mp4
+    df = pd.DataFrame([_row(folder="cam_a", video="v1", species="deer")])
     result = historic_provider.import_historic_csv(df, active_project_id=None)
     assert result["imported"] == 1
     assert historic_provider.get_video_detail(ids["v1"])["manual_selections"]
+
+
+def test_import_fallback_stem_empty_folder_no_match(historic_provider):
+    """Empty folder col no longer matches by stem alone — camera substring is required."""
+    df = pd.DataFrame([_row(folder="", video="v1", species="deer")])
+    result = historic_provider.import_historic_csv(df, active_project_id=None)
+    assert result["imported"] == 0
 
 
 def test_import_species_mapping_applied(historic_provider):
@@ -348,3 +356,51 @@ def test_import_ambiguous_stem_not_matched_by_stem_fallback(ambiguous_provider):
     # the stem fallback must not match either video.
     assert result["imported"] == 0
     assert len(result["skipped"]) == 1
+
+
+def test_cross_camera_stem_not_matched(tmp_db, mock_probe):
+    """CSV folder C8_Cam002_F2 must not match DB camera P4_Cam003_L1 even with the same stem."""
+    from review_app.backend.provider.local_data_provider import LocalDataProvider
+
+    video_dir = tmp_db["video_dir"]
+    (video_dir / "P4_Cam003_L1").mkdir()
+    (video_dir / "P4_Cam003_L1" / "01180001.mp4").touch()
+    dp = LocalDataProvider()
+    dp.sync_videos(progress_callback=None, video_dir=video_dir)
+
+    df = pd.DataFrame(
+        [
+            {
+                "Folder_name_standard": "C8_Cam002_F2",
+                "Video_name": "01180001.mp4",
+                "Species": "deer",
+                "Data_type": "Video",
+            }
+        ]
+    )
+    result = dp.import_historic_csv(df, active_project_id=None)
+    assert result["imported"] == 0
+
+
+def test_matching_camera_substring_resolves(tmp_db, mock_probe):
+    """CSV folder C8_Cam003_F2 should match DB camera P4_Cam003_L1 via 'Cam003' substring."""
+    from review_app.backend.provider.local_data_provider import LocalDataProvider
+
+    video_dir = tmp_db["video_dir"]
+    (video_dir / "P4_Cam003_L1").mkdir()
+    (video_dir / "P4_Cam003_L1" / "01180001.mp4").touch()
+    dp = LocalDataProvider()
+    dp.sync_videos(progress_callback=None, video_dir=video_dir)
+
+    df = pd.DataFrame(
+        [
+            {
+                "Folder_name_standard": "C8_Cam003_F2",
+                "Video_name": "01180001.mp4",
+                "Species": "deer",
+                "Data_type": "Video",
+            }
+        ]
+    )
+    result = dp.import_historic_csv(df, active_project_id=None)
+    assert result["imported"] == 1

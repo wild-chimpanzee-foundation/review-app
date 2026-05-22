@@ -530,10 +530,10 @@ def _render_match_stats(match_stats: dict | None) -> None:
         ui.label(t("match_preview_result", matched=matched, total=total)).classes(
             f"text-body2 {color}"
         )
-        if match_stats.get("matched_by_stem", 0) > 0:
-            ui.label(t("wide_format_stem_fallback", count=match_stats["matched_by_stem"])).classes(
-                "text-caption text-warning"
-            )
+        if match_stats.get("matched_by_cam_stem", 0) > 0:
+            ui.label(
+                t("wide_format_stem_fallback", count=match_stats["matched_by_cam_stem"])
+            ).classes("text-caption text-warning")
         if unmatched and match_stats.get("unmatched_sample"):
             with ui.expansion(t("wide_format_unmatched", count=unmatched), icon="warning").classes(
                 "q-mt-xs"

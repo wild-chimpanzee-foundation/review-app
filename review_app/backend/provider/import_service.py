@@ -12,6 +12,11 @@ from sqlalchemy import text
 
 from review_app.app.config import CSV_TEMPLATES
 from review_app.backend.errors import DataImportError
+from review_app.backend.path_matching import (
+    VideoPathLookup,
+    build_video_path_lookup,
+    resolve_video_path,
+)
 from review_app.backend.provider.base import ProviderBase
 
 logger = logging.getLogger(__name__)
@@ -104,74 +109,27 @@ class ImportMixin(ProviderBase):
 
     # ── Path matching helpers ─────────────────────────────────────────────────
 
-    def _build_video_path_lookup(
-        self, active_project_id: str | None
-    ) -> tuple[dict[str, str], dict[str, str]]:
-        """
-        Build two lookups for matching CSV file paths to DB video_ids.
-
-        - by_suffix: keyed by both the full relative path from a project scan dir AND
-          the legacy parent_dir/name form, so CSVs produced by the pipeline (which use the
-          full relative path) and manually-edited CSVs (which may use just parent/name) both
-          match. Extension-less variants are included so the extension need not be present.
-        - by_stem: {stem.lower() -> video_id} — last-resort fallback, only for unique stems.
-        """
+    def _build_video_path_lookup(self, active_project_id: str | None) -> VideoPathLookup:
         with self.engine.connect() as conn:
-            df = pd.read_sql(
+            rows = conn.execute(
                 text(
-                    "SELECT video_id, video_path FROM videos"
+                    "SELECT video_id, video_path, camera_id FROM videos"
                     + (" WHERE project_id = :pid" if active_project_id else "")
                 ),
-                conn,
-                params={"pid": active_project_id} if active_project_id else {},
-            )
+                {"pid": active_project_id} if active_project_id else {},
+            ).fetchall()
             scan_dirs: list[Path] = []
             if active_project_id:
-                rows = conn.execute(
+                dir_rows = conn.execute(
                     text("SELECT path FROM project_dirs WHERE project_id = :pid"),
                     {"pid": active_project_id},
                 ).fetchall()
-                scan_dirs = [Path(r[0]) for r in rows]
+                scan_dirs = [Path(r[0]) for r in dir_rows]
 
-        by_suffix: dict[str, str] = {}
-        stem_to_id: dict[str, str] = {}
-        stem_count: dict[str, int] = {}
-        # cam_prefix/stem fallback: e.g. "BDR72_681625_.../DCIM/.../DSCF0001.mp4" → "bdr72/dscf0001"
-        cam_stem_to_id: dict[str, str] = {}
-        cam_stem_count: dict[str, int] = {}
-        for _, row in df.iterrows():
-            p = Path(str(row["video_path"]))
-            vid = str(row["video_id"])
-
-            # Full relative path from each project scan dir (primary match)
-            for scan_dir in scan_dirs:
-                try:
-                    rel = p.relative_to(scan_dir)
-                    by_suffix[str(rel).lower()] = vid
-                    by_suffix[str(rel.with_suffix("")).lower()] = vid
-                    # Short cam-ID prefix (first _-segment of the top-level folder)
-                    if rel.parts:
-                        cam_prefix = rel.parts[0].split("_")[0].lower()
-                        key = f"{cam_prefix}/{p.stem.lower()}"
-                        cam_stem_to_id[key] = vid
-                        cam_stem_count[key] = cam_stem_count.get(key, 0) + 1
-                except ValueError:
-                    continue
-
-            # Legacy parent_dir/name fallback
-            by_suffix[f"{p.parent.name}/{p.name}".lower()] = vid
-            by_suffix[f"{p.parent.name}/{p.stem}".lower()] = vid
-
-            stem = p.stem.lower()
-            stem_to_id[stem] = vid
-            stem_count[stem] = stem_count.get(stem, 0) + 1
-
-        by_stem = {s: vid for s, vid in stem_to_id.items() if stem_count[s] == 1}
-        # Merge unambiguous cam-prefix entries into by_suffix
-        for key, vid in cam_stem_to_id.items():
-            if cam_stem_count[key] == 1:
-                by_suffix.setdefault(key, vid)
-        return by_suffix, by_stem
+        return build_video_path_lookup(
+            [(str(r[0]), str(r[1]), r[2]) for r in rows],
+            scan_dirs,
+        )
 
     # ── Annotation type validation ────────────────────────────────────────────
 
@@ -202,32 +160,20 @@ class ImportMixin(ProviderBase):
         Matching: tries parent_dir/filename (suffix) first, falls back to unambiguous stem.
         ann_mappings: list of {model_name, annotation_type, value_col, prob_col}
         """
-        by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
+        lookup = self._build_video_path_lookup(active_project_id)
 
         rows: list[dict[str, Any]] = []
         matched_suffix = 0
-        matched_stem = 0
+        matched_cam_stem = 0
         unmatched_paths: list[str] = []
 
         for _, src_row in df.iterrows():
             raw_path = str(src_row.get(path_col, "")).strip()
-            p = Path(raw_path)
 
-            video_id = (
-                by_suffix.get(raw_path.lower())
-                or by_suffix.get(str(p.with_suffix("")).lower())
-                or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
-                or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
-                or by_stem.get(p.stem.lower())
-            )
+            video_id, tier = resolve_video_path(raw_path, lookup)
             if video_id:
-                if by_stem.get(p.stem.lower()) == video_id and not (
-                    by_suffix.get(raw_path.lower())
-                    or by_suffix.get(str(p.with_suffix("")).lower())
-                    or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
-                    or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
-                ):
-                    matched_stem += 1
+                if tier == "cam_stem":
+                    matched_cam_stem += 1
                 else:
                     matched_suffix += 1
 
@@ -288,9 +234,9 @@ class ImportMixin(ProviderBase):
         )
         stats: dict[str, Any] = {
             "total_rows": len(df),
-            "matched": matched_suffix + matched_stem,
+            "matched": matched_suffix + matched_cam_stem,
             "matched_by_suffix": matched_suffix,
-            "matched_by_stem": matched_stem,
+            "matched_by_cam_stem": matched_cam_stem,
             "unmatched": len(unmatched_paths),
             "unmatched_sample": unmatched_paths[:10],
         }
@@ -319,21 +265,11 @@ class ImportMixin(ProviderBase):
         known_videos = set(video_map.keys())
         path_to_id = {v.lower(): k for k, v in video_map.items()}
 
-        by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
+        lookup = self._build_video_path_lookup(active_project_id)
 
         def _resolve_path(raw: str) -> str:
-            if raw in known_videos:
-                return raw
-            p = Path(raw)
-            return (
-                path_to_id.get(raw.lower())
-                or by_suffix.get(raw.lower())
-                or by_suffix.get(str(p.with_suffix("")).lower())
-                or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
-                or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
-                or by_stem.get(p.stem.lower())
-                or raw
-            )
+            vid, _ = resolve_video_path(raw, lookup, known_videos, path_to_id)
+            return vid or raw
 
         src["video_path"] = src["video_path"].astype(str).str.strip().map(_resolve_path)
 
@@ -525,18 +461,12 @@ class ImportMixin(ProviderBase):
         file_col: str = "",
     ) -> dict[str, Any]:
         """Dry-run path matching; returns {total, matched, unmatched} without writing to the DB."""
-        by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
+        lookup = self._build_video_path_lookup(active_project_id)
         matched = 0
         unmatched_paths: list[str] = []
         for _, row in df.iterrows():
             raw_path = self._meta_resolve_path(row, folder_col, file_col)
-            p = Path(raw_path)
-            video_id = (
-                by_suffix.get(raw_path.lower())
-                or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
-                or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
-                or by_stem.get(p.stem.lower())
-            )
+            video_id, _ = resolve_video_path(raw_path, lookup)
             if video_id:
                 matched += 1
             else:
@@ -589,7 +519,7 @@ class ImportMixin(ProviderBase):
         if source_epsg:
             transformer = Transformer.from_crs(source_epsg, 4326, always_xy=True)
 
-        by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
+        lookup = self._build_video_path_lookup(active_project_id)
         has_created_at = datetime_col and datetime_col in df.columns
         has_latitude = lat_col and lat_col in df.columns
         has_longitude = lon_col and lon_col in df.columns
@@ -616,14 +546,7 @@ class ImportMixin(ProviderBase):
         with self.engine.begin() as conn:
             for _, row in df.iterrows():
                 raw_path = self._meta_resolve_path(row, folder_col, file_col)
-                p = Path(raw_path)
-                video_id = (
-                    path_to_id.get(raw_path.lower())
-                    or by_suffix.get(raw_path.lower())
-                    or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
-                    or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
-                    or by_stem.get(p.stem.lower())
-                )
+                video_id, _ = resolve_video_path(raw_path, lookup, extra_suffix_map=path_to_id)
                 if video_id is None:
                     skipped.append(raw_path)
                     continue
@@ -848,18 +771,13 @@ class ImportMixin(ProviderBase):
             )
 
         # Build video path lookup: exact match first, then fuzzy suffix fallback for cross-machine sharing.
-        path_to_id = {v: k for k, v in self._known_video_map(active_project_id).items()}
-        by_suffix, _by_stem = self._build_video_path_lookup(active_project_id)
+        path_to_id = {v.lower(): k for k, v in self._known_video_map(active_project_id).items()}
+        lookup = self._build_video_path_lookup(active_project_id)
         known_ids = self._known_video_ids(active_project_id)
 
         def _resolve_path(path_str: str) -> str | None:
-            vid = path_to_id.get(path_str)
-            if vid:
-                return vid
-            p = Path(path_str)
-            return by_suffix.get(f"{p.parent.name}/{p.name}".lower()) or by_suffix.get(
-                f"{p.parent.name}/{p.stem}".lower()
-            )
+            vid, _ = resolve_video_path(path_str, lookup, extra_suffix_map=path_to_id)
+            return vid
 
         if has_path and not has_id:
             df = df.copy()
@@ -1024,14 +942,15 @@ class ImportMixin(ProviderBase):
             video_df = df.copy()
             skipped_installation = 0
 
-        by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
+        lookup = self._build_video_path_lookup(active_project_id)
         groups: dict[str, list[dict]] = {}
         skipped: list[str] = []
 
         for _, row in video_df.iterrows():
             folder = str(row.get(folder_col, "")).strip() if folder_col in video_df.columns else ""
             video = str(row.get(video_col, "")).strip() if video_col in video_df.columns else ""
-            video_id = by_suffix.get(f"{folder}/{video}".lower()) or by_stem.get(video.lower())
+            synthetic = f"{folder}/{video}" if folder else video
+            video_id, _ = resolve_video_path(synthetic, lookup)
             if video_id is None:
                 skipped.append(f"{folder}/{video}")
             else:
@@ -1270,11 +1189,11 @@ class ImportMixin(ProviderBase):
         with self.engine.connect() as conn:
             df = pd.read_sql(
                 text(f"""
-                    SELECT 
-                        v.video_path, 
-                        v.camera_id, 
-                        v.created_at, 
-                        v.latitude, 
+                    SELECT
+                        v.video_path,
+                        v.camera_id,
+                        v.created_at,
+                        v.latitude,
                         v.longitude,
                         va.assigned_to
                     FROM videos v
@@ -1402,9 +1321,7 @@ class ImportMixin(ProviderBase):
                         results["model_annotations"] = {**stats, "errors": error_count}
                     else:
                         unmatched = (
-                            errors_df.loc[
-                                errors_df["error"] == "error_unknown_path", "video_path"
-                            ]
+                            errors_df.loc[errors_df["error"] == "error_unknown_path", "video_path"]
                             .dropna()
                             .tolist()[:5]
                             if not errors_df.empty and "video_path" in errors_df.columns
