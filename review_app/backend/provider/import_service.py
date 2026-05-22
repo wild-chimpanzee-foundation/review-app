@@ -1161,3 +1161,171 @@ class ImportMixin(ProviderBase):
             "skipped": list(dict.fromkeys(skipped)),
             "skipped_observations": skipped_observations,
         }
+
+    # ── Project bundle export / import ────────────────────────────────────────
+
+    def _export_metadata_csv(
+        self, project_id: str, camera_ids: list[str] | None = None
+    ) -> str:
+        """Export video metadata (path, camera, recorded_at, lat, lon) as CSV."""
+        params: dict[str, Any] = {"pid": project_id}
+        cam_filter = ""
+        if camera_ids:
+            placeholders = ", ".join(f":c{i}" for i in range(len(camera_ids)))
+            for i, c in enumerate(camera_ids):
+                params[f"c{i}"] = c
+            cam_filter = f"AND v.camera_id IN ({placeholders})"
+        with self.engine.connect() as conn:
+            df = pd.read_sql(
+                text(f"""
+                    SELECT v.video_path, v.camera_id, v.created_at, v.latitude, v.longitude
+                    FROM videos v
+                    WHERE v.project_id = :pid AND v.is_missing = 0 {cam_filter}
+                    ORDER BY v.camera_id, v.video_path
+                """),
+                conn,
+                params=params,
+            )
+        return df.to_csv(index=False)
+
+    def export_project_bundle(
+        self,
+        project_id: str,
+        include: list[str],
+        camera_ids: list[str] | None = None,
+    ) -> bytes:
+        """Build a ZIP bundle of project data.
+
+        `include` is a subset of: "species", "tags", "model_annotations", "metadata".
+        `camera_ids` optionally filters model_annotations and metadata to those cameras.
+        Returns raw ZIP bytes.
+        """
+        import io
+        import json
+        import zipfile
+
+        buf = io.BytesIO()
+        contents = []
+
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            if "species" in include:
+                csv_str = self.export_project_species_csv(project_id)
+                if csv_str:
+                    zf.writestr("species.csv", csv_str)
+                    contents.append("species")
+
+            if "tags" in include:
+                csv_str = self.export_tags_csv()
+                if csv_str:
+                    zf.writestr("tags.csv", csv_str)
+                    contents.append("tags")
+
+            if "model_annotations" in include:
+                ma_df = self.export_model_annotations_csv(project_id)
+                if camera_ids:
+                    with self.engine.connect() as conn:
+                        placeholders = ", ".join(f":c{i}" for i in range(len(camera_ids)))
+                        params = {f"c{i}": c for i, c in enumerate(camera_ids)}
+                        params["pid"] = project_id
+                        cam_video_ids = {
+                            r[0]
+                            for r in conn.execute(
+                                text(f"""
+                                    SELECT video_id FROM videos
+                                    WHERE project_id = :pid AND camera_id IN ({placeholders})
+                                """),
+                                params,
+                            ).fetchall()
+                        }
+                    # Filter ma_df by matching video_path against those video IDs
+                    # Use the video_path lookup we already have
+                    by_suffix, _ = self._build_video_path_lookup(project_id)
+                    allowed_paths = {
+                        path for vid, path in by_suffix.items() if vid in cam_video_ids
+                    }
+                    if not ma_df.empty and "video_path" in ma_df.columns:
+                        ma_df = ma_df[ma_df["video_path"].isin(allowed_paths)]
+                if not ma_df.empty:
+                    zf.writestr("model_annotations.csv", ma_df.to_csv(index=False))
+                    contents.append("model_annotations")
+
+            if "metadata" in include:
+                csv_str = self._export_metadata_csv(project_id, camera_ids)
+                if csv_str:
+                    zf.writestr("metadata.csv", csv_str)
+                    contents.append("metadata")
+
+            manifest = json.dumps({"version": "1", "contents": contents})
+            zf.writestr("bundle.json", manifest)
+
+        return buf.getvalue()
+
+    def import_project_bundle(self, project_id: str, zip_bytes: bytes) -> dict[str, Any]:
+        """Unzip a project bundle and import each present component.
+
+        Returns a dict keyed by component name with per-component import results.
+        """
+        import io
+        import json
+        import zipfile
+
+        results: dict[str, Any] = {}
+
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            names = set(zf.namelist())
+
+            manifest_contents: list[str] = []
+            if "bundle.json" in names:
+                manifest = json.loads(zf.read("bundle.json"))
+                manifest_contents = manifest.get("contents", [])
+            else:
+                manifest_contents = [
+                    n.replace(".csv", "")
+                    for n in names
+                    if n.endswith(".csv")
+                    and n.replace(".csv", "") in ("species", "tags", "model_annotations", "metadata")
+                ]
+
+            if "species" in manifest_contents and "species.csv" in names:
+                content = zf.read("species.csv").decode("utf-8")
+                try:
+                    count = self.import_project_species_from_csv(project_id, content)
+                    results["species"] = {"imported": count}
+                except Exception as exc:
+                    results["species"] = {"error": str(exc)}
+
+            if "tags" in manifest_contents and "tags.csv" in names:
+                content = zf.read("tags.csv").decode("utf-8")
+                try:
+                    count = self.import_tags_from_csv(content)
+                    results["tags"] = {"imported": count}
+                except Exception as exc:
+                    results["tags"] = {"error": str(exc)}
+
+            if "model_annotations" in manifest_contents and "model_annotations.csv" in names:
+                import io as _io
+
+                content = zf.read("model_annotations.csv").decode("utf-8")
+                try:
+                    df = pd.read_csv(_io.StringIO(content))
+                    cleaned_df, errors_df, _, _ = self.validate_model_csv(df, active_project_id=project_id)
+                    if not cleaned_df.empty:
+                        stats = self.import_model_csv(cleaned_df, project_id)
+                        results["model_annotations"] = stats
+                    else:
+                        results["model_annotations"] = {"imported": 0, "errors": len(errors_df)}
+                except Exception as exc:
+                    results["model_annotations"] = {"error": str(exc)}
+
+            if "metadata" in manifest_contents and "metadata.csv" in names:
+                import io as _io
+
+                content = zf.read("metadata.csv").decode("utf-8")
+                try:
+                    df = pd.read_csv(_io.StringIO(content))
+                    stats = self.import_video_metadata_csv(df, project_id)
+                    results["metadata"] = stats
+                except Exception as exc:
+                    results["metadata"] = {"error": str(exc)}
+
+        return results

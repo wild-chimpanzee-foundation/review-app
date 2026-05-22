@@ -175,6 +175,71 @@ class TagMixin(ProviderBase):
                             {"vid": video_id, "tid": tag_id, "at": now},
                         )
 
+    def export_tags_csv(self) -> str:
+        """Export all custom tags as a CSV string (key, name_en, name_fr, color, icon)."""
+        import csv
+        import io
+
+        tags = [t for t in self.get_all_tags() if t["is_custom"]]
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["key", "name_en", "name_fr", "color", "icon"])
+        for tag in tags:
+            writer.writerow([
+                tag.get("key") or "",
+                tag.get("name_en") or "",
+                tag.get("name_fr") or "",
+                tag.get("color") or "",
+                tag.get("icon") or "",
+            ])
+        return buf.getvalue()
+
+    def import_tags_from_csv(self, content: str) -> int:
+        """Import custom tags from a CSV string. Idempotent upsert by key.
+        Returns the number of tags imported."""
+        import csv
+        import io
+
+        reader = csv.DictReader(io.StringIO(content))
+        count = 0
+        for row in reader:
+            key = (row.get("key") or "").strip()
+            name_en = (row.get("name_en") or "").strip()
+            name_fr = (row.get("name_fr") or "").strip() or None
+            color = (row.get("color") or "").strip() or None
+            icon = (row.get("icon") or "").strip() or None
+            if not key or not name_en:
+                continue
+            with self.engine.begin() as conn:
+                existing = conn.execute(
+                    text("SELECT id FROM tags WHERE key = :k"), {"k": key}
+                ).fetchone()
+                if existing is None:
+                    conn.execute(
+                        text(
+                            "INSERT INTO tags (id, key, name_en, name_fr, color, icon, is_custom) "
+                            "VALUES (:id, :key, :name_en, :name_fr, :color, :icon, 1)"
+                        ),
+                        {
+                            "id": str(uuid.uuid4()),
+                            "key": key,
+                            "name_en": name_en,
+                            "name_fr": name_fr,
+                            "color": color,
+                            "icon": icon,
+                        },
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "UPDATE tags SET name_en = :name_en, name_fr = :name_fr, "
+                            "color = :color, icon = :icon WHERE key = :key AND is_custom = 1"
+                        ),
+                        {"key": key, "name_en": name_en, "name_fr": name_fr, "color": color, "icon": icon},
+                    )
+            count += 1
+        return count
+
     def delete_custom_tag(self, key: str) -> None:
         with self.engine.begin() as conn:
             tag_row = conn.execute(

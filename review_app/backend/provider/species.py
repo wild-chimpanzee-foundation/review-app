@@ -933,3 +933,28 @@ class SpeciesMixin(ProviderBase):
                 updated += 1
         logger.info("Set behaviors for %d species in project %s from CSV", updated, project_id)
         return updated
+
+    def export_project_species_csv(self, project_id: str) -> str:
+        """Export the project's species list as a semicolon-separated CSV string."""
+        import csv
+        import io
+
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text("""
+                    SELECT s.scientific_name, s.name_en, s.name_fr,
+                           s.group_en, s.group_fr, s.iucn
+                    FROM species s
+                    JOIN project_species ps ON ps.species_id = s.id
+                    WHERE ps.project_id = :pid
+                    ORDER BY s.scientific_name
+                """),
+                {"pid": project_id},
+            ).fetchall()
+
+        buf = io.StringIO()
+        writer = csv.writer(buf, delimiter=";")
+        writer.writerow(["scientific_name", "name_en", "name_fr", "group_en", "group_fr", "iucn"])
+        for r in rows:
+            writer.writerow([r[0] or "", r[1] or "", r[2] or "", r[3] or "", r[4] or "", r[5] or ""])
+        return buf.getvalue()

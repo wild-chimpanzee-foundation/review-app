@@ -207,6 +207,9 @@ def shared_header(show_drawer: bool = False):
                 ui.button(t("nav_import"), on_click=lambda: ui.navigate.to("/model-import")).props(
                     "flat color=white"
                 ).classes("gt-sm")
+                ui.button(
+                    t("nav_distribution"), on_click=lambda: ui.navigate.to("/distribution")
+                ).props("flat color=white").classes("gt-sm")
                 ui.button(t("nav_settings"), on_click=lambda: ui.navigate.to("/settings")).props(
                     "flat color=white"
                 ).classes("gt-sm")
@@ -218,6 +221,10 @@ def shared_header(show_drawer: bool = False):
                         ui.menu_item(t("nav_review"), on_click=lambda: ui.navigate.to("/review"))
                         ui.menu_item(
                             t("nav_import"), on_click=lambda: ui.navigate.to("/model-import")
+                        )
+                        ui.menu_item(
+                            t("nav_distribution"),
+                            on_click=lambda: ui.navigate.to("/distribution"),
                         )
                         ui.menu_item(
                             t("nav_settings"), on_click=lambda: ui.navigate.to("/settings")
@@ -385,6 +392,15 @@ class GUI:
 
         await setup_settings()
 
+    async def distribution_page(self):
+        from review_app.app.utils import require_login
+
+        if not require_login():
+            return
+        from review_app.app.pages.distribution import setup_distribution
+
+        await setup_distribution()
+
     def setup_page(self):
         from nicegui import ui
 
@@ -458,6 +474,7 @@ class GUI:
         ui.page("/review")(self.review_page)
         ui.page("/setup")(self.setup_page)
         ui.page("/model-import")(self.model_import_page)
+        ui.page("/distribution")(self.distribution_page)
         ui.page("/settings")(self.settings_page)
 
         # Initialize data provider only if the DB already exists (i.e. app was set up before).
