@@ -95,7 +95,7 @@ class ImportMixin(ProviderBase):
             rows.append(
                 f"{sample_paths[1] if len(sample_paths) > 1 else 'path/to/video2.mp4'},blank_non_blank,blank_model,blank,,0.98,0,"
             )
-            template = "path,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec\n"
+            template = "video_path,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec\n"
             template += "\n".join(rows)
         else:
             template = CSV_TEMPLATES["model_annotations"]
@@ -267,7 +267,7 @@ class ImportMixin(ProviderBase):
                 if value_text is not None or probability is not None or value_num is not None:
                     rows.append(
                         {
-                            "path": video_id,
+                            "video_path": video_id,
                             "annotation_type": ann_type,
                             "model_name": model_name,
                             "value_text": value_text,
@@ -278,7 +278,7 @@ class ImportMixin(ProviderBase):
 
         empty = pd.DataFrame(
             columns=[
-                "path",
+                "video_path",
                 "annotation_type",
                 "model_name",
                 "value_text",
@@ -307,7 +307,7 @@ class ImportMixin(ProviderBase):
 
         mappings = mappings or {}
 
-        required = {"path", "annotation_type", "model_name"}
+        required = {"video_path", "annotation_type", "model_name"}
         missing = required - set(src.columns)
         if missing:
             raise DataImportError(
@@ -333,7 +333,7 @@ class ImportMixin(ProviderBase):
                 or raw
             )
 
-        src["path"] = src["path"].astype(str).str.strip().map(_resolve_path)
+        src["video_path"] = src["video_path"].astype(str).str.strip().map(_resolve_path)
 
         species_mask = (
             src["annotation_type"].str.strip().str.lower().isin({"species", "object_detection"})
@@ -355,7 +355,7 @@ class ImportMixin(ProviderBase):
 
         for idx, row in src.iterrows():
             row_num = int(idx) + 1
-            video_id = str(row.get("path", "")).strip()
+            video_id = str(row.get("video_path", "")).strip()
             model_name = str(row.get("model_name", "")).strip()
             raw_type = str(row.get("annotation_type", "")).strip()
 
@@ -745,9 +745,18 @@ class ImportMixin(ProviderBase):
 
         return base_df
 
-    def export_model_annotations_csv(self, active_project_id: str | None) -> pd.DataFrame:
-        params = {"pid": active_project_id} if active_project_id else {}
-        ma_pid = "AND ma.project_id = :pid" if active_project_id else ""
+    def export_model_annotations_csv(
+        self, active_project_id: str | None, camera_ids: list[str] | None = None
+    ) -> pd.DataFrame:
+        params: dict[str, Any] = {"pid": active_project_id} if active_project_id else {}
+        v_pid = "AND v.project_id = :pid" if active_project_id else ""
+        cam_filter = ""
+        if camera_ids:
+            placeholders = ", ".join(f":c{i}" for i in range(len(camera_ids)))
+            for i, c in enumerate(camera_ids):
+                params[f"c{i}"] = c
+            cam_filter = f"AND v.camera_id IN ({placeholders})"
+
         with self.engine.connect() as conn:
             df = pd.read_sql(
                 text(f"""
@@ -762,7 +771,7 @@ class ImportMixin(ProviderBase):
                         ma.t_end_sec
                     FROM model_annotations ma
                     JOIN videos v ON v.video_id = ma.video_id
-                    WHERE 1=1 {ma_pid}
+                    WHERE 1=1 {v_pid} {cam_filter}
                     ORDER BY v.video_path, ma.model_name, ma.annotation_type
                 """),
                 conn,
@@ -1221,30 +1230,7 @@ class ImportMixin(ProviderBase):
                     contents.append("tags")
 
             if "model_annotations" in include:
-                ma_df = self.export_model_annotations_csv(project_id)
-                if camera_ids:
-                    with self.engine.connect() as conn:
-                        placeholders = ", ".join(f":c{i}" for i in range(len(camera_ids)))
-                        params = {f"c{i}": c for i, c in enumerate(camera_ids)}
-                        params["pid"] = project_id
-                        cam_video_ids = {
-                            r[0]
-                            for r in conn.execute(
-                                text(f"""
-                                    SELECT video_id FROM videos
-                                    WHERE project_id = :pid AND camera_id IN ({placeholders})
-                                """),
-                                params,
-                            ).fetchall()
-                        }
-                    # Filter ma_df by matching video_path against those video IDs
-                    # Use the video_path lookup we already have
-                    by_suffix, _ = self._build_video_path_lookup(project_id)
-                    allowed_paths = {
-                        path for vid, path in by_suffix.items() if vid in cam_video_ids
-                    }
-                    if not ma_df.empty and "video_path" in ma_df.columns:
-                        ma_df = ma_df[ma_df["video_path"].isin(allowed_paths)]
+                ma_df = self.export_model_annotations_csv(project_id, camera_ids)
                 if not ma_df.empty:
                     zf.writestr("model_annotations.csv", ma_df.to_csv(index=False))
                     contents.append("model_annotations")

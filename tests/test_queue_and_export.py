@@ -302,6 +302,60 @@ def test_export_model_annotations_csv(populated_provider):
 
 
 # ---------------------------------------------------------------------------
+# Project Bundle Export
+# ---------------------------------------------------------------------------
+
+
+def test_export_project_bundle_model_annotations_with_camera_filter(populated_provider):
+    import io
+    import zipfile
+    import pandas as pd
+
+    dp, ids = populated_provider
+    # cam_a has v1 and v2. v1 has model annotations, v2 has model annotations.
+    # cam_b has v3 and v4. v3 has model annotations.
+
+    # Export bundle for cam_a only
+    bundle_bytes = dp.export_project_bundle(
+        project_id=None, include=["model_annotations"], camera_ids=["cam_a"]
+    )
+
+    with zipfile.ZipFile(io.BytesIO(bundle_bytes)) as zf:
+        assert "model_annotations.csv" in zf.namelist()
+        content = zf.read("model_annotations.csv").decode("utf-8")
+        df = pd.read_csv(io.StringIO(content))
+
+        # Should contain cam_a videos (v1, v2) but not cam_b (v3)
+        paths = df["video_path"].unique()
+        assert any("v1.mp4" in p for p in paths)
+        assert any("v2.mp4" in p for p in paths)
+        assert not any("v3.mp4" in p for p in paths)
+
+
+def test_export_project_bundle_model_annotations_no_filter(populated_provider):
+    import io
+    import zipfile
+    import pandas as pd
+
+    dp, ids = populated_provider
+
+    bundle_bytes = dp.export_project_bundle(
+        project_id=None, include=["model_annotations"], camera_ids=None
+    )
+
+    with zipfile.ZipFile(io.BytesIO(bundle_bytes)) as zf:
+        assert "model_annotations.csv" in zf.namelist()
+        content = zf.read("model_annotations.csv").decode("utf-8")
+        df = pd.read_csv(io.StringIO(content))
+
+        # Should contain all videos with model annotations (v1, v2, v3)
+        paths = df["video_path"].unique()
+        assert any("v1.mp4" in p for p in paths)
+        assert any("v2.mp4" in p for p in paths)
+        assert any("v3.mp4" in p for p in paths)
+
+
+# ---------------------------------------------------------------------------
 # remove_project_dir
 # ---------------------------------------------------------------------------
 
