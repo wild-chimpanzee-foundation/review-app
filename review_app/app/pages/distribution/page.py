@@ -56,7 +56,7 @@ async def setup_distribution():
                 value="",
             ).props("outlined dense").classes("w-64")
 
-            async def download_bundle():
+            def _get_include() -> list[str]:
                 include: list[str] = []
                 if include_species.value:
                     include.append("species")
@@ -66,6 +66,10 @@ async def setup_distribution():
                     include.append("model_annotations")
                 if include_metadata.value:
                     include.append("metadata")
+                return include
+
+            async def download_bundle():
+                include = _get_include()
                 if not include:
                     ui.notify(t("bundle_include_label"), type="warning")
                     return
@@ -84,13 +88,32 @@ async def setup_distribution():
                     filename = f"bundle{ann_suffix}_{date.today()}.zip"
                     ui.download(zip_bytes, filename)
                 except Exception as exc:
-                    ui.notify(
-                        t("bundle_error", msg=user_error_message(exc)), type="negative"
-                    )
+                    ui.notify(t("bundle_error", msg=user_error_message(exc)), type="negative")
 
-            ui.button(t("bundle_download_btn"), icon="download", on_click=download_bundle).props(
-                "unelevated color=primary q-mt-md"
-            )
+            async def download_all_bundles():
+                if not annotators:
+                    ui.notify(t("bundle_no_annotators"), type="warning")
+                    return
+                include = _get_include()
+                if not include:
+                    ui.notify(t("bundle_include_label"), type="warning")
+                    return
+                try:
+                    zip_bytes = await run.io_bound(
+                        dp.export_all_bundles, project_id, include
+                    )
+                    filename = f"all_bundles_{date.today()}.zip"
+                    ui.download(zip_bytes, filename)
+                except Exception as exc:
+                    ui.notify(t("bundle_error", msg=user_error_message(exc)), type="negative")
+
+            with ui.row().classes("gap-sm q-mt-md"):
+                ui.button(t("bundle_download_btn"), icon="download", on_click=download_bundle).props(
+                    "unelevated color=primary"
+                )
+                ui.button(
+                    t("bundle_download_all_btn"), icon="folder_zip", on_click=download_all_bundles
+                ).props("outline color=primary").tooltip(t("bundle_download_all_tooltip"))
 
         # ── Bundle Import ─────────────────────────────────────────────────────
         with ui.card().classes("full-width q-mb-lg"):

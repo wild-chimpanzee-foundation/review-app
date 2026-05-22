@@ -1329,3 +1329,27 @@ class ImportMixin(ProviderBase):
                     results["metadata"] = {"error": str(exc)}
 
         return results
+
+    def export_all_bundles(self, project_id: str, include: list[str]) -> bytes:
+        """Build one bundle ZIP per annotator and wrap them in an outer ZIP.
+
+        Each inner ZIP is named bundle_<annotator>_<today>.zip and contains only
+        that annotator's assigned cameras. Unassigned annotators get a full-project
+        bundle (no camera filter). Returns raw outer ZIP bytes.
+        """
+        import io
+        import zipfile
+        from datetime import date as _date
+
+        today = _date.today()
+        annotators = self.get_all_annotators()
+        camera_map = self.get_camera_assignment_map(project_id)
+
+        outer_buf = io.BytesIO()
+        with zipfile.ZipFile(outer_buf, "w", compression=zipfile.ZIP_DEFLATED) as outer:
+            for annotator in annotators:
+                camera_ids = [c for c, a in camera_map.items() if a == annotator] or None
+                bundle_bytes = self.export_project_bundle(project_id, include, camera_ids)
+                safe_name = annotator.replace(" ", "_")
+                outer.writestr(f"bundle_{safe_name}_{today}.zip", bundle_bytes)
+        return outer_buf.getvalue()
