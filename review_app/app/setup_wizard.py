@@ -337,9 +337,67 @@ class SetupWizard:
             )
             status.text = t("sync_complete")
 
+            annotator_map = None
+            unknown_annotators = await run.io_bound(dp.check_bundle_annotators, bundle_bytes[0])
+            if unknown_annotators:
+                existing = await run.io_bound(dp.get_all_annotators)
+                if existing:
+                    resolve_dlg = ui.dialog().props("persistent")
+                    state = {"confirmed": False}
+                    rows = []
+
+                    with resolve_dlg, ui.card().classes("q-pa-lg").style("min-width: 520px"):
+                        ui.label(t("bundle_annotator_check_title")).classes("text-h6 q-mb-sm")
+                        ui.label(t("bundle_annotator_check_desc", names=", ".join(unknown_annotators))).classes(
+                            "text-caption text-grey-6 q-mb-md"
+                        )
+
+                        for name in unknown_annotators:
+                            with ui.row().classes("items-center gap-sm w-full q-mb-sm"):
+                                ui.label(name).classes("text-body2 font-weight-bold").style("min-width: 120px")
+                                radio = ui.radio(
+                                    [t("bundle_annotator_create"), t("bundle_annotator_map_to")],
+                                    value=t("bundle_annotator_create"),
+                                ).props("inline")
+                                sel = ui.select({a: a for a in existing}, visible=False).props(
+                                    "outlined dense"
+                                ).classes("w-48")
+
+                                def _on_radio(e, s=sel):
+                                    s.visible = (e.value == t("bundle_annotator_map_to"))
+
+                                radio.on_value_change(_on_radio)
+                                rows.append({"name": name, "radio": radio, "select": sel})
+
+                        def _confirm():
+                            state["confirmed"] = True
+                            resolve_dlg.close()
+
+                        with ui.row().classes("q-mt-md gap-sm justify-end"):
+                            ui.button(t("cancel"), on_click=resolve_dlg.close).props("flat")
+                            ui.button(t("confirm"), on_click=_confirm, color="primary")
+
+                    resolve_dlg.open()
+                    await resolve_dlg.wait_for_close()
+
+                    if not state["confirmed"]:
+                        result_col.visible = True
+                        return
+
+                    annotator_map = {}
+                    for row in rows:
+                        if row["radio"].value == t("bundle_annotator_create"):
+                            annotator_map[row["name"]] = row["name"]
+                        else:
+                            annotator_map[row["name"]] = row["select"].value
+                else:
+                    annotator_map = {n: n for n in unknown_annotators}
+
             bundle_summary = None
             try:
-                results = await run.io_bound(dp.import_project_bundle, project.id, bundle_bytes[0])
+                results = await run.io_bound(
+                    dp.import_project_bundle, project.id, bundle_bytes[0], annotator_map
+                )
                 parts = []
                 comp_names = {
                     "species": t("bundle_component_species"),

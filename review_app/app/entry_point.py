@@ -289,10 +289,10 @@ class GUI:
         else:
             ui.navigate.to("/setup")
 
-    def login_page(self):
+    async def login_page(self):
         from review_app.app.pages.login import setup_login
 
-        setup_login()
+        await setup_login()
 
     def db_error_page(self):
         from nicegui import ui

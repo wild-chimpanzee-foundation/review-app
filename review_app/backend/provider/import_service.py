@@ -564,12 +564,16 @@ class ImportMixin(ProviderBase):
         lat_col: str = "latitude",
         lon_col: str = "longitude",
         source_epsg: int | None = None,
+        annotator_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """
         Update video rows from a CSV with columns for path, created_at, latitude, longitude.
         When folder_col and file_col are provided the path is constructed as folder/file;
         otherwise the 'path' column is used.
         When source_epsg is given, coordinates are reprojected to WGS84 before storing.
+        When annotator_map is provided, it maps original assigned_to names to existing or new names;
+        names not in the map are skipped. If annotator_map is None, unknown annotators are
+        auto-created (legacy behavior).
         Returns {"updated": int, "skipped": list[str]}.
         """
         use_mapped_path = bool(folder_col and file_col)
@@ -590,11 +594,20 @@ class ImportMixin(ProviderBase):
         has_assignment = "assigned_to" in df.columns
 
         if has_assignment:
-            all_annotators = {
-                str(a).strip() for a in df["assigned_to"].dropna().unique() if str(a).strip()
-            }
-            for a in all_annotators:
-                self.add_annotator(a)
+            if annotator_map is not None:
+                target_names = {
+                    v for v in annotator_map.values() if v is not None
+                }
+                for a in target_names:
+                    self.add_annotator(a)
+            else:
+                all_annotators = {
+                    str(a).strip()
+                    for a in df["assigned_to"].dropna().unique()
+                    if str(a).strip()
+                }
+                for a in all_annotators:
+                    self.add_annotator(a)
 
         path_to_id = {v.lower(): k for k, v in self._known_video_map(active_project_id).items()}
 
@@ -668,17 +681,21 @@ class ImportMixin(ProviderBase):
                     updated += 1
 
                 if has_assignment:
-                    annotator = (
+                    raw = (
                         str(row["assigned_to"]).strip() if pd.notna(row["assigned_to"]) else None
                     )
-                    if annotator:
-                        conn.execute(
-                            text("""
-                                INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at)
-                                VALUES (:video_id, :annotator, :now)
-                            """),
-                            {"video_id": video_id, "annotator": annotator, "now": now_str},
+                    if raw:
+                        annotator = (
+                            annotator_map.get(raw) if annotator_map is not None else raw
                         )
+                        if annotator:
+                            conn.execute(
+                                text("""
+                                    INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at)
+                                    VALUES (:video_id, :annotator, :now)
+                                """),
+                                {"video_id": video_id, "annotator": annotator, "now": now_str},
+                            )
 
         logger.info("Video metadata import: %d updated, %d skipped", updated, len(skipped))
         return {"updated": updated, "skipped": skipped}
@@ -1221,6 +1238,28 @@ class ImportMixin(ProviderBase):
             "skipped_observations": skipped_observations,
         }
 
+    def check_bundle_annotators(self, zip_bytes: bytes) -> list[str]:
+        """Inspect a bundle ZIP and return annotator names from metadata.csv
+        that are not yet in the annotators registry."""
+        import io
+        import zipfile
+
+        import pandas as pd
+
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            if "metadata.csv" not in zf.namelist():
+                return []
+            df = pd.read_csv(io.BytesIO(zf.read("metadata.csv")))
+        if "assigned_to" not in df.columns:
+            return []
+        names = {
+            str(a).strip()
+            for a in df["assigned_to"].dropna().unique()
+            if str(a).strip()
+        }
+        known = set(self.get_all_annotators())
+        return sorted(names - known)
+
     # ── Project bundle export / import ────────────────────────────────────────
 
     def _export_metadata_csv(self, project_id: str, camera_ids: list[str] | None = None) -> str:
@@ -1301,8 +1340,16 @@ class ImportMixin(ProviderBase):
 
         return buf.getvalue()
 
-    def import_project_bundle(self, project_id: str, zip_bytes: bytes) -> dict[str, Any]:
+    def import_project_bundle(
+        self,
+        project_id: str,
+        zip_bytes: bytes,
+        annotator_map: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Unzip a project bundle and import each present component.
+
+        When annotator_map is provided (for metadata), it maps original assigned_to
+        names to existing or new annotator names.
 
         Returns a dict keyed by component name with per-component import results.
         """
@@ -1367,7 +1414,7 @@ class ImportMixin(ProviderBase):
                 content = zf.read("metadata.csv").decode("utf-8")
                 try:
                     df = pd.read_csv(_io.StringIO(content))
-                    stats = self.import_video_metadata_csv(df, project_id)
+                    stats = self.import_video_metadata_csv(df, project_id, annotator_map=annotator_map)
                     results["metadata"] = stats
                 except Exception as exc:
                     results["metadata"] = {"error": str(exc)}
