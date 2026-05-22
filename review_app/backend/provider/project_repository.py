@@ -6,7 +6,18 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-from review_app.backend.db.models import Project, ProjectDir, Video
+from review_app.backend.db.models import (
+    IndividualObservation,
+    ModelAnnotation,
+    Project,
+    ProjectDir,
+    ProjectSpecies,
+    ProjectSpeciesBehavior,
+    Video,
+    VideoAssignment,
+    VideoLabel,
+    VideoTag,
+)
 from review_app.backend.provider.base import ProviderBase
 
 logger = logging.getLogger(__name__)
@@ -99,22 +110,13 @@ class ProjectMixin(ProviderBase):
             if not d:
                 return
             prefix = d.path.rstrip("/") + "/"
-            deleted = (
-                s.query(Video)
-                .filter(
-                    Video.project_id == d.project_id,
-                    Video.video_path.startswith(prefix),
-                )
-                .delete(synchronize_session=False)
-            )
+            s.query(Video).filter(
+                Video.project_id == d.project_id,
+                Video.video_path.startswith(prefix),
+            ).delete(synchronize_session=False)
             s.delete(d)
             s.commit()
-        logger.info(
-            "Removed directory %s from project %s (%d videos deleted)",
-            d.path,
-            d.project_id,
-            deleted,
-        )
+        logger.info("Removed directory %s from project %s", d.path, d.project_id)
 
     def get_project_video_count(self, project_id: str) -> int:
         with self.engine.connect() as conn:
@@ -131,14 +133,44 @@ class ProjectMixin(ProviderBase):
                 logger.warning("delete_project: project %s not found", project_id)
                 return {"deleted": False}
             project_name = project.name
-            video_count = len(project.videos)
+
+            # 1. Efficiently collect transcoded paths for cleanup without loading full objects
             transcoded_paths = [
-                Path(v.transcoded_path) for v in project.videos if v.transcoded_path is not None
+                Path(p)
+                for (p,) in s.query(Video.transcoded_path)
+                .filter(Video.project_id == project_id, Video.transcoded_path != None)
+                .all()
             ]
+
+            # 2. Bulk delete related data in reverse dependency order.
+            # This is much faster than SQLAlchemy's cascade which loads every object.
+
+            # Tables with direct project_id
+            video_count = s.query(Video).filter_by(project_id=project_id).count()
+            s.query(ModelAnnotation).filter_by(project_id=project_id).delete()
+            s.query(IndividualObservation).filter_by(project_id=project_id).delete()
+            s.query(ProjectSpecies).filter_by(project_id=project_id).delete()
+            s.query(ProjectSpeciesBehavior).filter_by(project_id=project_id).delete()
+            s.query(ProjectDir).filter_by(project_id=project_id).delete()
+
+            # Tables without project_id (linked via video_id)
+            v_sub = s.query(Video.video_id).filter_by(project_id=project_id).scalar_subquery()
+            s.query(VideoLabel).filter(VideoLabel.video_id.in_(v_sub)).delete(
+                synchronize_session=False
+            )
+            s.query(VideoTag).filter(VideoTag.video_id.in_(v_sub)).delete(synchronize_session=False)
+            s.query(VideoAssignment).filter(VideoAssignment.video_id.in_(v_sub)).delete(
+                synchronize_session=False
+            )
+
+            # Finally delete videos and the project itself
+            s.query(Video).filter_by(project_id=project_id).delete()
             s.delete(project)
             s.commit()
+
         for p in transcoded_paths:
             p.unlink(missing_ok=True)
+
         logger.info(
             "Deleted project %r (id=%s): %d videos removed, %d transcoded files cleaned up",
             project_name,

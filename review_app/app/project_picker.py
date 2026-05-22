@@ -1,22 +1,31 @@
 from __future__ import annotations
 
+import asyncio
+
+from nicegui import run, ui
+
 from review_app.app.state import get_active_project_id, get_data_provider, reset_app_state
 from review_app.app.translations import t
 from review_app.app.utils import switch_project
 from review_app.backend.db.backup import BackupError, create_backup
 
+_db_op_lock = asyncio.Lock()
+
+
+def _busy() -> bool:
+    if _db_op_lock.locked():
+        ui.notify(t("db_op_in_progress"), type="warning")
+        return True
+    return False
+
 
 def _warn_missing_dirs(missing: list[str]) -> None:
-    from nicegui import ui
-
     for path in missing:
         ui.notify(t("dir_not_found", path=path), type="warning", timeout=0)
 
 
 def build_project_picker():
     """Build the project-picker dialog. Returns (dialog, refresh_fn)."""
-    from nicegui import ui
-
     with ui.dialog() as dialog, ui.card().classes("q-pa-lg").style("min-width: 480px"):
         ui.label(t("switch_project")).classes("text-h6 q-mb-md")
         projects_col = ui.column().classes("w-full gap-xs q-mb-md")
@@ -48,7 +57,7 @@ def build_project_picker():
                         def make_delete(pid, pname, count):
                             def do_delete():
                                 with (
-                                    ui.dialog() as confirm_dialog,
+                                    ui.dialog().props("persistent") as confirm_dialog,
                                     ui.card().classes("q-pa-lg").style("min-width: 360px"),
                                 ):
                                     ui.label(
@@ -64,49 +73,65 @@ def build_project_picker():
                                         )
 
                                     async def confirm():
-                                        dp = get_data_provider()
-                                        try:
-                                            create_backup(reason="delete_project")
-                                        except BackupError as exc:
-                                            ui.notify(
-                                                t(
-                                                    "backup_failed_proceed",
-                                                    error=t(exc.user_message_key),
-                                                ),
-                                                type="warning",
-                                            )
-                                        with ui.dialog() as deleting_dialog, ui.card().classes("q-pa-lg items-center gap-md"):
+                                        confirm_dialog.close()
+                                        if _busy():
+                                            return
+
+                                        with ui.dialog().props("persistent") as loading_dialog, ui.card().classes("q-pa-lg items-center gap-md"):
                                             ui.spinner(size="lg")
                                             ui.label(t("deleting")).classes("text-body1")
-                                        deleting_dialog.props("persistent")
-                                        deleting_dialog.open()
-                                        import asyncio
-                                        await asyncio.sleep(0)
-                                        dp.delete_project(pid)
-                                        deleting_dialog.close()
-                                        confirm_dialog.close()
-                                        if pid == get_active_project_id():
-                                            other = dp.get_most_recent_project()
-                                            if other:
-                                                missing = switch_project(dp, other.id)
-                                                _warn_missing_dirs(missing)
-                                                dialog.close()
-                                                ui.navigate.to("/overview")
-                                            else:
-                                                from review_app.app.state import set_active_project
+                                        loading_dialog.open()
 
-                                                reset_app_state()
-                                                set_active_project(None)
-                                                dialog.close()
-                                                ui.navigate.to("/setup")
-                                        else:
-                                            refresh()
+                                        try:
+                                            async with _db_op_lock:
+                                                dp = get_data_provider()
+                                                try:
+                                                    await run.io_bound(
+                                                        create_backup, reason="delete_project"
+                                                    )
+                                                except BackupError as exc:
+                                                    ui.notify(
+                                                        t(
+                                                            "backup_failed_proceed",
+                                                            error=t(exc.user_message_key),
+                                                        ),
+                                                        type="warning",
+                                                    )
+
+                                                await run.io_bound(dp.delete_project, pid)
+                                                ui.notify(t("project_deleted"), type="positive")
+
+                                                if pid == get_active_project_id():
+                                                    other = dp.get_most_recent_project()
+                                                    if other:
+                                                        missing = switch_project(dp, other.id)
+                                                        _warn_missing_dirs(missing)
+                                                        dialog.close()
+                                                        ui.navigate.to("/overview")
+                                                    else:
+                                                        from review_app.app.state import (
+                                                            set_active_project,
+                                                        )
+
+                                                        reset_app_state()
+                                                        set_active_project(None)
+                                                        dialog.close()
+                                                        ui.navigate.to("/setup")
+                                                else:
+                                                    refresh()
+                                        finally:
+                                            loading_dialog.close()
 
                                     with ui.row().classes("gap-sm justify-end w-full"):
                                         ui.button(
                                             t("cancel"), on_click=confirm_dialog.close
                                         ).props("flat")
-                                        ui.button(t("delete"), color="negative", on_click=confirm)
+                                        ui.button(
+                                            t("yes_delete"),
+                                            icon="delete_forever",
+                                            color="negative",
+                                            on_click=confirm,
+                                        )
                                 confirm_dialog.open()
 
                             return do_delete
