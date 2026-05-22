@@ -84,6 +84,9 @@ class Video(Base):
         "ModelAnnotation", cascade="all, delete-orphan"
     )
     tags: Mapped[list[VideoTag]] = relationship("VideoTag", cascade="all, delete-orphan")
+    assignments: Mapped[list["VideoAssignment"]] = relationship(
+        "VideoAssignment", cascade="all, delete-orphan"
+    )
 
 
 class VideoLabel(Base):

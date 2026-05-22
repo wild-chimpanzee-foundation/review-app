@@ -11,7 +11,7 @@ VIDEO_EXTENSIONS: frozenset[str] = frozenset(
 
 CSV_TEMPLATES: dict[str, str] = {
     "model_annotations": (
-        "path,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec\n"
+        "video_path,annotation_type,model_name,value_text,value_num,probability,t_start_sec,t_end_sec\n"
         "CAM01/VIDEO_001.mp4,species,species_model_a,deer,,0.92,0,12.0\n"
         "CAM01/VIDEO_001.mp4,behavior,behavior_model_a,reacts_to_camera,,0.83,0,12.0\n"
         "CAM01/VIDEO_002.mp4,blank_non_blank,blank_model,blank,,0.98,0,\n"

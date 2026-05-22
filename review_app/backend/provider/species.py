@@ -954,7 +954,7 @@ class SpeciesMixin(ProviderBase):
 
         buf = io.StringIO()
         writer = csv.writer(buf, delimiter=";")
-        writer.writerow(["scientific_name", "name_en", "name_fr", "group_en", "group_fr", "iucn"])
+        writer.writerow(["scientific_name", "english_name", "french_name", "group_en", "group_fr", "iucn"])
         for r in rows:
             writer.writerow([r[0] or "", r[1] or "", r[2] or "", r[3] or "", r[4] or "", r[5] or ""])
         return buf.getvalue()

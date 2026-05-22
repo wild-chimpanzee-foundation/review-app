@@ -1,7 +1,10 @@
+import io
+import json
 import platform
 import shutil
 import sqlite3
 import subprocess
+import zipfile
 from pathlib import Path
 
 from nicegui import run, ui
@@ -94,6 +97,9 @@ class SetupWizard:
         continue_btn_holder: list = [None]
         project_btn_holder: list = [None]
         collection_select_holder: list = [None]
+        bundle_bytes: list = [None]
+        bundle_btn_holder: list = [None]
+        bundle_preview_label: list = [None]
 
         # ── Shared helpers ────────────────────────────────────────────────────
 
@@ -114,12 +120,29 @@ class SetupWizard:
                     )
                 )
 
+        def update_bundle_button():
+            btn = bundle_btn_holder[0]
+            if btn is not None:
+                has_bundle = bundle_bytes[0] is not None
+                has_dir = bool(
+                    self.inputs.get("bundle_video_dir")
+                    and self.inputs["bundle_video_dir"].value.strip()
+                )
+                btn.set_enabled(has_bundle and has_dir)
+
         def on_video_dir_change(e):
             update_project_button()
             if not self.inputs["project_name"].value.strip():
                 path = e.value.strip()
                 if path:
                     self.inputs["project_name"].set_value(Path(path).name)
+
+        def on_bundle_video_dir_change(e):
+            update_bundle_button()
+            if not self.inputs["bundle_project_name"].value.strip():
+                path = e.value.strip()
+                if path:
+                    self.inputs["bundle_project_name"].set_value(Path(path).name)
 
         async def do_check_ffmpeg():
             ok = await run.io_bound(check_ffmpeg)
@@ -132,6 +155,31 @@ class SetupWizard:
                 ffmpeg_status_label.classes("text-negative", remove="text-positive text-grey-6")
                 ffmpeg_install_card.visible = True
             update_continue_button()
+
+        async def handle_bundle_upload(e):
+            raw = await e.file.read()
+            try:
+                with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                    manifest = json.loads(z.read("bundle.json"))
+                    contents = manifest.get("contents", [])
+                comp_names = {
+                    "species": t("bundle_component_species"),
+                    "tags": t("bundle_component_tags"),
+                    "model_annotations": t("bundle_component_model_annotations"),
+                    "metadata": t("bundle_component_metadata"),
+                }
+                labels = [comp_names.get(c, c) for c in contents]
+                preview_text = t("wizard_bundle_preview", contents=", ".join(labels)) if labels else ""
+                bundle_bytes[0] = raw
+                if bundle_preview_label[0]:
+                    bundle_preview_label[0].set_text(preview_text)
+                    bundle_preview_label[0].classes("text-positive", remove="text-negative")
+            except Exception:
+                bundle_bytes[0] = None
+                if bundle_preview_label[0]:
+                    bundle_preview_label[0].set_text(t("wizard_bundle_invalid"))
+                    bundle_preview_label[0].classes("text-negative", remove="text-positive")
+            update_bundle_button()
 
         async def submit_project():
             project_btn_holder[0].set_enabled(False)
@@ -190,57 +238,6 @@ class SetupWizard:
                     post_sync.visible = False
                     with post_sync:
                         ui.separator()
-
-                        # Bundle import option
-                        with ui.card().classes("full-width q-pa-sm bg-blue-1").props("flat bordered"):
-                            ui.label(t("wizard_bundle_import_label")).classes(
-                                "text-subtitle2 font-weight-medium q-mb-xs"
-                            )
-                            ui.label(t("wizard_bundle_import_desc")).classes(
-                                "text-caption text-grey-7 q-mb-sm"
-                            )
-                            bundle_status: list = [None]
-
-                            async def handle_bundle(e):
-                                try:
-                                    zip_bytes = await e.file.read()
-                                    results = await run.io_bound(
-                                        dp.import_project_bundle, project.id, zip_bytes
-                                    )
-                                    parts = []
-                                    comp_names = {
-                                        "species": t("bundle_component_species"),
-                                        "tags": t("bundle_component_tags"),
-                                        "model_annotations": t("bundle_component_model_annotations"),
-                                        "metadata": t("bundle_component_metadata"),
-                                    }
-                                    for key, label in comp_names.items():
-                                        if key in results and "error" not in results[key]:
-                                            n = results[key].get("imported") or results[key].get("updated") or 0
-                                            parts.append(f"{label}: {n}")
-                                    summary = ", ".join(parts) if parts else "—"
-                                    msg = t("wizard_bundle_imported", summary=summary)
-                                    if bundle_status[0]:
-                                        bundle_status[0].set_text(msg)
-                                        bundle_status[0].classes("text-positive", remove="text-negative")
-                                    ui.notify(msg, type="positive")
-                                except Exception as exc:
-                                    from review_app.app.utils import user_error_message
-                                    msg = t("bundle_error", msg=user_error_message(exc))
-                                    if bundle_status[0]:
-                                        bundle_status[0].set_text(msg)
-                                        bundle_status[0].classes("text-negative", remove="text-positive")
-                                    ui.notify(msg, type="negative")
-
-                            ui.upload(
-                                on_upload=handle_bundle,
-                                multiple=False,
-                                label=t("wizard_bundle_import_btn"),
-                                auto_upload=True,
-                            ).props("accept=.zip flat color=primary").classes("full-width")
-                            bundle_status[0] = ui.label("").classes("text-caption q-mt-xs")
-
-                        ui.separator()
                         ui.label(t("wizard_import_suggestion")).classes("text-body2 q-mt-xs")
                         ui.button(
                             t("wizard_go_to_import_btn"),
@@ -276,6 +273,223 @@ class SetupWizard:
                 post_sync.visible = True
             else:
                 self.on_complete_callback()
+
+        async def submit_bundle_project():
+            if not bundle_bytes[0]:
+                ui.notify(t("wizard_bundle_no_file"), type="warning")
+                return
+
+            video_dir = self.inputs["bundle_video_dir"].value.strip()
+            if not video_dir:
+                ui.notify(t("enter_video_dir"), type="warning")
+                return
+
+            dir_error = await run.io_bound(validate_video_dir, video_dir)
+            if dir_error:
+                key, kwargs = dir_error
+                ui.notify(t(key, **kwargs), type="negative", timeout=6000)
+                return
+
+            project_name = (
+                self.inputs["bundle_project_name"].value.strip()
+                or Path(video_dir).name
+                or "My Project"
+            )
+
+            bundle_btn_holder[0].set_enabled(False)
+
+            from review_app.app.state import (
+                get_active_project_id,
+                load_session_defaults,
+                load_settings_from_db,
+                set_data_provider,
+            )
+            from review_app.app.utils import switch_project
+            from review_app.backend.provider.local_data_provider import LocalDataProvider
+
+            dp = LocalDataProvider()
+            set_data_provider(dp)
+            if adding_to_existing:
+                load_settings_from_db(dp)
+            else:
+                load_session_defaults(dp)
+
+            project = dp.create_project(project_name, video_dir)
+            switch_project(dp, project.id)
+
+            dialog = ui.dialog().props("persistent")
+            with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
+                ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
+                progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
+                status = ui.label(t("starting")).classes("text-caption text-grey-6 q-mt-sm")
+                result_col = ui.column().classes("w-full q-mt-md gap-sm")
+                result_col.visible = False
+
+            dialog.open()
+            stats = await sync_with_progress(
+                dp,
+                progress=progress,
+                status=status,
+                video_dir=video_dir,
+                active_project_id=get_active_project_id(),
+            )
+            status.text = t("sync_complete")
+
+            bundle_summary = None
+            try:
+                results = await run.io_bound(dp.import_project_bundle, project.id, bundle_bytes[0])
+                parts = []
+                comp_names = {
+                    "species": t("bundle_component_species"),
+                    "tags": t("bundle_component_tags"),
+                    "model_annotations": t("bundle_component_model_annotations"),
+                    "metadata": t("bundle_component_metadata"),
+                }
+                for comp_key, label in comp_names.items():
+                    if comp_key in results and "error" not in results[comp_key]:
+                        n = results[comp_key].get("imported") or results[comp_key].get("updated") or 0
+                        parts.append(f"{label}: {n}")
+                bundle_summary = ", ".join(parts) if parts else "—"
+            except Exception as exc:
+                from review_app.app.utils import user_error_message
+                ui.notify(t("bundle_error", msg=user_error_message(exc)), type="negative")
+
+            with result_col:
+                ui.separator()
+                if stats:
+                    ui.label(t("sync_stat_scanned", n=stats["scanned"])).classes(
+                        "text-caption text-grey-6"
+                    )
+                    ui.label(t("sync_stat_added", n=stats["added"])).classes(
+                        "text-caption text-positive"
+                    )
+                    ui.label(t("sync_stat_updated", n=stats["updated"])).classes(
+                        "text-caption text-grey-6"
+                    )
+                if bundle_summary:
+                    ui.label(t("wizard_bundle_imported", summary=bundle_summary)).classes(
+                        "text-caption text-positive q-mt-xs"
+                    )
+                ui.separator()
+                ui.button(
+                    t("go_to_overview_btn"),
+                    icon="play_arrow",
+                    on_click=lambda: (dialog.close(), self.on_complete_callback()),
+                ).props("size=lg").classes("full-width")
+
+            result_col.visible = True
+
+        def render_project_tabs():
+            with ui.tabs().classes("w-full q-mb-md") as tabs:
+                ui.tab(name="manual", label=t("wizard_setup_tab_manual"), icon="edit")
+                ui.tab(name="bundle", label=t("wizard_setup_tab_bundle"), icon="inventory_2")
+
+            with ui.tab_panels(tabs, value="manual").classes("w-full"):
+                with ui.tab_panel("manual"):
+                    with ui.card().classes("full-width q-mb-md"):
+                        ui.label(t("project_name_label")).classes(
+                            "text-subtitle1 font-weight-medium q-mb-xs"
+                        )
+                        ui.label(t("project_name_desc")).classes(
+                            "text-caption text-grey-6 q-mb-md"
+                        )
+                        self.inputs["project_name"] = ui.input(
+                            placeholder=t("project_name_placeholder"),
+                        ).props("outlined dense class=w-full")
+                        self.inputs["project_name"].on_value_change(
+                            lambda _: update_project_button()
+                        )
+
+                    with ui.card().classes("full-width q-mb-md"):
+                        ui.label(t("project_collection_label")).classes(
+                            "text-subtitle1 font-weight-medium q-mb-xs"
+                        )
+                        ui.label(t("project_collection_desc")).classes(
+                            "text-caption text-grey-6 q-mb-md"
+                        )
+                        from review_app.backend.provider.local_data_provider import (
+                            LocalDataProvider as _LDP,
+                        )
+
+                        _colls = _LDP().list_collections()
+                        _coll_opts = {"": t("no_collection")} | {
+                            c["id"]: c["name"] for c in _colls
+                        }
+                        collection_select_holder[0] = ui.select(
+                            options=_coll_opts,
+                            value="",
+                        ).props("outlined dense class=w-full")
+
+                    with ui.card().classes("full-width q-mb-md"):
+                        ui.label(t("video_dir_label")).classes(
+                            "text-subtitle1 font-weight-medium q-mb-xs"
+                        )
+                        ui.label(t("video_dir_desc")).classes("text-caption text-grey-6 q-mb-md")
+                        self.inputs["video_dir"] = ui.input(
+                            placeholder=t("video_dir_placeholder"),
+                        ).props("outlined dense class=w-full")
+                        self.inputs["video_dir"].on_value_change(on_video_dir_change)
+
+                    project_btn_holder[0] = (
+                        ui.button(
+                            t("sync_videos_title"),
+                            on_click=submit_project,
+                            icon="play_arrow",
+                            color="primary",
+                        )
+                        .props("size=lg")
+                        .classes("full-width")
+                    )
+                    project_btn_holder[0].set_enabled(False)
+
+                with ui.tab_panel("bundle"):
+                    with ui.card().classes("full-width q-mb-md"):
+                        ui.label(t("wizard_bundle_import_label")).classes(
+                            "text-subtitle1 font-weight-medium q-mb-xs"
+                        )
+                        ui.label(t("wizard_bundle_import_desc")).classes(
+                            "text-caption text-grey-6 q-mb-sm"
+                        )
+                        ui.upload(
+                            on_upload=handle_bundle_upload,
+                            multiple=False,
+                            label=t("wizard_bundle_import_btn"),
+                            auto_upload=True,
+                        ).props("accept=.zip flat color=primary").classes("full-width")
+                        bundle_preview_label[0] = ui.label("").classes("text-caption q-mt-xs")
+
+                    with ui.card().classes("full-width q-mb-md"):
+                        ui.label(t("video_dir_label")).classes(
+                            "text-subtitle1 font-weight-medium q-mb-xs"
+                        )
+                        ui.label(t("video_dir_desc")).classes("text-caption text-grey-6 q-mb-md")
+                        self.inputs["bundle_video_dir"] = ui.input(
+                            placeholder=t("video_dir_placeholder"),
+                        ).props("outlined dense class=w-full")
+                        self.inputs["bundle_video_dir"].on_value_change(on_bundle_video_dir_change)
+
+                    with ui.card().classes("full-width q-mb-md"):
+                        ui.label(t("project_name_label")).classes(
+                            "text-subtitle1 font-weight-medium q-mb-xs"
+                        )
+                        ui.label(t("project_name_desc")).classes(
+                            "text-caption text-grey-6 q-mb-md"
+                        )
+                        self.inputs["bundle_project_name"] = ui.input(
+                            placeholder=t("project_name_placeholder"),
+                        ).props("outlined dense class=w-full")
+
+                    bundle_btn_holder[0] = (
+                        ui.button(
+                            t("wizard_bundle_submit_btn"),
+                            on_click=submit_bundle_project,
+                            icon="inventory_2",
+                            color="primary",
+                        )
+                        .props("size=lg")
+                        .classes("full-width")
+                    )
+                    bundle_btn_holder[0].set_enabled(False)
 
         # ── Layout ────────────────────────────────────────────────────────────
 
@@ -378,61 +592,7 @@ class SetupWizard:
                     with ui.card().classes("full-width q-mb-lg"):
                         ui.label(t("new_project")).classes("text-h5 text-primary font-weight-bold")
 
-                    with ui.card().classes("full-width q-mb-md"):
-                        ui.label(t("project_name_label")).classes(
-                            "text-subtitle1 font-weight-medium q-mb-xs"
-                        )
-                        ui.label(t("project_name_desc")).classes(
-                            "text-caption text-grey-6 q-mb-md"
-                        )
-                        self.inputs["project_name"] = ui.input(
-                            placeholder=t("project_name_placeholder"),
-                        ).props("outlined dense class=w-full")
-                        self.inputs["project_name"].on_value_change(
-                            lambda _: update_project_button()
-                        )
-
-                    with ui.card().classes("full-width q-mb-md"):
-                        ui.label(t("project_collection_label")).classes(
-                            "text-subtitle1 font-weight-medium q-mb-xs"
-                        )
-                        ui.label(t("project_collection_desc")).classes(
-                            "text-caption text-grey-6 q-mb-md"
-                        )
-                        from review_app.backend.provider.local_data_provider import (
-                            LocalDataProvider as _LDP,
-                        )
-
-                        _colls = _LDP().list_collections()
-                        _coll_opts = {"": t("no_collection")} | {
-                            c["id"]: c["name"] for c in _colls
-                        }
-                        collection_select_holder[0] = ui.select(
-                            options=_coll_opts,
-                            value="",
-                        ).props("outlined dense class=w-full")
-
-                    with ui.card().classes("full-width q-mb-md"):
-                        ui.label(t("video_dir_label")).classes(
-                            "text-subtitle1 font-weight-medium q-mb-xs"
-                        )
-                        ui.label(t("video_dir_desc")).classes("text-caption text-grey-6 q-mb-md")
-                        self.inputs["video_dir"] = ui.input(
-                            placeholder=t("video_dir_placeholder"),
-                        ).props("outlined dense class=w-full")
-                        self.inputs["video_dir"].on_value_change(on_video_dir_change)
-
-                    project_btn_holder[0] = (
-                        ui.button(
-                            t("sync_videos_title"),
-                            on_click=submit_project,
-                            icon="play_arrow",
-                            color="primary",
-                        )
-                        .props("size=lg")
-                        .classes("full-width")
-                    )
-                    project_btn_holder[0].set_enabled(False)
+                    render_project_tabs()
 
                 # ── Step 3: restore flow ──────────────────────────────────────
                 with ui.column().classes("w-full gap-0") as step_restore:
@@ -596,55 +756,7 @@ class SetupWizard:
                 with ui.card().classes("full-width q-mb-lg"):
                     ui.label(t("new_project")).classes("text-h5 text-primary font-weight-bold")
 
-                with ui.card().classes("full-width q-mb-md"):
-                    ui.label(t("project_name_label")).classes(
-                        "text-subtitle1 font-weight-medium q-mb-xs"
-                    )
-                    ui.label(t("project_name_desc")).classes("text-caption text-grey-6 q-mb-md")
-                    self.inputs["project_name"] = ui.input(
-                        placeholder=t("project_name_placeholder"),
-                    ).props("outlined dense class=w-full")
-                    self.inputs["project_name"].on_value_change(lambda _: update_project_button())
-
-                with ui.card().classes("full-width q-mb-md"):
-                    ui.label(t("project_collection_label")).classes(
-                        "text-subtitle1 font-weight-medium q-mb-xs"
-                    )
-                    ui.label(t("project_collection_desc")).classes(
-                        "text-caption text-grey-6 q-mb-md"
-                    )
-                    from review_app.backend.provider.local_data_provider import (
-                        LocalDataProvider as _LDP,
-                    )
-
-                    _colls = _LDP().list_collections()
-                    _coll_opts = {"": t("no_collection")} | {c["id"]: c["name"] for c in _colls}
-                    collection_select_holder[0] = ui.select(
-                        options=_coll_opts,
-                        value="",
-                    ).props("outlined dense class=w-full")
-
-                with ui.card().classes("full-width q-mb-md"):
-                    ui.label(t("video_dir_label")).classes(
-                        "text-subtitle1 font-weight-medium q-mb-xs"
-                    )
-                    ui.label(t("video_dir_desc")).classes("text-caption text-grey-6 q-mb-md")
-                    self.inputs["video_dir"] = ui.input(
-                        placeholder=t("video_dir_placeholder"),
-                    ).props("outlined dense class=w-full")
-                    self.inputs["video_dir"].on_value_change(on_video_dir_change)
-
-                project_btn_holder[0] = (
-                    ui.button(
-                        t("sync_videos_title"),
-                        on_click=submit_project,
-                        icon="play_arrow",
-                        color="primary",
-                    )
-                    .props("size=lg")
-                    .classes("full-width")
-                )
-                project_btn_holder[0].set_enabled(False)
+                render_project_tabs()
 
 
 def setup_wizard(on_complete_callback):

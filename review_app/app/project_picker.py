@@ -75,7 +75,15 @@ def build_project_picker():
                                                 ),
                                                 type="warning",
                                             )
+                                        with ui.dialog() as deleting_dialog, ui.card().classes("q-pa-lg items-center gap-md"):
+                                            ui.spinner(size="lg")
+                                            ui.label(t("deleting")).classes("text-body1")
+                                        deleting_dialog.props("persistent")
+                                        deleting_dialog.open()
+                                        import asyncio
+                                        await asyncio.sleep(0)
                                         dp.delete_project(pid)
+                                        deleting_dialog.close()
                                         confirm_dialog.close()
                                         if pid == get_active_project_id():
                                             other = dp.get_most_recent_project()

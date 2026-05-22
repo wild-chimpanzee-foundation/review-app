@@ -128,7 +128,7 @@ def auto_suggest_path_col(columns: list[str], sample: list[dict]) -> str:
 
 
 def is_long_format(columns: list[str]) -> bool:
-    return {"path", "annotation_type", "model_name"}.issubset(set(columns))
+    return {"video_path", "annotation_type", "model_name"}.issubset(set(columns))
 
 
 def render_species_mappings(
