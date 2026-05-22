@@ -3,6 +3,7 @@ from nicegui import run, ui
 from review_app.app.pages.review.tags import _tag_label, tag_selector
 from review_app.app.state import (
     get_active_project_id,
+    get_annotator_name,
     get_blank_threshold,
     get_filters,
     get_language,
@@ -231,6 +232,15 @@ async def render_filter_drawer_body(page):
                 "checked-icon=bookmark unchecked-icon=bookmark_border class=full-width color='warning'"
             )
 
+            _current_annotator = get_annotator_name()
+            assigned_to_me_cb = ui.checkbox(
+                t("assigned_to_me_filter"),
+                value=bool(filters.get("assigned_to_me", False)),
+                on_change=lambda _: apply_filters(),
+            ).props("class=full-width color=primary")
+            if not _current_annotator:
+                assigned_to_me_cb.props("disable")
+
             async def reset_filters():
                 search.value = ""
                 camera_select.value = "All"
@@ -244,6 +254,7 @@ async def render_filter_drawer_body(page):
                 manual_blank_filter.value = "All"
                 annotation_filter.value = "All"
                 is_review_later.value = False
+                assigned_to_me_cb.value = False
                 annotator_filter.value = []
                 multiple_annotators_cb.value = False
                 selected_tag_keys.clear()
@@ -271,6 +282,8 @@ async def render_filter_drawer_body(page):
                     "selected_model_blank": model_blank_filter.value,
                     "selected_annotation_status": annotation_filter.value,
                     "selected_is_review_later": is_review_later.value,
+                    "assigned_to_me": assigned_to_me_cb.value,
+                    "assigned_to": get_annotator_name() if assigned_to_me_cb.value else "",
                     "selected_annotator": annotator_filter.value,
                     "selected_multiple_annotators": multiple_annotators_cb.value,
                     "selected_needs_review": needs_review_filter.value,

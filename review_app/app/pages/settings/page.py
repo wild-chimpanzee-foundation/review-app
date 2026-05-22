@@ -20,6 +20,7 @@ from review_app.app.translations import t
 from review_app.app.utils import get_or_create_data_provider, sync_with_progress
 
 from .database import render_database_section
+from .distribution import DistributionSection
 from .species import render_species_section
 from .tags import TagsSection
 
@@ -210,6 +211,15 @@ def _build_settings_content(container: ui.column):
                             color="negative",
                             on_click=delete_missing_dialog.open,
                         ).props("dense outline")
+
+        if active_project_id:
+            with ui.card().classes("full-width q-mb-lg"):
+                with ui.row().classes("items-center q-mb-sm"):
+                    ui.icon("group", size="sm").classes("text-primary q-mr-sm")
+                    ui.label(t("distribution_title")).classes("text-subtitle1 font-weight-medium")
+                ui.label(t("distribution_desc")).classes("text-caption text-grey-6 q-mb-md")
+                _dp_dist = get_data_provider()
+                DistributionSection(_dp_dist, active_project_id).render()
 
         with ui.expansion(t("advanced_settings"), icon="settings").classes("full-width q-mb-lg"):
             with ui.column().classes("w-full gap-lg q-pa-md"):
