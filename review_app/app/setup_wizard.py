@@ -447,12 +447,12 @@ class SetupWizard:
                 }
                 for comp_key, label in comp_names.items():
                     if comp_key in results and "error" not in results[comp_key]:
-                        n = (
-                            results[comp_key].get("imported")
-                            or results[comp_key].get("updated")
-                            or 0
-                        )
-                        parts.append(f"{label}: {n}")
+                        n = results[comp_key].get("imported") or results[comp_key].get("updated") or 0
+                        errors = results[comp_key].get("errors", 0)
+                        entry = f"{label}: {n}"
+                        if errors:
+                            entry += f" ({errors} unmatched)"
+                        parts.append(entry)
                 bundle_summary = ", ".join(parts) if parts else "—"
             except Exception as exc:
                 from review_app.app.utils import user_error_message

@@ -317,6 +317,7 @@ class ImportMixin(ProviderBase):
 
         video_map = self._known_video_map(active_project_id)
         known_videos = set(video_map.keys())
+        path_to_id = {v.lower(): k for k, v in video_map.items()}
 
         by_suffix, by_stem = self._build_video_path_lookup(active_project_id)
 
@@ -325,7 +326,8 @@ class ImportMixin(ProviderBase):
                 return raw
             p = Path(raw)
             return (
-                by_suffix.get(raw.lower())
+                path_to_id.get(raw.lower())
+                or by_suffix.get(raw.lower())
                 or by_suffix.get(str(p.with_suffix("")).lower())
                 or by_suffix.get(f"{p.parent.name}/{p.name}".lower())
                 or by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
@@ -511,7 +513,7 @@ class ImportMixin(ProviderBase):
             )
 
         logger.info("Model CSV import complete: %d rows upserted", len(rows))
-        return {"inserted_rows": len(rows)}
+        return {"imported": len(rows)}
 
     # ── Video metadata CSV import ─────────────────────────────────────────────
 
@@ -1394,11 +1396,31 @@ class ImportMixin(ProviderBase):
                     cleaned_df, errors_df, _, _ = self.validate_model_csv(
                         df, active_project_id=project_id
                     )
+                    error_count = len(errors_df)
                     if not cleaned_df.empty:
                         stats = self.import_model_csv(cleaned_df, project_id)
-                        results["model_annotations"] = stats
+                        results["model_annotations"] = {**stats, "errors": error_count}
                     else:
-                        results["model_annotations"] = {"imported": 0, "errors": len(errors_df)}
+                        unmatched = (
+                            errors_df.loc[
+                                errors_df["error"] == "error_unknown_path", "video_path"
+                            ]
+                            .dropna()
+                            .tolist()[:5]
+                            if not errors_df.empty and "video_path" in errors_df.columns
+                            else []
+                        )
+                        if unmatched:
+                            logger.warning(
+                                "Bundle model_annotations: 0 rows imported, %d errors. "
+                                "Sample unmatched paths: %s",
+                                error_count,
+                                unmatched,
+                            )
+                        results["model_annotations"] = {
+                            "imported": 0,
+                            "errors": error_count,
+                        }
                 except Exception as exc:
                     results["model_annotations"] = {"error": str(exc)}
 
