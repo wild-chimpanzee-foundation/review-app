@@ -134,7 +134,7 @@ class AssignmentMixin(ProviderBase):
     # ── Query helpers ─────────────────────────────────────────────────────────
 
     def get_assignment_summary(self, project_id: str) -> list[dict]:
-        """Return per-annotator summary: cameras, video_count, hours."""
+        """Return per-annotator summary: cameras, video_count, hours, labeling stats."""
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text("""
@@ -142,9 +142,13 @@ class AssignmentMixin(ProviderBase):
                         va.assigned_to,
                         COUNT(DISTINCT v.camera_id) AS cameras,
                         COUNT(*) AS video_count,
-                        ROUND(COALESCE(SUM(v.duration_sec), 0) / 3600.0, 2) AS hours
+                        ROUND(COALESCE(SUM(v.duration_sec), 0) / 3600.0, 2) AS hours,
+                        COUNT(DISTINCT CASE WHEN vl.video_id IS NOT NULL THEN v.video_id END) AS labeled,
+                        COUNT(DISTINCT CASE WHEN vl.is_blank = 1 THEN v.video_id END) AS blank,
+                        COUNT(DISTINCT CASE WHEN vl.is_blank = 0 THEN v.video_id END) AS non_blank
                     FROM video_assignments va
                     JOIN videos v ON v.video_id = va.video_id
+                    LEFT JOIN video_labels vl ON vl.video_id = v.video_id
                     WHERE v.project_id = :pid
                     GROUP BY va.assigned_to
                     ORDER BY va.assigned_to
@@ -157,6 +161,9 @@ class AssignmentMixin(ProviderBase):
                 "cameras": r[1],
                 "video_count": r[2],
                 "hours": r[3],
+                "labeled": r[4],
+                "blank": r[5],
+                "non_blank": r[6],
             }
             for r in rows
         ]

@@ -378,9 +378,15 @@ async def _render_video_section_body(page: ReviewPage):
             with ui.element("div").classes("col"):
                 if video.get("camera_id"):
                     ui.label(video["camera_id"]).classes("text-caption")
-            ui.label(Path(video.get("video_path", "")).name).classes(
-                "col text-caption text-center"
-            ).style("white-space: nowrap; overflow: hidden; text-overflow: ellipsis;")
+            with ui.element("div").classes("col text-center"):
+                with ui.row().classes("items-center justify-center no-wrap"):
+                    ui.label(Path(video.get("video_path", "")).name).classes(
+                        "text-caption"
+                    ).style("white-space: nowrap; overflow: hidden; text-overflow: ellipsis;")
+                    _assign = video.get("assigned_to")
+                    if _assign:
+                        ui.label("·").classes("text-caption text-grey-6 q-mx-xs")
+                        ui.label(f"{t('assigned_to')}: {_assign}").classes("text-caption text-grey-6")
             with ui.row().classes("col justify-end items-center gap-xs no-wrap"):
                 queue_input = (
                     ui.number(min=1, max=len(queue), value=current_idx + 1, step=1)

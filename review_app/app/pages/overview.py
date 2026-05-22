@@ -234,3 +234,31 @@ async def setup_overview():
                 ui.table(columns=columns, rows=rows).classes("q-pa-sm")
             else:
                 ui.label(t("no_camera_data")).classes("text-grey-5 q-pa-sm")
+
+        # Assignment summary table
+        with (
+            ui.expansion(t("assignment_summary_title"), icon="assignment_ind")
+            .classes("full-width q-mb-lg")
+            .props("content-inset-level=0 header-class='q-pa-md q-py-sm'")
+        ):
+            assignment_summary = await run.io_bound(dp.get_assignment_summary, pid)
+            if assignment_summary:
+                rows = [
+                    {
+                        **r,
+                        "labeled_pct": f"{round(100 * r['labeled'] / max(r['video_count'], 1))}%",
+                    }
+                    for r in assignment_summary
+                ]
+                columns = [
+                    {"name": "annotator", "label": t("annotator_label"), "field": "annotator"},
+                    {"name": "cameras", "label": t("col_cameras"), "field": "cameras"},
+                    {"name": "videos", "label": t("col_videos"), "field": "video_count"},
+                    {"name": "labeled", "label": t("col_labeled"), "field": "labeled"},
+                    {"name": "labeled_pct", "label": t("col_labeled_pct"), "field": "labeled_pct"},
+                    {"name": "blank", "label": t("col_blank"), "field": "blank"},
+                    {"name": "hours", "label": t("col_hours"), "field": "hours"},
+                ]
+                ui.table(columns=columns, rows=rows).classes("q-pa-sm")
+            else:
+                ui.label(t("no_camera_data")).classes("text-grey-5 q-pa-sm")

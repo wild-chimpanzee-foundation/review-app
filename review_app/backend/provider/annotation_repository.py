@@ -151,10 +151,12 @@ class AnnotationMixin(ProviderBase):
                         CASE WHEN LOWER(TRIM(mb.blank_non_blank_model_result)) = 'blank'
                              THEN mb.probability ELSE NULL
                         END AS blank_model_probability,
+                        va.assigned_to,
                         COALESCE(msc_.max_species_confidence, 0.0) AS max_species_confidence,
                         rs.needs_manual_review
                     FROM videos v
                     LEFT JOIN video_labels vl ON vl.video_id = v.video_id
+                    LEFT JOIN video_assignments va ON va.video_id = v.video_id
                     LEFT JOIN model_blank mb ON mb.video_id = v.video_id AND mb.rn = 1
                     LEFT JOIN manual_summary ms ON ms.video_id = v.video_id
                     LEFT JOIN model_species_consensus msc ON msc.video_id = v.video_id
