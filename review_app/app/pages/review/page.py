@@ -147,13 +147,6 @@ def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
     if model_ann is None or model_ann.empty:
         return
 
-    def _is_number(v: str) -> bool:
-        try:
-            float(v)
-            return True
-        except (TypeError, ValueError):
-            return False
-
     # groups[ann_type][display_val] = {"key": original_value_text, "models": [...]}
     groups: dict = {}
 
@@ -254,18 +247,12 @@ def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
                             if _clickable and _shortcut_idx <= 9:
                                 _shortcut_badge(str(_shortcut_idx))
                             _display_val = _val
-                            if (
-                                _ann_type == "object_detection"
-                                and _count is not None
-                                and _count > 0
-                            ):
+                            if _count is not None and _count > 1:
                                 _count_str = (
                                     f"{int(_count)}" if _count == int(_count) else f"{_count:.1f}"
                                 )
                                 _display_val += f" (x{_count_str})"
                             ui.label(_display_val).classes("text-caption text-bold")
-                            if len(_models) > 1:
-                                ui.badge(f"{len(_models)}").props("color=blue-6 outline size=xs")
                         with ui.row().classes("gap-x-1 items-center"):
                             for _m in _models:
                                 with ui.element("div").style(
