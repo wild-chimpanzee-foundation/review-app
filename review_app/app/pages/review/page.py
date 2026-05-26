@@ -165,13 +165,9 @@ def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
         _vnum = _row.get("value_num")
 
         if _ann_type == "blank_non_blank":
-            threshold = get_blank_threshold() or 0.0
-            if _is_number(_value):
-                _value = t("non_blank") if float(_value) < threshold else t("blank")
-            elif _prob is not None:
-                _value = t("non_blank") if _prob < threshold else t("blank")
-            else:
-                _value = t("blank") if str(_value).lower() == "blank" else t("non_blank")
+            threshold = get_blank_threshold()
+            _p = float(_prob) if (_prob is not None and _prob == _prob) else 0.0
+            _value = t("non_blank") if _p < threshold else t("blank")
         elif _ann_type in {"species", "object_detection"}:
             _value = global_species_map.get(_value, _value)
 
@@ -194,7 +190,7 @@ def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
             key=lambda x: (x["prob"] is not None, x["prob"]), reverse=True
         )
 
-        group_order = ["species", "blank_non_blank"]
+        group_order = ["species", "object_detection", "blank_non_blank"]
         groups = dict(
             sorted(
                 groups.items(),
