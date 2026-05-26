@@ -171,8 +171,13 @@ def auto_suggest_path_col(columns: list[str], sample: list[dict]) -> str:
     return columns[0] if columns else ""
 
 
+_PATH_COL_ALIASES = {"video_path", "path", "filepath", "review_filename", "original_filepath"}
+
+
 def is_long_format(columns: list[str]) -> bool:
-    return {"video_path", "annotation_type", "model_name"}.issubset(set(columns))
+    col_set = set(columns)
+    has_path = bool(col_set & _PATH_COL_ALIASES)
+    return has_path and {"annotation_type", "model_name"}.issubset(col_set)
 
 
 def render_species_mappings(
@@ -186,6 +191,7 @@ def render_species_mappings(
     mappings_state_key: str = "species_mappings",
     show_blank_option: bool = False,
     project_id: str | None = None,
+    species_counts: dict[str, int] | None = None,
 ) -> None:
     """Shared species-mapping editor used by both the model-import and historic-import tabs."""
     ui.label(t("species_mappings")).classes("text-subtitle1 font-weight-medium q-mb-sm")
@@ -199,11 +205,14 @@ def render_species_mappings(
         current_mapping = all_mappings.get(orig, "")
         is_unmapped = orig in unmapped_origs
         with ui.row().classes("w-full items-center q-mb-sm"):
-            ui.label(orig).classes(f"col {'text-negative' if is_unmapped else ''}")
+            count = species_counts.get(orig) if species_counts else None
+            count_suffix = f" ({count})" if count is not None else ""
+            ui.label(f"{orig}{count_suffix}").classes(f"col {'text-negative' if is_unmapped else ''}")
+            safe_value = current_mapping if current_mapping in select_options else ""
             select = ui.select(
                 label=t("mapped_to"),
                 options=select_options,
-                value=current_mapping,
+                value=safe_value,
                 with_input=True,
             ).props("outlined dense class=col-4")
 

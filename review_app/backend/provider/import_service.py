@@ -258,6 +258,14 @@ class ImportMixin(ProviderBase):
         src = df.copy()
         src.columns = [str(c).strip() for c in src.columns]
 
+        # Normalize path column aliases → video_path
+        _path_aliases = {"path", "filepath", "review_filename", "original_filepath"}
+        if "video_path" not in src.columns:
+            for alias in _path_aliases:
+                if alias in src.columns:
+                    src = src.rename(columns={alias: "video_path"})
+                    break
+
         mappings = mappings or {}
 
         required = {"video_path", "annotation_type", "model_name"}
