@@ -222,11 +222,12 @@ def test_species_display_map_english(tmp_db):
     assert "Red Deer" in m["deer"]  # format: "Red Deer (deer)"
 
 
-def test_behavior_display_map_filtered_by_species(tmp_db):
+def test_behavior_display_map_global_always(tmp_db):
     dp = LocalDataProvider()
+    # species_name is ignored — map is always global
     m = dp.get_behavior_display_map(lang="en", species_name="deer")
     assert "grazing" in m
-    assert "running" not in m  # fox-only behavior
+    assert "running" in m  # all behaviors are now global
 
 
 def test_behavior_display_map_all(tmp_db):
@@ -268,28 +269,25 @@ def test_import_project_species_empty_csv_raises(provider_with_project):
 # ---------------------------------------------------------------------------
 
 
-def test_import_project_behaviors_global_rows(provider_with_project):
-    """Behaviors with scientific_name='*' apply to all project species."""
+def test_import_project_behaviors_adds_custom_behaviors(provider_with_project):
+    """import_project_behaviors_from_csv adds unknown keys as custom global behaviors."""
     dp, project, _ = provider_with_project
-    dp.set_project_species(project.id, ["deer", "fox"])
 
     csv_content = "scientific_name;key;name_en\n*;stalking;Stalking\n"
-    updated = dp.import_project_behaviors_from_csv(project.id, csv_content)
-    assert updated == 2  # deer and fox both updated
+    added = dp.import_project_behaviors_from_csv(project.id, csv_content)
+    assert added == 1
 
-    assert "stalking" in dp.get_project_species_behaviors(project.id, "deer")
-    assert "stalking" in dp.get_project_species_behaviors(project.id, "fox")
+    m = dp.get_behavior_display_map(lang="en")
+    assert "stalking" in m
 
 
-def test_import_project_behaviors_species_specific(provider_with_project):
+def test_import_project_behaviors_skips_existing(provider_with_project):
     dp, project, _ = provider_with_project
-    dp.set_project_species(project.id, ["deer", "fox"])
 
-    csv_content = "scientific_name;key;name_en\ndeer;stalking;Stalking\n"
-    dp.import_project_behaviors_from_csv(project.id, csv_content)
-
-    assert "stalking" in dp.get_project_species_behaviors(project.id, "deer")
-    assert "stalking" not in dp.get_project_species_behaviors(project.id, "fox")
+    # grazing and running are seeded in tmp_db fixture
+    csv_content = "scientific_name;key;name_en\n*;grazing;Grazing\n"
+    added = dp.import_project_behaviors_from_csv(project.id, csv_content)
+    assert added == 0  # already exists
 
 
 def test_import_project_behaviors_empty_csv_raises(provider_with_project):

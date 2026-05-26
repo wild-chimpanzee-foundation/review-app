@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 
-from review_app.backend.db.models import IndividualObservation, VideoLabel
+from review_app.backend.db.models import IndividualObservation, ObservationTag, VideoLabel
 from review_app.backend.errors import SpeciesError
 from review_app.backend.provider.base import ProviderBase
 from review_app.backend.utils import needs_browser_transcode
@@ -104,7 +104,8 @@ class AnnotationMixin(ProviderBase):
                             GROUP_CONCAT(DISTINCT b.key) AS behavior_prediction,
                             COUNT(*) AS individual_count
                         FROM individual_observations io
-                        LEFT JOIN behaviors b ON b.id = io.behavior_id
+                        LEFT JOIN observation_tags ot ON ot.video_id = io.video_id AND ot.observation_id = io.id
+                        LEFT JOIN behaviors b ON b.id = ot.behavior_id
                         GROUP BY io.video_id
                     ),
                     review_state AS (
@@ -177,12 +178,15 @@ class AnnotationMixin(ProviderBase):
             manual_rows = pd.read_sql(
                 text(
                     """
-                    SELECT io.id, s.scientific_name AS species, b.key AS behavior,
+                    SELECT io.id, s.scientific_name AS species,
+                           GROUP_CONCAT(b.key) AS tags,
                            io.count, io.start_sec, io.end_sec, io.labeled_by, io.labeled_at
                     FROM individual_observations io
                     LEFT JOIN species s ON s.id = io.species_id
-                    LEFT JOIN behaviors b ON b.id = io.behavior_id
+                    LEFT JOIN observation_tags ot ON ot.video_id = io.video_id AND ot.observation_id = io.id
+                    LEFT JOIN behaviors b ON b.id = ot.behavior_id
                     WHERE io.video_id = :video_id
+                    GROUP BY io.id, s.scientific_name, io.count, io.start_sec, io.end_sec, io.labeled_by, io.labeled_at
                     ORDER BY COALESCE(io.start_sec, 0.0), s.scientific_name
                     """
                 ),
@@ -272,13 +276,18 @@ class AnnotationMixin(ProviderBase):
         species_threshold: float,
         video_tag_keys: list[str] | None = None,
     ) -> dict[str, Any]:
+        def _parse_tags(raw) -> list[str]:
+            if not raw or (isinstance(raw, float) and pd.isna(raw)):
+                return []
+            return [t.strip() for t in str(raw).split(",") if t.strip()]
+
         selections = []
         for _, manual in manual_rows.iterrows():
             selections.append(
                 {
                     "id": int(manual.get("id")) if pd.notna(manual.get("id")) else None,
                     "species": str(manual.get("species")),
-                    "behavior": str(manual.get("behavior")),
+                    "tags": _parse_tags(manual.get("tags")),
                     "count": int(manual.get("count")) if pd.notna(manual.get("count")) else None,
                     "start_sec": float(manual.get("start_sec")),
                     "end_sec": float(manual.get("end_sec"))
@@ -295,9 +304,9 @@ class AnnotationMixin(ProviderBase):
             "\n".join(
                 [
                     (
-                        f"{s['species']} ({s['behavior']}) @ {s['start_sec']}s"
+                        f"{s['species']} @ {s['start_sec']}s"
                         if s["end_sec"] is None
-                        else f"{s['species']} ({s['behavior']}) {s['start_sec']}s-{s['end_sec']}s"
+                        else f"{s['species']} {s['start_sec']}s-{s['end_sec']}s"
                     )
                     for s in selections
                 ]
@@ -400,6 +409,9 @@ class AnnotationMixin(ProviderBase):
                             "review_later": False,
                         }
                     )
+                    session.query(ObservationTag).filter(
+                        ObservationTag.video_id == video_id
+                    ).delete(synchronize_session=False)
                     session.query(IndividualObservation).filter(
                         IndividualObservation.video_id == video_id
                     ).delete(synchronize_session=False)
@@ -418,6 +430,19 @@ class AnnotationMixin(ProviderBase):
                 r[0]: r[1] for r in conn.execute(text("SELECT key, id FROM behaviors")).fetchall()
             }
 
+        def _parse_tag_ids(selection: dict) -> list[str]:
+            raw = selection.get("tags")
+            if raw is None:
+                # Legacy import: fall back to single "behavior" key
+                raw = selection.get("behavior", "")
+            if isinstance(raw, list):
+                keys = raw
+            else:
+                keys = [t.strip() for t in str(raw).split(",") if t.strip()]
+            # Filter out legacy sentinel values
+            keys = [k for k in keys if k not in ("unlabeled", "does_not_react", "")]
+            return [behavior_id_map[k] for k in keys if k in behavior_id_map]
+
         normalized: list[dict[str, Any]] = []
         for selection in selections:
             species = str(selection.get("species") or "").strip() or "unknown"
@@ -427,7 +452,6 @@ class AnnotationMixin(ProviderBase):
                     detail=f"Unknown species: {species!r}",
                     name=species,
                 )
-            behavior = str(selection.get("behavior") or "").strip() or "unlabeled"
 
             # Support both 'start_sec' and 'timestamp' keys
             start_sec_raw = selection.get("start_sec")
@@ -455,7 +479,7 @@ class AnnotationMixin(ProviderBase):
                 {
                     "id": obs_id,
                     "species_id": species_id_map.get(species),
-                    "behavior_id": behavior_id_map.get(behavior),
+                    "tag_ids": _parse_tag_ids(selection),
                     "count": count_val,
                     "start_sec": float(start_sec),
                     "end_sec": end_sec_val,
@@ -466,6 +490,21 @@ class AnnotationMixin(ProviderBase):
 
         if is_blank is None and normalized:
             is_blank = False
+
+        # obs_id -> tag_ids for all observations we touch (for tag sync after commit)
+        obs_tags_to_sync: dict[int, list[str]] = {}
+
+        # Load current tags so we can detect changes without a separate query per observation
+        with self.engine.connect() as conn:
+            existing_tag_rows = conn.execute(
+                text(
+                    "SELECT observation_id, behavior_id FROM observation_tags WHERE video_id = :vid"
+                ),
+                {"vid": video_id},
+            ).fetchall()
+        existing_obs_tags: dict[int, set[str]] = {}
+        for oid, bid in existing_tag_rows:
+            existing_obs_tags.setdefault(oid, set()).add(bid)
 
         with self.Session() as session:
             # 1. Update IndividualObservations surgically
@@ -490,16 +529,16 @@ class AnnotationMixin(ProviderBase):
                         and row["end_sec"] is not None
                         and abs(obs.end_sec - row["end_sec"]) > 0.001
                     )
+                    tags_changed = set(row["tag_ids"]) != existing_obs_tags.get(obs_id, set())
                     changed = (
                         obs.species_id != row["species_id"]
-                        or obs.behavior_id != row["behavior_id"]
                         or obs.count != row["count"]
                         or abs((obs.start_sec or 0.0) - row["start_sec"]) > 0.001
                         or end_sec_changed
+                        or tags_changed
                     )
                     if changed:
                         obs.species_id = row["species_id"]
-                        obs.behavior_id = row["behavior_id"]
                         obs.count = row["count"]
                         obs.start_sec = row["start_sec"]
                         obs.end_sec = row["end_sec"]
@@ -512,6 +551,7 @@ class AnnotationMixin(ProviderBase):
                         obs.updated_at = now
                     if obs_id in to_delete:
                         to_delete.remove(obs_id)
+                    obs_tags_to_sync[obs_id] = row["tag_ids"]
                 else:
                     # New record
                     max_id += 1
@@ -522,7 +562,6 @@ class AnnotationMixin(ProviderBase):
                             id=max_id,
                             project_id=active_project_id,
                             species_id=row["species_id"],
-                            behavior_id=row["behavior_id"],
                             count=row["count"],
                             start_sec=row["start_sec"],
                             end_sec=row["end_sec"],
@@ -531,6 +570,7 @@ class AnnotationMixin(ProviderBase):
                             updated_at=now,
                         )
                     )
+                    obs_tags_to_sync[max_id] = row["tag_ids"]
 
             if to_delete:
                 session.query(IndividualObservation).filter(
@@ -565,6 +605,33 @@ class AnnotationMixin(ProviderBase):
                 len(normalized),
                 labeled_by,
             )
+
+        # 3. Sync observation_tags (outside the ORM session, in a separate transaction)
+        with self.engine.begin() as conn:
+            # Clear tags for deleted observations
+            for obs_id in to_delete:
+                conn.execute(
+                    text(
+                        "DELETE FROM observation_tags WHERE video_id = :vid AND observation_id = :oid"
+                    ),
+                    {"vid": video_id, "oid": obs_id},
+                )
+            # Sync tags for each observation we touched
+            for obs_id, tag_ids in obs_tags_to_sync.items():
+                conn.execute(
+                    text(
+                        "DELETE FROM observation_tags WHERE video_id = :vid AND observation_id = :oid"
+                    ),
+                    {"vid": video_id, "oid": obs_id},
+                )
+                for tag_id in tag_ids:
+                    conn.execute(
+                        text(
+                            "INSERT OR IGNORE INTO observation_tags"
+                            " (video_id, observation_id, behavior_id) VALUES (:vid, :oid, :bid)"
+                        ),
+                        {"vid": video_id, "oid": obs_id, "bid": tag_id},
+                    )
 
     def set_review_later(self, video_id: str, value: bool = True) -> None:
         with self.Session() as session:

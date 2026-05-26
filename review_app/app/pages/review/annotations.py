@@ -40,20 +40,10 @@ def _render_labeled_by_meta(labeled_by, labeled_at=None):
     ui.label(meta).classes("text-caption")
 
 
-def _resolve_behavior(behaviors_map, current_value=None):
-    if current_value in behaviors_map:
-        return current_value
-    if "does_not_react" in behaviors_map:
-        return "does_not_react"
-    if behaviors_map:
-        return list(behaviors_map.keys())[0]
-    return None
-
-
-def _new_annotation(species, behavior, duration_sec, source=None, probability=None, count=1):
+def _new_annotation(species, tags, duration_sec, source=None, probability=None, count=1):
     ann = {
         "species": species,
-        "behavior": behavior,
+        "tags": tags if isinstance(tags, list) else [],
         "start_sec": 0.0,
         "end_sec": duration_sec,
         "count": count,
@@ -64,7 +54,7 @@ def _new_annotation(species, behavior, duration_sec, source=None, probability=No
     return ann
 
 
-def _init_annotation_state(video, default_species, default_behavior):
+def _init_annotation_state(video, default_species, default_tags):
     is_blank = _normalize_is_blank(video.get("is_blank"))
     selections = list(video.get("manual_selections") or [])
 
@@ -78,7 +68,7 @@ def _init_annotation_state(video, default_species, default_behavior):
                 selections = [
                     _new_annotation(
                         s["species"],
-                        default_behavior,
+                        default_tags,
                         video.get("duration_sec"),
                         source="model",
                         probability=s["probability"],
@@ -108,14 +98,14 @@ def _filter_species_by_group(species_map: dict, species_groups: dict, group: str
     return dict(sorted(items, key=lambda x: x[1]))
 
 
-def render_annotation_section_body(page, video, default_species, default_behavior):
+def render_annotation_section_body(page, video, default_species, default_tags):
     species_map = page.species_map
     species_groups = page.species_groups
     dp = page.dp
     # Always reinitialize state when the rendered video differs from what state belongs to
     cached_video_id = get_state_val("review_state_video_id")
     if cached_video_id != video.get("video_id"):
-        _init_annotation_state(video, default_species, default_behavior)
+        _init_annotation_state(video, default_species, default_tags)
 
     is_blank = get_state_val("review_is_blank")
     selections = get_selections()
@@ -209,14 +199,11 @@ def render_annotation_section_body(page, video, default_species, default_behavio
                 )
                 ann_card._props["data-annotation-idx"] = str(i)
                 with ann_card:
-                    active_project_id = get_active_project_id()
-                    behaviors_map = dp.get_behavior_display_map(
-                        lang=get_language(),
-                        species_name=sel["species"],
-                        project_id=active_project_id,
-                    )
+                    behaviors_map = dp.get_behavior_display_map(lang=get_language())
                     sp_value = sel["species"] if sel["species"] in species_map else None
-                    bp_value = _resolve_behavior(behaviors_map, sel.get("behavior"))
+                    current_tags = sel.get("tags") or []
+                    # Filter to only tags that exist in the global behaviors map
+                    bp_value = [k for k in current_tags if k in behaviors_map]
                     group_options = _build_group_options(species_groups)
                     initial_group = species_groups.get(sp_value, "") if sp_value else ""
                     filtered_species = _filter_species_by_group(
@@ -256,9 +243,10 @@ def render_annotation_section_body(page, video, default_species, default_behavio
                                 label=t("behavior_label"),
                                 options=behaviors_map,
                                 value=bp_value,
+                                multiple=True,
                                 with_input=True,
                             )
-                            .props("outlined dense")
+                            .props("outlined dense use-chips")
                             .style("flex: 2; min-width: 120px;")
                         )
 
@@ -315,10 +303,6 @@ def render_annotation_section_body(page, video, default_species, default_behavio
                             ui.label(t("predicted_species", species=sel["species"])).classes(
                                 "text-caption text-warning"
                             ).tooltip(t("predicted_not_in_list_tooltip"))
-                        if bp_value is None and sel.get("behavior"):
-                            ui.label(t("predicted_behavior", behavior=sel["behavior"])).classes(
-                                "text-caption text-warning"
-                            ).tooltip(t("predicted_not_in_list_tooltip"))
                         ui.element("div").classes("col")
                         del_btn = ui.button(
                             icon="delete", on_click=lambda idx=i: delete_selection(idx)
@@ -330,7 +314,7 @@ def render_annotation_section_body(page, video, default_species, default_behavio
                         if 0 <= idx < len(new_sels):
                             new_sels[idx] = {
                                 "species": sp_el.value,
-                                "behavior": bp_el.value,
+                                "tags": bp_el.value if isinstance(bp_el.value, list) else [],
                                 "count": ct_el.value or 1,
                                 "start_sec": new_sels[idx].get("start_sec"),
                                 "end_sec": new_sels[idx].get("end_sec"),
@@ -347,14 +331,6 @@ def render_annotation_section_body(page, video, default_species, default_behavio
                         s.update()
 
                     def on_species_change(_, s=sp, b=bp, c=ct, g=gp, idx=i):
-                        new_behaviors = dp.get_behavior_display_map(
-                            lang=get_language(),
-                            species_name=s.value,
-                            project_id=get_active_project_id(),
-                        )
-                        b.options = new_behaviors
-                        b.value = _resolve_behavior(new_behaviors, b.value)
-                        b.update()
                         if s.value:
                             inferred_group = species_groups.get(s.value, "")
                             if inferred_group != (g.value or ""):

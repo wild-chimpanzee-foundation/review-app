@@ -61,9 +61,8 @@ def tmp_db(tmp_path, monkeypatch):
     behavior_csv = tmp_path / "behaviors.csv"
     behavior_csv.write_text(
         "scientific_name;key;name_en;name_fr\n"
-        "*;does_not_react;Does not react;\n"
-        "deer;grazing;Grazing;\n"
-        "fox;running;Running;\n"
+        "*;grazing;Grazing;\n"
+        "*;running;Running;\n"
     )
 
     monkeypatch.setattr(
@@ -129,7 +128,7 @@ def populated_provider(tmp_db, mock_probe):
         [
             {
                 "species": "deer",
-                "behavior": "grazing",
+                "tags": ["grazing"],
                 "start_sec": 0.0,
                 "end_sec": 5.0,
                 "labeled_by": "alice",
@@ -143,7 +142,7 @@ def populated_provider(tmp_db, mock_probe):
         [
             {
                 "species": "fox",
-                "behavior": "running",
+                "tags": ["running"],
                 "start_sec": 2.0,
                 "end_sec": 8.0,
                 "labeled_by": "bob",

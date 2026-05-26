@@ -145,7 +145,7 @@ def test_queue_filter_multiple_annotators(populated_provider):
     # Add a second annotator to v1 so it has both alice and bob.
     dp.update_manual_review(
         ids["v1"],
-        [{"species": "deer", "behavior": "grazing", "start_sec": 6.0, "labeled_by": "bob"}],
+        [{"species": "deer", "tags": ["grazing"], "start_sec": 6.0, "labeled_by": "bob"}],
         append=True,
     )
     result = queue(dp, {"selected_multiple_annotators": True})
@@ -235,7 +235,7 @@ REQUIRED_COLUMNS = {
     "is_blank",
     "is_annotated",
     "species",
-    "behavior",
+    "attributes",
     "start_sec",
     "end_sec",
     "annotator",
@@ -271,7 +271,7 @@ def test_export_annotated_video_has_species_and_behavior(populated_provider):
     df = dp.export_annotations_csv(active_project_id=None)
     row = df[df["video_path"].str.endswith("v1.mp4")].iloc[0]
     assert "deer" in str(row["species"]).lower()
-    assert "grazing" in str(row["behavior"]).lower()
+    assert "grazing" in str(row["attributes"]).lower()
     assert row["annotator"] == "alice"
 
 

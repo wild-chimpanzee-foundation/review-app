@@ -98,9 +98,10 @@ class StatsMixin(ProviderBase):
                 SELECT
                     b.key                 AS behavior,
                     COUNT(*)              AS observations,
-                    COUNT(DISTINCT io.video_id) AS videos
-                FROM individual_observations io
-                JOIN behaviors b ON b.id = io.behavior_id
+                    COUNT(DISTINCT ot.video_id) AS videos
+                FROM observation_tags ot
+                JOIN behaviors b ON b.id = ot.behavior_id
+                JOIN individual_observations io ON io.video_id = ot.video_id AND io.id = ot.observation_id
                 {pf.replace("project_id", "io.project_id") if pf else ""}
                 GROUP BY b.key
                 ORDER BY observations DESC

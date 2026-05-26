@@ -649,7 +649,12 @@ class ImportMixin(ProviderBase):
                         COALESCE(io.labeled_at, vl.labeled_at) AS labeled_at,
                         io.id                     AS observation_id,
                         s.scientific_name         AS species,
-                        b.key                     AS behavior,
+                        (
+                            SELECT GROUP_CONCAT(b2.key)
+                            FROM observation_tags ot
+                            JOIN behaviors b2 ON b2.id = ot.behavior_id
+                            WHERE ot.video_id = io.video_id AND ot.observation_id = io.id
+                        )                         AS attributes,
                         io.count,
                         io.start_sec,
                         io.end_sec
@@ -659,7 +664,6 @@ class ImportMixin(ProviderBase):
                     LEFT JOIN video_assignments va ON va.video_id = v.video_id
                     LEFT JOIN individual_observations io ON io.video_id = v.video_id
                     LEFT JOIN species s ON s.id = io.species_id
-                    LEFT JOIN behaviors b ON b.id = io.behavior_id
                     WHERE 1=1 {vid_pid}
                     ORDER BY v.camera_id, v.video_path, v.created_at
                 """),
@@ -846,7 +850,12 @@ class ImportMixin(ProviderBase):
                     sp = str(sp_raw).strip() if pd.notna(sp_raw) else ""
                     if not sp:
                         continue
-                    beh = str(row.get("behavior") or "unlabeled").strip() or "unlabeled"
+                    beh_raw = row.get("attributes") or row.get("behavior") or ""
+                    tags_list = [
+                        t.strip()
+                        for t in str(beh_raw).split(",")
+                        if t.strip() and t.strip() not in ("unlabeled", "does_not_react")
+                    ]
                     labeled_by = (
                         str(row["annotator"])
                         if "annotator" in group.columns and pd.notna(row.get("annotator"))
@@ -869,7 +878,7 @@ class ImportMixin(ProviderBase):
                         {
                             "id": obs_id,
                             "species": sp,
-                            "behavior": beh,
+                            "tags": tags_list,
                             "count": count_val,
                             "start_sec": row.get("start_sec"),
                             "end_sec": row.get("end_sec"),

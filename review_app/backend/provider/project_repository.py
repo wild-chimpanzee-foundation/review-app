@@ -9,10 +9,10 @@ from sqlalchemy import text
 from review_app.backend.db.models import (
     IndividualObservation,
     ModelAnnotation,
+    ObservationTag,
     Project,
     ProjectDir,
     ProjectSpecies,
-    ProjectSpeciesBehavior,
     Video,
     VideoAssignment,
     VideoLabel,
@@ -162,11 +162,13 @@ class ProjectMixin(ProviderBase):
             s.query(ModelAnnotation).filter_by(project_id=project_id).delete()
             s.query(IndividualObservation).filter_by(project_id=project_id).delete()
             s.query(ProjectSpecies).filter_by(project_id=project_id).delete()
-            s.query(ProjectSpeciesBehavior).filter_by(project_id=project_id).delete()
             s.query(ProjectDir).filter_by(project_id=project_id).delete()
 
             # Tables without project_id (linked via video_id)
             v_sub = s.query(Video.video_id).filter_by(project_id=project_id).scalar_subquery()
+            s.query(ObservationTag).filter(ObservationTag.video_id.in_(v_sub)).delete(
+                synchronize_session=False
+            )
             s.query(VideoLabel).filter(VideoLabel.video_id.in_(v_sub)).delete(
                 synchronize_session=False
             )

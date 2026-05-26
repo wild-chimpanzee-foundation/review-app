@@ -416,6 +416,117 @@ def _migration_v17(conn) -> None:
         conn.execute(text(idx_sql))
 
 
+def _migration_v18(conn) -> None:
+    """Convert behavior_id FK on individual_observations to observation_tags junction table.
+    Drops species_behaviors and project_species_behaviors.  Idempotent."""
+    tables = {
+        r[0]
+        for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
+    }
+
+    if "observation_tags" not in tables:
+        conn.execute(
+            text("""
+                CREATE TABLE observation_tags (
+                    video_id TEXT NOT NULL REFERENCES videos(video_id),
+                    observation_id INTEGER NOT NULL,
+                    behavior_id TEXT NOT NULL REFERENCES behaviors(id),
+                    PRIMARY KEY (video_id, observation_id, behavior_id)
+                )
+            """)
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_observation_tags_video"
+                " ON observation_tags(video_id, behavior_id)"
+            )
+        )
+
+    io_cols = {r[1] for r in conn.execute(text("PRAGMA table_info(individual_observations)")).fetchall()}
+    if "behavior_id" in io_cols:
+        # Migrate: copy non-"does_not_react" behavior_id rows to observation_tags
+        does_not_react_id = conn.execute(
+            text("SELECT id FROM behaviors WHERE key = 'does_not_react'")
+        ).scalar()
+        if does_not_react_id:
+            conn.execute(
+                text("""
+                    INSERT OR IGNORE INTO observation_tags (video_id, observation_id, behavior_id)
+                    SELECT video_id, id, behavior_id
+                    FROM individual_observations
+                    WHERE behavior_id IS NOT NULL AND behavior_id != :dnr
+                """),
+                {"dnr": does_not_react_id},
+            )
+        else:
+            conn.execute(
+                text("""
+                    INSERT OR IGNORE INTO observation_tags (video_id, observation_id, behavior_id)
+                    SELECT video_id, id, behavior_id
+                    FROM individual_observations
+                    WHERE behavior_id IS NOT NULL
+                """)
+            )
+
+        # Recreate individual_observations without behavior_id column
+        conn.execute(
+            text("""
+                CREATE TABLE individual_observations_new (
+                    video_id TEXT NOT NULL REFERENCES videos(video_id),
+                    id INTEGER NOT NULL,
+                    project_id TEXT REFERENCES projects(id),
+                    species_id TEXT REFERENCES species(id),
+                    count INTEGER,
+                    start_sec REAL NOT NULL DEFAULT 0.0,
+                    end_sec REAL,
+                    labeled_by TEXT,
+                    labeled_at TEXT,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (video_id, id)
+                )
+            """)
+        )
+        conn.execute(
+            text("""
+                INSERT INTO individual_observations_new
+                SELECT video_id, id, project_id, species_id, count, start_sec, end_sec,
+                       labeled_by, labeled_at, updated_at
+                FROM individual_observations
+            """)
+        )
+        conn.execute(text("DROP TABLE individual_observations"))
+        conn.execute(
+            text("ALTER TABLE individual_observations_new RENAME TO individual_observations")
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_individual_video_species"
+                " ON individual_observations(video_id, species_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_individual_video_time"
+                " ON individual_observations(video_id, start_sec)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_individual_project"
+                " ON individual_observations(project_id)"
+            )
+        )
+
+    # Drop old per-species behavior junction tables
+    if "species_behaviors" in tables:
+        conn.execute(text("DROP TABLE species_behaviors"))
+    if "project_species_behaviors" in tables:
+        conn.execute(text("DROP TABLE project_species_behaviors"))
+
+    # Remove the does_not_react built-in behavior — empty tags now means normal
+    conn.execute(text("DELETE FROM behaviors WHERE key = 'does_not_react' AND is_custom = 0"))
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -545,6 +656,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
         ],
     ),
     (17, _migration_v17),
+    (18, _migration_v18),
 ]
 
 

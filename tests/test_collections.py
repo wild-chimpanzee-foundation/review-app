@@ -332,8 +332,6 @@ def test_species_cleanup_survives_project_species_reference(tmp_path):
                 AND is_custom = 0
                 AND id NOT IN (SELECT DISTINCT species_id FROM individual_observations WHERE species_id IS NOT NULL)
                 AND id NOT IN (SELECT DISTINCT species_id FROM project_species WHERE species_id IS NOT NULL)
-                AND id NOT IN (SELECT DISTINCT species_id FROM project_species_behaviors WHERE species_id IS NOT NULL)
-                AND id NOT IN (SELECT DISTINCT species_id FROM species_behaviors WHERE species_id IS NOT NULL)
                 AND id NOT IN (SELECT DISTINCT species_id FROM species_collection_members WHERE species_id IS NOT NULL)
                 """
             )

@@ -48,9 +48,9 @@ class QueueMixin(ProviderBase):
                     WHERE io.species_id IS NOT NULL {io_exists}
                     GROUP BY s.scientific_name
                     UNION ALL
-                    SELECT 'behavior', b.key FROM individual_observations io
-                    JOIN behaviors b ON b.id = io.behavior_id
-                    WHERE io.behavior_id IS NOT NULL {io_exists}
+                    SELECT 'behavior', b.key FROM observation_tags ot
+                    JOIN behaviors b ON b.id = ot.behavior_id
+                    WHERE 1=1 {io_exists.replace("io.video_id", "ot.video_id")}
                     GROUP BY b.key
                     UNION ALL
                     SELECT 'possible_species', ma.value_text FROM model_annotations ma
@@ -315,9 +315,9 @@ class QueueMixin(ProviderBase):
                 params[f"beh{i}"] = v
             where.append(f"""
                 EXISTS (
-                    SELECT 1 FROM individual_observations io
-                    JOIN behaviors b ON b.id = io.behavior_id
-                    WHERE io.video_id = v.video_id AND b.key IN ({phs})
+                    SELECT 1 FROM observation_tags ot
+                    JOIN behaviors b ON b.id = ot.behavior_id
+                    WHERE ot.video_id = v.video_id AND b.key IN ({phs})
                 )""")
 
         if selected_model_behavior:

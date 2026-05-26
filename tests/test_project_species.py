@@ -13,7 +13,6 @@ class MockDataProvider(LocalDataProvider):
         self.engine = create_engine(f"sqlite:///{self._db_path}")
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
-        # Mock _load_species_data and _load_species_behaviors to avoid dependency on bundled CSVs
         self._seed_data()
 
     def _seed_data(self):
@@ -31,11 +30,6 @@ class MockDataProvider(LocalDataProvider):
             conn.execute(
                 text(
                     "INSERT INTO behaviors (id, key, name_en, name_fr, is_custom) VALUES ('b1', 'walking', 'Walking', 'Marche', 0), ('b2', 'eating', 'Eating', 'Mange', 0)"
-                )
-            )
-            conn.execute(
-                text(
-                    "INSERT INTO species_behaviors (species_id, behavior_id) VALUES ('s1', 'b1'), ('s2', 'b2')"
                 )
             )
             conn.execute(
@@ -66,28 +60,13 @@ def test_set_and_get_project_species(dp):
     assert sorted(dp.get_valid_species("p2")) == ["Deer", "Fox"]
 
 
-def test_get_behaviors_fallback(dp):
-    # Should use global mapping
-    assert dp.get_behaviors_for_species("Deer", "p1") == ["walking"]
-    assert dp.get_behaviors_for_species("Fox", "p1") == ["eating"]
-
-
-def test_set_and_get_project_behaviors(dp):
-    dp.set_project_species_behaviors("p1", "Deer", ["eating"])
-    # Deer in p1 should now have 'eating'
-    assert dp.get_behaviors_for_species("Deer", "p1") == ["eating"]
-    # Deer globally/other projects still has 'walking'
-    assert dp.get_behaviors_for_species("Deer", "p2") == ["walking"]
-
-
 def test_get_species_display_map_project(dp):
     dp.set_project_species("p1", ["Fox"])
     display_map = dp.get_species_display_map(project_id="p1")
     assert list(display_map.keys()) == ["Fox"]
 
 
-def test_behavior_localization(dp):
-    # Test global display map
+def test_behavior_display_map_global(dp):
     en_map = dp.get_behavior_display_map(lang="en")
     assert en_map["walking"] == "Walking"
     assert en_map["eating"] == "Eating"
@@ -97,8 +76,8 @@ def test_behavior_localization(dp):
     assert fr_map["eating"] == "Mange"
 
 
-def test_behavior_localization_project_filtered(dp):
-    dp.set_project_species_behaviors("p1", "Deer", ["walking"])
-    # Should only return 'walking' for Deer in p1
-    p1_deer_map = dp.get_behavior_display_map(lang="fr", species_name="Deer", project_id="p1")
-    assert p1_deer_map == {"walking": "Marche"}
+def test_behavior_display_map_ignores_species_and_project(dp):
+    # get_behavior_display_map is now global — species_name and project_id are ignored
+    en_map = dp.get_behavior_display_map(lang="en", species_name="Deer", project_id="p1")
+    assert "walking" in en_map
+    assert "eating" in en_map

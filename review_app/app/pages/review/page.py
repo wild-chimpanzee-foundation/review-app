@@ -86,8 +86,8 @@ class ReviewPage:
         await _render_video_section_body(self)
 
     @ui.refreshable_method
-    def render_annotation_section(self, video, default_species, default_behavior):
-        render_annotation_section_body(self, video, default_species, default_behavior)
+    def render_annotation_section(self, video, default_species, default_tags):
+        render_annotation_section_body(self, video, default_species, default_tags)
 
     @ui.refreshable_method
     async def render_filter_drawer(self):
@@ -323,7 +323,7 @@ async def _render_video_section_body(page: ReviewPage):
     model_ann_task = run.io_bound(dp.get_model_annotations, selected_video_id)
     video, model_ann = await asyncio.gather(video_task, model_ann_task)
 
-    default_behavior = "does_not_react"
+    default_tags: list[str] = []
     try:
         if model_ann is not None and not model_ann.empty:
             behavior_rows = model_ann[
@@ -332,9 +332,11 @@ async def _render_video_section_body(page: ReviewPage):
                 & (model_ann["value_text"].fillna("").str.lower() != "dummy")
             ]["value_text"]
             if not behavior_rows.empty:
-                default_behavior = behavior_rows.mode().iloc[0]
+                predicted = behavior_rows.mode().iloc[0]
+                if predicted and predicted not in ("does_not_react", "unlabeled"):
+                    default_tags = [predicted]
     except Exception:
-        logger.exception("Failed to compute default behavior from model annotations")
+        logger.exception("Failed to compute default tags from model annotations")
 
     if not video:
         # Queue can become stale after DB reset/re-sync or ID format changes.
@@ -573,7 +575,7 @@ async def _render_video_section_body(page: ReviewPage):
                     0,
                     {
                         "species": species_key,
-                        "behavior": default_behavior,
+                        "tags": default_tags,
                         "start_sec": 0.0,
                         "end_sec": video.get("duration_sec"),
                         "count": min(count, 11),
@@ -612,7 +614,7 @@ async def _render_video_section_body(page: ReviewPage):
                 consensus = video.get("classification_consensus")
                 default_species = consensus or None
 
-                page.render_annotation_section(video, default_species, default_behavior)
+                page.render_annotation_section(video, default_species, default_tags)
 
 
 async def setup_review():

@@ -41,9 +41,7 @@ class Project(Base):
     project_species: Mapped[list[ProjectSpecies]] = relationship(
         "ProjectSpecies", cascade="all, delete-orphan"
     )
-    project_species_behaviors: Mapped[list[ProjectSpeciesBehavior]] = relationship(
-        "ProjectSpeciesBehavior", cascade="all, delete-orphan"
-    )
+
 
 
 class ProjectDir(Base):
@@ -110,9 +108,6 @@ class Species(Base):
     group_fr: Mapped[str | None] = mapped_column(String)
     iucn: Mapped[str | None] = mapped_column(String)
     is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
-    behaviors: Mapped[list[SpeciesBehavior]] = relationship(
-        "SpeciesBehavior", cascade="all, delete-orphan"
-    )
 
 
 class Behavior(Base):
@@ -125,10 +120,11 @@ class Behavior(Base):
     is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
-class SpeciesBehavior(Base):
-    __tablename__ = "species_behaviors"
+class ObservationTag(Base):
+    __tablename__ = "observation_tags"
 
-    species_id: Mapped[str] = mapped_column(String, ForeignKey("species.id"), primary_key=True)
+    video_id: Mapped[str] = mapped_column(String, ForeignKey("videos.video_id"), primary_key=True)
+    observation_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     behavior_id: Mapped[str] = mapped_column(String, ForeignKey("behaviors.id"), primary_key=True)
 
 
@@ -137,14 +133,6 @@ class ProjectSpecies(Base):
 
     project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id"), primary_key=True)
     species_id: Mapped[str] = mapped_column(String, ForeignKey("species.id"), primary_key=True)
-
-
-class ProjectSpeciesBehavior(Base):
-    __tablename__ = "project_species_behaviors"
-
-    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id"), primary_key=True)
-    species_id: Mapped[str] = mapped_column(String, ForeignKey("species.id"), primary_key=True)
-    behavior_id: Mapped[str] = mapped_column(String, ForeignKey("behaviors.id"), primary_key=True)
 
 
 class SpeciesCollection(Base):
@@ -174,7 +162,6 @@ class IndividualObservation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[str | None] = mapped_column(String, ForeignKey("projects.id"), index=True)
     species_id: Mapped[str | None] = mapped_column(String, ForeignKey("species.id"), index=True)
-    behavior_id: Mapped[str | None] = mapped_column(String, ForeignKey("behaviors.id"), index=True)
     count: Mapped[int | None] = mapped_column(Integer)
     start_sec: Mapped[float] = mapped_column(Float, default=0.0)
     end_sec: Mapped[float | None] = mapped_column(Float)
@@ -257,11 +244,6 @@ Index(
     IndividualObservation.video_id,
     IndividualObservation.species_id,
 )
-Index(
-    "idx_individual_video_behavior",
-    IndividualObservation.video_id,
-    IndividualObservation.behavior_id,
-)
 Index("idx_individual_video_time", IndividualObservation.video_id, IndividualObservation.start_sec)
 Index("idx_videos_is_valid", Video.is_valid)
 Index("idx_videos_is_web_safe", Video.is_web_safe)
@@ -279,9 +261,4 @@ Index(
     ModelAnnotation.video_id,
     ModelAnnotation.probability,
 )
-# Covers: WHERE video_id=? AND behavior_id=?  (behavior filter EXISTS)
-Index(
-    "idx_individual_behavior_video",
-    IndividualObservation.behavior_id,
-    IndividualObservation.video_id,
-)
+Index("idx_observation_tags_video", ObservationTag.video_id, ObservationTag.behavior_id)

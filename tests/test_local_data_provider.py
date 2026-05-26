@@ -18,7 +18,7 @@ def temp_workspace(tmp_path, monkeypatch):
 
     behavior_csv = tmp_path / "behaviors.csv"
     behavior_csv.write_text(
-        "scientific_name;key;name_en;name_fr\n*;does_not_react;Does not react;\ndeer;reacts_to_camera;Reacts to camera;\ndeer;grazing;Grazing;\nfox;running;Running;\n"
+        "scientific_name;key;name_en;name_fr\n*;reacts_to_camera;Reacts to camera;\n*;grazing;Grazing;\n*;running;Running;\n"
     )
 
     monkeypatch.setattr(
@@ -54,10 +54,10 @@ def test_provider_initialization(temp_workspace):
 
 def test_get_behaviors(temp_workspace):
     dp = LocalDataProvider()
-    deer_behaviors = dp.get_behaviors_for_species("deer")
-    assert "reacts_to_camera" in deer_behaviors
-    assert "grazing" in deer_behaviors
-    assert "does_not_react" in deer_behaviors
+    behaviors = dp.get_behavior_display_map()
+    assert "reacts_to_camera" in behaviors
+    assert "grazing" in behaviors
+    assert "does_not_react" not in behaviors
 
 
 def test_sync_videos(temp_workspace, monkeypatch):
@@ -158,8 +158,8 @@ def test_surgical_update_preserves_labeled_at(temp_workspace, monkeypatch):
     dp.update_manual_review(
         video_id,
         [
-            {"species": "deer", "behavior": "grazing", "start_sec": 0, "end_sec": 5},
-            {"species": "fox", "behavior": "does_not_react", "start_sec": 10, "end_sec": 15},
+            {"species": "deer", "tags": ["grazing"], "start_sec": 0, "end_sec": 5},
+            {"species": "fox", "tags": [], "start_sec": 10, "end_sec": 15},
         ],
         labeled_by="User A",
     )
@@ -174,13 +174,13 @@ def test_surgical_update_preserves_labeled_at(temp_workspace, monkeypatch):
     # Wait to ensure time difference (now using 1s precision)
     time.sleep(1.1)
 
-    # 2. Update ONLY the second observation (change behavior)
+    # 2. Update ONLY the second observation (change tags)
     # Pass back the IDs to enable surgical update
     dp.update_manual_review(
         video_id,
         [
             obs1_original,  # Unchanged
-            {**obs2_original, "behavior": "grazing"},  # Changed
+            {**obs2_original, "tags": ["grazing"]},  # Changed
         ],
         labeled_by="User B",
     )
@@ -195,7 +195,7 @@ def test_surgical_update_preserves_labeled_at(temp_workspace, monkeypatch):
     assert obs1_after["labeled_by"] == "User A"
 
     # Verify obs2 is UPDATED and has NEW labeled_at
-    assert obs2_after["behavior"] == "grazing"
+    assert "grazing" in obs2_after["tags"]
     assert str(obs2_after["labeled_at"]) > str(obs2_original["labeled_at"])
     assert obs2_after["labeled_by"] == "User B"
 
@@ -363,10 +363,10 @@ def test_import_append_mode_does_not_override_name(temp_workspace, monkeypatch):
     bob_obs = next(o for o in detail["manual_selections"] if o["id"] != obs_id)
 
     assert alice_obs["labeled_by"] == "Alice"
-    assert alice_obs["behavior"] == "grazing"
+    assert "grazing" in alice_obs["tags"]
 
     assert bob_obs["labeled_by"] == "Bob"
-    assert bob_obs["behavior"] == "running"
+    assert "running" in bob_obs["tags"]
 
 
 def test_annotation_sharing_round_trip(tmp_path, monkeypatch):
@@ -427,9 +427,9 @@ def test_annotation_sharing_round_trip(tmp_path, monkeypatch):
 
     export_df = dp_a.export_annotations_csv(active_project_id=None)
 
-    # Sanity-check the export: behavior is the key, same as species uses scientific name.
+    # Sanity-check the export: attributes column contains the tag key.
     clip1_row = export_df[export_df["video_path"].str.endswith("clip1.mp4")].iloc[0]
-    assert clip1_row["behavior"] == "grazing"
+    assert "grazing" in str(clip1_row["attributes"])
     assert clip1_row["annotator"] == "Alice"
     clip2_row = export_df[export_df["video_path"].str.endswith("clip2.mp4")].iloc[0]
     assert clip2_row["annotator"] == "Alice"
@@ -462,7 +462,7 @@ def test_annotation_sharing_round_trip(tmp_path, monkeypatch):
     assert len(detail1["manual_selections"]) == 1
     obs = detail1["manual_selections"][0]
     assert obs["species"] == "deer"
-    assert obs["behavior"] == "grazing"
+    assert "grazing" in obs["tags"]
     assert obs["labeled_by"] == "Alice"
 
     # clip2: blank status and annotator preserved
