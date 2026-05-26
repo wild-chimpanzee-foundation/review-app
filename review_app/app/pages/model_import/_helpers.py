@@ -152,7 +152,14 @@ def auto_suggest_ann_cols(columns: list[str]) -> dict[str, str]:
 
 
 def auto_suggest_path_col(columns: list[str], sample: list[dict]) -> str:
-    for preferred in ("filepath", "original_filepath", "video_path", "path", "file"):
+    for preferred in (
+        "review_filename",
+        "filepath",
+        "original_filepath",
+        "video_path",
+        "path",
+        "file",
+    ):
         if preferred in columns:
             return preferred
     if sample:

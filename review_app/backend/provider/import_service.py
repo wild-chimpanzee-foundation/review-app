@@ -152,6 +152,7 @@ class ImportMixin(ProviderBase):
         path_col: str,
         ann_mappings: list[dict[str, str]],
         active_project_id: str | None,
+        filename_match: bool = False,
     ) -> tuple[pd.DataFrame, dict[str, Any]]:
         """
         Normalize an arbitrary CSV to the long format expected by validate_model_csv, using
@@ -165,15 +166,20 @@ class ImportMixin(ProviderBase):
         rows: list[dict[str, Any]] = []
         matched_suffix = 0
         matched_cam_stem = 0
+        matched_filename = 0
         unmatched_paths: list[str] = []
 
         for _, src_row in df.iterrows():
             raw_path = str(src_row.get(path_col, "")).strip()
 
-            video_id, tier = resolve_video_path(raw_path, lookup)
+            video_id, tier = resolve_video_path(
+                raw_path, lookup, use_filename_match=filename_match
+            )
             if video_id:
                 if tier == "cam_stem":
                     matched_cam_stem += 1
+                elif tier == "filename":
+                    matched_filename += 1
                 else:
                     matched_suffix += 1
 
@@ -234,9 +240,10 @@ class ImportMixin(ProviderBase):
         )
         stats: dict[str, Any] = {
             "total_rows": len(df),
-            "matched": matched_suffix + matched_cam_stem,
+            "matched": matched_suffix + matched_cam_stem + matched_filename,
             "matched_by_suffix": matched_suffix,
             "matched_by_cam_stem": matched_cam_stem,
+            "matched_by_filename": matched_filename,
             "unmatched": len(unmatched_paths),
             "unmatched_sample": unmatched_paths[:10],
         }
@@ -957,8 +964,12 @@ class ImportMixin(ProviderBase):
             if use_single_path:
                 synthetic = str(row.get(path_col, "")).strip()
             else:
-                folder = str(row.get(folder_col, "")).strip() if folder_col in video_df.columns else ""
-                video = str(row.get(video_col, "")).strip() if video_col in video_df.columns else ""
+                folder = (
+                    str(row.get(folder_col, "")).strip() if folder_col in video_df.columns else ""
+                )
+                video = (
+                    str(row.get(video_col, "")).strip() if video_col in video_df.columns else ""
+                )
                 synthetic = f"{folder}/{video}" if folder else video
             video_id, _ = resolve_video_path(synthetic, lookup)
             if video_id is None:
@@ -984,7 +995,13 @@ class ImportMixin(ProviderBase):
     ) -> dict[str, Any]:
         species_mappings = species_mappings or {}
         video_df, skipped_installation, groups, skipped = self._filter_and_group_historic(
-            df, active_project_id, folder_col, video_col, data_type_col, data_type_val, path_col=path_col
+            df,
+            active_project_id,
+            folder_col,
+            video_col,
+            data_type_col,
+            data_type_val,
+            path_col=path_col,
         )
         valid_for_project = set(self.get_valid_species(active_project_id))
         variant_map = {
@@ -1056,7 +1073,13 @@ class ImportMixin(ProviderBase):
         species_mappings = species_mappings or {}
         tag_cols = tag_cols or []
         _, _, groups, skipped = self._filter_and_group_historic(
-            df, active_project_id, folder_col, video_col, data_type_col, data_type_val, path_col=path_col
+            df,
+            active_project_id,
+            folder_col,
+            video_col,
+            data_type_col,
+            data_type_val,
+            path_col=path_col,
         )
         valid_for_project = set(self.get_valid_species(active_project_id))
         variant_map = {

@@ -9,6 +9,8 @@ class VideoPathLookup(NamedTuple):
     # stem -> [(video_id, camera_id_lower)] — all videos sharing that stem
     by_cam_stem: dict[str, list[tuple[str, str]]]
     cam_by_id: dict[str, str]  # video_id -> camera_id_lower
+    # filename (basename only) -> video_id — only populated for unambiguous filenames
+    by_filename: dict[str, str]
 
 
 def _cameras_share_token(csv_cam: str, db_cam: str) -> bool:
@@ -38,11 +40,14 @@ def build_video_path_lookup(
     cam_stem_count: dict[str, int] = {}
     by_cam_stem: dict[str, list[tuple[str, str]]] = {}
     cam_by_id: dict[str, str] = {}
+    by_filename_lists: dict[str, list[str]] = {}
 
     for vid, video_path, camera_id in video_rows:
         p = Path(video_path)
         cam_lower = (camera_id or "").lower()
         cam_by_id[vid] = cam_lower
+        by_filename_lists.setdefault(p.name.lower(), []).append(vid)
+        by_filename_lists.setdefault(p.stem.lower(), []).append(vid)
 
         # Full relative path from each project scan dir
         for scan_dir in scan_dirs:
@@ -72,7 +77,14 @@ def build_video_path_lookup(
         if cam_stem_count[key] == 1:
             by_suffix.setdefault(key, vid)
 
-    return VideoPathLookup(by_suffix=by_suffix, by_cam_stem=by_cam_stem, cam_by_id=cam_by_id)
+    by_filename = {k: v[0] for k, v in by_filename_lists.items() if len(v) == 1}
+
+    return VideoPathLookup(
+        by_suffix=by_suffix,
+        by_cam_stem=by_cam_stem,
+        cam_by_id=cam_by_id,
+        by_filename=by_filename,
+    )
 
 
 def resolve_video_path(
@@ -80,6 +92,7 @@ def resolve_video_path(
     lookup: VideoPathLookup,
     known_video_ids: set[str] | None = None,
     extra_suffix_map: dict[str, str] | None = None,
+    use_filename_match: bool = False,
 ) -> tuple[str | None, str]:
     """Resolve a CSV path string to a video_id.
 
@@ -87,6 +100,7 @@ def resolve_video_path(
       "exact_id"  – raw_path was already a known video_id
       "suffix"    – matched via by_suffix or extra_suffix_map
       "cam_stem"  – matched via camera-aware stem fallback
+      "filename"  – matched via filename-only lookup (use_filename_match=True)
       ""          – no match
     """
     if known_video_ids and raw_path in known_video_ids:
@@ -116,5 +130,10 @@ def resolve_video_path(
     matching = [(v, c) for v, c in candidates if _cameras_share_token(csv_cam, c)]
     if len(matching) == 1:
         return matching[0][0], "cam_stem"
+
+    if use_filename_match:
+        vid = lookup.by_filename.get(p.name.lower()) or lookup.by_filename.get(p.stem.lower())
+        if vid:
+            return vid, "filename"
 
     return None, ""

@@ -71,6 +71,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                     get_state_val("path_col") or "",
                     get_state_val("ann_mappings") or [],
                     get_active_project_id(),
+                    get_state_val("filename_match") or False,
                 )
                 set_state_val("match_preview", stats)
                 config_ui.refresh()
@@ -99,6 +100,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 set_state_val("errors_df", None)
                 set_state_val("species_mappings", {})
                 set_state_val("unmapped_species", [])
+                set_state_val("filename_match", False)
 
                 upload_result.text = t("loaded_rows", count=len(raw_df))
                 if upload_widget_holder[0]:
@@ -185,6 +187,22 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                     await run_preview_logic()
 
                 path_sel.on_value_change(on_path_col_change)
+
+            filename_match_val = get_state_val("filename_match") or False
+            filename_toggle = ui.checkbox(
+                t("filename_match_label"),
+                value=filename_match_val,
+            ).classes("q-mb-xs")
+
+            async def on_filename_match_change():
+                set_state_val("filename_match", filename_toggle.value)
+                set_state_val("match_preview", None)
+                await run_preview_logic()
+
+            filename_toggle.on_value_change(on_filename_match_change)
+
+            if filename_match_val:
+                ui.label(t("filename_match_warning")).classes("text-caption text-warning q-mb-xs")
 
             preview = get_state_val("match_preview")
             if preview:
@@ -534,6 +552,10 @@ def _render_match_stats(match_stats: dict | None) -> None:
             ui.label(
                 t("wide_format_stem_fallback", count=match_stats["matched_by_cam_stem"])
             ).classes("text-caption text-warning")
+        if match_stats.get("matched_by_filename", 0) > 0:
+            ui.label(
+                t("wide_format_filename_fallback", count=match_stats["matched_by_filename"])
+            ).classes("text-caption text-warning")
         if unmatched and match_stats.get("unmatched_sample"):
             with ui.expansion(t("wide_format_unmatched", count=unmatched), icon="warning").classes(
                 "q-mt-xs"
@@ -637,6 +659,7 @@ async def _validate_wide(dp, loading_dialog, path_col, ann_maps, refresh_results
             path_col,
             ann_maps,
             get_active_project_id(),
+            get_state_val("filename_match") or False,
         )
         set_state_val("match_stats", match_stats)
         set_state_val("uploaded_df", normalized_df.to_dict(orient="records"))
