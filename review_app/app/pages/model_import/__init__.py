@@ -39,6 +39,8 @@ _STATE_KEYS = (
     "ann_timestamp_col",
     "ann_is_blank_col",
     "ann_tag_cols",
+    "ann_path_mode",
+    "ann_path_col",
 )
 
 

@@ -880,10 +880,10 @@ class ImportMixin(ProviderBase):
                     for sel in selections:
                         observations_by_annotator[sel.get("labeled_by") or ""] += 1
 
-            # Restore review_later
+            # Restore review_later — reset to False too so override is complete
             rl_raw = first.get("review_later") if "review_later" in group.columns else None
-            if pd.notna(rl_raw) and bool(int(rl_raw)):
-                self.set_review_later(str(video_id), True)
+            if pd.notna(rl_raw):
+                self.set_review_later(str(video_id), bool(int(rl_raw)))
 
             # Auto-create missing custom tags and collect their normalized keys so
             # set_video_tags receives keys that actually exist in the DB.
@@ -933,8 +933,13 @@ class ImportMixin(ProviderBase):
         video_col: str,
         data_type_col: str,
         data_type_val: str = "",
+        path_col: str = "",
     ) -> tuple[pd.DataFrame, int, dict[str, list[dict]], list[str]]:
-        """Filter rows by data_type_col == data_type_val (when both are set), build path lookup, group matched rows by video_id."""
+        """Filter rows by data_type_col == data_type_val (when both are set), build path lookup, group matched rows by video_id.
+
+        When path_col is set, use it as the full video path directly instead of constructing it
+        from folder_col + video_col.
+        """
         if data_type_col in df.columns and data_type_val:
             video_df = df[df[data_type_col].astype(str).str.strip() == data_type_val].copy()
             skipped_installation = len(df) - len(video_df)
@@ -946,13 +951,18 @@ class ImportMixin(ProviderBase):
         groups: dict[str, list[dict]] = {}
         skipped: list[str] = []
 
+        use_single_path = bool(path_col) and path_col in video_df.columns
+
         for _, row in video_df.iterrows():
-            folder = str(row.get(folder_col, "")).strip() if folder_col in video_df.columns else ""
-            video = str(row.get(video_col, "")).strip() if video_col in video_df.columns else ""
-            synthetic = f"{folder}/{video}" if folder else video
+            if use_single_path:
+                synthetic = str(row.get(path_col, "")).strip()
+            else:
+                folder = str(row.get(folder_col, "")).strip() if folder_col in video_df.columns else ""
+                video = str(row.get(video_col, "")).strip() if video_col in video_df.columns else ""
+                synthetic = f"{folder}/{video}" if folder else video
             video_id, _ = resolve_video_path(synthetic, lookup)
             if video_id is None:
-                skipped.append(f"{folder}/{video}")
+                skipped.append(synthetic)
             else:
                 groups.setdefault(video_id, []).append(dict(row))
 
@@ -970,10 +980,11 @@ class ImportMixin(ProviderBase):
         species_mappings: dict[str, str] | None = None,
         is_blank_col: str = "",
         tag_cols: list[str] | None = None,
+        path_col: str = "",
     ) -> dict[str, Any]:
         species_mappings = species_mappings or {}
         video_df, skipped_installation, groups, skipped = self._filter_and_group_historic(
-            df, active_project_id, folder_col, video_col, data_type_col, data_type_val
+            df, active_project_id, folder_col, video_col, data_type_col, data_type_val, path_col=path_col
         )
         valid_for_project = set(self.get_valid_species(active_project_id))
         variant_map = {
@@ -1040,11 +1051,12 @@ class ImportMixin(ProviderBase):
         species_mappings: dict[str, str] | None = None,
         is_blank_col: str = "",
         tag_cols: list[str] | None = None,
+        path_col: str = "",
     ) -> dict[str, Any]:
         species_mappings = species_mappings or {}
         tag_cols = tag_cols or []
         _, _, groups, skipped = self._filter_and_group_historic(
-            df, active_project_id, folder_col, video_col, data_type_col, data_type_val
+            df, active_project_id, folder_col, video_col, data_type_col, data_type_val, path_col=path_col
         )
         valid_for_project = set(self.get_valid_species(active_project_id))
         variant_map = {

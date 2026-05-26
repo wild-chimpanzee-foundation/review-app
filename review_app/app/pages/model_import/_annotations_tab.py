@@ -16,6 +16,7 @@ from review_app.app.utils import user_error_message
 from review_app.backend.utils import df_to_records
 
 from ._helpers import (
+    auto_suggest_ann_cols,
     col_val,
     get_df_from_state,
     make_col_selects,
@@ -119,18 +120,37 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
 
             required_opts = {c: c for c in columns}
             optional_opts = {_NONE_VALUE: f"— {t('historic_col_none')} —", **required_opts}
+            path_mode = get_state_val("ann_path_mode") or "split"
 
             with col_config_section:
                 ui.label(t("historic_path_matching")).classes(
                     "text-caption text-grey q-mb-xs q-mt-sm"
                 )
+                path_toggle = ui.toggle(
+                    {
+                        "split": t("ann_path_mode_split"),
+                        "single": t("ann_path_mode_single"),
+                    },
+                    value=path_mode,
+                ).props("dense size=sm q-mb-sm")
+
+                async def on_path_mode_change() -> None:
+                    set_state_val("ann_path_mode", path_toggle.value)
+                    col_config_ui.refresh()
+                    await _run_validate(dp, loading_dialog, results_ui, results_container)
+
+                path_toggle.on_value_change(on_path_mode_change)
+
                 with ui.row().classes("w-full gap-md q-mb-sm items-end"):
-                    sels = make_col_selects(
-                        [
-                            ("ann_folder_col", required_opts),
-                            ("ann_video_col", required_opts),
-                        ]
-                    )
+                    if path_mode == "single":
+                        sels = make_col_selects([("ann_path_col", required_opts)])
+                    else:
+                        sels = make_col_selects(
+                            [
+                                ("ann_folder_col", required_opts),
+                                ("ann_video_col", required_opts),
+                            ]
+                        )
 
                 ui.label(t("historic_annotation_cols")).classes(
                     "text-caption text-grey q-mb-xs q-mt-sm"
@@ -275,6 +295,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                             if df is None:
                                 return
                             mappings = get_state_val(_MAPPINGS_KEY) or {}
+                            is_single = (get_state_val("ann_path_mode") or "split") == "single"
                             result = await run.io_bound(
                                 dp.validate_historic_csv,
                                 df,
@@ -287,6 +308,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                                 mappings,
                                 col_val("ann_is_blank_col"),
                                 get_state_val("ann_tag_cols") or [],
+                                col_val("ann_path_col") if is_single else "",
                             )
                             set_state_val("ann_validation", result)
                             ui.notify(t("mappings_applied"), type="positive")
@@ -323,6 +345,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     if df is None:
                         ui.notify(t("no_data_import"), type="warning")
                         return
+                    is_single = (get_state_val("ann_path_mode") or "split") == "single"
                     result = await run.io_bound(
                         dp.import_historic_csv,
                         df,
@@ -340,6 +363,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         get_state_val(_MAPPINGS_KEY) or {},
                         col_val("ann_is_blank_col"),
                         get_state_val("ann_tag_cols") or [],
+                        col_val("ann_path_col") if is_single else "",
                     )
                     msg = t("imported_historic", count=result["imported"])
                     if result["skipped"]:
@@ -424,6 +448,16 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     for key in _OPTIONAL_COLS:
                         set_state_val(key, "")
                     set_state_val("ann_tag_cols", [])
+                    set_state_val("ann_path_mode", "split")
+                    set_state_val("ann_path_col", columns[0])
+
+                    # Apply conservative auto-suggestions based on column names
+                    suggestions = auto_suggest_ann_cols(columns)
+                    for key, val in suggestions.items():
+                        if key == "ann_path_mode":
+                            set_state_val(key, val)
+                        elif val in columns:
+                            set_state_val(key, val)
 
                     col_config_section.visible = True
                     col_config_ui.refresh()
@@ -456,6 +490,7 @@ async def _run_validate(dp, loading_dialog, results_ui, results_container) -> No
         if df is None:
             return
         mappings = get_state_val(_MAPPINGS_KEY) or {}
+        is_single = (get_state_val("ann_path_mode") or "split") == "single"
         result = await run.io_bound(
             dp.validate_historic_csv,
             df,
@@ -468,6 +503,7 @@ async def _run_validate(dp, loading_dialog, results_ui, results_container) -> No
             mappings,
             col_val("ann_is_blank_col"),
             get_state_val("ann_tag_cols") or [],
+            col_val("ann_path_col") if is_single else "",
         )
         set_state_val("ann_validation", result)
         results_container.visible = True

@@ -117,6 +117,40 @@ def auto_suggest_mappings(columns: list[str]) -> list[dict]:
     return suggestions
 
 
+def auto_suggest_ann_cols(columns: list[str]) -> dict[str, str]:
+    """Return suggested state-key → column-name mappings for the external annotation import.
+
+    Conservative: only exact case-insensitive matches. Never returns a column that is
+    not present in `columns`. Prefers single-path mode when a combined path column is found.
+    """
+    col_lower = {c.lower(): c for c in columns}
+
+    _EXACT: dict[str, list[str]] = {
+        "ann_folder_col": ["folder_name_standard", "folder_name", "folder"],
+        "ann_video_col": ["video_name", "filename", "file_name"],
+        "ann_species_col": ["species"],
+        "ann_behavior_col": ["behaviour", "behavior"],
+        "ann_count_col": ["number"],
+        "ann_observer_col": ["observer"],
+        "ann_timestamp_col": ["timestamp"],
+        "ann_is_blank_col": ["is_blank"],
+        "ann_path_col": ["filepath", "file_path", "video_path", "path"],
+    }
+
+    result: dict[str, str] = {}
+    for key, candidates in _EXACT.items():
+        for c in candidates:
+            if c in col_lower:
+                result[key] = col_lower[c]
+                break
+
+    # When a single combined path column is found, suggest single-path mode
+    if "ann_path_col" in result:
+        result["ann_path_mode"] = "single"
+
+    return result
+
+
 def auto_suggest_path_col(columns: list[str], sample: list[dict]) -> str:
     for preferred in ("filepath", "original_filepath", "video_path", "path", "file"):
         if preferred in columns:
