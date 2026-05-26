@@ -19,6 +19,8 @@ from review_app.app.state import (
 from review_app.app.translations import t
 from review_app.app.utils import get_or_create_data_provider, sync_with_progress
 
+from review_app.app.pages.distribution import render_distribution_section
+
 from .database import render_database_section
 from .species import render_species_section
 from .tags import TagsSection
@@ -256,6 +258,10 @@ def _build_settings_content(container: ui.column):
                         ui.button(
                             t("save"), icon="check", color="primary", on_click=save_thresholds
                         ).props("dense")
+
+                if active_project_id:
+                    with ui.expansion(t("nav_distribution"), icon="group").classes("full-width"):
+                        render_distribution_section(_dp, active_project_id)
 
                 with ui.expansion(t("database_management"), icon="storage").classes("full-width"):
                     render_database_section(current_db_path, active_project_id)

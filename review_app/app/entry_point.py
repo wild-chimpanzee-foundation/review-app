@@ -207,9 +207,6 @@ def shared_header(show_drawer: bool = False):
                 ui.button(t("nav_import"), on_click=lambda: ui.navigate.to("/model-import")).props(
                     "flat color=white"
                 ).classes("gt-sm")
-                ui.button(
-                    t("nav_distribution"), on_click=lambda: ui.navigate.to("/distribution")
-                ).props("flat color=white").classes("gt-sm")
                 ui.button(t("nav_settings"), on_click=lambda: ui.navigate.to("/settings")).props(
                     "flat color=white"
                 ).classes("gt-sm")
@@ -221,10 +218,6 @@ def shared_header(show_drawer: bool = False):
                         ui.menu_item(t("nav_review"), on_click=lambda: ui.navigate.to("/review"))
                         ui.menu_item(
                             t("nav_import"), on_click=lambda: ui.navigate.to("/model-import")
-                        )
-                        ui.menu_item(
-                            t("nav_distribution"),
-                            on_click=lambda: ui.navigate.to("/distribution"),
                         )
                         ui.menu_item(
                             t("nav_settings"), on_click=lambda: ui.navigate.to("/settings")
