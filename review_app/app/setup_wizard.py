@@ -316,6 +316,69 @@ class SetupWizard:
             else:
                 load_session_defaults(dp)
 
+            # ── Resolve annotators before creating the project ────────────────
+            annotator_map = None
+            bundle_annotators = await run.io_bound(dp.get_bundle_annotators, bundle_bytes[0])
+            if bundle_annotators:
+                existing = await run.io_bound(dp.get_all_annotators)
+                logged_in = app.storage.user.get("annotator_name", "")
+                select_opts = list(existing) + (
+                    [logged_in] if logged_in and logged_in not in existing else []
+                )
+                resolve_dlg = ui.dialog().props("persistent")
+                state = {"confirmed": False}
+                rows = []
+
+                _NEW = "__new__"
+                with resolve_dlg, ui.card().classes("q-pa-lg").style("min-width: 580px"):
+                    ui.label(t("bundle_annotator_check_title")).classes("text-h6 q-mb-sm")
+                    ui.label(t("bundle_annotator_check_desc_all")).classes(
+                        "text-caption text-grey-6 q-mb-md"
+                    )
+
+                    for name in bundle_annotators:
+                        if name in existing:
+                            default = name
+                        elif select_opts:
+                            default = logged_in if logged_in in select_opts else select_opts[0]
+                        else:
+                            default = _NEW
+                        opts = {_NEW: t("bundle_annotator_keep_as", name=name)} | {
+                            a: a for a in select_opts
+                        }
+                        with ui.row().classes("items-center gap-md w-full q-mb-sm"):
+                            ui.label(name).classes("text-body2 text-bold").style(
+                                "min-width: 140px"
+                            )
+                            ui.icon("arrow_forward").classes("text-grey-5")
+                            sel = (
+                                ui.select(opts, value=default)
+                                .props("outlined dense")
+                                .classes("flex-1")
+                            )
+                            rows.append({"name": name, "select": sel})
+
+                    def _confirm():
+                        state["confirmed"] = True
+                        resolve_dlg.close()
+
+                    with ui.row().classes("q-mt-md gap-sm justify-end"):
+                        ui.button(t("cancel"), on_click=resolve_dlg.close).props("flat")
+                        ui.button(t("confirm"), on_click=_confirm, color="primary")
+
+                resolve_dlg.open()
+                await resolve_dlg
+
+                if not state["confirmed"]:
+                    bundle_btn_holder[0].set_enabled(True)
+                    return
+
+                annotator_map = {}
+                for row in rows:
+                    val = row["select"].value
+                    annotator_map[row["name"]] = row["name"] if val == _NEW else val
+
+            # ── Create project and sync videos ────────────────────────────────
             project = dp.create_project(project_name, video_dir)
             switch_project(dp, project.id)
 
@@ -336,83 +399,6 @@ class SetupWizard:
                 active_project_id=get_active_project_id(),
             )
             status.text = t("sync_complete")
-
-            annotator_map = None
-            unknown_annotators = await run.io_bound(dp.check_bundle_annotators, bundle_bytes[0])
-            if unknown_annotators:
-                existing = await run.io_bound(dp.get_all_annotators)
-                logged_in = app.storage.user.get("annotator_name", "")
-                if existing:
-                    resolve_dlg = ui.dialog().props("persistent")
-                    state = {"confirmed": False}
-                    rows = []
-
-                    with resolve_dlg, ui.card().classes("q-pa-lg").style("min-width: 520px"):
-                        ui.label(t("bundle_annotator_check_title")).classes("text-h6 q-mb-sm")
-                        ui.label(
-                            t(
-                                "bundle_annotator_check_desc",
-                                names=", ".join(unknown_annotators),
-                            )
-                        ).classes("text-caption text-grey-6 q-mb-md")
-
-                        for name in unknown_annotators:
-                            default_action = (
-                                t("bundle_annotator_map_to")
-                                if logged_in in existing
-                                else t("bundle_annotator_create")
-                            )
-                            default_target = logged_in if logged_in in existing else existing[0]
-                            with ui.row().classes("items-center gap-sm w-full q-mb-sm"):
-                                ui.label(name).classes("text-body2 font-weight-bold").style(
-                                    "min-width: 120px"
-                                )
-                                radio = ui.radio(
-                                    [
-                                        t("bundle_annotator_create"),
-                                        t("bundle_annotator_map_to"),
-                                    ],
-                                    value=default_action,
-                                ).props("inline")
-                                sel = (
-                                    ui.select(
-                                        {a: a for a in existing},
-                                        value=default_target,
-                                        visible=(default_action == t("bundle_annotator_map_to")),
-                                    )
-                                    .props("outlined dense")
-                                    .classes("w-48")
-                                )
-
-                                def _on_radio(e, s=sel):
-                                    s.visible = e.value == t("bundle_annotator_map_to")
-
-                                radio.on_value_change(_on_radio)
-                                rows.append({"name": name, "radio": radio, "select": sel})
-
-                        def _confirm():
-                            state["confirmed"] = True
-                            resolve_dlg.close()
-
-                        with ui.row().classes("q-mt-md gap-sm justify-end"):
-                            ui.button(t("cancel"), on_click=resolve_dlg.close).props("flat")
-                            ui.button(t("confirm"), on_click=_confirm, color="primary")
-
-                    resolve_dlg.open()
-                    await resolve_dlg.wait_for_close()
-
-                    if not state["confirmed"]:
-                        result_col.visible = True
-                        return
-
-                    annotator_map = {}
-                    for row in rows:
-                        if row["radio"].value == t("bundle_annotator_create"):
-                            annotator_map[row["name"]] = row["name"]
-                        else:
-                            annotator_map[row["name"]] = row["select"].value
-                else:
-                    annotator_map = {n: n for n in unknown_annotators}
 
             bundle_summary = None
             try:

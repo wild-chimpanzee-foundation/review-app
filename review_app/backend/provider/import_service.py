@@ -1189,9 +1189,8 @@ class ImportMixin(ProviderBase):
             "skipped_observations": skipped_observations,
         }
 
-    def check_bundle_annotators(self, zip_bytes: bytes) -> list[str]:
-        """Inspect a bundle ZIP and return annotator names from metadata.csv
-        that are not yet in the annotators registry."""
+    def get_bundle_annotators(self, zip_bytes: bytes) -> list[str]:
+        """Inspect a bundle ZIP and return all annotator names from metadata.csv."""
         import io
         import zipfile
 
@@ -1204,8 +1203,7 @@ class ImportMixin(ProviderBase):
         if "assigned_to" not in df.columns:
             return []
         names = {str(a).strip() for a in df["assigned_to"].dropna().unique() if str(a).strip()}
-        known = set(self.get_all_annotators())
-        return sorted(names - known)
+        return sorted(names)
 
     # ── Project bundle export / import ────────────────────────────────────────
 
