@@ -123,9 +123,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
         set_state_val("review_is_blank", False)
         existing = list(video.get("manual_selections") or [])
         if not existing:
-            existing = [
-                _new_annotation(default_species, default_behavior, video.get("duration_sec"))
-            ]
+            existing = [_new_annotation(default_species, default_tags, video.get("duration_sec"))]
         set_selections(existing)
         page.render_annotation_section.refresh()
 
@@ -170,7 +168,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
 
         def add_species():
             new_sels = get_selections()
-            new_sels.insert(0, _new_annotation(None, default_behavior, video.get("duration_sec")))
+            new_sels.insert(0, _new_annotation(None, default_tags, video.get("duration_sec")))
             set_selections(new_sels)
             set_state_val("review_is_blank", False)
             set_state_val("focus_new_species", True)
