@@ -4,6 +4,7 @@ from pathlib import Path
 from nicegui import run, ui
 
 from review_app.app.config import get_default_db_path, get_user_data_dir
+from review_app.app.pages.distribution import render_distribution_section
 from review_app.app.state import (
     get_active_project_id,
     get_blank_threshold,
@@ -18,8 +19,6 @@ from review_app.app.state import (
 )
 from review_app.app.translations import t
 from review_app.app.utils import get_or_create_data_provider, sync_with_progress
-
-from review_app.app.pages.distribution import render_distribution_section
 
 from .database import render_database_section
 from .species import render_species_section

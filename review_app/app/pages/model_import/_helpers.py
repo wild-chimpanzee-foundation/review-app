@@ -171,7 +171,7 @@ def auto_suggest_path_col(columns: list[str], sample: list[dict]) -> str:
     return columns[0] if columns else ""
 
 
-_PATH_COL_ALIASES = {"video_path", "path", "filepath", "review_filename", "original_filepath"}
+_PATH_COL_ALIASES = {"video_path", "filepath", "review_filename", "original_filepath"}
 
 
 def is_long_format(columns: list[str]) -> bool:

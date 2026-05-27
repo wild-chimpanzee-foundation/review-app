@@ -2,6 +2,7 @@ from nicegui import run, ui
 
 from review_app.app.pages.review.tags import _color_picker, _tag_label
 from review_app.app.translations import t
+from review_app.app.utils import user_error_message
 
 
 class TagsSection:
@@ -64,7 +65,7 @@ def _open_add_tag_dialog(section: TagsSection, all_tags: list) -> None:
         try:
             await run.io_bound(dp.create_custom_tag, name, state["color"], name_fr)
         except ValueError as exc:
-            ui.notify(str(exc), type="negative")
+            ui.notify(user_error_message(exc), type="negative")
             return
         finally:
             state["submitting"] = False

@@ -12,7 +12,7 @@ from nicegui import app, run, ui
 from review_app.app.config import get_default_db_path
 from review_app.app.state import get_language, set_language
 from review_app.app.translations import t
-from review_app.app.utils import format_utc_timestamp, sync_with_progress
+from review_app.app.utils import format_utc_timestamp, sync_with_progress, user_error_message
 
 FFMPEG_INSTALL_MAC = "brew install ffmpeg"
 FFMPEG_INSTALL_WINDOWS = "winget install ffmpeg OR download from https://ffmpeg.org/download.html"
@@ -426,8 +426,6 @@ class SetupWizard:
                         parts.append(entry)
                 bundle_summary = ", ".join(parts) if parts else "—"
             except Exception as exc:
-                from review_app.app.utils import user_error_message
-
                 ui.notify(t("bundle_error", msg=user_error_message(exc)), type="negative")
 
             with result_col:
@@ -714,8 +712,8 @@ class SetupWizard:
                             return
                         except Exception as exc:
                             if lbl:
-                                lbl.set_text(t("restore_failed", error=str(exc)))
-                            ui.notify(t("restore_failed", error=str(exc)), type="negative")
+                                lbl.set_text(t("restore_failed", error=user_error_message(exc)))
+                            ui.notify(t("restore_failed", error=user_error_message(exc)), type="negative")
                             return
 
                         try:
@@ -735,8 +733,8 @@ class SetupWizard:
                             set_media_dirs(all_dirs)
                         except Exception as exc:
                             if lbl:
-                                lbl.set_text(t("restore_failed", error=str(exc)))
-                            ui.notify(t("restore_failed", error=str(exc)), type="negative")
+                                lbl.set_text(t("restore_failed", error=user_error_message(exc)))
+                            ui.notify(t("restore_failed", error=user_error_message(exc)), type="negative")
                             ui.navigate.to("/db-error")
                             return
 
