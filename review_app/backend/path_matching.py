@@ -42,6 +42,8 @@ def build_video_path_lookup(
     cam_by_id: dict[str, str] = {}
     by_filename_lists: dict[str, list[str]] = {}
 
+    legacy_suffix_lists: dict[str, list[str]] = {}
+
     for vid, video_path, camera_id in video_rows:
         p = Path(video_path)
         cam_lower = (camera_id or "").lower()
@@ -64,9 +66,9 @@ def build_video_path_lookup(
             except ValueError:
                 continue
 
-        # Legacy parent_dir/name fallback
-        by_suffix[f"{p.parent.name}/{p.name}".lower()] = vid
-        by_suffix[f"{p.parent.name}/{p.stem}".lower()] = vid
+        # Legacy parent_dir/name fallback — collect first, add only if unambiguous
+        legacy_suffix_lists.setdefault(f"{p.parent.name}/{p.name}".lower(), []).append(vid)
+        legacy_suffix_lists.setdefault(f"{p.parent.name}/{p.stem}".lower(), []).append(vid)
 
         # Camera-aware stem lookup (replaces the old by_stem)
         stem = p.stem.lower()
@@ -76,6 +78,11 @@ def build_video_path_lookup(
     for key, vid in cam_stem_to_id.items():
         if cam_stem_count[key] == 1:
             by_suffix.setdefault(key, vid)
+
+    # Only add legacy parent/name entries when they're unambiguous across all DB videos
+    for key, vids in legacy_suffix_lists.items():
+        if len(vids) == 1:
+            by_suffix.setdefault(key, vids[0])
 
     by_filename = {k: v[0] for k, v in by_filename_lists.items() if len(v) == 1}
 
@@ -114,14 +121,17 @@ def resolve_video_path(
         if vid:
             return vid, "suffix"
 
-    vid = (
-        lookup.by_suffix.get(raw_lower)
-        or lookup.by_suffix.get(str(p.with_suffix("")).lower())
-        or lookup.by_suffix.get(f"{p.parent.name}/{p.name}".lower())
-        or lookup.by_suffix.get(f"{p.parent.name}/{p.stem}".lower())
-    )
-    if vid:
-        return vid, "suffix"
+    # Try full path first, then progressively shorter suffixes (longest = most specific first).
+    # This ensures e.g. "CamA/DCIM/100EK113/file.mp4" is preferred over the ambiguous
+    # short fallback "100EK113/file.mp4" when two cameras share the same sub-folder structure.
+    parts = p.parts
+    for i in range(len(parts)):
+        suffix_str = str(Path(*parts[i:])).lower() if i > 0 else raw_lower
+        vid = lookup.by_suffix.get(suffix_str) or lookup.by_suffix.get(
+            str(Path(*parts[i:]).with_suffix("")).lower()
+        )
+        if vid:
+            return vid, "suffix"
 
     # Camera-aware stem fallback: require camera folder substring match
     stem = p.stem.lower()
