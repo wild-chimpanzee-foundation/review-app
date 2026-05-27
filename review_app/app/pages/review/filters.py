@@ -10,10 +10,8 @@ from review_app.app.state import (
     get_species_threshold,
     is_auto_transcode,
     is_autoplay,
-    is_muted,
     set_auto_transcode,
     set_autoplay,
-    set_muted,
     set_queue,
     update_filters,
 )
@@ -371,14 +369,6 @@ async def render_filter_drawer_body(page):
                 value=is_autoplay(),
                 on_change=lambda e: (
                     set_autoplay(e.value),
-                    page.render_video_section.refresh(),
-                ),
-            )
-            ui.checkbox(
-                t("muted"),
-                value=is_muted(),
-                on_change=lambda e: (
-                    set_muted(e.value),
                     page.render_video_section.refresh(),
                 ),
             )
