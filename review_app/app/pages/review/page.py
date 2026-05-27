@@ -293,7 +293,6 @@ def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
 
 async def _render_video_section_body(page: ReviewPage):
     dp = page.dp
-    global_species_map = page.global_species_map
     queue = get_queue()
     if not queue:
         _render_no_videos_match()
@@ -417,141 +416,139 @@ async def _render_video_section_body(page: ReviewPage):
             next_btn._props["data-shortcut"] = "next"
 
     with ui.column().classes("w-full").style("max-width: 1280px"):
-            with ui.card().classes("full-width q-mb-md"):
-                if video.get("needs_transcode"):
-                    attempted = set(get_state_val("transcode_attempted_ids", []))
-                    if selected_video_id not in attempted and is_auto_transcode():
-                        attempted.add(selected_video_id)
-                        set_state_val("transcode_attempted_ids", list(attempted))
-                        ui.label(t("transcoding_video")).classes("text-body2 q-mb-sm")
-                        result = await run.io_bound(dp.transcode_video, selected_video_id)
-                        if result.get("success"):
-                            ui.notify(t("video_transcoded"), type="positive")
-                            page.render_video_section.refresh()
-                            return
-                        ui.label(
-                            t("transcode_failed", error=result.get("error", "unknown error"))
-                        ).classes("text-negative text-caption q-mb-sm")
+        with ui.card().classes("full-width q-mb-md"):
+            if video.get("needs_transcode"):
+                attempted = set(get_state_val("transcode_attempted_ids", []))
+                if selected_video_id not in attempted and is_auto_transcode():
+                    attempted.add(selected_video_id)
+                    set_state_val("transcode_attempted_ids", list(attempted))
+                    ui.label(t("transcoding_video")).classes("text-body2 q-mb-sm")
+                    result = await run.io_bound(dp.transcode_video, selected_video_id)
+                    if result.get("success"):
+                        ui.notify(t("video_transcoded"), type="positive")
+                        page.render_video_section.refresh()
+                        return
+                    ui.label(
+                        t("transcode_failed", error=result.get("error", "unknown error"))
+                    ).classes("text-negative text-caption q-mb-sm")
 
-                    async def retry_transcode():
-                        result = await run.io_bound(dp.transcode_video, selected_video_id)
-                        if result.get("success"):
-                            ui.notify(t("video_transcoded"), type="positive")
-                            page.render_video_section.refresh()
-                        else:
-                            ui.notify(
-                                t("transcode_failed", error=result.get("error", "unknown error")),
-                                type="negative",
-                            )
-
-                    ui.button(
-                        t("transcode_for_playback"),
-                        icon="movie",
-                        color="primary",
-                        on_click=retry_transcode,
-                    )
-                elif video.get("video_path"):
-                    # Transcoded sidecars live in the system temp dir, served via /transcoded
-                    transcoded_str = video.get("transcoded_path")
-                    transcoded_path = Path(transcoded_str) if transcoded_str else None
-
-                    if transcoded_path and transcoded_path.exists():
-                        video_url = f"/transcoded/{quote(transcoded_path.name)}"
+                async def retry_transcode():
+                    result = await run.io_bound(dp.transcode_video, selected_video_id)
+                    if result.get("success"):
+                        ui.notify(t("video_transcoded"), type="positive")
+                        page.render_video_section.refresh()
                     else:
-                        serve_path = Path(video["video_path"])
-                        if serve_path.exists():
-                            video_url = None
-                            for _base in [
-                                Path(d.path) for d in dp.get_project_dirs(get_active_project_id())
-                            ]:
-                                try:
-                                    rel_path = serve_path.relative_to(_base)
-                                    video_url = f"/media/{quote(str(rel_path), safe='/')}"
-                                    break
-                                except ValueError:
-                                    continue
-                            if video_url is None:
-                                ui.label(t("video_outside_media")).classes("text-negative")
-                        else:
-                            ui.label(t("video_not_found", path=video["video_path"])).classes(
-                                "text-negative"
-                            )
-                            video_url = None
-
-                    if video_url:
-                        render_custom_video_player(
-                            video_url, video.get("duration_sec") or 0, str(uuid.uuid4())
+                        ui.notify(
+                            t("transcode_failed", error=result.get("error", "unknown error")),
+                            type="negative",
                         )
-                else:
-                    ui.label(t("no_video_path"))
 
-                if not video.get("is_video_valid", True):
-                    _err = video.get("video_validation_details", "Unknown error")
-                    logger.warning(
-                        "Displaying invalid video %s: %s",
-                        video.get("video_path", "<unknown>"),
-                        _err,
-                    )
-                    ui.label(t("video_validation_failed", error=_err)).classes(
-                        "text-negative text-caption q-mt-sm"
-                    )
+                ui.button(
+                    t("transcode_for_playback"),
+                    icon="movie",
+                    color="primary",
+                    on_click=retry_transcode,
+                )
+            elif video.get("video_path"):
+                # Transcoded sidecars live in the system temp dir, served via /transcoded
+                transcoded_str = video.get("transcoded_path")
+                transcoded_path = Path(transcoded_str) if transcoded_str else None
 
-                _meta_parts = []
-                _missing_parts = []
-                _created = video.get("created_at")
-                if _created:
-                    try:
-                        _created_str = str(_created)[:16].replace("T", " ")
-                        _meta_parts.append(f"{t('video_created_at')}: {_created_str}")
-                    except Exception:
-                        _missing_parts.append(t("video_created_at"))
+                if transcoded_path and transcoded_path.exists():
+                    video_url = f"/transcoded/{quote(transcoded_path.name)}"
                 else:
+                    serve_path = Path(video["video_path"])
+                    if serve_path.exists():
+                        video_url = None
+                        for _base in [
+                            Path(d.path) for d in dp.get_project_dirs(get_active_project_id())
+                        ]:
+                            try:
+                                rel_path = serve_path.relative_to(_base)
+                                video_url = f"/media/{quote(str(rel_path), safe='/')}"
+                                break
+                            except ValueError:
+                                continue
+                        if video_url is None:
+                            ui.label(t("video_outside_media")).classes("text-negative")
+                    else:
+                        ui.label(t("video_not_found", path=video["video_path"])).classes(
+                            "text-negative"
+                        )
+                        video_url = None
+
+                if video_url:
+                    render_custom_video_player(
+                        video_url, video.get("duration_sec") or 0, str(uuid.uuid4())
+                    )
+            else:
+                ui.label(t("no_video_path"))
+
+            if not video.get("is_video_valid", True):
+                _err = video.get("video_validation_details", "Unknown error")
+                logger.warning(
+                    "Displaying invalid video %s: %s",
+                    video.get("video_path", "<unknown>"),
+                    _err,
+                )
+                ui.label(t("video_validation_failed", error=_err)).classes(
+                    "text-negative text-caption q-mt-sm"
+                )
+
+            _meta_parts = []
+            _missing_parts = []
+            _created = video.get("created_at")
+            if _created:
+                try:
+                    _created_str = str(_created)[:16].replace("T", " ")
+                    _meta_parts.append(f"{t('video_created_at')}: {_created_str}")
+                except Exception:
                     _missing_parts.append(t("video_created_at"))
-                _lat = video.get("latitude")
-                _lon = video.get("longitude")
-                _has_location = _lat is not None and _lon is not None
-                if not _has_location:
-                    _missing_parts.append(t("video_location"))
-                with ui.row().classes("items-center gap-xs q-mt-xs"):
-                    if _meta_parts:
-                        ui.label("  ·  ".join(_meta_parts)).classes("text-caption")
-                    if _has_location:
+            else:
+                _missing_parts.append(t("video_created_at"))
+            _lat = video.get("latitude")
+            _lon = video.get("longitude")
+            _has_location = _lat is not None and _lon is not None
+            if not _has_location:
+                _missing_parts.append(t("video_location"))
+            with ui.row().classes("items-center gap-xs q-mt-xs"):
+                if _meta_parts:
+                    ui.label("  ·  ".join(_meta_parts)).classes("text-caption")
+                if _has_location:
 
-                        def _open_map(lat=_lat, lon=_lon):
-                            from review_app.app.components.location_map import (
-                                MapMarker,
-                                render_location_map,
-                            )
-
-                            with (
-                                ui.dialog().props("maximized=false") as dlg,
-                                ui.card()
-                                .classes("q-pa-md")
-                                .style("min-width:480px; min-height:360px"),
-                            ):
-                                with ui.row().classes(
-                                    "items-center justify-between w-full q-mb-sm"
-                                ):
-                                    ui.label(t("video_location")).classes(
-                                        "text-subtitle2 font-weight-medium"
-                                    )
-                                    ui.button(icon="close", on_click=dlg.close).props(
-                                        "flat round dense"
-                                    )
-                                render_location_map([MapMarker(lat=lat, lon=lon)], height="320px")
-                            dlg.open()
-
-                        ui.label(f"{t('video_location')}: {_lat:.5f}, {_lon:.5f}").classes(
-                            "text-caption text-primary cursor-pointer"
-                        ).on("click", _open_map).tooltip(t("click_to_view_map"))
-                    if _missing_parts:
-                        ui.label(
-                            t("video_metadata_missing", fields=", ".join(_missing_parts))
-                        ).classes("text-caption text-grey-6").tooltip(
-                            t("video_metadata_missing_tooltip")
+                    def _open_map(lat=_lat, lon=_lon):
+                        from review_app.app.components.location_map import (
+                            MapMarker,
+                            render_location_map,
                         )
-                ui.separator().classes("q-my-xs")
-                await render_video_tags(selected_video_id, dp, get_annotator_name())
+
+                        with (
+                            ui.dialog().props("maximized=false") as dlg,
+                            ui.card()
+                            .classes("q-pa-md")
+                            .style("min-width:480px; min-height:360px"),
+                        ):
+                            with ui.row().classes("items-center justify-between w-full q-mb-sm"):
+                                ui.label(t("video_location")).classes(
+                                    "text-subtitle2 font-weight-medium"
+                                )
+                                ui.button(icon="close", on_click=dlg.close).props(
+                                    "flat round dense"
+                                )
+                            render_location_map([MapMarker(lat=lat, lon=lon)], height="320px")
+                        dlg.open()
+
+                    ui.label(f"{t('video_location')}: {_lat:.5f}, {_lon:.5f}").classes(
+                        "text-caption text-primary cursor-pointer"
+                    ).on("click", _open_map).tooltip(t("click_to_view_map"))
+                if _missing_parts:
+                    ui.label(
+                        t("video_metadata_missing", fields=", ".join(_missing_parts))
+                    ).classes("text-caption text-grey-6").tooltip(
+                        t("video_metadata_missing_tooltip")
+                    )
+            ui.separator().classes("q-my-xs")
+            await render_video_tags(selected_video_id, dp, get_annotator_name())
 
 
 def _render_annotation_sidebar_body(page: ReviewPage):
@@ -604,9 +601,7 @@ def _render_annotation_sidebar_body(page: ReviewPage):
                     icon="bookmark" if is_review_later else "bookmark_border",
                     on_click=toggle_review_later,
                 )
-                .props(
-                    f"flat round dense {'color=orange' if is_review_later else 'color=grey-6'}"
-                )
+                .props(f"flat round dense {'color=orange' if is_review_later else 'color=grey-6'}")
                 .classes("tour-target-review-later")
                 .tooltip(t("review_later"))
             )
@@ -715,8 +710,10 @@ async def setup_review():
     with left_drawer:
         await page.render_filter_drawer()
 
-    right_drawer = ui.right_drawer(value=True).props("behavior=desktop width=520").classes(
-        "q-pa-sm review-sidebar"
+    right_drawer = (
+        ui.right_drawer(value=True)
+        .props("behavior=desktop width=520")
+        .classes("q-pa-sm review-sidebar")
     )
     with right_drawer:
         page.render_annotation_sidebar()
