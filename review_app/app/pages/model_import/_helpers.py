@@ -207,7 +207,9 @@ def render_species_mappings(
         with ui.row().classes("w-full items-center q-mb-sm"):
             count = species_counts.get(orig) if species_counts else None
             count_suffix = f" ({count})" if count is not None else ""
-            ui.label(f"{orig}{count_suffix}").classes(f"col {'text-negative' if is_unmapped else ''}")
+            ui.label(f"{orig}{count_suffix}").classes(
+                f"col {'text-negative' if is_unmapped else ''}"
+            )
             safe_value = current_mapping if current_mapping in select_options else ""
             select = ui.select(
                 label=t("mapped_to"),

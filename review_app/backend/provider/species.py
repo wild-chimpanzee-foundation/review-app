@@ -523,9 +523,7 @@ class SpeciesMixin(ProviderBase):
     def get_behavior_display_map(self, lang: str = "en", **_kwargs) -> dict[str, str]:
         col = {"en": "name_en", "fr": "name_fr"}.get(lang, "name_en")
         with self.engine.connect() as conn:
-            rows = conn.execute(
-                text(f"SELECT key, {col} FROM behaviors ORDER BY key")
-            ).fetchall()
+            rows = conn.execute(text(f"SELECT key, {col} FROM behaviors ORDER BY key")).fetchall()
         return {key: name or key for key, name in rows}
 
     def get_project_species(self, project_id: str) -> list[str]:

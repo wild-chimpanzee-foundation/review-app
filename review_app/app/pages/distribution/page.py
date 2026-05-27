@@ -256,9 +256,7 @@ def render_distribution_section(dp, project_id: str) -> None:
         _vz_selected: set[str] = set(_vz_annotators)
 
         if _vz_annotators:
-            ui.label(t("video_zip_annotators_label")).classes(
-                "text-caption text-grey-6 q-mb-xs"
-            )
+            ui.label(t("video_zip_annotators_label")).classes("text-caption text-grey-6 q-mb-xs")
 
             @ui.refreshable
             def render_vz_chips():
@@ -306,9 +304,7 @@ def render_distribution_section(dp, project_id: str) -> None:
             with progress_dialog, ui.card().classes("q-pa-lg").style("min-width: 420px"):
                 ui.label(t("video_zip_title")).classes("text-h6 q-mb-md")
                 count_label = ui.label("0 / … files").classes("text-body2 q-mb-xs")
-                progress_bar = ui.linear_progress(value=0, show_value=False).props(
-                    "color=primary"
-                )
+                progress_bar = ui.linear_progress(value=0, show_value=False).props("color=primary")
             progress_dialog.open()
             await ui.context.client.connected()
 
@@ -331,17 +327,13 @@ def render_distribution_section(dp, project_id: str) -> None:
                 return
 
             progress_dialog.clear()
-            out_dir = (
-                str(__import__("pathlib").Path(results[0]["path"]).parent) if results else ""
-            )
+            out_dir = str(__import__("pathlib").Path(results[0]["path"]).parent) if results else ""
             with (
                 progress_dialog,
                 ui.card().classes("q-pa-lg items-center gap-md").style("min-width: 420px"),
             ):
                 ui.icon("check_circle", size="lg").classes("text-positive")
-                ui.label(t("video_zip_done", n=len(results), path=out_dir)).classes(
-                    "text-body1"
-                )
+                ui.label(t("video_zip_done", n=len(results), path=out_dir)).classes("text-body1")
                 ui.button(t("close"), on_click=progress_dialog.close, color="primary").classes(
                     "full-width"
                 )
@@ -364,9 +356,7 @@ def render_distribution_section(dp, project_id: str) -> None:
             try:
                 content = (await e.file.read()).decode("utf-8")
                 df = pd.read_csv(io.StringIO(content))
-                result = await run.io_bound(
-                    dp.import_annotations_csv, df, project_id, "append"
-                )
+                result = await run.io_bound(dp.import_annotations_csv, df, project_id, "append")
                 _batch_state["total_imported"] += result.get("imported", 0)
                 _batch_state["total_skipped"] += len(result.get("skipped", []))
                 _batch_state["file_count"] += 1

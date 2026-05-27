@@ -244,9 +244,7 @@ def shared_header(show_drawer: bool = False):
                             _update_btn.tooltip(t("update_tooltip", version=tag.lstrip("v")))
                             _update_btn.on(
                                 "click",
-                                lambda u=url: ui.run_javascript(
-                                    f"window.open('{u}', '_blank')"
-                                ),
+                                lambda u=url: ui.run_javascript(f"window.open('{u}', '_blank')"),
                             )
                             _update_btn.classes(remove="hidden")
                     except Exception:

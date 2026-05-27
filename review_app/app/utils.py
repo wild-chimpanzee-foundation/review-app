@@ -59,7 +59,8 @@ async def sync_with_progress(
             total = sync_progress["total"]
             current = sync_progress["current"]
             filename = sync_progress["filename"]
-            if total > 0:
+            if total > 0 and current > 0:
+                progress.props(remove="indeterminate")
                 progress.value = current / total
                 status.text = t("sync_processing", current=current, total=total, filename=filename)
             elif filename:
@@ -67,6 +68,7 @@ async def sync_with_progress(
         await asyncio.sleep(0.15)
 
     if progress is not None:
+        progress.props(remove="indeterminate")
         progress.value = 1.0
     if status is not None:
         status.text = t("sync_complete")

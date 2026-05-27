@@ -332,9 +332,16 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             all_species = set(all_mappings.keys()) | unmapped_origs
 
             uploaded_df_for_counts = get_df_from_state("uploaded_df")
-            if uploaded_df_for_counts is not None and "value_text" in uploaded_df_for_counts.columns:
-                sp_mask = uploaded_df_for_counts["annotation_type"].isin({"species", "object_detection"})
-                species_counts = uploaded_df_for_counts.loc[sp_mask, "value_text"].value_counts().to_dict()
+            if (
+                uploaded_df_for_counts is not None
+                and "value_text" in uploaded_df_for_counts.columns
+            ):
+                sp_mask = uploaded_df_for_counts["annotation_type"].isin(
+                    {"species", "object_detection"}
+                )
+                species_counts = (
+                    uploaded_df_for_counts.loc[sp_mask, "value_text"].value_counts().to_dict()
+                )
             else:
                 species_counts = {}
 

@@ -385,7 +385,7 @@ class SetupWizard:
             dialog = ui.dialog().props("persistent")
             with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
                 ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
-                progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
+                progress = ui.linear_progress(show_value=False).props("indeterminate color=primary")
                 status = ui.label(t("starting")).classes("text-caption text-grey-6 q-mt-sm")
                 result_col = ui.column().classes("w-full q-mt-md gap-sm")
                 result_col.visible = False
@@ -713,7 +713,9 @@ class SetupWizard:
                         except Exception as exc:
                             if lbl:
                                 lbl.set_text(t("restore_failed", error=user_error_message(exc)))
-                            ui.notify(t("restore_failed", error=user_error_message(exc)), type="negative")
+                            ui.notify(
+                                t("restore_failed", error=user_error_message(exc)), type="negative"
+                            )
                             return
 
                         try:
@@ -734,7 +736,9 @@ class SetupWizard:
                         except Exception as exc:
                             if lbl:
                                 lbl.set_text(t("restore_failed", error=user_error_message(exc)))
-                            ui.notify(t("restore_failed", error=user_error_message(exc)), type="negative")
+                            ui.notify(
+                                t("restore_failed", error=user_error_message(exc)), type="negative"
+                            )
                             ui.navigate.to("/db-error")
                             return
 

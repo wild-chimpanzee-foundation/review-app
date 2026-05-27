@@ -129,8 +129,8 @@ def _build_settings_content(container: ui.column):
                     dir_sync_dialog.clear()
                     with dir_sync_dialog, ui.card().classes("q-pa-lg").style("min-width: 360px"):
                         ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
-                        progress = ui.linear_progress(value=0, show_value=False).props(
-                            "color=primary"
+                        progress = ui.linear_progress(show_value=False).props(
+                            "indeterminate color=primary"
                         )
                         status = ui.label(t("starting"))
                     dir_sync_dialog.open()

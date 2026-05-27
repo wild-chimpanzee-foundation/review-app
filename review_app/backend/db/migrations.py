@@ -442,7 +442,9 @@ def _migration_v18(conn) -> None:
             )
         )
 
-    io_cols = {r[1] for r in conn.execute(text("PRAGMA table_info(individual_observations)")).fetchall()}
+    io_cols = {
+        r[1] for r in conn.execute(text("PRAGMA table_info(individual_observations)")).fetchall()
+    }
     if "behavior_id" in io_cols:
         # Migrate: copy non-"does_not_react" behavior_id rows to observation_tags
         does_not_react_id = conn.execute(

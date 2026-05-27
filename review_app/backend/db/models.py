@@ -43,7 +43,6 @@ class Project(Base):
     )
 
 
-
 class ProjectDir(Base):
     __tablename__ = "project_dirs"
     __table_args__ = (UniqueConstraint("project_id", "path", name="uq_project_dir"),)
