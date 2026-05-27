@@ -50,6 +50,16 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Sync version from tag
+        shell: bash
+        run: |
+          TAG="${{ steps.vars.outputs.tag || github.event.inputs.tag || '' }}"
+          if [[ "$TAG" =~ ^v ]]; then
+            VERSION="${TAG#v}"
+            sed -i "s/__version__ = \".*\"/__version__ = \"${VERSION}\"/" review_app/__init__.py
+            echo "Set __version__ = ${VERSION}"
+          fi
+
       - name: Build with PyInstaller
         shell: bash
         run: uv run pyinstaller video_annotation.spec --clean

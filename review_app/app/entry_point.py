@@ -226,6 +226,34 @@ def shared_header(show_drawer: bool = False):
             ui.space()
 
             with ui.row().classes("gap-2 items-center q-ml-md"):
+                _update_btn = (
+                    ui.button(icon="system_update_alt")
+                    .props("flat round color=amber-4")
+                    .classes("hidden")
+                )
+
+                async def _check_update():
+                    from nicegui import run
+
+                    from review_app.app.update_checker import check_for_update
+
+                    try:
+                        result = await run.io_bound(check_for_update)
+                        if result:
+                            tag, url = result
+                            _update_btn.tooltip(t("update_tooltip", version=tag.lstrip("v")))
+                            _update_btn.on(
+                                "click",
+                                lambda u=url: ui.run_javascript(
+                                    f"window.open('{u}', '_blank')"
+                                ),
+                            )
+                            _update_btn.classes(remove="hidden")
+                    except Exception:
+                        pass
+
+                ui.timer(0, _check_update, once=True)
+
                 ui.select(
                     options={"en": t("lang_en"), "fr": t("lang_fr")},
                     value=get_language(),

@@ -1,4 +1,4 @@
-.PHONY: test coverage lint format run build ci changelog
+.PHONY: test coverage lint format run build ci changelog bump release
 
 ci:
 	uv run ruff check review_app/ tests/
@@ -28,3 +28,18 @@ build:
 
 changelog:
 	uvx git-cliff --unreleased
+
+bump:
+	$(eval VERSION ?= $(shell uvx git-cliff --bumped-version 2>/dev/null | sed 's/^v//'))
+	@[ -n "$(VERSION)" ] || (echo "Could not determine next version from commits" && exit 1)
+	sed -i 's/__version__ = ".*"/__version__ = "$(VERSION)"/' review_app/__init__.py
+	@echo "Version bumped to $(VERSION)"
+
+release:
+	$(eval VERSION ?= $(shell uvx git-cliff --bumped-version 2>/dev/null | sed 's/^v//'))
+	@[ -n "$(VERSION)" ] || (echo "Could not determine next version from commits" && exit 1)
+	sed -i 's/__version__ = ".*"/__version__ = "$(VERSION)"/' review_app/__init__.py
+	git add review_app/__init__.py
+	git commit -m "release $(VERSION)"
+	git tag "v$(VERSION)"
+	@echo "Tagged v$(VERSION) — push with: git push && git push --tags"

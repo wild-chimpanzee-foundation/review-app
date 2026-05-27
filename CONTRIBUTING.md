@@ -42,6 +42,8 @@ uv run python -m review_app.app.entry_point --dev
 | `make format` | Auto-format with ruff |
 | `make ci` | Lint + format check + tests (mirrors CI) |
 | `make build` | Build standalone executable via PyInstaller |
+| `make bump` | Bump version based on conventional commits since last tag |
+| `make release` | Bump version, commit, and tag — ready to push |
 
 ## Tests
 
@@ -104,6 +106,8 @@ Pre-commit hooks enforce both on every commit. Run `make ci` before pushing to c
 
 ## Building a release
 
+The project uses [semantic versioning](https://semver.org/): `MAJOR.MINOR.PATCH`, with pre-releases as `1.0.0-beta.1`, `1.0.0-rc.1`, etc.
+
 Commit messages must follow [conventional commits](https://www.conventionalcommits.org/) — the format is enforced by the commit-msg hook and used to auto-generate changelogs:
 
 ```
@@ -114,12 +118,29 @@ refactor: extract col_val helper
 
 Types that appear in the changelog: `feat`, `fix`, `refactor`, `perf`, `docs`. Types that are valid but hidden: `chore`, `test`, `ci`, `build`.
 
-Push a version tag — GitHub Actions builds executables for Linux, Windows, and macOS, generates a changelog, and attaches everything to a release:
+### Release steps
+
+The next version is inferred automatically from conventional commits since the last tag: any `feat:` → minor bump, `fix:`/others → patch bump, breaking change (`!` or `BREAKING CHANGE:` footer) → major bump.
 
 ```bash
-git tag v1.2.0
-git push origin v1.2.0
+# Preview what the next version will be and what's going into the changelog
+uvx git-cliff --bumped-version
+make changelog
+
+# Bump, commit, and tag in one step
+make release
+
+# Push — CI handles the rest
+git push && git push --tags
 ```
+
+To override the version (e.g. for a planned major release):
+
+```bash
+make release VERSION=2.0.0
+```
+
+GitHub Actions builds executables for Linux, Windows, and macOS, generates a changelog from commits since the last tag, and attaches everything to a GitHub Release. Tags containing `beta`, `alpha`, or `rc` are automatically marked as pre-releases.
 
 To preview the changelog for the upcoming release locally:
 
