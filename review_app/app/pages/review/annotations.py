@@ -265,9 +265,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                     def step_count(idx, delta, c=ct):
                         new_sels = get_selections()
                         if 0 <= idx < len(new_sels):
-                            new_count = max(
-                                1, min(11, (new_sels[idx].get("count") or 1) + delta)
-                            )
+                            new_count = max(1, min(11, (new_sels[idx].get("count") or 1) + delta))
                             new_sels[idx] = {**new_sels[idx], "count": new_count}
                             set_selections(new_sels)
                             c.value = new_count
