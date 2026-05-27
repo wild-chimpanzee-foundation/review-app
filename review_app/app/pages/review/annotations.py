@@ -348,7 +348,17 @@ def render_annotation_section_body(page, video, default_species, default_tags):
         if not queue:
             set_current_idx(0)
         elif current_video_id in queue:
-            set_current_idx(min(queue.index(current_video_id) + 1, len(queue) - 1))
+            current_pos = queue.index(current_video_id)
+            if current_pos == len(queue) - 1:
+                ui.notify(
+                    t("queue_complete"),
+                    type="warning",
+                    position="center",
+                    multi_line=True,
+                    timeout=6000,
+                    classes="text-h6 text-center",
+                )
+            set_current_idx(min(current_pos + 1, len(queue) - 1))
         else:
             set_current_idx(max(0, min(prev_idx + 1, len(queue) - 1)))
 
