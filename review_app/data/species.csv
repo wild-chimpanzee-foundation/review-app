@@ -315,5 +315,5 @@ truck_stationary;Camion à l'arrêt;Objet à l'arrêt;NA;Truck (stationary);Obje
 boat_stationary;Bateau à l'arrêt;Objet à l'arrêt;NA;Boat (stationary);Object Stationary;y;y;y
 train_stationary;Train à l'arrêt;Objet à l'arrêt;NA;Train (stationary);Object Stationary;y;y;y
 airplane_stationary;Avion à l'arrêt;Objet à l'arrêt;NA;Airplane (stationary);Object Stationary;y;y;y
-person_moving;Personne en mouvement;Objet en mouvement;NA;Person (moving);Object Moving;y;y;y
-person_stationary;Personne à l'arrêt;Objet à l'arrêt;NA;Person (stationary);Object Stationary;y;y;y
+construction_vehicle_moving;Engin de chantier en mouvement;Objet en mouvement;NA;Construction Vehicle (moving);Object Moving;y;y;y
+construction_vehicle_stationary;Engin de chantier à l'arrêt;Objet à l'arrêt;NA;Construction Vehicle (stationary);Object Stationary;y;y;y
