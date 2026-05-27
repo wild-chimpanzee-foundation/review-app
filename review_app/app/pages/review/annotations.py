@@ -174,172 +174,169 @@ def render_annotation_section_body(page, video, default_species, default_tags):
             set_state_val("focus_new_species", True)
             page.render_annotation_section.refresh()
 
-        with ui.element("div").style(
-            "overflow-y: auto; overflow-x: hidden; max-height: calc(100vh - 360px); width: 100%;"
-        ):
-            with ui.row().classes("w-full justify-center q-mb-xs"):
-                with (
-                    ui.button(on_click=add_species)
-                    .props("size=md color=primary outline")
-                    .style("border-style: dashed") as add_species_btn
-                ):
-                    with ui.row().classes("items-center justify-between w-full q-px-xs"):
-                        with ui.row().classes("items-center gap-xs col justify-center"):
-                            ui.icon("add", size="sm")
-                            ui.label(t("add_species"))
-                        _shortcut_badge("A")
-                add_species_btn._props["data-shortcut"] = "add-species"
-            for i, sel in enumerate(selections):
-                ann_card = (
-                    ui.card()
-                    .classes("full-width q-pa-md q-mb-sm")
-                    .style("border: 2px solid var(--q-primary)")
+        with ui.row().classes("w-full justify-center q-mb-xs"):
+            with (
+                ui.button(on_click=add_species)
+                .props("size=md color=primary outline")
+                .style("border-style: dashed") as add_species_btn
+            ):
+                with ui.row().classes("items-center justify-between w-full q-px-xs"):
+                    with ui.row().classes("items-center gap-xs col justify-center"):
+                        ui.icon("add", size="sm")
+                        ui.label(t("add_species"))
+                    _shortcut_badge("A")
+            add_species_btn._props["data-shortcut"] = "add-species"
+        for i, sel in enumerate(selections):
+            ann_card = (
+                ui.card()
+                .classes("full-width q-pa-md q-mb-sm")
+                .style("border: 2px solid var(--q-primary)")
+            )
+            ann_card._props["data-annotation-idx"] = str(i)
+            with ann_card:
+                behaviors_map = dp.get_behavior_display_map(lang=get_language())
+                sp_value = sel["species"] if sel["species"] in species_map else None
+                current_tags = sel.get("tags") or []
+                # Filter to only tags that exist in the global behaviors map
+                bp_value = [k for k in current_tags if k in behaviors_map]
+                group_options = _build_group_options(species_groups)
+                initial_group = species_groups.get(sp_value, "") if sp_value else ""
+                filtered_species = _filter_species_by_group(
+                    species_map, species_groups, initial_group
                 )
-                ann_card._props["data-annotation-idx"] = str(i)
-                with ann_card:
-                    behaviors_map = dp.get_behavior_display_map(lang=get_language())
-                    sp_value = sel["species"] if sel["species"] in species_map else None
-                    current_tags = sel.get("tags") or []
-                    # Filter to only tags that exist in the global behaviors map
-                    bp_value = [k for k in current_tags if k in behaviors_map]
-                    group_options = _build_group_options(species_groups)
-                    initial_group = species_groups.get(sp_value, "") if sp_value else ""
-                    filtered_species = _filter_species_by_group(
-                        species_map, species_groups, initial_group
+
+                with ui.row().classes("w-full gap-sm items-center"):
+                    gp = (
+                        ui.select(
+                            label=t("group_label"),
+                            options=group_options,
+                            value=initial_group,
+                            with_input=True,
+                        )
+                        .props("outlined dense clearable")
+                        .classes("col")
                     )
 
-                    with ui.row().classes("w-full gap-sm items-center"):
-                        gp = (
-                            ui.select(
-                                label=t("group_label"),
-                                options=group_options,
-                                value=initial_group,
-                                with_input=True,
-                            )
-                            .props("outlined dense clearable")
-                            .classes("col")
+                with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
+                    sp = (
+                        ui.select(
+                            label=t("species_label"),
+                            options=filtered_species,
+                            value=sp_value,
+                            with_input=True,
                         )
+                        .props("outlined dense")
+                        .classes("col")
+                    )
+                    if i == 0 and get_state_val("focus_new_species"):
+                        set_state_val("focus_new_species", False)
+                        sp.run_method("focus")
 
-                    with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
-                        sp = (
-                            ui.select(
-                                label=t("species_label"),
-                                options=filtered_species,
-                                value=sp_value,
-                                with_input=True,
-                            )
-                            .props("outlined dense")
-                            .classes("col")
+                with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
+                    bp = (
+                        ui.select(
+                            label=t("behavior_label"),
+                            options=behaviors_map,
+                            value=bp_value,
+                            multiple=True,
+                            with_input=True,
                         )
-                        if i == 0 and get_state_val("focus_new_species"):
-                            set_state_val("focus_new_species", False)
-                            sp.run_method("focus")
+                        .props("outlined dense use-chips")
+                        .style("flex: 2; min-width: 120px;")
+                    )
 
-                    with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
-                        bp = (
-                            ui.select(
-                                label=t("behavior_label"),
-                                options=behaviors_map,
-                                value=bp_value,
-                                multiple=True,
-                                with_input=True,
-                            )
-                            .props("outlined dense use-chips")
-                            .style("flex: 2; min-width: 120px;")
+                current_count = min(sel.get("count") or 1, 11)
+                count_options = {i: str(i) for i in range(1, 11)}
+                count_options[11] = ">10"
+                with ui.row().classes("items-center gap-xs q-mt-sm w-full"):
+                    ct = (
+                        ui.select(
+                            label=t("count_label"),
+                            options=count_options,
+                            value=current_count,
                         )
+                        .props("outlined dense")
+                        .classes("col")
+                    )
+                    if i == 0 and get_state_val("focus_new_count"):
+                        set_state_val("focus_new_count", False)
+                        ct.run_method("focus")
 
-                    current_count = min(sel.get("count") or 1, 11)
-                    count_options = {i: str(i) for i in range(1, 11)}
-                    count_options[11] = ">10"
-                    with ui.row().classes("items-center gap-xs q-mt-sm w-full"):
-                        ct = (
-                            ui.select(
-                                label=t("count_label"),
-                                options=count_options,
-                                value=current_count,
-                            )
-                            .props("outlined dense")
-                            .classes("col")
-                        )
-                        if i == 0 and get_state_val("focus_new_count"):
-                            set_state_val("focus_new_count", False)
-                            ct.run_method("focus")
-
-                        def step_count(idx, delta, c=ct):
-                            new_sels = get_selections()
-                            if 0 <= idx < len(new_sels):
-                                new_count = max(
-                                    1, min(11, (new_sels[idx].get("count") or 1) + delta)
-                                )
-                                new_sels[idx] = {**new_sels[idx], "count": new_count}
-                                set_selections(new_sels)
-                                c.value = new_count
-                                c.update()
-
-                        ui.button(icon="remove").props("flat dense round size=sm").on(
-                            "click", lambda idx=i, fn=step_count: fn(idx, -1)
-                        )
-                        ui.button(icon="add").props("flat dense round size=sm").on(
-                            "click", lambda idx=i, fn=step_count: fn(idx, 1)
-                        )
-
-                    labeled_by = sel.get("labeled_by")
-                    labeled_at = sel.get("labeled_at")
-                    source = sel.get("source")
-                    with ui.row().classes("items-center gap-xs q-mt-xs w-full"):
-                        if labeled_by:
-                            _render_labeled_by_meta(labeled_by, labeled_at)
-                        elif source == "model":
-                            ui.icon("smart_toy", size="xs").classes("")
-                            ui.label(t("model_suggestion")).classes("text-caption")
-                            prob = sel.get("probability")
-                            if prob is not None:
-                                ui.label(f"{prob:.0%}").style(
-                                    f"color: {get_probability_color(prob)}; font-weight: bold"
-                                ).classes("text-caption")
-                        if sp_value is None and sel.get("species"):
-                            ui.label(t("predicted_species", species=sel["species"])).classes(
-                                "text-caption text-warning"
-                            ).tooltip(t("predicted_not_in_list_tooltip"))
-                        ui.element("div").classes("col")
-                        del_btn = ui.button(
-                            icon="delete", on_click=lambda idx=i: delete_selection(idx)
-                        ).props("flat color=negative dense")
-                        del_btn._props["data-shortcut"] = "delete-annotation"
-
-                    def update_sel(idx, sp_el, bp_el, ct_el):
+                    def step_count(idx, delta, c=ct):
                         new_sels = get_selections()
                         if 0 <= idx < len(new_sels):
-                            new_sels[idx] = {
-                                "species": sp_el.value,
-                                "tags": bp_el.value if isinstance(bp_el.value, list) else [],
-                                "count": ct_el.value or 1,
-                                "start_sec": new_sels[idx].get("start_sec"),
-                                "end_sec": new_sels[idx].get("end_sec"),
-                            }
+                            new_count = max(
+                                1, min(11, (new_sels[idx].get("count") or 1) + delta)
+                            )
+                            new_sels[idx] = {**new_sels[idx], "count": new_count}
                             set_selections(new_sels)
+                            c.value = new_count
+                            c.update()
 
-                    def on_group_change(_, g=gp, s=sp):
-                        new_filtered = _filter_species_by_group(
-                            species_map, species_groups, g.value or ""
-                        )
-                        s.options = new_filtered
-                        if s.value not in new_filtered:
-                            s.value = None
-                        s.update()
+                    ui.button(icon="remove").props("flat dense round size=sm").on(
+                        "click", lambda idx=i, fn=step_count: fn(idx, -1)
+                    )
+                    ui.button(icon="add").props("flat dense round size=sm").on(
+                        "click", lambda idx=i, fn=step_count: fn(idx, 1)
+                    )
 
-                    def on_species_change(_, s=sp, b=bp, c=ct, g=gp, idx=i):
-                        if s.value:
-                            inferred_group = species_groups.get(s.value, "")
-                            if inferred_group != (g.value or ""):
-                                g.value = inferred_group
-                                g.update()
-                        update_sel(idx, s, b, c)
+                labeled_by = sel.get("labeled_by")
+                labeled_at = sel.get("labeled_at")
+                source = sel.get("source")
+                with ui.row().classes("items-center gap-xs q-mt-xs w-full"):
+                    if labeled_by:
+                        _render_labeled_by_meta(labeled_by, labeled_at)
+                    elif source == "model":
+                        ui.icon("smart_toy", size="xs").classes("")
+                        ui.label(t("model_suggestion")).classes("text-caption")
+                        prob = sel.get("probability")
+                        if prob is not None:
+                            ui.label(f"{prob:.0%}").style(
+                                f"color: {get_probability_color(prob)}; font-weight: bold"
+                            ).classes("text-caption")
+                    if sp_value is None and sel.get("species"):
+                        ui.label(t("predicted_species", species=sel["species"])).classes(
+                            "text-caption text-warning"
+                        ).tooltip(t("predicted_not_in_list_tooltip"))
+                    ui.element("div").classes("col")
+                    del_btn = ui.button(
+                        icon="delete", on_click=lambda idx=i: delete_selection(idx)
+                    ).props("flat color=negative dense")
+                    del_btn._props["data-shortcut"] = "delete-annotation"
 
-                    gp.on_value_change(on_group_change)
-                    sp.on_value_change(on_species_change)
-                    bp.on_value_change(lambda _, s=sp, b=bp, c=ct, idx=i: update_sel(idx, s, b, c))
-                    ct.on_value_change(lambda _, s=sp, b=bp, c=ct, idx=i: update_sel(idx, s, b, c))
+                def update_sel(idx, sp_el, bp_el, ct_el):
+                    new_sels = get_selections()
+                    if 0 <= idx < len(new_sels):
+                        new_sels[idx] = {
+                            "species": sp_el.value,
+                            "tags": bp_el.value if isinstance(bp_el.value, list) else [],
+                            "count": ct_el.value or 1,
+                            "start_sec": new_sels[idx].get("start_sec"),
+                            "end_sec": new_sels[idx].get("end_sec"),
+                        }
+                        set_selections(new_sels)
+
+                def on_group_change(_, g=gp, s=sp):
+                    new_filtered = _filter_species_by_group(
+                        species_map, species_groups, g.value or ""
+                    )
+                    s.options = new_filtered
+                    if s.value not in new_filtered:
+                        s.value = None
+                    s.update()
+
+                def on_species_change(_, s=sp, b=bp, c=ct, g=gp, idx=i):
+                    if s.value:
+                        inferred_group = species_groups.get(s.value, "")
+                        if inferred_group != (g.value or ""):
+                            g.value = inferred_group
+                            g.update()
+                    update_sel(idx, s, b, c)
+
+                gp.on_value_change(on_group_change)
+                sp.on_value_change(on_species_change)
+                bp.on_value_change(lambda _, s=sp, b=bp, c=ct, idx=i: update_sel(idx, s, b, c))
+                ct.on_value_change(lambda _, s=sp, b=bp, c=ct, idx=i: update_sel(idx, s, b, c))
 
     # Source of truth: the video currently rendered.
     selected_video_id = video.get("video_id")

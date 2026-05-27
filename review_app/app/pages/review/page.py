@@ -47,6 +47,10 @@ class ReviewPage:
         self.species_map = species_map
         self.species_groups = species_groups
         self.global_species_map = global_species_map
+        self._video = None
+        self._model_ann = None
+        self._default_species = None
+        self._default_tags: list[str] = []
 
     def navigate(self, direction: int):
         queue = get_queue()
@@ -88,6 +92,10 @@ class ReviewPage:
     @ui.refreshable_method
     def render_annotation_section(self, video, default_species, default_tags):
         render_annotation_section_body(self, video, default_species, default_tags)
+
+    @ui.refreshable_method
+    def render_annotation_sidebar(self):
+        _render_annotation_sidebar_body(self)
 
     @ui.refreshable_method
     async def render_filter_drawer(self):
@@ -347,16 +355,12 @@ async def _render_video_section_body(page: ReviewPage):
             ui.label(t("loading_video")).classes(" q-mt-md")
         return
 
-    is_review_later = bool(video.get("review_later"))
-
-    async def toggle_review_later():
-        nonlocal is_review_later
-        new_val = not is_review_later
-        await run.io_bound(dp.set_review_later, selected_video_id, new_val)
-        is_review_later = new_val
-        bookmark_btn._props["icon"] = "bookmark" if new_val else "bookmark_border"
-        bookmark_btn._props["color"] = "orange" if new_val else "grey-6"
-        bookmark_btn.update()
+    # Store video context for the annotation sidebar
+    page._video = video
+    page._model_ann = model_ann
+    page._default_tags = default_tags
+    page._default_species = video.get("classification_consensus") or None
+    page.render_annotation_sidebar.refresh()
 
     with ui.column().classes("w-full q-mb-xs gap-0 tour-target-queue"):
         with ui.row().classes("w-full items-center"):
@@ -412,8 +416,7 @@ async def _render_video_section_body(page: ReviewPage):
                     ui.icon("chevron_right")
             next_btn._props["data-shortcut"] = "next"
 
-    with ui.row().classes("w-full gap-xs items-start"):
-        with ui.column().style("flex: 3; min-width: 320px; max-width: 1280px"):
+    with ui.column().classes("w-full").style("max-width: 1280px"):
             with ui.card().classes("full-width q-mb-md"):
                 if video.get("needs_transcode"):
                     attempted = set(get_state_val("transcode_attempted_ids", []))
@@ -550,54 +553,70 @@ async def _render_video_section_body(page: ReviewPage):
                 ui.separator().classes("q-my-xs")
                 await render_video_tags(selected_video_id, dp, get_annotator_name())
 
-        with ui.column().style("flex: 1; min-width: 300px; max-width: 560px;"):
 
-            def _on_add_ai_species(species_key: str, count: int):
-                sels = get_selections()
-                sels.insert(
-                    0,
-                    {
-                        "species": species_key,
-                        "tags": default_tags,
-                        "start_sec": 0.0,
-                        "end_sec": video.get("duration_sec"),
-                        "count": min(count, 11),
-                        "source": "model",
-                    },
+def _render_annotation_sidebar_body(page: ReviewPage):
+    video = page._video
+    if video is None:
+        return
+
+    model_ann = page._model_ann
+    global_species_map = page.global_species_map
+    default_tags = page._default_tags
+    default_species = page._default_species
+    dp = page.dp
+    selected_video_id = video.get("video_id")
+    is_review_later = bool(video.get("review_later"))
+
+    async def toggle_review_later():
+        nonlocal is_review_later
+        new_val = not is_review_later
+        await run.io_bound(dp.set_review_later, selected_video_id, new_val)
+        is_review_later = new_val
+        bookmark_btn._props["icon"] = "bookmark" if new_val else "bookmark_border"
+        bookmark_btn._props["color"] = "orange" if new_val else "grey-6"
+        bookmark_btn.update()
+
+    def _on_add_ai_species(species_key: str, count: int):
+        sels = get_selections()
+        sels.insert(
+            0,
+            {
+                "species": species_key,
+                "tags": default_tags,
+                "start_sec": 0.0,
+                "end_sec": video.get("duration_sec"),
+                "count": min(count, 11),
+                "source": "model",
+            },
+        )
+        set_selections(sels)
+        set_state_val("review_is_blank", False)
+        set_state_val("focus_new_count", True)
+        page.render_annotation_section.refresh()
+
+    _render_ai_annotations(model_ann, global_species_map, on_add_species=_on_add_ai_species)
+    with ui.card().classes("full-width"):
+        with ui.row().classes("items-center w-full q-mb-none"):
+            ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium")
+            ui.space()
+            bookmark_btn = (
+                ui.button(
+                    icon="bookmark" if is_review_later else "bookmark_border",
+                    on_click=toggle_review_later,
                 )
-                set_selections(sels)
-                set_state_val("review_is_blank", False)
-                set_state_val("focus_new_count", True)
-                page.render_annotation_section.refresh()
-
-            _render_ai_annotations(
-                model_ann, global_species_map, on_add_species=_on_add_ai_species
+                .props(
+                    f"flat round dense {'color=orange' if is_review_later else 'color=grey-6'}"
+                )
+                .classes("tour-target-review-later")
+                .tooltip(t("review_later"))
             )
-            with ui.card().classes("full-width"):
-                with ui.row().classes("items-center w-full q-mb-none"):
-                    ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium")
-                    ui.space()
-                    bookmark_btn = (
-                        ui.button(
-                            icon="bookmark" if is_review_later else "bookmark_border",
-                            on_click=toggle_review_later,
-                        )
-                        .props(
-                            f"flat round dense {'color=orange' if is_review_later else 'color=grey-6'}"
-                        )
-                        .classes("tour-target-review-later")
-                        .tooltip(t("review_later"))
-                    )
-                    ui.button(
-                        icon="info_outline",
-                        on_click=lambda: show_info_dialog(
-                            t("info_review_later_title"), t("info_review_later_body")
-                        ),
-                    ).props("flat round dense size=xs color=grey-6")
-                consensus = video.get("classification_consensus")
-                default_species = consensus or None
-
-                page.render_annotation_section(video, default_species, default_tags)
+            ui.button(
+                icon="info_outline",
+                on_click=lambda: show_info_dialog(
+                    t("info_review_later_title"), t("info_review_later_body")
+                ),
+            ).props("flat round dense size=xs color=grey-6")
+        page.render_annotation_section(video, default_species, default_tags)
 
 
 async def setup_review():
@@ -696,8 +715,14 @@ async def setup_review():
     with left_drawer:
         await page.render_filter_drawer()
 
+    right_drawer = ui.right_drawer(value=True).props("behavior=desktop width=520").classes(
+        "q-pa-sm review-sidebar"
+    )
+    with right_drawer:
+        page.render_annotation_sidebar()
+
     with ui.column().classes("w-full q-pa-xs"):
-        with ui.element("div").style("width: 100%; max-width: 1900px; margin: 0 auto"):
+        with ui.element("div").style("width: 100%; max-width: 1280px; margin: 0 auto"):
             await page.render_video_section()
 
     ui.run_javascript("document.activeElement?.blur()")
