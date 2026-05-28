@@ -291,6 +291,19 @@ def render_custom_video_player(video_url, duration, vid_key):
                 const pauseIcon = document.getElementById('vp-pause-icon-{vid_key}');
 
                 btn.addEventListener('click', () => videoEl.paused ? videoEl.play() : videoEl.pause());
+                let clickTimer = null;
+                videoEl.addEventListener('click', () => {{
+                    if (clickTimer) return;
+                    clickTimer = setTimeout(() => {{
+                        clickTimer = null;
+                        videoEl.paused ? videoEl.play() : videoEl.pause();
+                    }}, 250);
+                }});
+                videoEl.addEventListener('dblclick', () => {{
+                    clearTimeout(clickTimer);
+                    clickTimer = null;
+                    vpWrapper.classList.contains('vp-fs-active') ? exitFs() : enterFs();
+                }});
                 videoEl.addEventListener('play', () => {{ playIcon.style.display = 'none'; pauseIcon.style.display = ''; }});
                 videoEl.addEventListener('pause', () => {{ playIcon.style.display = ''; pauseIcon.style.display = 'none'; }});
 
