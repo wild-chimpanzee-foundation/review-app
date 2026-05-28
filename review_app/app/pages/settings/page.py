@@ -282,6 +282,37 @@ def _build_settings_content(container: ui.column):
                         icon="description",
                     ).props("flat dense").classes("disabled").tooltip(t("log_not_available"))
 
+            ui.separator().classes("q-my-xs")
+
+            with ui.row().classes("w-full items-center"):
+                ui.label(t("check_for_updates_label")).classes("text-body2")
+                ui.space()
+                check_btn = ui.button(t("check_for_updates_btn"), icon="system_update_alt").props(
+                    "flat color=primary dense"
+                )
+
+                async def _do_check_update():
+                    from review_app.app.update_checker import force_check_for_update
+
+                    check_btn.props("loading")
+                    try:
+                        result = await run.io_bound(force_check_for_update)
+                        if result:
+                            tag, url = result
+                            ui.notify(
+                                t("update_available_notify", version=tag.lstrip("v")),
+                                type="positive",
+                            )
+                            await ui.run_javascript(f"window.open('{url}', '_blank')")
+                        else:
+                            ui.notify(t("update_up_to_date"), type="positive")
+                    except Exception:
+                        ui.notify(t("update_check_failed"), type="warning")
+                    finally:
+                        check_btn.props(remove="loading")
+
+                check_btn.on("click", _do_check_update)
+
 
 async def setup_settings():
     from review_app.app.entry_point import shared_header

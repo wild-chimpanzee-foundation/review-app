@@ -74,3 +74,12 @@ def check_for_update() -> tuple[str, str] | None:
     if tag and _is_newer(tag):
         return tag, f"https://github.com/{GITHUB_REPO}/releases/tag/{tag}"
     return None
+
+
+def force_check_for_update() -> tuple[str, str] | None:
+    """Like check_for_update but always bypasses the cache."""
+    try:
+        _cache_path().unlink(missing_ok=True)
+    except Exception:
+        pass
+    return check_for_update()
