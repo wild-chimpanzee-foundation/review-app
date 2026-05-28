@@ -130,8 +130,8 @@ make changelog
 # Bump, commit, and tag in one step
 make release
 
-# Push — CI handles the rest
-git push && git push --tags
+# Push — CI handles the rest (single command ensures the tag push triggers GitHub Actions)
+git push origin main v1.0.0
 ```
 
 To override the version (e.g. for a planned major release):

@@ -240,15 +240,94 @@ def shared_header(show_drawer: bool = False):
                     try:
                         result = await run.io_bound(check_for_update)
                         if result:
-                            tag, url = result
-                            _update_btn.tooltip(t("update_tooltip", version=tag.lstrip("v")))
-                            _update_btn.on(
-                                "click",
-                                lambda u=url: ui.run_javascript(f"window.open('{u}', '_blank')"),
-                            )
+                            tag, _url = result
+                            version = tag.lstrip("v")
+                            _update_btn.tooltip(t("update_tooltip", version=version))
+                            _update_btn.on("click", lambda tg=tag: _open_update_dialog(tg))
                             _update_btn.classes(remove="hidden")
                     except Exception:
-                        pass
+                        logger.exception("Update check failed")
+
+                def _open_update_dialog(tag: str):
+                    import subprocess
+
+                    from nicegui import run
+
+                    from review_app.app.update_checker import download_and_extract_update
+
+                    version = tag.lstrip("v")
+                    with ui.dialog().props("persistent") as dlg, ui.card().classes(
+                        "q-pa-lg"
+                    ).style("min-width: 420px"):
+                        ui.label(t("update_dialog_title")).classes("text-h6 q-mb-xs")
+                        ui.label(t("update_dialog_body", version=version)).classes(
+                            "text-body2 text-grey-7 q-mb-md"
+                        )
+                        status = ui.label("").classes("text-caption text-grey-6")
+                        progress = ui.linear_progress(value=0, show_value=False).props(
+                            "color=primary"
+                        )
+                        progress.visible = False
+
+                        with ui.row().classes("w-full justify-end gap-sm q-mt-md") as btn_row:
+                            cancel_btn = ui.button(t("cancel"), on_click=dlg.close).props("flat")
+                            download_btn = ui.button(
+                                t("update_download_btn"), icon="download", color="primary"
+                            )
+
+                        result_col = ui.column().classes("w-full q-mt-sm gap-xs")
+                        result_col.visible = False
+
+                        async def _do_download():
+                            download_btn.props("loading=true disabled=true")
+                            cancel_btn.visible = False
+                            progress.visible = True
+                            status.text = t("update_downloading_unknown")
+
+                            def _on_progress(done, total):
+                                if total:
+                                    progress.value = done / total
+                                    status.text = t(
+                                        "update_downloading",
+                                        mb_done=done / 1_048_576,
+                                        mb_total=total / 1_048_576,
+                                    )
+
+                            try:
+                                logger.info("Starting download of update %s", tag)
+                                dest = await run.io_bound(
+                                    download_and_extract_update, tag, _on_progress
+                                )
+                                logger.info("Update extracted to %s", dest)
+                                status.text = t("update_done")
+                                progress.value = 1.0
+                                btn_row.clear()
+                                with result_col:
+                                    result_col.visible = True
+                                    ui.label(t("update_done")).classes(
+                                        "text-caption text-positive"
+                                    )
+                                    with ui.row().classes("gap-sm"):
+                                        ui.button(
+                                            t("update_open_folder_btn"),
+                                            icon="folder_open",
+                                            on_click=lambda d=dest: subprocess.Popen(
+                                                ["xdg-open" if sys.platform == "linux" else
+                                                 "open" if sys.platform == "darwin" else
+                                                 "explorer", str(d)]
+                                            ),
+                                        ).props("flat")
+                                        ui.button(t("close"), on_click=dlg.close).props(
+                                            "color=primary"
+                                        )
+                            except Exception as exc:
+                                logger.exception("Update download failed")
+                                status.text = t("update_failed", error=str(exc))
+                                download_btn.props(remove="loading disabled")
+                                cancel_btn.visible = True
+
+                        download_btn.on("click", _do_download)
+                    dlg.open()
 
                 ui.timer(0, _check_update, once=True)
 
@@ -468,7 +547,16 @@ class GUI:
         _udd.mkdir(parents=True, exist_ok=True)
         _setup_logging(_udd, dev_mode)
 
-        logger.info("Starting (dev=%s, port=%d, host=%s, data_dir=%s)", dev_mode, port, host, _udd)
+        from review_app import __version__
+
+        logger.info(
+            "Starting v%s (dev=%s, port=%d, host=%s, data_dir=%s)",
+            __version__,
+            dev_mode,
+            port,
+            host,
+            _udd,
+        )
 
         @app.on_page_exception
         def custom_error_page(exception: Exception):

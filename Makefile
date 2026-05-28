@@ -40,6 +40,6 @@ release:
 	@[ -n "$(VERSION)" ] || (echo "Could not determine next version from commits" && exit 1)
 	sed -i 's/__version__ = ".*"/__version__ = "$(VERSION)"/' review_app/__init__.py
 	git add review_app/__init__.py
-	git commit -m "release $(VERSION)"
+	git commit -m "chore: release $(VERSION)"
 	git tag "v$(VERSION)"
-	@echo "Tagged v$(VERSION) — push with: git push && git push --tags"
+	@echo "Tagged v$(VERSION) — push with: git push origin main v$(VERSION)"
