@@ -42,4 +42,4 @@ release:
 	git add review_app/__init__.py
 	git commit -m "release $(VERSION)"
 	git tag "v$(VERSION)"
-	@echo "Tagged v$(VERSION) — push with: git push && git push --tags"
+	@echo "Tagged v$(VERSION) — push with: git push origin main v$(VERSION)"
