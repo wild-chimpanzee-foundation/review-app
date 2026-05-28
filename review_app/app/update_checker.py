@@ -1,12 +1,7 @@
 import json
 import logging
 import re
-import shutil
-import sys
-import tarfile
-import zipfile
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -96,65 +91,3 @@ def force_check_for_update() -> tuple[str, str] | None:
     except Exception:
         pass
     return check_for_update()
-
-
-def _platform_asset(tag: str) -> tuple[str, str]:
-    """Return (asset filename, download URL) for the current platform."""
-    if sys.platform == "win32":
-        name = f"VideoAnnotation-windows-{tag}.zip"
-    elif sys.platform == "darwin":
-        name = f"VideoAnnotation-macos-{tag}.tar.gz"
-    else:
-        name = f"VideoAnnotation-linux-{tag}.tar.gz"
-    url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag}/{name}"
-    return name, url
-
-
-def download_and_extract_update(tag: str, progress_callback=None) -> Path:
-    """Download the release archive for this platform, extract to ~/Downloads, return the folder.
-
-    progress_callback(bytes_done, total_bytes) — called during download; total may be 0 if unknown.
-    Blocking — run in executor.
-    """
-    asset_name, download_url = _platform_asset(tag)
-    downloads_dir = Path.home() / "Downloads"
-    downloads_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = downloads_dir / asset_name
-    dest_dir = downloads_dir / f"VideoAnnotation-{tag}"
-
-    logger.info("Downloading update %s from %s", tag, download_url)
-
-    # Download
-    req = Request(download_url, headers={"Accept": "application/octet-stream"})
-    with urlopen(req, timeout=60) as resp:
-        total = int(resp.headers.get("Content-Length", 0))
-        logger.info("Download size: %s bytes", total or "unknown")
-        done = 0
-        chunk = 64 * 1024
-        with archive_path.open("wb") as f:
-            while True:
-                buf = resp.read(chunk)
-                if not buf:
-                    break
-                f.write(buf)
-                done += len(buf)
-                if progress_callback:
-                    progress_callback(done, total)
-    logger.info("Download complete: %s", archive_path)
-
-    # Extract
-    if dest_dir.exists():
-        shutil.rmtree(dest_dir)
-    dest_dir.mkdir(parents=True)
-
-    logger.info("Extracting to %s", dest_dir)
-    if asset_name.endswith(".zip"):
-        with zipfile.ZipFile(archive_path) as zf:
-            zf.extractall(dest_dir)
-    else:
-        with tarfile.open(archive_path) as tf:
-            tf.extractall(dest_dir)
-    logger.info("Extraction complete")
-
-    archive_path.unlink(missing_ok=True)
-    return dest_dir
