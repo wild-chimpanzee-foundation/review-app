@@ -220,7 +220,10 @@ async def render_filter_drawer_body(page):
                     await apply_filters()
 
                 refresh_tags = tag_selector(
-                    sorted(all_tags, key=_tag_label), selected_tag_keys, on_tag_toggle
+                    sorted(all_tags, key=_tag_label),
+                    selected_tag_keys,
+                    on_tag_toggle,
+                    placeholder=t("filter_by_tag"),
                 )
             multiple_annotators_cb = ui.checkbox(
                 t("multiple_annotators_filter"),

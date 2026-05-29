@@ -60,7 +60,11 @@ def _color_picker(initial_color: str | None, on_select):
 
 
 def tag_selector(
-    all_tags: list[dict], active_keys: set[str], on_toggle, shortcut: str | None = None
+    all_tags: list[dict],
+    active_keys: set[str],
+    on_toggle,
+    shortcut: str | None = None,
+    placeholder: str | None = None,
 ) -> callable:
     """
     Renders a searchable tag dropdown. active_keys is a shared mutable set that the
@@ -159,7 +163,7 @@ def tag_selector(
             ):
                 render_active_chips()
             search_input = (
-                ui.input(placeholder=t("add_tag_btn"))
+                ui.input(placeholder=placeholder if placeholder is not None else t("add_tag_btn"))
                 .props("borderless dense")
                 .style("min-width: 60px; flex: 1;")
             )
