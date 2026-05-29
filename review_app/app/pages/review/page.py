@@ -536,6 +536,7 @@ async def _render_video_section_body(page: ReviewPage):
                                     "flat round dense"
                                 )
                             render_location_map([MapMarker(lat=lat, lon=lon)], height="320px")
+                        dlg.on('hide', dlg.delete)
                         dlg.open()
 
                     ui.label(f"{t('video_location')}: {_lat:.5f}, {_lon:.5f}").classes(
@@ -794,7 +795,7 @@ async def setup_review():
                         if (__selectedAnnotationIdx >= 0) { __clearAnnotationSelection(); return; }
                         return;
                     }
-                    if (document.querySelector('.q-dialog')) return;
+                    if (document.querySelector('.q-dialog[aria-modal="true"]')) return;
                     const tag = e.target.tagName.toLowerCase();
                     const inInput = tag === 'input' || tag === 'textarea' || tag === 'select';
                     if (e.target.isContentEditable) return;

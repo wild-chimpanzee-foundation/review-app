@@ -270,8 +270,10 @@ def render_custom_video_player(video_url, duration, vid_key):
                     resetZoomBtn.addEventListener('click', resetZoom);
                 }}
 
+                if (window.__vpKeyController) window.__vpKeyController.abort();
+                window.__vpKeyController = new AbortController();
                 window.addEventListener('keydown', (e) => {{
-                    if (document.querySelector('.q-dialog')) return;
+                    if (document.querySelector('.q-dialog[aria-modal="true"]')) return;
                     const _tag = e.target.tagName.toLowerCase();
                     if (_tag === 'input' || _tag === 'textarea' || _tag === 'select') return;
                     if (e.key === 'z') {{
@@ -283,7 +285,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                     }} else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey) {{
                         vpWrapper.classList.contains('vp-fs-active') ? exitFs() : enterFs();
                     }}
-                }});
+                }}, {{ signal: window.__vpKeyController.signal }});
 
                 // Playback and Range Logic
                 const btn = document.getElementById('vp-playpause-{vid_key}');
