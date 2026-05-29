@@ -795,6 +795,9 @@ async def setup_review():
                         if (__selectedAnnotationIdx >= 0) { __clearAnnotationSelection(); return; }
                         return;
                     }
+                    // Briefly ignore shortcuts right after a fuzzy-select auto-commit,
+                    // so trailing keystrokes the user is still typing aren't fired as actions.
+                    if (window.__suppressShortcutsUntil && Date.now() < window.__suppressShortcutsUntil) return;
                     if (document.querySelector('.q-dialog[aria-modal="true"]')) return;
                     const tag = e.target.tagName.toLowerCase();
                     const inInput = tag === 'input' || tag === 'textarea' || tag === 'select';

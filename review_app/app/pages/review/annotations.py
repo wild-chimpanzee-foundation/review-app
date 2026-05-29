@@ -1,5 +1,6 @@
 from nicegui import run, ui
 
+from review_app.app.components.fuzzy_select import FuzzySelect
 from review_app.app.state import (
     get_active_project_id,
     get_annotator_name,
@@ -207,7 +208,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
 
                 with ui.row().classes("w-full gap-sm items-center"):
                     gp = (
-                        ui.select(
+                        FuzzySelect(
                             label=t("group_label"),
                             options=group_options,
                             value=initial_group,
@@ -219,7 +220,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
 
                 with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
                     sp = (
-                        ui.select(
+                        FuzzySelect(
                             label=t("species_label"),
                             options=filtered_species,
                             value=sp_value,
@@ -234,7 +235,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
 
                 with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
                     bp = (
-                        ui.select(
+                        FuzzySelect(
                             label=t("behavior_label"),
                             options=behaviors_map,
                             value=bp_value,
