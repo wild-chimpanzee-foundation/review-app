@@ -234,6 +234,9 @@ class VideoMixin(ProviderBase):
             for p in sorted(scan_dir.rglob("*")):
                 if p.suffix.lower() not in VIDEO_EXTENSIONS:
                     continue
+                # Skip hidden files/dirs (e.g. macOS ._* resource forks, .Trashes)
+                if any(part.startswith(".") for part in p.relative_to(scan_dir).parts):
+                    continue
                 rel = p.parent.relative_to(scan_dir)
                 camera_id = str(rel) if str(rel) != "." else "default"
                 rows.append({"video_path": str(p), "camera_id": camera_id})
