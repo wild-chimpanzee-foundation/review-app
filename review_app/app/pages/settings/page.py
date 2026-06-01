@@ -285,7 +285,10 @@ def _build_settings_content(container: ui.column):
             ui.separator().classes("q-my-xs")
 
             with ui.row().classes("w-full items-center"):
+                from review_app import __version__
+
                 ui.label(t("check_for_updates_label")).classes("text-body2")
+                version_label = ui.label(f"v{__version__}").classes("text-caption text-grey-6")
                 ui.space()
                 check_btn = ui.button(t("check_for_updates_btn"), icon="system_update_alt").props(
                     "flat color=primary dense"
@@ -296,9 +299,11 @@ def _build_settings_content(container: ui.column):
 
                     check_btn.props("loading")
                     try:
-                        result = await run.io_bound(force_check_for_update)
-                        if result:
-                            tag, url = result
+                        update, latest_tag = await run.io_bound(force_check_for_update)
+                        if latest_tag:
+                            version_label.set_text(f"v{__version__} → {latest_tag}")
+                        if update:
+                            tag, url = update
                             ui.notify(
                                 t("update_available_notify", version=tag.lstrip("v")),
                                 type="positive",

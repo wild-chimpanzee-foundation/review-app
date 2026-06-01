@@ -84,10 +84,21 @@ def check_for_update() -> tuple[str, str] | None:
     return None
 
 
-def force_check_for_update() -> tuple[str, str] | None:
-    """Like check_for_update but always bypasses the cache."""
+def force_check_for_update() -> tuple[tuple[str, str] | None, str | None]:
+    """Like check_for_update but always bypasses the cache.
+
+    Returns (update_result, latest_tag) where update_result is (tag, url) if newer, else None.
+    """
     try:
         _cache_path().unlink(missing_ok=True)
     except Exception:
         pass
-    return check_for_update()
+    tag = _fetch_latest_tag()
+    _write_cache(tag)
+    update = None
+    if tag and _is_newer(tag):
+        logger.info("Update available: %s → %s", __version__, tag)
+        update = tag, f"https://github.com/{GITHUB_REPO}/releases/tag/{tag}"
+    else:
+        logger.info("No update available (latest=%s, current=%s)", tag, __version__)
+    return update, tag
