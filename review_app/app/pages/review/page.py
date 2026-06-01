@@ -536,7 +536,7 @@ async def _render_video_section_body(page: ReviewPage):
                                     "flat round dense"
                                 )
                             render_location_map([MapMarker(lat=lat, lon=lon)], height="320px")
-                        dlg.on('hide', dlg.delete)
+                        dlg.on("hide", dlg.delete)
                         dlg.open()
 
                     ui.label(f"{t('video_location')}: {_lat:.5f}, {_lon:.5f}").classes(
@@ -589,7 +589,6 @@ def _render_annotation_sidebar_body(page: ReviewPage):
         )
         set_selections(sels)
         set_state_val("review_is_blank", False)
-        set_state_val("focus_new_count", True)
         page.render_annotation_section.refresh()
 
     _render_ai_annotations(model_ann, global_species_map, on_add_species=_on_add_ai_species)
