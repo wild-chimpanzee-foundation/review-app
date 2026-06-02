@@ -247,6 +247,7 @@ def shared_header(show_drawer: bool = False):
                                 lambda u=url: ui.run_javascript(f"window.open('{u}', '_blank')"),
                             )
                             _update_btn.classes(remove="hidden")
+                            _update_btn.text = t("update_tooltip", version=tag.lstrip("v"))
                     except Exception:
                         logger.exception("Update check failed")
 
