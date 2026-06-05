@@ -60,6 +60,82 @@ class AssignmentMixin(ProviderBase):
 
     # ── Distribution algorithm ────────────────────────────────────────────────
 
+    def get_video_chunks(
+        self,
+        project_id: str,
+        max_hours_per_chunk: float = float("inf"),
+        only_unlabeled: bool = False,
+    ) -> list[dict]:
+        """Return consecutive video chunks for all cameras.
+
+        Each camera's videos are ordered by video_path and accumulated into
+        chunks of at most max_hours_per_chunk hours. When max_hours_per_chunk
+        is infinite, one chunk per camera is returned (identical to the old
+        camera-level behaviour).
+
+        When only_unlabeled is True, videos that already have a row in
+        video_labels are excluded — useful for redistribution mid-project.
+
+        Returns a list of dicts with keys:
+          chunk_id, camera_id, label, video_ids, video_count, hours
+        """
+        unlabeled_filter = (
+            "AND NOT EXISTS (SELECT 1 FROM video_labels WHERE video_id = v.video_id)"
+            if only_unlabeled
+            else ""
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(f"""
+                    SELECT v.video_id, v.camera_id, COALESCE(v.duration_sec, 0) AS dur
+                    FROM videos v
+                    WHERE v.project_id = :pid AND v.camera_id IS NOT NULL
+                    {unlabeled_filter}
+                    ORDER BY v.camera_id, v.video_path
+                """),
+                {"pid": project_id},
+            ).fetchall()
+
+        # Group by camera_id preserving order
+        from collections import defaultdict
+
+        by_camera: dict[str, list[tuple[str, float]]] = defaultdict(list)
+        for video_id, camera_id, dur in rows:
+            by_camera[camera_id].append((video_id, dur / 3600.0))
+
+        chunks: list[dict] = []
+        for camera_id, videos in by_camera.items():
+            camera_chunks: list[list[tuple[str, float]]] = []
+            current: list[tuple[str, float]] = []
+            current_hours = 0.0
+            for vid_id, h in videos:
+                if current and current_hours + h > max_hours_per_chunk:
+                    camera_chunks.append(current)
+                    current = []
+                    current_hours = 0.0
+                current.append((vid_id, h))
+                current_hours += h
+            if current:
+                camera_chunks.append(current)
+
+            n = len(camera_chunks)
+            for i, chunk_vids in enumerate(camera_chunks):
+                chunk_id = camera_id if n == 1 else f"{camera_id}::{i}"
+                label = camera_id if n == 1 else f"{camera_id} ({i + 1}/{n})"
+                vid_ids = [v[0] for v in chunk_vids]
+                hours = round(sum(v[1] for v in chunk_vids), 2)
+                chunks.append(
+                    {
+                        "chunk_id": chunk_id,
+                        "camera_id": camera_id,
+                        "label": label,
+                        "video_ids": vid_ids,
+                        "video_count": len(vid_ids),
+                        "hours": hours,
+                    }
+                )
+        return chunks
+
     def auto_distribute(self, project_id: str, annotator_names: list[str]) -> dict[str, list[str]]:
         """Greedily assign cameras to annotators to balance total hours.
 
@@ -77,6 +153,220 @@ class AssignmentMixin(ProviderBase):
             assignment[least_loaded].append(cam["camera_id"])
             loads[least_loaded] += cam["hours"]
         return assignment
+
+    def auto_distribute_flexible(
+        self, project_id: str, annotator_names: list[str]
+    ) -> tuple[dict[str, list[str]], list[dict]]:
+        """Chunk-aware greedy distribution that splits large cameras and balances
+        both video count and hours.
+
+        Uses average camera duration as the chunk size threshold so cameras
+        above average are split, giving the greedy step finer resolution.
+        Assigns greedily to the annotator with the lowest combined normalised
+        load (equal weight on video count and hours), then refines the result
+        with pairwise swap optimisation until no swap improves balance.
+
+        Returns ({annotator: [chunk_id, ...]}, chunks).
+        """
+        if not annotator_names:
+            return {}, []
+        n = len(annotator_names)
+        # First pass: one chunk per unlabeled camera, used to size the threshold.
+        unlabeled_by_camera = self.get_video_chunks(project_id, float("inf"), only_unlabeled=True)
+        if not unlabeled_by_camera:
+            return {name: [] for name in annotator_names}, []
+        total_unlabeled_hours = sum(c["hours"] for c in unlabeled_by_camera)
+        total_unlabeled_videos = sum(c["video_count"] for c in unlabeled_by_camera)
+        avg_camera_hours = total_unlabeled_hours / len(unlabeled_by_camera)
+        target_per_annotator = total_unlabeled_hours / n
+        # Use the smaller of the two so that:
+        # - on a fresh project avg_camera_hours wins → same behaviour as before
+        # - near project end target_per_annotator wins → cameras are split finely
+        #   enough to fill all annotators even when little work remains
+        max_chunk_hours = max(1.0 / 60, min(avg_camera_hours, target_per_annotator))
+        # Second pass: actually chunk at the computed threshold.
+        chunks = self.get_video_chunks(project_id, max_chunk_hours, only_unlabeled=True)
+        # Sort largest-video-count chunks first for better greedy packing
+        chunks_sorted = sorted(chunks, key=lambda c: c["video_count"], reverse=True)
+        target_videos = total_unlabeled_videos / n if total_unlabeled_videos else 1
+        target_hours = total_unlabeled_hours / n if total_unlabeled_hours else 1
+        video_loads: dict[str, int] = {name: 0 for name in annotator_names}
+        hour_loads: dict[str, float] = {name: 0.0 for name in annotator_names}
+        assignment: dict[str, list[str]] = {name: [] for name in annotator_names}
+        for chunk in chunks_sorted:
+            least_loaded = min(
+                annotator_names,
+                key=lambda name: (
+                    video_loads[name] / target_videos + hour_loads[name] / target_hours
+                ),
+            )
+            assignment[least_loaded].append(chunk["chunk_id"])
+            video_loads[least_loaded] += chunk["video_count"]
+            hour_loads[least_loaded] += chunk["hours"]
+        assignment = self._swap_optimize(
+            assignment, chunks, annotator_names, target_videos, target_hours
+        )
+        return assignment, chunks
+
+    @staticmethod
+    def _swap_optimize(
+        assignment: dict[str, list[str]],
+        chunks: list[dict],
+        annotator_names: list[str],
+        target_videos: float,
+        target_hours: float,
+    ) -> dict[str, list[str]]:
+        """Improve greedy assignment via exhaustive pairwise swaps.
+
+        Repeatedly finds the single chunk-swap between any two annotators that
+        most reduces the combined normalised imbalance (video range + hour range,
+        both divided by their respective targets), and applies it. Stops when no
+        swap improves the score.
+        """
+        chunk_map = {c["chunk_id"]: c for c in chunks}
+        video_loads: dict[str, int] = {
+            n: sum(chunk_map[c]["video_count"] for c in cids)
+            for n, cids in assignment.items()
+        }
+        hour_loads: dict[str, float] = {
+            n: sum(chunk_map[c]["hours"] for c in cids) for n, cids in assignment.items()
+        }
+
+        def imbalance(vl: dict, hl: dict) -> float:
+            return (max(vl.values()) - min(vl.values())) / target_videos + (
+                max(hl.values()) - min(hl.values())
+            ) / target_hours
+
+        ann_pairs = [
+            (a, b)
+            for i, a in enumerate(annotator_names)
+            for b in annotator_names[i + 1 :]
+        ]
+
+        improved = True
+        while improved:
+            improved = False
+            current = imbalance(video_loads, hour_loads)
+            best = current
+            best_swap: tuple | None = None
+
+            for ann_a, ann_b in ann_pairs:
+                for cid_a in assignment[ann_a]:
+                    ca = chunk_map[cid_a]
+                    for cid_b in assignment[ann_b]:
+                        cb = chunk_map[cid_b]
+                        dv = cb["video_count"] - ca["video_count"]
+                        dh = cb["hours"] - ca["hours"]
+                        new_vl = dict(video_loads)
+                        new_hl = dict(hour_loads)
+                        new_vl[ann_a] += dv
+                        new_vl[ann_b] -= dv
+                        new_hl[ann_a] += dh
+                        new_hl[ann_b] -= dh
+                        score = imbalance(new_vl, new_hl)
+                        if score < best:
+                            best = score
+                            best_swap = (ann_a, ann_b, cid_a, cid_b, dv, dh)
+
+            if best_swap:
+                ann_a, ann_b, cid_a, cid_b, dv, dh = best_swap
+                assignment[ann_a].remove(cid_a)
+                assignment[ann_b].remove(cid_b)
+                assignment[ann_a].append(cid_b)
+                assignment[ann_b].append(cid_a)
+                video_loads[ann_a] += dv
+                video_loads[ann_b] -= dv
+                hour_loads[ann_a] += dh
+                hour_loads[ann_b] -= dh
+                improved = True
+
+        return assignment
+
+    def get_chunk_assignment_map(
+        self, project_id: str, chunks: list[dict]
+    ) -> dict[str, str | None]:
+        """Return {chunk_id: annotator | None} for the given chunks.
+
+        None means the chunk is unassigned or split across multiple annotators.
+        """
+        if not chunks:
+            return {}
+        with self.engine.connect() as conn:
+            result = {}
+            for chunk in chunks:
+                vids = chunk["video_ids"]
+                if not vids:
+                    result[chunk["chunk_id"]] = None
+                    continue
+                placeholders = ",".join(f":v{i}" for i in range(len(vids)))
+                params = {f"v{i}": v for i, v in enumerate(vids)}
+                rows = conn.execute(
+                    text(f"""
+                        SELECT assigned_to, COUNT(*) AS cnt
+                        FROM video_assignments
+                        WHERE video_id IN ({placeholders})
+                        GROUP BY assigned_to
+                    """),
+                    params,
+                ).fetchall()
+                if len(rows) == 1 and rows[0][1] == len(vids):
+                    result[chunk["chunk_id"]] = rows[0][0]
+                else:
+                    result[chunk["chunk_id"]] = None
+        return result
+
+    def apply_chunk_assignment(
+        self,
+        project_id: str,
+        chunk_assignment: dict[str, list[str]],
+        chunks: list[dict],
+        clear_chunk_ids: list[str] | None = None,
+    ) -> int:
+        """Write VideoAssignment rows for a chunk-based assignment.
+
+        chunk_assignment maps annotator → [chunk_id].
+        clear_chunk_ids lists chunks to unassign.
+        Returns total rows inserted.
+        """
+        chunk_map = {c["chunk_id"]: c for c in chunks}
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Collect all video_ids affected (assigned + cleared)
+        all_video_ids: list[str] = []
+        for chunk_ids in chunk_assignment.values():
+            for cid in chunk_ids:
+                all_video_ids.extend(chunk_map[cid]["video_ids"])
+        for cid in clear_chunk_ids or []:
+            all_video_ids.extend(chunk_map[cid]["video_ids"])
+
+        total = 0
+        with self.engine.begin() as conn:
+            if all_video_ids:
+                placeholders = ",".join(f":v{i}" for i in range(len(all_video_ids)))
+                params = {f"v{i}": v for i, v in enumerate(all_video_ids)}
+                conn.execute(
+                    text(f"DELETE FROM video_assignments WHERE video_id IN ({placeholders})"),
+                    params,
+                )
+            for annotator, chunk_ids in chunk_assignment.items():
+                video_ids: list[str] = []
+                for cid in chunk_ids:
+                    video_ids.extend(chunk_map[cid]["video_ids"])
+                if not video_ids:
+                    continue
+                placeholders = ",".join(f":v{i}" for i in range(len(video_ids)))
+                params = {f"v{i}": v for i, v in enumerate(video_ids)}
+                params["annotator"] = annotator
+                params["now"] = now
+                rows = conn.execute(
+                    text(f"""
+                        INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at)
+                        VALUES {", ".join(f"(:v{i}, :annotator, :now)" for i in range(len(video_ids)))}
+                    """),
+                    params,
+                )
+                total += rows.rowcount
+        return total
 
     def apply_distribution(
         self,
@@ -167,6 +457,20 @@ class AssignmentMixin(ProviderBase):
             }
             for r in rows
         ]
+
+    def clear_all_assignments(self, project_id: str) -> int:
+        """Delete all video assignments for the project. Returns number of rows removed."""
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                text("""
+                    DELETE FROM video_assignments
+                    WHERE video_id IN (
+                        SELECT video_id FROM videos WHERE project_id = :pid
+                    )
+                """),
+                {"pid": project_id},
+            )
+        return result.rowcount
 
     def get_assigned_video_ids(self, project_id: str, annotator_name: str) -> list[str]:
         with self.engine.connect() as conn:
