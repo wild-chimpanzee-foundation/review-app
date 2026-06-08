@@ -317,3 +317,6 @@ train_stationary;Train à l'arrêt;Objet à l'arrêt;NA;Train (stationary);Objec
 airplane_stationary;Avion à l'arrêt;Objet à l'arrêt;NA;Airplane (stationary);Object Stationary;y;y;y
 construction_vehicle_moving;Engin de chantier en mouvement;Objet en mouvement;NA;Construction Vehicle (moving);Object Moving;y;y;y
 construction_vehicle_stationary;Engin de chantier à l'arrêt;Objet à l'arrêt;NA;Construction Vehicle (stationary);Object Stationary;y;y;y
+animal;Animal (générique);Animal;NA;Animal (generic);Animal;y;y;y
+person;Personne (générique);Humain;NA;Person (generic);Human;y;y;y
+vehicle;Véhicule (générique);Véhicule;NA;Vehicle (generic);Vehicle;y;y;y
