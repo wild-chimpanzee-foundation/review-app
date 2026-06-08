@@ -239,6 +239,10 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                     if i == 0 and get_state_val("focus_new_species"):
                         set_state_val("focus_new_species", False)
                         sp.run_method("focus")
+                        ui.run_javascript("__scrollAnnotationCardIntoView(0)")
+                    if i == 0 and get_state_val("scroll_to_first_annotation"):
+                        set_state_val("scroll_to_first_annotation", False)
+                        ui.run_javascript("__scrollAnnotationCardIntoView(0)")
 
                 # Row 2: Behavior (wide) + Count + ± buttons
                 current_count = min(sel.get("count") or 1, 11)

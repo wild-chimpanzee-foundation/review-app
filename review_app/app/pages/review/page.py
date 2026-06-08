@@ -589,6 +589,7 @@ def _render_annotation_sidebar_body(page: ReviewPage):
         )
         set_selections(sels)
         set_state_val("review_is_blank", False)
+        set_state_val("scroll_to_first_annotation", True)
         page.render_annotation_section.refresh()
 
     _render_ai_annotations(model_ann, global_species_map, on_add_species=_on_add_ai_species)
@@ -770,13 +771,9 @@ async def setup_review():
                     __selectedAnnotationIdx = -1;
                 }
 
-                function __selectAnnotationCard(idx) {
-                    __clearAnnotationSelection();
+                function __scrollAnnotationCardIntoView(idx) {
                     const card = document.querySelector('[data-annotation-idx="' + idx + '"]');
                     if (!card) return;
-                    card.style.borderColor = 'var(--q-warning)';
-
-                    // Find the nearest scrollable ancestor (the right drawer scroll container)
                     let scrollEl = card.parentElement;
                     while (scrollEl && scrollEl !== document.body) {
                         const style = window.getComputedStyle(scrollEl);
@@ -785,26 +782,27 @@ async def setup_review():
                     }
                     if (!scrollEl || scrollEl === document.body) {
                         card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-                        __selectedAnnotationIdx = idx;
                         return;
                     }
-
                     const containerRect = scrollEl.getBoundingClientRect();
                     const cardRect = card.getBoundingClientRect();
-
-                    // Account for the sticky action-button footer so cards are not hidden behind it
                     const stickyEl = scrollEl.querySelector('[style*="sticky"]');
                     const footerHeight = stickyEl ? stickyEl.offsetHeight : 0;
-
                     const visibleTop = containerRect.top + 8;
                     const visibleBottom = containerRect.bottom - footerHeight - 8;
-
                     if (cardRect.top < visibleTop) {
                         scrollEl.scrollTo({ top: scrollEl.scrollTop + cardRect.top - visibleTop, behavior: 'smooth' });
                     } else if (cardRect.bottom > visibleBottom) {
                         scrollEl.scrollTo({ top: scrollEl.scrollTop + cardRect.bottom - visibleBottom, behavior: 'smooth' });
                     }
+                }
 
+                function __selectAnnotationCard(idx) {
+                    __clearAnnotationSelection();
+                    const card = document.querySelector('[data-annotation-idx="' + idx + '"]');
+                    if (!card) return;
+                    card.style.borderColor = 'var(--q-warning)';
+                    __scrollAnnotationCardIntoView(idx);
                     __selectedAnnotationIdx = idx;
                 }
 
