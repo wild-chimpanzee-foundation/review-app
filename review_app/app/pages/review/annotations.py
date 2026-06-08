@@ -198,7 +198,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
         for i, sel in enumerate(selections):
             ann_card = (
                 ui.card()
-                .classes("full-width q-pa-md q-mb-sm")
+                .classes("full-width q-pa-sm q-mb-sm")
                 .style("border: 2px solid var(--q-primary)")
             )
             ann_card._props["data-annotation-idx"] = str(i)
@@ -214,6 +214,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                     species_map, species_groups, initial_group
                 )
 
+                # Row 1: Group (narrow) + Species (wide)
                 with ui.row().classes("w-full gap-sm items-center"):
                     gp = (
                         FuzzySelect(
@@ -223,10 +224,8 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                             with_input=True,
                         )
                         .props("outlined dense clearable")
-                        .classes("col")
+                        .style("width: 38%")
                     )
-
-                with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
                     sp = (
                         FuzzySelect(
                             label=t("species_label"),
@@ -241,7 +240,11 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                         set_state_val("focus_new_species", False)
                         sp.run_method("focus")
 
-                with ui.row().classes("w-full gap-sm items-center q-mt-sm"):
+                # Row 2: Behavior (wide) + Count + ± buttons
+                current_count = min(sel.get("count") or 1, 11)
+                count_options = {i: str(i) for i in range(1, 11)}
+                count_options[11] = ">10"
+                with ui.row().classes("w-full gap-xs items-center q-mt-xs"):
                     bp = (
                         FuzzySelect(
                             label=t("behavior_label"),
@@ -251,21 +254,15 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                             with_input=True,
                         )
                         .props("outlined dense use-chips")
-                        .style("flex: 2; min-width: 120px;")
+                        .classes("col")
                     )
-
-                current_count = min(sel.get("count") or 1, 11)
-                count_options = {i: str(i) for i in range(1, 11)}
-                count_options[11] = ">10"
-                with ui.row().classes("items-center gap-xs q-mt-sm w-full"):
                     ct = (
                         ui.select(
-                            label=t("count_label"),
                             options=count_options,
                             value=current_count,
                         )
                         .props("outlined dense")
-                        .classes("col")
+                        .style("width: 52px")
                     )
                     if i == 0 and get_state_val("focus_new_count"):
                         set_state_val("focus_new_count", False)
@@ -290,7 +287,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                 labeled_by = sel.get("labeled_by")
                 labeled_at = sel.get("labeled_at")
                 source = sel.get("source")
-                with ui.row().classes("items-center gap-xs q-mt-xs w-full"):
+                with ui.row().classes("items-center gap-xs q-mt-xs w-full no-wrap"):
                     if labeled_by:
                         _render_labeled_by_meta(labeled_by, labeled_at)
                     elif source == "model":
