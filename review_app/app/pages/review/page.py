@@ -867,7 +867,13 @@ async def setup_review():
                         card?.querySelector('[data-shortcut="delete-annotation"]')?.click();
                         if (totalCards > 1) {
                             const nextIdx = Math.min(deletedIdx, totalCards - 2);
-                            setTimeout(() => __selectAnnotationCard(nextIdx), 300);
+                            const observer = new MutationObserver(() => {
+                                if (document.querySelectorAll('[data-annotation-idx]').length !== totalCards) {
+                                    observer.disconnect();
+                                    __selectAnnotationCard(nextIdx);
+                                }
+                            });
+                            observer.observe(document.body, { childList: true, subtree: true });
                         }
                         return;
                     }
