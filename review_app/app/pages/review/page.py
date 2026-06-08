@@ -605,6 +605,7 @@ def _render_annotation_sidebar_body(page: ReviewPage):
                 .classes("tour-target-review-later")
                 .tooltip(t("review_later"))
             )
+            bookmark_btn._props["data-shortcut"] = "toggle-review-later"
             ui.button(
                 icon="info_outline",
                 on_click=lambda: show_info_dialog(
@@ -899,7 +900,7 @@ async def setup_review():
                         document.querySelector('[data-shortcut="clear-annotations"]')?.click();
                     } else if (e.key === 'm' || e.key === 'M') {
                         e.preventDefault();
-                        document.querySelector('[data-shortcut="mark-unknown"]')?.click();
+                        document.querySelector('[data-shortcut="toggle-review-later"]')?.click();
                     } else if (e.key >= '1' && e.key <= '9') {
                         const target = document.querySelector('[data-shortcut="add-ai-' + e.key + '"]');
                         if (target) { e.preventDefault(); target.click(); }

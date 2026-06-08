@@ -595,7 +595,6 @@ class AnnotationMixin(ProviderBase):
                 label.labeled_by = labeled_by
 
             label.is_blank = is_blank
-            label.review_later = False
 
             session.commit()
             logger.info(

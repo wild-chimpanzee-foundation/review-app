@@ -426,19 +426,6 @@ def render_annotation_section_body(page, video, default_species, default_tags):
         page.render_video_section.refresh()
         page.render_filter_drawer.refresh()
 
-    async def mark_review_later():
-        if get_state_val("submit_in_progress"):
-            return
-        set_state_val("submit_in_progress", True)
-        try:
-            await run.io_bound(dp.set_review_later, selected_video_id)
-            ui.notify(t("marked_review_later"), type="info")
-            _advance_to_next(selected_video_id)
-            _clear_review_state()
-            page.render_video_section.refresh()
-        finally:
-            set_state_val("submit_in_progress", False)
-
     async def mark_blank_stay():
         await mark_blank(go_next=False)
 
@@ -509,20 +496,3 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                     _shortcut_badge("B")
             blank_next_btn._props["data-shortcut"] = "mark-blank"
             blank_next_btn.tooltip(t("tooltip_mark_blank"))
-
-            with (
-                ui.row()
-                .classes("col items-center gap-xs tour-target-review-later")
-                .style("min-width: 160px")
-            ):
-                with (
-                    ui.button(on_click=mark_review_later)
-                    .props("outline color=grey")
-                    .classes("col")
-                    .style("min-height: 60px;") as review_later_btn
-                ):
-                    with ui.row().classes("items-center justify-between w-full q-px-xs q-py-sm"):
-                        ui.label(t("mark_review_later")).classes("text-center col")
-                        _shortcut_badge("M")
-                review_later_btn._props["data-shortcut"] = "mark-unknown"
-                review_later_btn.tooltip(t("tooltip_review_later_btn"))
