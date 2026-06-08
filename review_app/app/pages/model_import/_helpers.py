@@ -7,7 +7,7 @@ from nicegui import ui
 
 from review_app.app.state import get_language, get_state_val, set_state_val
 from review_app.app.translations import t
-from review_app.backend.provider.import_service import BLANK_SENTINEL
+from review_app.backend.provider.import_service import BLANK_SENTINEL, IGNORE_SENTINEL
 
 
 def get_df_from_state(key: str) -> pd.DataFrame | None:
@@ -190,6 +190,7 @@ def render_species_mappings(
     can_apply: bool,
     mappings_state_key: str = "species_mappings",
     show_blank_option: bool = False,
+    show_ignore_option: bool = False,
     project_id: str | None = None,
     species_counts: dict[str, int] | None = None,
 ) -> None:
@@ -199,7 +200,8 @@ def render_species_mappings(
 
     species_map = dp.get_species_display_map(get_language(), project_id)
     blank_opt = {BLANK_SENTINEL: f"— {t('map_to_blank_video')} —"} if show_blank_option else {}
-    select_options = {"": "", **blank_opt, **species_map}
+    ignore_opt = {IGNORE_SENTINEL: f"— {t('map_to_ignore')} —"} if show_ignore_option else {}
+    select_options = {"": "", **blank_opt, **ignore_opt, **species_map}
 
     for orig in sorted(all_species):
         current_mapping = all_mappings.get(orig, "")
@@ -230,10 +232,39 @@ def render_species_mappings(
             select.on_value_change(make_update_fn(orig, select))
 
     pending_unmapped = [k for k, v in (get_state_val(mappings_state_key) or {}).items() if not v]
-    ui.button(t("apply"), icon="refresh", on_click=apply_fn, color="primary").props(
-        f"wide {'disabled' if not can_apply else ''}"
-    )
+
+    with ui.row().classes("items-center gap-sm q-mt-sm"):
+        apply_btn = ui.button(
+            t("apply"), icon="refresh", on_click=apply_fn, color="primary"
+        ).props(f"wide {'disabled' if not can_apply else ''}")
+
+        def accept_originals():
+            mappings = get_state_val(mappings_state_key) or {}
+            for orig in all_species:
+                if not mappings.get(orig):
+                    mappings[orig] = orig
+            set_state_val(mappings_state_key, mappings)
+            update_import_button()
+            apply_btn.props("wide")
+
+        def ignore_unmapped():
+            mappings = get_state_val(mappings_state_key) or {}
+            for orig in all_species:
+                if not mappings.get(orig):
+                    mappings[orig] = IGNORE_SENTINEL
+            set_state_val(mappings_state_key, mappings)
+            update_import_button()
+            apply_btn.props("wide")
+
+        if pending_unmapped:
+            ui.button(t("accept_originals"), icon="check", on_click=accept_originals).props(
+                "flat dense color=warning"
+            )
+        if pending_unmapped and show_ignore_option:
+            ui.button(t("ignore_unmapped"), icon="block", on_click=ignore_unmapped).props(
+                "flat dense color=grey"
+            )
     if pending_unmapped:
         ui.label(t("map_all_to_import", list=", ".join(pending_unmapped))).classes(
-            "text-warning text-caption q-mt-sm"
+            "text-warning text-caption q-mt-xs"
         )

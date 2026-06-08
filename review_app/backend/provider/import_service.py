@@ -22,6 +22,7 @@ from review_app.backend.provider.base import ProviderBase
 logger = logging.getLogger(__name__)
 
 BLANK_SENTINEL = "__blank__"
+IGNORE_SENTINEL = "__ignore__"
 _FALSY = {"", "0", "false", "False", "nan", "none", "None", "no"}
 _BLANK_SPECIES = {"Vide", "Video vide", "Indetermine", "Espece indeterminee", "NA", "nan", ""}
 

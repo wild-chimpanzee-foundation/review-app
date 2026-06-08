@@ -41,6 +41,10 @@ def _render_labeled_by_meta(labeled_by, labeled_at=None):
     ui.label(meta).classes("text-caption")
 
 
+# Generic detection-class entries added for AI model import; not meaningful for human review.
+_DETECTION_CLASS_SPECIES = {"animal", "person", "vehicle"}
+
+
 def _new_annotation(species, tags, duration_sec, source=None, probability=None, count=1):
     ann = {
         "species": species,
@@ -64,7 +68,11 @@ def _init_annotation_state(video, default_species, default_tags):
             is_blank = True
         else:
             is_blank = False
-            model_suggestions = video.get("model_suggestions") or []
+            model_suggestions = [
+                s
+                for s in (video.get("model_suggestions") or [])
+                if s.get("species") not in _DETECTION_CLASS_SPECIES
+            ]
             if model_suggestions:
                 selections = [
                     _new_annotation(
@@ -100,7 +108,7 @@ def _filter_species_by_group(species_map: dict, species_groups: dict, group: str
 
 
 def render_annotation_section_body(page, video, default_species, default_tags):
-    species_map = page.species_map
+    species_map = {k: v for k, v in page.species_map.items() if k not in _DETECTION_CLASS_SPECIES}
     species_groups = page.species_groups
     dp = page.dp
     # Always reinitialize state when the rendered video differs from what state belongs to

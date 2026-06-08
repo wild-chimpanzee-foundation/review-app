@@ -290,6 +290,9 @@ def _build_settings_content(container: ui.column):
                 ui.label(t("check_for_updates_label")).classes("text-body2")
                 version_label = ui.label(f"v{__version__}").classes("text-caption text-grey-6")
                 ui.space()
+                download_btn = (
+                    ui.button(icon="download").props("flat color=positive dense").classes("hidden")
+                )
                 check_btn = ui.button(t("check_for_updates_btn"), icon="system_update_alt").props(
                     "flat color=primary dense"
                 )
@@ -308,7 +311,12 @@ def _build_settings_content(container: ui.column):
                                 t("update_available_notify", version=tag.lstrip("v")),
                                 type="positive",
                             )
-                            await ui.run_javascript(f"window.open('{url}', '_blank')")
+                            download_btn.set_text(t("update_tooltip", version=tag.lstrip("v")))
+                            download_btn.on(
+                                "click",
+                                lambda u=url: ui.run_javascript(f"window.open('{u}', '_blank')"),
+                            )
+                            download_btn.classes(remove="hidden")
                         else:
                             ui.notify(t("update_up_to_date"), type="positive")
                     except Exception:

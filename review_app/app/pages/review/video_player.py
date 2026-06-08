@@ -322,7 +322,14 @@ def render_custom_video_player(video_url, duration, vid_key):
                         Math.floor(videoEl.currentTime%60).toString().padStart(2,'0') + ' / ' + '{_fmt(duration)}';
                 }});
 
-                range.addEventListener('input', () => videoEl.currentTime = range.value);
+                range.addEventListener('input', () => {{
+                    videoEl.currentTime = range.value;
+                    const pct = (range.value / range.max) * 100;
+                    range.style.setProperty('--pct', pct + '%');
+                    document.getElementById('vp-time-{vid_key}').textContent =
+                        Math.floor(range.value/60).toString().padStart(2,'0') + ':' +
+                        Math.floor(range.value%60).toString().padStart(2,'0') + ' / ' + '{_fmt(duration)}';
+                }});
                 range.addEventListener('mousedown', () => range._seeking = true);
                 range.addEventListener('mouseup', () => range._seeking = false);
 

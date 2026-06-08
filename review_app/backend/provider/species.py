@@ -373,14 +373,15 @@ class SpeciesMixin(ProviderBase):
                 )
 
     def _build_species_variant_map(self) -> dict[str, str]:
-        """Return {lowercase_variant -> scientific_name} for all species names/aliases."""
+        """Return {lowercase_variant -> scientific_name} for all species names/aliases.
+        Underscores are normalised to spaces so e.g. 'common_warthog' key becomes 'common warthog'."""
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text("SELECT scientific_name, name_en, name_fr FROM species")
             ).fetchall()
         variant_to_sci: dict[str, str] = {}
         for sci, name_en, name_fr in rows:
-            variant_to_sci[sci.lower()] = sci
+            variant_to_sci[sci.lower().replace("_", " ")] = sci
             if name_en:
                 variant_to_sci[name_en.lower()] = sci
             if name_fr:
@@ -390,12 +391,12 @@ class SpeciesMixin(ProviderBase):
     def _validate_species_fuzzy(
         self, value_text: str, variant_map: dict[str, str] | None = None
     ) -> tuple[bool, str | None]:
-        from thefuzz import process
+        from thefuzz import fuzz, process
 
         if not value_text:
             return False, None
 
-        value_lower = str(value_text).strip().lower()
+        value_lower = str(value_text).strip().lower().replace("_", " ")
         variant_to_sci = (
             variant_map if variant_map is not None else self._build_species_variant_map()
         )
@@ -406,8 +407,10 @@ class SpeciesMixin(ProviderBase):
         candidates = list(variant_to_sci.keys())
         if not candidates:
             return False, None
-        match, score = process.extractOne(value_lower, candidates)
-        if score >= 80:
+        # token_sort_ratio compares whole-word tokens, preventing short inputs like 'car'
+        # from matching longer candidates like 'caracal aurata' via substring.
+        match, score = process.extractOne(value_lower, candidates, scorer=fuzz.token_sort_ratio)
+        if score >= 85:
             return True, variant_to_sci[match]
 
         return False, None
