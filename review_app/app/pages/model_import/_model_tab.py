@@ -5,6 +5,7 @@ from review_app.app.state import get_active_project_id, get_state_val, set_state
 from review_app.app.translations import t
 from review_app.app.utils import user_error_message
 from review_app.backend.errors import DataImportError
+from review_app.backend.provider.import_service import IGNORE_SENTINEL
 from review_app.backend.utils import df_to_records
 
 from ._helpers import (
@@ -17,6 +18,17 @@ from ._helpers import (
 )
 
 _SCROLL_TO_CTA = 'setTimeout(()=>document.getElementById("import-cta")?.scrollIntoView({behavior:"smooth",block:"start"}),100)'
+_MAX_ERRORS_PER_TYPE = 50
+
+
+def _cap_errors_for_state(errors_df) -> tuple[list | None, dict]:
+    """Return (capped records, full counts). Keeps at most _MAX_ERRORS_PER_TYPE rows per
+    error type so large imports don't bloat session state."""
+    if errors_df is None or errors_df.empty:
+        return None, {}
+    counts = errors_df["error"].value_counts().to_dict()
+    capped = errors_df.groupby("error", group_keys=False).head(_MAX_ERRORS_PER_TYPE)
+    return capped.to_dict(orient="records"), counts
 
 
 async def setup_model_tab(dp, loading_dialog) -> None:
@@ -101,6 +113,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 set_state_val("species_mappings", {})
                 set_state_val("unmapped_species", [])
                 set_state_val("filename_match", False)
+                set_state_val("error_counts", {})
 
                 upload_result.text = t("loaded_rows", count=len(raw_df))
                 if upload_widget_holder[0]:
@@ -243,6 +256,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 df_to_import.loc[mask, "value_text"] = df_to_import.loc[
                     mask, "value_text"
                 ].replace(mappings)
+            df_to_import = df_to_import[df_to_import["value_text"] != IGNORE_SENTINEL]
 
             result = await run.io_bound(
                 dp.import_model_csv,
@@ -323,7 +337,13 @@ async def setup_model_tab(dp, loading_dialog) -> None:
 
             # Valid / invalid summary
             errors_df = get_df_from_state("errors_df")
-            _render_validation_counts(valid_count, errors_df, cleaned_df)
+            error_counts = get_state_val("error_counts") or {}
+            total_invalid = (
+                sum(error_counts.values())
+                if error_counts
+                else (len(errors_df) if errors_df is not None else 0)
+            )
+            _render_validation_counts(valid_count, errors_df, cleaned_df, total_invalid)
 
             # Species mappings (if any unknown species require mapping)
             all_mappings = dict(get_state_val("species_mappings", {}))
@@ -365,10 +385,9 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                             if cleaned_df is not None
                             else None,
                         )
-                        set_state_val(
-                            "errors_df",
-                            errors_df.to_dict(orient="records") if errors_df is not None else None,
-                        )
+                        errors_recs, error_counts = _cap_errors_for_state(errors_df)
+                        set_state_val("errors_df", errors_recs)
+                        set_state_val("error_counts", error_counts)
                         set_state_val("unmapped_species", unmapped_species)
                         ui.notify(t("mappings_applied"), type="positive")
                         refresh_results()
@@ -396,6 +415,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                     apply_fn=apply_mappings_model,
                     update_import_button=update_import_button,
                     can_apply=can_apply,
+                    show_ignore_option=True,
                     project_id=get_active_project_id(),
                     species_counts=species_counts,
                 )
@@ -403,7 +423,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             # Error details
             if errors_df is not None and not errors_df.empty:
                 ui.separator().classes("q-my-md")
-                _render_error_details(errors_df)
+                _render_error_details(errors_df, error_counts)
 
             if unmapped:
                 ui.label(t("unmapped_species_count", count=len(unmapped))).classes(
@@ -458,6 +478,7 @@ def _render_annotation_mappings(ann_mappings: list, col_opts_none: dict, config_
         "species": t("ann_type_species"),
         "blank_non_blank": t("ann_type_blank"),
         "behavior": t("ann_type_behavior"),
+        "object_detection": t("ann_type_object_detection"),
     }
 
     if ann_mappings:
@@ -579,9 +600,15 @@ def _render_match_stats(match_stats: dict | None) -> None:
                     ui.label(up).classes("text-caption")
 
 
-def _render_validation_counts(valid_count: int, errors_df, cleaned_df) -> None:
+def _render_validation_counts(
+    valid_count: int, errors_df, cleaned_df, total_invalid: int | None = None
+) -> None:
     ui.label(t("validation_result")).classes("text-subtitle1 font-weight-medium q-mb-md")
-    invalid_count = len(errors_df) if errors_df is not None else 0
+    invalid_count = (
+        total_invalid
+        if total_invalid is not None
+        else (len(errors_df) if errors_df is not None else 0)
+    )
 
     with ui.row().classes("gap-lg q-mb-md"):
         with ui.card().classes("text-center q-pa-md"):
@@ -605,14 +632,21 @@ def _render_validation_counts(valid_count: int, errors_df, cleaned_df) -> None:
             ).classes("h-64")
 
 
-def _render_error_details(errors_df) -> None:
-    ui.label(t("validation_errors_count", count=len(errors_df))).classes("text-negative q-mb-sm")
+def _render_error_details(errors_df, error_counts: dict | None = None) -> None:
+    total = sum(error_counts.values()) if error_counts else len(errors_df)
+    ui.label(t("validation_errors_count", count=total)).classes("text-negative q-mb-sm")
 
-    error_summary = errors_df["error"].value_counts().to_dict()
-    if error_summary:
+    summary = error_counts if error_counts else errors_df["error"].value_counts().to_dict()
+    if summary:
         ui.label(t("error_summary")).classes("text-body2 q-mt-sm")
-        for err, count in error_summary.items():
+        for err, count in summary.items():
             ui.label(t("error_summary_item", err=t(err), count=count)).classes("text-body2")
+
+    shown = len(errors_df)
+    if shown < total:
+        ui.label(t("errors_showing_sample", shown=shown, total=total)).classes(
+            "text-caption text-grey q-mt-xs"
+        )
 
     with ui.expansion(t("show_detailed_errors"), icon="table_rows").classes("full-width q-mt-sm"):
         err_display_cols = [c for c in errors_df.columns if c != "video_id"]
@@ -645,10 +679,9 @@ async def _validate_long(dp, loading_dialog, refresh_results) -> None:
             "cleaned_df",
             cleaned_df.to_dict(orient="records") if cleaned_df is not None else None,
         )
-        set_state_val(
-            "errors_df",
-            errors_df.to_dict(orient="records") if errors_df is not None else None,
-        )
+        errors_recs, error_counts = _cap_errors_for_state(errors_df)
+        set_state_val("errors_df", errors_recs)
+        set_state_val("error_counts", error_counts)
         set_state_val(
             "species_mappings",
             {m["original"]: m.get("mapped_to", "") for m in species_mappings},
@@ -686,10 +719,9 @@ async def _validate_wide(dp, loading_dialog, path_col, ann_maps, refresh_results
             "cleaned_df",
             cleaned_df.to_dict(orient="records") if cleaned_df is not None else None,
         )
-        set_state_val(
-            "errors_df",
-            errors_df.to_dict(orient="records") if errors_df is not None else None,
-        )
+        errors_recs, error_counts = _cap_errors_for_state(errors_df)
+        set_state_val("errors_df", errors_recs)
+        set_state_val("error_counts", error_counts)
         set_state_val(
             "species_mappings",
             {m["original"]: m.get("mapped_to", "") for m in species_mappings},
