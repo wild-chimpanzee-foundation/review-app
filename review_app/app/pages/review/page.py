@@ -857,12 +857,18 @@ async def setup_review():
                         return;
                     }
 
-                    // X: delete the selected annotation card
+                    // X: delete the selected annotation card, then select the next one
                     if ((e.key === 'x' || e.key === 'X') && __selectedAnnotationIdx >= 0) {
                         e.preventDefault();
                         const card = document.querySelector('[data-annotation-idx="' + __selectedAnnotationIdx + '"]');
+                        const totalCards = document.querySelectorAll('[data-annotation-idx]').length;
+                        const deletedIdx = __selectedAnnotationIdx;
                         __clearAnnotationSelection();
                         card?.querySelector('[data-shortcut="delete-annotation"]')?.click();
+                        if (totalCards > 1) {
+                            const nextIdx = Math.min(deletedIdx, totalCards - 2);
+                            setTimeout(() => __selectAnnotationCard(nextIdx), 300);
+                        }
                         return;
                     }
 
