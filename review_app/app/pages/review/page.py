@@ -868,7 +868,7 @@ async def setup_review():
                         if (totalCards > 1) {
                             const nextIdx = Math.min(deletedIdx, totalCards - 2);
                             const observer = new MutationObserver(() => {
-                                if (document.querySelectorAll('[data-annotation-idx]').length !== totalCards) {
+                                if (document.querySelectorAll('[data-annotation-idx]').length === totalCards - 1) {
                                     observer.disconnect();
                                     __selectAnnotationCard(nextIdx);
                                 }
