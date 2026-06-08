@@ -258,11 +258,12 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                     )
                     ct = (
                         ui.select(
+                            label=t("count_label"),
                             options=count_options,
                             value=current_count,
                         )
                         .props("outlined dense")
-                        .style("width: 52px")
+                        .classes("col")
                     )
                     if i == 0 and get_state_val("focus_new_count"):
                         set_state_val("focus_new_count", False)
