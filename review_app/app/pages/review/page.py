@@ -774,7 +774,36 @@ async def setup_review():
                     const card = document.querySelector('[data-annotation-idx="' + idx + '"]');
                     if (!card) return;
                     card.style.borderColor = 'var(--q-warning)';
-                    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+                    // Find the nearest scrollable ancestor (the right drawer scroll container)
+                    let scrollEl = card.parentElement;
+                    while (scrollEl && scrollEl !== document.body) {
+                        const style = window.getComputedStyle(scrollEl);
+                        if (style.overflowY === 'auto' || style.overflowY === 'scroll') break;
+                        scrollEl = scrollEl.parentElement;
+                    }
+                    if (!scrollEl || scrollEl === document.body) {
+                        card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                        __selectedAnnotationIdx = idx;
+                        return;
+                    }
+
+                    const containerRect = scrollEl.getBoundingClientRect();
+                    const cardRect = card.getBoundingClientRect();
+
+                    // Account for the sticky action-button footer so cards are not hidden behind it
+                    const stickyEl = scrollEl.querySelector('[style*="sticky"]');
+                    const footerHeight = stickyEl ? stickyEl.offsetHeight : 0;
+
+                    const visibleTop = containerRect.top + 8;
+                    const visibleBottom = containerRect.bottom - footerHeight - 8;
+
+                    if (cardRect.top < visibleTop) {
+                        scrollEl.scrollTo({ top: scrollEl.scrollTop + cardRect.top - visibleTop, behavior: 'smooth' });
+                    } else if (cardRect.bottom > visibleBottom) {
+                        scrollEl.scrollTo({ top: scrollEl.scrollTop + cardRect.bottom - visibleBottom, behavior: 'smooth' });
+                    }
+
                     __selectedAnnotationIdx = idx;
                 }
 
