@@ -22,6 +22,7 @@ class DistributionSection:
         self._pending: dict[str, str | None] = {}
         self._active_annotators: set[str] | None = None
         self.camera_stats: list[dict] = []
+        self.chunks: list[dict] = []
 
     @ui.refreshable_method
     def render(self) -> None:
@@ -29,10 +30,12 @@ class DistributionSection:
         pid = self.project_id
         annotators = dp.get_all_annotators()
         self.camera_stats = dp.get_camera_stats(pid)
-        camera_assignment = dp.get_camera_assignment_map(pid)
-        for cam in camera_assignment:
-            if cam not in self._pending:
-                self._pending[cam] = camera_assignment[cam]
+        if not self.chunks:
+            self.chunks = dp.get_video_chunks(pid)
+        chunk_assignment = dp.get_chunk_assignment_map(pid, self.chunks)
+        for chunk_id in chunk_assignment:
+            if chunk_id not in self._pending:
+                self._pending[chunk_id] = chunk_assignment[chunk_id]
 
         if self._active_annotators is None:
             self._active_annotators = {v for v in self._pending.values() if v is not None}
@@ -89,92 +92,87 @@ class DistributionSection:
                     else:
                         chip.props("outline color=grey-6")
 
-        # ── Camera assignment ──────────────────────────────────────────────────
+        # ── Distribution controls ──────────────────────────────────────────────
         ui.separator().classes("q-my-sm")
-        ui.label(t("distribution_cameras_label")).classes("text-caption text-grey-6 q-mb-xs")
 
         if not self.camera_stats:
             ui.label(t("distribution_no_cameras")).classes("text-caption text-grey-5")
             return
 
-        annotator_options = {a: a for a in annotators}
-
         async def auto_distribute():
             if not self._active_annotators:
                 ui.notify(t("distribution_no_annotators"), type="warning")
                 return
-            result = await run.io_bound(dp.auto_distribute, pid, list(self._active_annotators))
-            self._pending = {c: None for c in self._pending}
-            for ann, cams in result.items():
-                for cam in cams:
-                    self._pending[cam] = ann
+            result, chunks = await run.io_bound(
+                dp.auto_distribute_flexible, pid, list(self._active_annotators)
+            )
+            self.chunks = chunks
+            self._pending = {ch["chunk_id"]: None for ch in chunks}
+            for ann, chunk_ids in result.items():
+                for cid in chunk_ids:
+                    self._pending[cid] = ann
             self.render.refresh()
             self.render_summary.refresh()
 
         async def apply_distribution():
-            assignment: dict[str, list[str]] = {}
-            clear_cameras: list[str] = []
-            for cam, ann in self._pending.items():
+            chunk_assignment: dict[str, list[str]] = {}
+            clear_chunks: list[str] = []
+            for chunk_id, ann in self._pending.items():
                 if ann:
-                    assignment.setdefault(ann, []).append(cam)
+                    chunk_assignment.setdefault(ann, []).append(chunk_id)
                 else:
-                    clear_cameras.append(cam)
-            n = await run.io_bound(dp.apply_distribution, pid, assignment, clear_cameras)
-            filled = len(assignment)
+                    clear_chunks.append(chunk_id)
+            n = await run.io_bound(
+                dp.apply_chunk_assignment, pid, chunk_assignment, self.chunks, clear_chunks
+            )
+            filled = len(chunk_assignment)
             ui.notify(t("distribution_applied", n=n, annotators=filled), type="positive")
             self.render.refresh()
             self.render_summary.refresh()
 
-        with ui.row().classes("gap-sm q-mb-sm"):
+        has_pending = any(v is not None for v in self._pending.values())
+
+        async def reset_assignments():
+            with ui.dialog() as confirm_dialog, ui.card():
+                ui.label(t("distribution_reset_confirm")).classes("text-body1 q-mb-md")
+                with ui.row().classes("gap-sm justify-end"):
+                    ui.button(t("cancel"), on_click=confirm_dialog.close).props(
+                        "outline size=sm"
+                    )
+
+                    async def _do_reset():
+                        confirm_dialog.close()
+                        await run.io_bound(dp.clear_all_assignments, pid)
+                        self._pending = {}
+                        self.chunks = []
+                        self.render.refresh()
+                        self.render_summary.refresh()
+                        ui.notify(t("distribution_reset_done"), type="positive")
+
+                    ui.button(
+                        t("distribution_reset_btn"), icon="delete_sweep", on_click=_do_reset
+                    ).props("unelevated color=negative size=sm")
+            confirm_dialog.open()
+
+        with ui.row().classes("gap-sm q-mb-sm items-center"):
             ui.button(
                 t("distribution_auto_btn"), icon="auto_fix_high", on_click=auto_distribute
             ).props("outline color=secondary size=sm").tooltip(t("distribution_auto_tooltip"))
-
-        with ui.grid(columns="1fr auto auto 200px").classes(
-            "w-full gap-x-md gap-y-xs items-center"
-        ):
-            ui.label(t("distribution_camera_col")).classes(
-                "text-caption text-grey-6 font-weight-bold"
-            )
-            ui.label(t("distribution_videos_col")).classes(
-                "text-caption text-grey-6 font-weight-bold text-right"
-            )
-            ui.label(t("distribution_hours_col")).classes(
-                "text-caption text-grey-6 font-weight-bold text-right"
-            )
-            ui.label(t("distribution_assigned_col")).classes(
-                "text-caption text-grey-6 font-weight-bold"
-            )
-
-            for cam in self.camera_stats:
-                cam_id = cam["camera_id"]
-                ui.label(cam_id).classes("text-body2")
-                ui.label(str(cam["video_count"])).classes("text-body2 text-right")
-                ui.label(f"{cam['hours']:.1f}").classes("text-body2 text-right")
-                sel = ui.select(
-                    options=annotator_options,
-                    value=self._pending.get(cam_id),
-                    clearable=True,
-                ).props("outlined dense")
-
-                def _make_handler(c):
-                    def _on_change(e):
-                        self._pending[c] = e.value or None
-                        self.render_summary.refresh()
-
-                    return _on_change
-
-                sel.on_value_change(_make_handler(cam_id))
-
-        ui.button(t("distribution_apply_btn"), icon="check", on_click=apply_distribution).props(
-            "unelevated color=primary size=sm"
-        ).classes("q-mt-sm")
+            if has_pending:
+                ui.button(
+                    t("distribution_apply_btn"), icon="check", on_click=apply_distribution
+                ).props("unelevated color=primary size=sm")
+            ui.button(
+                t("distribution_reset_btn"), icon="delete_sweep", on_click=reset_assignments
+            ).props("flat color=negative size=sm")
 
     @ui.refreshable_method
     def render_summary(self) -> None:
         annotator_map: dict[str, dict] = {}
-        for cam in self.camera_stats:
-            ann = self._pending.get(cam["camera_id"])
+        seen_cameras: dict[str, set[str]] = {}
+        chunks_by_annotator: dict[str, list[str]] = {}
+        for chunk in self.chunks:
+            ann = self._pending.get(chunk["chunk_id"])
             if ann is None:
                 continue
             if ann not in annotator_map:
@@ -184,9 +182,13 @@ class DistributionSection:
                     "video_count": 0,
                     "hours": 0.0,
                 }
-            annotator_map[ann]["cameras"] += 1
-            annotator_map[ann]["video_count"] += cam["video_count"]
-            annotator_map[ann]["hours"] = round(annotator_map[ann]["hours"] + cam["hours"], 2)
+                seen_cameras[ann] = set()
+                chunks_by_annotator[ann] = []
+            seen_cameras[ann].add(chunk["camera_id"])
+            annotator_map[ann]["cameras"] = len(seen_cameras[ann])
+            annotator_map[ann]["video_count"] += chunk["video_count"]
+            annotator_map[ann]["hours"] = round(annotator_map[ann]["hours"] + chunk["hours"], 2)
+            chunks_by_annotator[ann].append(chunk["label"])
         summary = sorted(annotator_map.values(), key=lambda r: r["annotator"])
         if summary:
             ui.separator().classes("q-my-sm")
@@ -206,6 +208,15 @@ class DistributionSection:
                     ui.label(str(row["cameras"])).classes("text-body2 text-right")
                     ui.label(str(row["video_count"])).classes("text-body2 text-right")
                     ui.label(str(row["hours"])).classes("text-body2 text-right")
+
+            ui.separator().classes("q-my-sm")
+            for row in summary:
+                ann = row["annotator"]
+                labels = chunks_by_annotator.get(ann, [])
+                with ui.row().classes("gap-xs items-start q-mb-xs flex-wrap"):
+                    ui.label(ann).classes("text-caption text-grey-6 font-weight-bold")
+                    ui.label("·").classes("text-caption text-grey-4")
+                    ui.label(", ".join(labels)).classes("text-caption text-grey-7")
 
 
 def render_distribution_section(dp, project_id: str) -> None:

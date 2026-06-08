@@ -732,11 +732,22 @@ class ImportMixin(ProviderBase):
         return base_df
 
     def export_model_annotations_csv(
-        self, active_project_id: str | None, camera_ids: list[str] | None = None
+        self,
+        active_project_id: str | None,
+        camera_ids: list[str] | None = None,
+        video_ids: list[str] | None = None,
     ) -> pd.DataFrame:
         params: dict[str, Any] = {"pid": active_project_id} if active_project_id else {}
         v_pid = "AND v.project_id = :pid" if active_project_id else ""
-        if camera_ids is None:
+        if video_ids is not None:
+            if video_ids:
+                placeholders = ", ".join(f":v{i}" for i in range(len(video_ids)))
+                for i, v in enumerate(video_ids):
+                    params[f"v{i}"] = v
+                cam_filter = f"AND v.video_id IN ({placeholders})"
+            else:
+                cam_filter = "AND 1=0"
+        elif camera_ids is None:
             cam_filter = ""
         elif camera_ids:
             placeholders = ", ".join(f":c{i}" for i in range(len(camera_ids)))
@@ -1225,10 +1236,23 @@ class ImportMixin(ProviderBase):
 
     # ── Project bundle export / import ────────────────────────────────────────
 
-    def _export_metadata_csv(self, project_id: str, camera_ids: list[str] | None = None) -> str:
+    def _export_metadata_csv(
+        self,
+        project_id: str,
+        camera_ids: list[str] | None = None,
+        video_ids: list[str] | None = None,
+    ) -> str:
         """Export video metadata (path, camera, recorded_at, lat, lon, assigned_to) as CSV."""
         params: dict[str, Any] = {"pid": project_id}
-        if camera_ids is None:
+        if video_ids is not None:
+            if video_ids:
+                placeholders = ", ".join(f":v{i}" for i in range(len(video_ids)))
+                for i, v in enumerate(video_ids):
+                    params[f"v{i}"] = v
+                cam_filter = f"AND v.video_id IN ({placeholders})"
+            else:
+                cam_filter = "AND 1=0"
+        elif camera_ids is None:
             cam_filter = ""
         elif camera_ids:
             placeholders = ", ".join(f":c{i}" for i in range(len(camera_ids)))
@@ -1262,11 +1286,12 @@ class ImportMixin(ProviderBase):
         project_id: str,
         include: list[str],
         camera_ids: list[str] | None = None,
+        video_ids: list[str] | None = None,
     ) -> bytes:
         """Build a ZIP bundle of project data.
 
         `include` is a subset of: "species", "tags", "model_annotations", "metadata".
-        `camera_ids` optionally filters model_annotations and metadata to those cameras.
+        `camera_ids` or `video_ids` optionally filters model_annotations and metadata.
         Returns raw ZIP bytes.
         """
         import io
@@ -1290,13 +1315,13 @@ class ImportMixin(ProviderBase):
                     contents.append("tags")
 
             if "model_annotations" in include:
-                ma_df = self.export_model_annotations_csv(project_id, camera_ids)
+                ma_df = self.export_model_annotations_csv(project_id, camera_ids, video_ids)
                 if not ma_df.empty:
                     zf.writestr("model_annotations.csv", ma_df.to_csv(index=False))
                     contents.append("model_annotations")
 
             if "metadata" in include:
-                csv_str = self._export_metadata_csv(project_id, camera_ids)
+                csv_str = self._export_metadata_csv(project_id, camera_ids, video_ids)
                 if csv_str:
                     zf.writestr("metadata.csv", csv_str)
                     contents.append("metadata")
@@ -1411,8 +1436,8 @@ class ImportMixin(ProviderBase):
         """Build one bundle ZIP per annotator and wrap them in an outer ZIP.
 
         Each inner ZIP is named bundle_<annotator>_<today>.zip and contains only
-        that annotator's assigned cameras. Annotators with no camera assignments
-        get an empty bundle. Returns raw outer ZIP bytes.
+        the videos assigned to that annotator (works correctly even when a camera
+        is split across multiple annotators). Returns raw outer ZIP bytes.
         """
         import io
         import zipfile
@@ -1420,15 +1445,34 @@ class ImportMixin(ProviderBase):
 
         today = _date.today()
         annotators = self.get_all_annotators()
-        camera_map = self.get_camera_assignment_map(project_id)
+
+        # Query per-annotator video_ids directly from video_assignments
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text("""
+                    SELECT va.assigned_to, va.video_id
+                    FROM video_assignments va
+                    JOIN videos v ON v.video_id = va.video_id
+                    WHERE v.project_id = :pid
+                      AND NOT EXISTS (
+                          SELECT 1 FROM video_labels WHERE video_id = v.video_id
+                      )
+                """),
+                {"pid": project_id},
+            ).fetchall()
+        video_ids_by_annotator: dict[str, list[str]] = {}
+        for assigned_to, video_id in rows:
+            video_ids_by_annotator.setdefault(assigned_to, []).append(video_id)
 
         outer_buf = io.BytesIO()
         with zipfile.ZipFile(outer_buf, "w", compression=zipfile.ZIP_DEFLATED) as outer:
             for annotator in annotators:
-                camera_ids = [c for c, a in camera_map.items() if a == annotator]
-                if not camera_ids:
+                video_ids = video_ids_by_annotator.get(annotator, [])
+                if not video_ids:
                     continue
-                bundle_bytes = self.export_project_bundle(project_id, include, camera_ids)
+                bundle_bytes = self.export_project_bundle(
+                    project_id, include, video_ids=video_ids
+                )
                 safe_name = annotator.replace(" ", "_")
                 outer.writestr(f"bundle_{safe_name}_{today}.zip", bundle_bytes)
         return outer_buf.getvalue()
