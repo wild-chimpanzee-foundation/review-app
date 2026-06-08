@@ -1469,9 +1469,7 @@ class ImportMixin(ProviderBase):
                 video_ids = video_ids_by_annotator.get(annotator, [])
                 if not video_ids:
                     continue
-                bundle_bytes = self.export_project_bundle(
-                    project_id, include, video_ids=video_ids
-                )
+                bundle_bytes = self.export_project_bundle(project_id, include, video_ids=video_ids)
                 safe_name = annotator.replace(" ", "_")
                 outer.writestr(f"bundle_{safe_name}_{today}.zip", bundle_bytes)
         return outer_buf.getvalue()

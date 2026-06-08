@@ -136,9 +136,7 @@ class DistributionSection:
             with ui.dialog() as confirm_dialog, ui.card():
                 ui.label(t("distribution_reset_confirm")).classes("text-body1 q-mb-md")
                 with ui.row().classes("gap-sm justify-end"):
-                    ui.button(t("cancel"), on_click=confirm_dialog.close).props(
-                        "outline size=sm"
-                    )
+                    ui.button(t("cancel"), on_click=confirm_dialog.close).props("outline size=sm")
 
                     async def _do_reset():
                         confirm_dialog.close()

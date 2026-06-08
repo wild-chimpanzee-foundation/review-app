@@ -225,8 +225,7 @@ class AssignmentMixin(ProviderBase):
         """
         chunk_map = {c["chunk_id"]: c for c in chunks}
         video_loads: dict[str, int] = {
-            n: sum(chunk_map[c]["video_count"] for c in cids)
-            for n, cids in assignment.items()
+            n: sum(chunk_map[c]["video_count"] for c in cids) for n, cids in assignment.items()
         }
         hour_loads: dict[str, float] = {
             n: sum(chunk_map[c]["hours"] for c in cids) for n, cids in assignment.items()
@@ -238,9 +237,7 @@ class AssignmentMixin(ProviderBase):
             ) / target_hours
 
         ann_pairs = [
-            (a, b)
-            for i, a in enumerate(annotator_names)
-            for b in annotator_names[i + 1 :]
+            (a, b) for i, a in enumerate(annotator_names) for b in annotator_names[i + 1 :]
         ]
 
         improved = True
