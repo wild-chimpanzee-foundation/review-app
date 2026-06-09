@@ -158,12 +158,13 @@ async def setup_overview():
                 )
                 species_counts = stats.get("species_counts", [])
                 if species_counts:
-                    for s in species_counts[:10]:
-                        sci_name = s["species"]
-                        common_name = species_map.get(sci_name, sci_name)
-                        with ui.row().classes("w-full items-center q-mb-sm"):
-                            ui.label(common_name).classes("col text-body2")
-                            ui.label(str(s["observations"])).classes("text-body2 text-grey-7")
+                    with ui.scroll_area().style("max-height: 300px"):
+                        for s in species_counts:
+                            sci_name = s["species"]
+                            common_name = species_map.get(sci_name, sci_name)
+                            with ui.row().classes("w-full items-center q-mb-sm"):
+                                ui.label(common_name).classes("col text-body2")
+                                ui.label(str(s["observations"])).classes("text-body2 text-grey-7")
                 else:
                     ui.label(t("no_obs_yet")).classes("text-grey-5")
 
