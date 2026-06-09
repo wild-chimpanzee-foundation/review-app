@@ -310,22 +310,29 @@ async def setup_overview():
         ):
             assignment_summary = await run.io_bound(dp.get_assignment_summary, pid)
             if assignment_summary:
-                rows = [
-                    {
-                        **r,
-                        "labeled_pct": f"{round(100 * r['labeled'] / max(r['video_count'], 1))}%",
-                    }
-                    for r in assignment_summary
-                ]
-                columns = [
-                    {"name": "annotator", "label": t("annotator_label"), "field": "annotator"},
-                    {"name": "cameras", "label": t("col_cameras"), "field": "cameras"},
-                    {"name": "videos", "label": t("col_videos"), "field": "video_count"},
-                    {"name": "labeled", "label": t("col_labeled"), "field": "labeled"},
-                    {"name": "labeled_pct", "label": t("col_labeled_pct"), "field": "labeled_pct"},
-                    {"name": "blank", "label": t("col_blank"), "field": "blank"},
-                    {"name": "hours", "label": t("col_hours"), "field": "hours"},
-                ]
-                ui.table(columns=columns, rows=rows).classes("q-pa-sm")
+                with ui.column().classes("w-full q-pa-sm gap-xs"):
+                    with ui.row().classes("w-full q-px-xs q-pb-xs"):
+                        ui.label(t("annotator_label")).classes("col-4 text-caption text-grey-6 font-weight-medium")
+                        ui.label(t("col_cameras")).classes("col text-caption text-grey-6 font-weight-medium text-right")
+                        ui.label(t("col_videos")).classes("col text-caption text-grey-6 font-weight-medium text-right")
+                        ui.label(t("col_labeled_pct")).classes("col text-caption text-grey-6 font-weight-medium text-right")
+                        ui.label(t("col_blank")).classes("col text-caption text-grey-6 font-weight-medium text-right")
+                        ui.label(t("col_hours")).classes("col text-caption text-grey-6 font-weight-medium text-right")
+                    for r in assignment_summary:
+                        labeled_pct = round(100 * r["labeled"] / max(r["video_count"], 1))
+                        with (
+                            ui.row()
+                            .classes("w-full items-center q-px-xs q-py-xs cursor-pointer rounded")
+                            .style("transition: background 0.15s")
+                            .on("click", lambda an=r["annotator"]: go_review(selected_annotator=[an]))
+                            .on("mouseover", lambda e: e.sender.style("background: rgba(0,0,0,0.06)"))
+                            .on("mouseout", lambda e: e.sender.style("background: transparent"))
+                        ):
+                            ui.label(r["annotator"] or "—").classes("col-4 text-body2")
+                            ui.label(str(r["cameras"])).classes("col text-body2 text-grey-7 text-right")
+                            ui.label(str(r["video_count"])).classes("col text-body2 text-grey-7 text-right")
+                            ui.label(f"{labeled_pct}%").classes("col text-body2 text-grey-7 text-right")
+                            ui.label(str(r["blank"])).classes("col text-body2 text-grey-7 text-right")
+                            ui.label(f"{r['hours']:.1f}h").classes("col text-body2 text-grey-7 text-right")
             else:
                 ui.label(t("no_camera_data")).classes("text-grey-5 q-pa-sm")
