@@ -167,7 +167,14 @@ async def setup_overview():
                         for s in species_counts:
                             sci_name = s["species"]
                             common_name = species_map.get(sci_name, sci_name)
-                            with ui.row().classes("w-full items-center q-mb-sm"):
+                            with (
+                                ui.row()
+                                .classes("w-full items-center q-mb-sm cursor-pointer rounded q-px-xs")
+                                .style("transition: background 0.15s")
+                                .on("click", lambda sn=sci_name: go_review(selected_species=[sn]))
+                                .on("mouseover", lambda e: e.sender.style("background: rgba(0,0,0,0.06)"))
+                                .on("mouseout", lambda e: e.sender.style("background: transparent"))
+                            ):
                                 ui.label(common_name).classes("col text-body2")
                                 ui.label(str(s["observations"])).classes("text-body2 text-grey-7")
                 else:
@@ -182,7 +189,14 @@ async def setup_overview():
                     total_obs = sum(b["observations"] for b in behavior_counts)
                     for b in behavior_counts:
                         pct = 100 * b["observations"] / max(total_obs, 1)
-                        with ui.row().classes("w-full items-center q-mb-sm"):
+                        with (
+                            ui.row()
+                            .classes("w-full items-center q-mb-sm cursor-pointer rounded q-px-xs")
+                            .style("transition: background 0.15s")
+                            .on("click", lambda bv=b["behavior"]: go_review(selected_behavior=[bv]))
+                            .on("mouseover", lambda e: e.sender.style("background: rgba(0,0,0,0.06)"))
+                            .on("mouseout", lambda e: e.sender.style("background: transparent"))
+                        ):
                             ui.label(b["behavior"]).classes("col text-body2")
                             ui.label(f"{b['observations']} ({pct:.0f}%)").classes(
                                 "text-caption text-grey-6 q-mr-sm"
