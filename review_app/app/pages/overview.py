@@ -209,7 +209,7 @@ async def setup_overview():
                     ]
                     render_location_map(map_markers)
 
-        # Camera summary table
+        # Camera cards
         with (
             ui.expansion(t("camera_summary_title"), icon="photo_camera")
             .classes("full-width q-mb-lg")
@@ -217,24 +217,36 @@ async def setup_overview():
         ):
             camera_summary = stats.get("camera_summary", [])
             if camera_summary:
-                rows = [
-                    {
-                        **row,
-                        "labeled_pct": f"{round(100 * row['labeled'] / max(row['total_videos'], 1))}%",
-                    }
-                    for row in camera_summary
-                ]
-                columns = [
-                    {"name": "camera_id", "label": t("col_camera"), "field": "camera_id"},
-                    {"name": "total", "label": t("col_total"), "field": "total_videos"},
-                    {"name": "labeled", "label": t("col_labeled"), "field": "labeled"},
-                    {"name": "labeled_pct", "label": t("col_labeled_pct"), "field": "labeled_pct"},
-                    {"name": "blank", "label": t("col_blank"), "field": "blank"},
-                    {"name": "hours", "label": t("col_hours"), "field": "hours"},
-                ]
-                ui.table(columns=columns, rows=rows).classes("q-pa-sm")
+                with ui.scroll_area().style("width: 100%"):
+                    with ui.row().classes("no-wrap gap-md q-pb-sm"):
+                        for cam in camera_summary:
+                            labeled_pct = round(100 * cam["labeled"] / max(cam["total_videos"], 1))
+                            cam_id = cam["camera_id"]
+                            with (
+                                ui.card()
+                                .classes("q-pa-md cursor-pointer")
+                                .style("min-width: 160px; max-width: 180px")
+                                .on("click", lambda c=cam_id: go_review(selected_camera=c))
+                            ):
+                                ui.label(cam_id or t("col_camera")).classes(
+                                    "text-body2 font-weight-medium ellipsis"
+                                ).style("max-width: 150px")
+                                ui.linear_progress(
+                                    value=labeled_pct / 100, show_value=False
+                                ).props("color=primary style=height:4px").classes("q-my-xs")
+                                with ui.row().classes("w-full justify-between items-center"):
+                                    ui.label(f"{labeled_pct}% {t('col_labeled').lower()}").classes(
+                                        "text-caption text-grey-6"
+                                    )
+                                with ui.row().classes("w-full justify-between"):
+                                    ui.label(
+                                        f"{cam['total_videos']} {t('col_total').lower()}"
+                                    ).classes("text-caption text-grey-5")
+                                    ui.label(f"{cam['hours']:.1f}h").classes(
+                                        "text-caption text-grey-5"
+                                    )
             else:
-                ui.label(t("no_camera_data")).classes("text-grey-5 q-pa-sm")
+                ui.label(t("no_camera_data")).classes("text-grey-5")
 
         # Assignment summary table
         with (
