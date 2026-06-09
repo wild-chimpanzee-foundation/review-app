@@ -45,7 +45,7 @@ def build_video_path_lookup(
     legacy_suffix_lists: dict[str, list[str]] = {}
 
     for vid, video_path, camera_id in video_rows:
-        p = Path(video_path)
+        p = Path(video_path.replace("\\", "/"))
         cam_lower = (camera_id or "").lower()
         cam_by_id[vid] = cam_lower
         by_filename_lists.setdefault(p.name.lower(), []).append(vid)
@@ -113,6 +113,7 @@ def resolve_video_path(
     if known_video_ids and raw_path in known_video_ids:
         return raw_path, "exact_id"
 
+    raw_path = raw_path.replace("\\", "/")
     p = Path(raw_path)
     raw_lower = raw_path.lower()
 

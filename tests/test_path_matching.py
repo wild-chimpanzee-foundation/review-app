@@ -216,3 +216,24 @@ def test_resolve_no_match():
     vid, tier = resolve_video_path("completely/unknown/path.mp4", lookup)
     assert vid is None
     assert tier == ""
+
+
+def test_resolve_windows_backslash_path():
+    """CSV exported on Windows uses backslashes; should match via suffix tier."""
+    rows = [("vid-001", "/root/C30_Cam003_L/01010001.mp4", "C30_Cam003_L")]
+    lookup = _simple_lookup(rows)
+    vid, tier = resolve_video_path(
+        r"D:\WCF_connectivity\AnneSo\C30_Cam003_L\01010001.mp4", lookup
+    )
+    assert vid == "vid-001"
+    assert tier == "suffix"
+
+
+def test_build_lookup_windows_backslash_db_path():
+    """DB paths with backslashes (Windows origin) are normalized correctly."""
+    rows = [("vid-001", r"D:\WCF_connectivity\C30_Cam003_L\01010001.mp4", "C30_Cam003_L")]
+    lookup = _simple_lookup(rows)
+    vid, tier = resolve_video_path(
+        r"D:\WCF_connectivity\C30_Cam003_L\01010001.mp4", lookup
+    )
+    assert vid == "vid-001"
