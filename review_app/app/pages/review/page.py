@@ -761,17 +761,18 @@ async def setup_review():
                 });
                 observer.observe(document.body, { childList: true, subtree: true });
 
-                // J/K annotation card selection (visual highlight only — Tab to enter)
-                let __selectedAnnotationIdx = -1;
+                // J/K annotation card selection state and helpers on window so they
+                // survive soft reconnects and remain accessible to the re-registered keydown handler.
+                window.__selectedAnnotationIdx = -1;
 
-                function __clearAnnotationSelection() {
+                window.__clearAnnotationSelection = function() {
                     document.querySelectorAll('[data-annotation-idx]').forEach(c => {
                         c.style.borderColor = 'var(--q-primary)';
                     });
-                    __selectedAnnotationIdx = -1;
-                }
+                    window.__selectedAnnotationIdx = -1;
+                };
 
-                function __scrollAnnotationCardIntoView(idx) {
+                window.__scrollAnnotationCardIntoView = function(idx) {
                     const card = document.querySelector('[data-annotation-idx="' + idx + '"]');
                     if (!card) return;
                     let scrollEl = card.parentElement;
@@ -795,174 +796,169 @@ async def setup_review():
                     } else if (cardRect.bottom > visibleBottom) {
                         scrollEl.scrollTo({ top: scrollEl.scrollTop + cardRect.bottom - visibleBottom, behavior: 'smooth' });
                     }
-                }
+                };
 
-                function __selectAnnotationCard(idx) {
-                    __clearAnnotationSelection();
+                window.__selectAnnotationCard = function(idx) {
+                    window.__clearAnnotationSelection();
                     const card = document.querySelector('[data-annotation-idx="' + idx + '"]');
                     if (!card) return;
                     card.style.borderColor = 'var(--q-warning)';
-                    __scrollAnnotationCardIntoView(idx);
-                    __selectedAnnotationIdx = idx;
-                }
+                    window.__scrollAnnotationCardIntoView(idx);
+                    window.__selectedAnnotationIdx = idx;
+                };
 
                 document.addEventListener('click', function(e) {
-                    if (__selectedAnnotationIdx >= 0 && !e.target.closest('[data-annotation-idx]'))
-                        __clearAnnotationSelection();
-                });
-
-                // Global keyboard listener that targets the active video or UI elements
-                const SPEED_STEPS = """
-        + str(SPEED_OPTIONS)
-        + """;
-
-                document.addEventListener('keydown', function(e) {
-                    if (e.key === 'Escape') {
-                        document.activeElement?.blur();
-                        if (__selectedAnnotationIdx >= 0) { __clearAnnotationSelection(); return; }
-                        return;
-                    }
-                    // Briefly ignore shortcuts right after a fuzzy-select auto-commit,
-                    // so trailing keystrokes the user is still typing aren't fired as actions.
-                    if (window.__suppressShortcutsUntil && Date.now() < window.__suppressShortcutsUntil) return;
-                    if (document.querySelector('.q-dialog[aria-modal="true"]')) return;
-                    const tag = e.target.tagName.toLowerCase();
-                    const inInput = tag === 'input' || tag === 'textarea' || tag === 'select';
-                    if (e.target.isContentEditable) return;
-                    if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-                    if (inInput) return;
-
-                    // J/K: visually select next/prev annotation card
-                    if (e.key === 'j' || e.key === 'J' || e.key === 'k' || e.key === 'K') {
-                        const cards = Array.from(document.querySelectorAll('[data-annotation-idx]'));
-                        if (cards.length > 0) {
-                            e.preventDefault();
-                            const isNext = e.key === 'j' || e.key === 'J';
-                            const targetIdx = isNext
-                                ? (__selectedAnnotationIdx + 1) % cards.length
-                                : ((__selectedAnnotationIdx - 1) + cards.length) % cards.length;
-                            __selectAnnotationCard(targetIdx);
-                            return;
-                        }
-                    }
-
-                    // Tab: focus first input of the selected annotation card
-                    if (e.key === 'Tab' && __selectedAnnotationIdx >= 0) {
-                        e.preventDefault();
-                        const card = document.querySelector('[data-annotation-idx="' + __selectedAnnotationIdx + '"]');
-                        __clearAnnotationSelection();
-                        card?.querySelector('input')?.focus();
-                        return;
-                    }
-
-                    // X: delete the selected annotation card, then select the next one
-                    if ((e.key === 'x' || e.key === 'X') && __selectedAnnotationIdx >= 0) {
-                        e.preventDefault();
-                        const card = document.querySelector('[data-annotation-idx="' + __selectedAnnotationIdx + '"]');
-                        const totalCards = document.querySelectorAll('[data-annotation-idx]').length;
-                        const deletedIdx = __selectedAnnotationIdx;
-                        __clearAnnotationSelection();
-                        card?.querySelector('[data-shortcut="delete-annotation"]')?.click();
-                        if (totalCards > 1) {
-                            const nextIdx = Math.min(deletedIdx, totalCards - 2);
-                            const observer = new MutationObserver(() => {
-                                if (document.querySelectorAll('[data-annotation-idx]').length === totalCards - 1) {
-                                    observer.disconnect();
-                                    __selectAnnotationCard(nextIdx);
-                                }
-                            });
-                            observer.observe(document.body, { childList: true, subtree: true });
-                        }
-                        return;
-                    }
-
-                    // Priority shortcuts: Submit, Next, Prev, Blank
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        document.querySelector('[data-shortcut="submit-next"]')?.click();
-                    } else if (e.key === 'n' || e.key === 'N') {
-                        e.preventDefault();
-                        document.querySelector('[data-shortcut="next"]')?.click();
-                    } else if (e.key === 'p' || e.key === 'P') {
-                        e.preventDefault();
-                        document.querySelector('[data-shortcut="prev"]')?.click();
-                    } else if (e.key === 'a' || e.key === 'A') {
-                        e.preventDefault();
-                        document.querySelector('[data-shortcut="add-species"]')?.click();
-                    } else if (e.key === 'c' || e.key === 'C') {
-                        e.preventDefault();
-                        document.querySelector('[data-shortcut="clear-annotations"]')?.click();
-                    } else if (e.key === 'm' || e.key === 'M') {
-                        e.preventDefault();
-                        document.querySelector('[data-shortcut="toggle-review-later"]')?.click();
-                    } else if (e.key >= '1' && e.key <= '9') {
-                        const target = document.querySelector('[data-shortcut="add-ai-' + e.key + '"]');
-                        if (target) { e.preventDefault(); target.click(); }
-                    } else if (e.key === 't' || e.key === 'T') {
-                        e.preventDefault();
-                        document.querySelector('[data-shortcut="focus-tags"]')?.focus();
-                    }
-
-                    // Video playback shortcuts - delegated to the first visible video element
-                    const videoEl = document.querySelector('video');
-                    if (!videoEl) return;
-
-                    if (e.key === ' ') {
-                        e.preventDefault();
-                        videoEl.paused ? videoEl.play() : videoEl.pause();
-                    } else if (e.key === 'ArrowLeft') {
-                        e.preventDefault();
-                        videoEl.currentTime = Math.max(0, videoEl.currentTime - 5);
-                    } else if (e.key === 'ArrowRight') {
-                        e.preventDefault();
-                        videoEl.currentTime = Math.min(videoEl.duration || 0, videoEl.currentTime + 5);
-                    } else if (e.key === 'd' || e.key === 'D') {
-                        e.preventDefault();
-                        const speedSteps = SPEED_STEPS;
-                        let best = 3, bestDiff = Infinity;
-                        speedSteps.forEach((s, i) => { const d = Math.abs(s - videoEl.playbackRate); if (d < bestDiff) { bestDiff = d; best = i; } });
-                        const newRate = speedSteps[Math.min(best + 1, speedSteps.length - 1)];
-                        videoEl.playbackRate = newRate;
-                        const speedSel = document.querySelector('[id^="vp-speed-"]');
-                        if (speedSel) {
-                            speedSel.value = Number.isInteger(newRate) ? newRate.toFixed(1) : String(newRate);
-                            speedSel.dispatchEvent(new Event('change'));
-                        }
-                        videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRate }));
-                    } else if (e.key === 's' || e.key === 'S') {
-                        e.preventDefault();
-                        const speedSteps = SPEED_STEPS;
-                        let best = 3, bestDiff = Infinity;
-                        speedSteps.forEach((s, i) => { const d = Math.abs(s - videoEl.playbackRate); if (d < bestDiff) { bestDiff = d; best = i; } });
-                        const newRate = speedSteps[Math.max(best - 1, 0)];
-                        videoEl.playbackRate = newRate;
-                        const speedSel = document.querySelector('[id^="vp-speed-"]');
-                        if (speedSel) {
-                            speedSel.value = Number.isInteger(newRate) ? newRate.toFixed(1) : String(newRate);
-                            speedSel.dispatchEvent(new Event('change'));
-                        }
-                        videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRate }));
-                    } else if (e.key === ']') {
-                        e.preventDefault();
-                        const brightSlider = document.querySelector('[id^="vp-brightness-"]');
-                        if (brightSlider) { brightSlider.value = Math.min(2, parseFloat(brightSlider.value) + 0.05); brightSlider.dispatchEvent(new Event('input')); }
-                    } else if (e.key === '[') {
-                        e.preventDefault();
-                        const brightSlider = document.querySelector('[id^="vp-brightness-"]');
-                        if (brightSlider) { brightSlider.value = Math.max(0.5, parseFloat(brightSlider.value) - 0.05); brightSlider.dispatchEvent(new Event('input')); }
-                    } else if (e.key === '}') {
-                        e.preventDefault();
-                        const contrastSlider = document.querySelector('[id^="vp-contrast-"]');
-                        if (contrastSlider) { contrastSlider.value = Math.min(2, parseFloat(contrastSlider.value) + 0.05); contrastSlider.dispatchEvent(new Event('input')); }
-                    } else if (e.key === '{') {
-                        e.preventDefault();
-                        const contrastSlider = document.querySelector('[id^="vp-contrast-"]');
-                        if (contrastSlider) { contrastSlider.value = Math.max(0.5, parseFloat(contrastSlider.value) - 0.05); contrastSlider.dispatchEvent(new Event('input')); }
-                    }
+                    if (window.__selectedAnnotationIdx >= 0 && !e.target.closest('[data-annotation-idx]'))
+                        window.__clearAnnotationSelection();
                 });
             }
         </script>
     """,
         shared=True,
+    )
+
+    # Keyboard handler is registered via ui.run_javascript (not shared HTML) so it is
+    # re-registered on every NiceGUI reconnect/hot-reload, not just on initial page load.
+    ui.run_javascript(
+        """
+        if (window.__kbController) window.__kbController.abort();
+        window.__kbController = new AbortController();
+        const __SPEED_STEPS = """
+        + str(SPEED_OPTIONS)
+        + """;
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.activeElement?.blur();
+                if (window.__selectedAnnotationIdx >= 0) { window.__clearAnnotationSelection(); return; }
+                return;
+            }
+            if (window.__suppressShortcutsUntil && Date.now() < window.__suppressShortcutsUntil) return;
+            if (document.querySelector('.q-dialog[aria-modal="true"]')) return;
+            const tag = e.target.tagName.toLowerCase();
+            const inInput = tag === 'input' || tag === 'textarea' || tag === 'select';
+            if (e.target.isContentEditable) return;
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            if (inInput) return;
+
+            // J/K: visually select next/prev annotation card
+            if (e.key === 'j' || e.key === 'J' || e.key === 'k' || e.key === 'K') {
+                const cards = Array.from(document.querySelectorAll('[data-annotation-idx]'));
+                if (cards.length > 0) {
+                    e.preventDefault();
+                    const isNext = e.key === 'j' || e.key === 'J';
+                    const targetIdx = isNext
+                        ? (window.__selectedAnnotationIdx + 1) % cards.length
+                        : ((window.__selectedAnnotationIdx - 1) + cards.length) % cards.length;
+                    window.__selectAnnotationCard(targetIdx);
+                    return;
+                }
+            }
+
+            // Tab: focus first input of the selected annotation card
+            if (e.key === 'Tab' && window.__selectedAnnotationIdx >= 0) {
+                e.preventDefault();
+                const card = document.querySelector('[data-annotation-idx="' + window.__selectedAnnotationIdx + '"]');
+                window.__clearAnnotationSelection();
+                card?.querySelector('input')?.focus();
+                return;
+            }
+
+            // X: delete the selected annotation card, then select the next one
+            if ((e.key === 'x' || e.key === 'X') && window.__selectedAnnotationIdx >= 0) {
+                e.preventDefault();
+                const card = document.querySelector('[data-annotation-idx="' + window.__selectedAnnotationIdx + '"]');
+                const totalCards = document.querySelectorAll('[data-annotation-idx]').length;
+                const deletedIdx = window.__selectedAnnotationIdx;
+                window.__clearAnnotationSelection();
+                card?.querySelector('[data-shortcut="delete-annotation"]')?.click();
+                if (totalCards > 1) {
+                    const nextIdx = Math.min(deletedIdx, totalCards - 2);
+                    const obs = new MutationObserver(() => {
+                        if (document.querySelectorAll('[data-annotation-idx]').length === totalCards - 1) {
+                            obs.disconnect();
+                            window.__selectAnnotationCard(nextIdx);
+                        }
+                    });
+                    obs.observe(document.body, { childList: true, subtree: true });
+                }
+                return;
+            }
+
+            // Priority shortcuts: Submit, Next, Prev, Blank
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.querySelector('[data-shortcut="submit-next"]')?.click();
+            } else if (e.key === 'n' || e.key === 'N') {
+                e.preventDefault();
+                document.querySelector('[data-shortcut="next"]')?.click();
+            } else if (e.key === 'p' || e.key === 'P') {
+                e.preventDefault();
+                document.querySelector('[data-shortcut="prev"]')?.click();
+            } else if (e.key === 'a' || e.key === 'A') {
+                e.preventDefault();
+                document.querySelector('[data-shortcut="add-species"]')?.click();
+            } else if (e.key === 'c' || e.key === 'C') {
+                e.preventDefault();
+                document.querySelector('[data-shortcut="clear-annotations"]')?.click();
+            } else if (e.key === 'm' || e.key === 'M') {
+                e.preventDefault();
+                document.querySelector('[data-shortcut="toggle-review-later"]')?.click();
+            } else if (e.key >= '1' && e.key <= '9') {
+                const target = document.querySelector('[data-shortcut="add-ai-' + e.key + '"]');
+                if (target) { e.preventDefault(); target.click(); }
+            } else if (e.key === 't' || e.key === 'T') {
+                e.preventDefault();
+                document.querySelector('[data-shortcut="focus-tags"]')?.focus();
+            }
+
+            // Video playback shortcuts - delegated to the first visible video element
+            const videoEl = document.querySelector('video');
+            if (!videoEl) return;
+
+            if (e.key === ' ') {
+                e.preventDefault();
+                videoEl.paused ? videoEl.play() : videoEl.pause();
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                videoEl.currentTime = Math.max(0, videoEl.currentTime - 5);
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                videoEl.currentTime = Math.min(videoEl.duration || 0, videoEl.currentTime + 5);
+            } else if (e.key === 'd' || e.key === 'D') {
+                e.preventDefault();
+                let best = 3, bestDiff = Infinity;
+                __SPEED_STEPS.forEach((s, i) => { const d = Math.abs(s - videoEl.playbackRate); if (d < bestDiff) { bestDiff = d; best = i; } });
+                const newRateD = __SPEED_STEPS[Math.min(best + 1, __SPEED_STEPS.length - 1)];
+                videoEl.playbackRate = newRateD;
+                const speedSelD = document.querySelector('[id^="vp-speed-"]');
+                if (speedSelD) { speedSelD.value = Number.isInteger(newRateD) ? newRateD.toFixed(1) : String(newRateD); speedSelD.dispatchEvent(new Event('change')); }
+                videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRateD }));
+            } else if (e.key === 's' || e.key === 'S') {
+                e.preventDefault();
+                let best = 3, bestDiff = Infinity;
+                __SPEED_STEPS.forEach((s, i) => { const d = Math.abs(s - videoEl.playbackRate); if (d < bestDiff) { bestDiff = d; best = i; } });
+                const newRateS = __SPEED_STEPS[Math.max(best - 1, 0)];
+                videoEl.playbackRate = newRateS;
+                const speedSelS = document.querySelector('[id^="vp-speed-"]');
+                if (speedSelS) { speedSelS.value = Number.isInteger(newRateS) ? newRateS.toFixed(1) : String(newRateS); speedSelS.dispatchEvent(new Event('change')); }
+                videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRateS }));
+            } else if (e.key === ']') {
+                e.preventDefault();
+                const brightSlider = document.querySelector('[id^="vp-brightness-"]');
+                if (brightSlider) { brightSlider.value = Math.min(2, parseFloat(brightSlider.value) + 0.05); brightSlider.dispatchEvent(new Event('input')); }
+            } else if (e.key === '[') {
+                e.preventDefault();
+                const brightSlider = document.querySelector('[id^="vp-brightness-"]');
+                if (brightSlider) { brightSlider.value = Math.max(0.5, parseFloat(brightSlider.value) - 0.05); brightSlider.dispatchEvent(new Event('input')); }
+            } else if (e.key === '}') {
+                e.preventDefault();
+                const contrastSlider = document.querySelector('[id^="vp-contrast-"]');
+                if (contrastSlider) { contrastSlider.value = Math.min(2, parseFloat(contrastSlider.value) + 0.05); contrastSlider.dispatchEvent(new Event('input')); }
+            } else if (e.key === '{') {
+                e.preventDefault();
+                const contrastSlider = document.querySelector('[id^="vp-contrast-"]');
+                if (contrastSlider) { contrastSlider.value = Math.max(0.5, parseFloat(contrastSlider.value) - 0.05); contrastSlider.dispatchEvent(new Event('input')); }
+            }
+        }, { signal: window.__kbController.signal });
+    """
     )
