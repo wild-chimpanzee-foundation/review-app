@@ -107,28 +107,35 @@ async def render_filter_drawer_body(page):
             # ).props("outlined dense class=full-width use-chips")
 
             selected_model_blank = filters.get("selected_model_blank", "All")
-            model_blank_filter = ui.select(
-                label=t("model_blank_filter"),
-                options={
-                    "All": t("all_option"),
-                    "Blank": t("blank"),
-                    "Non-Blank": t("non_blank"),
-                    "Unknown": t("model_blank_not_processed"),
-                },
-                value=selected_model_blank,
-                on_change=lambda _: apply_filters(),
-            ).props("outlined dense class=full-width")
+            ui.label(t("model_blank_filter")).classes("text-caption text-grey q-mt-xs")
+            model_blank_filter = (
+                ui.toggle(
+                    {
+                        "All": t("all_option"),
+                        "Blank": t("blank"),
+                        "Non-Blank": t("non_blank"),
+                    },
+                    value=selected_model_blank,
+                    on_change=lambda _: apply_filters(),
+                )
+                .props("dense spread unelevated")
+                .classes("full-width")
+            )
 
-            needs_review_filter = ui.select(
-                label=t("needs_review_filter"),
-                options={
-                    "All": t("all_option"),
-                    "Needs Review": t("needs_review"),
-                    "No Review": t("no_review_needed"),
-                },
-                value=filters.get("selected_needs_review", "All"),
-                on_change=lambda _: apply_filters(),
-            ).props("outlined dense class=full-width")
+            ui.label(t("needs_review_filter")).classes("text-caption text-grey q-mt-xs")
+            needs_review_filter = (
+                ui.toggle(
+                    {
+                        "All": t("all_option"),
+                        "Needs Review": t("needs_review"),
+                        "No Review": t("no_review_needed"),
+                    },
+                    value=filters.get("selected_needs_review", "All"),
+                    on_change=lambda _: apply_filters(),
+                )
+                .props("dense spread unelevated")
+                .classes("full-width")
+            )
 
             ui.separator().classes("q-my-xs")
             ui.label(t("filter_section_manual")).classes("text-caption")
@@ -172,28 +179,35 @@ async def render_filter_drawer_body(page):
             ).props("outlined dense class=full-width use-chips")
 
             selected_manual_blank = filters.get("selected_manual_blank", "All")
-            manual_blank_filter = ui.select(
-                label=t("manual_blank_filter"),
-                options={
-                    "All": t("all_option"),
-                    "Blank": t("blank"),
-                    "Non-Blank": t("non_blank"),
-                    "Unlabeled": t("unlabeled_option"),
-                },
-                value=selected_manual_blank,
-                on_change=lambda _: apply_filters(),
-            ).props("outlined dense class=full-width")
+            ui.label(t("manual_blank_filter")).classes("text-caption text-grey q-mt-xs")
+            manual_blank_filter = (
+                ui.toggle(
+                    {
+                        "All": t("all_option"),
+                        "Blank": t("blank"),
+                        "Non-Blank": t("non_blank"),
+                    },
+                    value=selected_manual_blank,
+                    on_change=lambda _: apply_filters(),
+                )
+                .props("dense spread unelevated")
+                .classes("full-width")
+            )
 
-            annotation_filter = ui.select(
-                label=t("annotation_filter"),
-                options={
-                    "All": t("all_option"),
-                    "Annotated": t("annotated"),
-                    "Not Annotated": t("not_annotated"),
-                },
-                value=filters.get("selected_annotation_status", "All"),
-                on_change=lambda _: apply_filters(),
-            ).props("outlined dense class=full-width")
+            ui.label(t("annotation_filter")).classes("text-caption text-grey q-mt-xs")
+            annotation_filter = (
+                ui.toggle(
+                    {
+                        "All": t("all_option"),
+                        "Annotated": t("annotated"),
+                        "Not Annotated": t("not_annotated"),
+                    },
+                    value=filters.get("selected_annotation_status", "All"),
+                    on_change=lambda _: apply_filters(),
+                )
+                .props("dense spread unelevated")
+                .classes("full-width")
+            )
 
             annotator_values = filter_options.get("annotator_values", [])
             selected_annotator = filters.get("selected_annotator", [])
