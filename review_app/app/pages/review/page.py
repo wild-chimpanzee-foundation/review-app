@@ -6,6 +6,7 @@ from urllib.parse import quote
 
 from nicegui import run, ui
 
+from review_app.app.components.inat_logo import inat_logo_svg
 from review_app.app.onboarding import show_info_dialog, show_tour_if_needed
 from review_app.app.pages.review.annotations import _shortcut_badge, render_annotation_section_body
 from review_app.app.pages.review.filters import render_filter_drawer_body
@@ -42,11 +43,12 @@ logger = logging.getLogger(__name__)
 
 
 class ReviewPage:
-    def __init__(self, dp, species_map, species_groups, global_species_map):
+    def __init__(self, dp, species_map, species_groups, global_species_map, species_inat):
         self.dp = dp
         self.species_map = species_map
         self.species_groups = species_groups
         self.global_species_map = global_species_map
+        self.species_inat = species_inat
         self._video = None
         self._model_ann = None
         self._default_species = None
@@ -151,7 +153,7 @@ def _render_no_videos_match():
                         ui.label(display).classes("text-caption text-weight-medium")
 
 
-def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
+def _render_ai_annotations(model_ann, global_species_map, species_inat=None, on_add_species=None):
     if model_ann is None or model_ann.empty:
         return
 
@@ -261,6 +263,23 @@ def _render_ai_annotations(model_ann, global_species_map, on_add_species=None):
                                 )
                                 _display_val += f" (x{_count_str})"
                             ui.label(_display_val).classes("text-caption text-bold")
+                            _inat_url = (species_inat or {}).get(_species_key)
+                            if _inat_url:
+                                _inat_icon = (
+                                    ui.html(inat_logo_svg(18))
+                                    .classes(
+                                        "cursor-pointer flex items-center q-pa-xs "
+                                        "rounded-borders bg-white/5 hover:bg-white/15"
+                                    )
+                                    .style("line-height:0")
+                                )
+                                _inat_icon.tooltip(t("inaturalist_tooltip"))
+                                _inat_icon.on(
+                                    "click.stop",
+                                    lambda _e, u=_inat_url: ui.run_javascript(
+                                        f"window.open('{u}', '_blank')"
+                                    ),
+                                )
                         with ui.row().classes("gap-x-1 items-center"):
                             for _m in _models:
                                 with ui.element("div").style(
@@ -592,7 +611,12 @@ def _render_annotation_sidebar_body(page: ReviewPage):
         set_state_val("scroll_to_first_annotation", True)
         page.render_annotation_section.refresh()
 
-    _render_ai_annotations(model_ann, global_species_map, on_add_species=_on_add_ai_species)
+    _render_ai_annotations(
+        model_ann,
+        global_species_map,
+        species_inat=page.species_inat,
+        on_add_species=_on_add_ai_species,
+    )
     with ui.card().classes("full-width"):
         with ui.row().classes("items-center w-full q-mb-none"):
             ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium")
@@ -640,6 +664,8 @@ async def setup_review():
     )
 
     global_species_map = await run.io_bound(dp.get_species_display_map, get_language())
+
+    species_inat = await run.io_bound(dp.get_species_inaturalist_map)
 
     set_selections([])
     set_state_val("review_state_video_id", None)
@@ -707,7 +733,7 @@ async def setup_review():
     assert left_drawer is not None
     left_drawer.classes("review-sidebar")
 
-    page = ReviewPage(dp, species_map, species_groups, global_species_map)
+    page = ReviewPage(dp, species_map, species_groups, global_species_map, species_inat)
 
     with left_drawer:
         await page.render_filter_drawer()

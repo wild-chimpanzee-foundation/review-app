@@ -1,6 +1,7 @@
 from nicegui import run, ui
 
 from review_app.app.components.fuzzy_select import FuzzySelect
+from review_app.app.components.inat_logo import inat_logo_svg
 from review_app.app.state import (
     get_active_project_id,
     get_annotator_name,
@@ -241,6 +242,24 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                         .props("outlined dense")
                         .classes("col")
                     )
+                    inat_btn = (
+                        ui.button().props("flat dense round size=sm").classes("self-center")
+                    )
+                    with inat_btn:
+                        ui.html(inat_logo_svg(20)).classes("flex items-center")
+                    inat_btn.tooltip(t("inaturalist_tooltip"))
+
+                    def _open_inat(_=None, s=sp):
+                        url = page.species_inat.get(s.value)
+                        if url:
+                            ui.run_javascript(f"window.open('{url}', '_blank')")
+
+                    inat_btn.on("click", _open_inat)
+
+                    def _sync_inat(s=sp, b=inat_btn):
+                        b.set_visibility(bool(page.species_inat.get(s.value)))
+
+                    _sync_inat()
                     if i == 0 and get_state_val("focus_new_species"):
                         set_state_val("focus_new_species", False)
                         sp.run_method("focus")
@@ -338,13 +357,14 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                         s.value = None
                     s.update()
 
-                def on_species_change(_, s=sp, b=bp, c=ct, g=gp, idx=i):
+                def on_species_change(_, s=sp, b=bp, c=ct, g=gp, idx=i, inat=_sync_inat):
                     if s.value:
                         inferred_group = species_groups.get(s.value, "")
                         if inferred_group != (g.value or ""):
                             g.value = inferred_group
                             g.update()
                     update_sel(idx, s, b, c)
+                    inat()
 
                 gp.on_value_change(on_group_change)
                 sp.on_value_change(on_species_change)

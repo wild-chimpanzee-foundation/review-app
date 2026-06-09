@@ -106,6 +106,7 @@ class Species(Base):
     group_en: Mapped[str | None] = mapped_column(String)
     group_fr: Mapped[str | None] = mapped_column(String)
     iucn: Mapped[str | None] = mapped_column(String)
+    inaturalist_url: Mapped[str | None] = mapped_column(String)
     is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
 
 

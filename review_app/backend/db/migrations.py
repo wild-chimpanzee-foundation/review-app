@@ -659,6 +659,15 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     ),
     (17, _migration_v17),
     (18, _migration_v18),
+    (
+        19,
+        lambda conn: (
+            conn.execute(text("ALTER TABLE species ADD COLUMN inaturalist_url TEXT"))
+            if "inaturalist_url"
+            not in {r[1] for r in conn.execute(text("PRAGMA table_info(species)")).fetchall()}
+            else None
+        ),
+    ),
 ]
 
 

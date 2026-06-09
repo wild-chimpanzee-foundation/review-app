@@ -18,7 +18,15 @@ class SpeciesMixin(ProviderBase):
     """Species and behavior loading and queries. Requires self.engine."""
 
     _SPECIES_BASE_COLS = frozenset(
-        {"scientific_name", "english_name", "french_name", "group_fr", "group_en", "IUCN"}
+        {
+            "scientific_name",
+            "english_name",
+            "french_name",
+            "group_fr",
+            "group_en",
+            "IUCN",
+            "inaturalist",
+        }
     )
 
     @classmethod
@@ -39,6 +47,9 @@ class SpeciesMixin(ProviderBase):
             collections = {
                 col: str(row.get(col, "") or "").strip().lower() == "y" for col in collection_cols
             }
+            # Blank cells come back as NaN (which is truthy), so check explicitly.
+            inat_raw = row.get("inaturalist") if "inaturalist" in df.columns else None
+            inaturalist_url = None if pd.isna(inat_raw) else (str(inat_raw).strip() or None)
             rows.append(
                 {
                     "scientific_name": sci,
@@ -57,6 +68,7 @@ class SpeciesMixin(ProviderBase):
                     "iucn": (str(row.get("IUCN", "") or "").strip() or None)
                     if "IUCN" in df.columns
                     else None,
+                    "inaturalist_url": inaturalist_url,
                     "collections": collections,
                 }
             )
@@ -91,14 +103,15 @@ class SpeciesMixin(ProviderBase):
             conn.execute(
                 text(
                     """
-                    INSERT INTO species (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn, is_custom)
-                    VALUES (:id, :scientific_name, :name_en, :name_fr, :group_en, :group_fr, :iucn, 0)
+                    INSERT INTO species (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn, inaturalist_url, is_custom)
+                    VALUES (:id, :scientific_name, :name_en, :name_fr, :group_en, :group_fr, :iucn, :inaturalist_url, 0)
                     ON CONFLICT(scientific_name) DO UPDATE SET
                         name_en  = excluded.name_en,
                         name_fr  = excluded.name_fr,
                         group_en = excluded.group_en,
                         group_fr = excluded.group_fr,
-                        iucn     = excluded.iucn
+                        iucn     = excluded.iucn,
+                        inaturalist_url = excluded.inaturalist_url
                     """
                 ),
                 rows,
@@ -500,6 +513,17 @@ class SpeciesMixin(ProviderBase):
                 text(f"SELECT scientific_name, {col} FROM species ORDER BY scientific_name")
             ).fetchall()
         return {sci: grp for sci, grp in rows}
+
+    def get_species_inaturalist_map(self) -> dict[str, str]:
+        """Return {scientific_name: inaturalist_url} for species that have a URL."""
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT scientific_name, inaturalist_url FROM species "
+                    "WHERE inaturalist_url IS NOT NULL AND inaturalist_url != ''"
+                )
+            ).fetchall()
+        return {sci: url for sci, url in rows}
 
     def get_all_behaviors(self) -> list[dict[str, str]]:
         with self.engine.connect() as conn:
