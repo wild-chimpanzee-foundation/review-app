@@ -125,7 +125,6 @@ def shared_header(show_drawer: bool = False):
         _shortcut_row("Enter", t("shortcut_submit_next"))
         _shortcut_row("N", t("shortcut_next_video"))
         _shortcut_row("P", t("shortcut_prev_video"))
-        _shortcut_row("B", t("shortcut_mark_blank"))
         _shortcut_row("M", t("review_later"))
         _shortcut_row("A", t("shortcut_add_species"))
         _shortcut_row("C", t("shortcut_clear_annotations"))

@@ -394,7 +394,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                     is_blank=True,
                     labeled_by=annotator,
                 )
-                ui.notify(t("marked_blank"), type="positive")
+                ui.notify(t("marked_blank"), type="warning")
                 return True
             annotator = get_annotator_name()
             labeled_sels = [{**s, "labeled_by": annotator} for s in sels]
@@ -428,36 +428,9 @@ def render_annotation_section_body(page, video, default_species, default_tags):
         page.render_video_section.refresh()
         page.render_filter_drawer.refresh()
 
-    async def mark_blank_stay():
-        await mark_blank(go_next=False)
-
-    async def mark_blank_next():
-        await mark_blank(go_next=True)
-
-    async def mark_blank(go_next=True):
-        if get_state_val("submit_in_progress"):
-            return
-        set_state_val("submit_in_progress", True)
-        try:
-            await run.io_bound(
-                dp.update_manual_review,
-                selected_video_id,
-                [],
-                is_blank=True,
-                labeled_by=get_annotator_name(),
-            )
-            ui.notify(t("marked_blank"), type="positive")
-            if go_next:
-                _advance_to_next(selected_video_id)
-            _clear_review_state()
-            page.render_video_section.refresh()
-            page.render_filter_drawer.refresh()
-        finally:
-            set_state_val("submit_in_progress", False)
-
     with ui.element("div").style(
         "position: sticky; bottom: 0; z-index: 10; background: inherit; "
-        "padding-top: 8px; border-top: 1px solid rgba(128,128,128,0.15);"
+        "padding-top: 8px; border-top: 1px solid rgba(128,128,128,0.15); width: 100%;"
     ):
 
         def clear_annotations():
@@ -475,26 +448,20 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                     _shortcut_badge("C")
             clear_btn._props["data-shortcut"] = "clear-annotations"
 
-        with ui.row().classes("w-full gap-sm q-mt-sm tour-target-action-buttons"):
+        with (
+            ui.element("div")
+            .classes("q-mt-sm tour-target-action-buttons")
+            .style("width: 100%; display: block;")
+        ):
             with (
                 ui.button(on_click=submit_and_next, color="warning")
-                .classes("col")
-                .style("min-height: 60px; font-weight:700; min-width: 160px;") as submit_next_btn
+                .props("full-width")
+                .style(
+                    "min-height: 60px; font-weight:700; width: 100%; display: block;"
+                ) as submit_next_btn
             ):
                 with ui.row().classes("items-center justify-between w-full q-px-xs q-py-sm"):
                     ui.label(t("submit_next")).classes("text-center col")
                     _shortcut_badge("↵ Enter")
             submit_next_btn._props["data-shortcut"] = "submit-next"
             submit_next_btn.tooltip(t("tooltip_submit_next"))
-
-            with (
-                ui.button(on_click=mark_blank_next, color="primary")
-                .props("outline")
-                .classes("col")
-                .style("min-height: 60px; min-width: 160px;") as blank_next_btn
-            ):
-                with ui.row().classes("items-center justify-between w-full q-px-xs q-py-sm"):
-                    ui.label(t("mark_blank")).classes("text-center col")
-                    _shortcut_badge("B")
-            blank_next_btn._props["data-shortcut"] = "mark-blank"
-            blank_next_btn.tooltip(t("tooltip_mark_blank"))

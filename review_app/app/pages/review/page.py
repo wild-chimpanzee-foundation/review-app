@@ -887,9 +887,6 @@ async def setup_review():
                     } else if (e.key === 'p' || e.key === 'P') {
                         e.preventDefault();
                         document.querySelector('[data-shortcut="prev"]')?.click();
-                    } else if (e.key === 'b' || e.key === 'B') {
-                        e.preventDefault();
-                        document.querySelector('[data-shortcut="mark-blank"]')?.click();
                     } else if (e.key === 'a' || e.key === 'A') {
                         e.preventDefault();
                         document.querySelector('[data-shortcut="add-species"]')?.click();
