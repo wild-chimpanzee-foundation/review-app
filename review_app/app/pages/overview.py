@@ -18,7 +18,9 @@ _NON_BLANK_COLOR = "#2196f3"
 _UNLABELED_COLOR = "#e0e0e0"
 
 
-def _render_annotation_bar(blank: int, non_blank: int, unlabeled: int, height: str = "12px") -> None:
+def _render_annotation_bar(
+    blank: int, non_blank: int, unlabeled: int, height: str = "12px"
+) -> None:
     total = max(blank + non_blank + unlabeled, 1)
     segments = [
         (_BLANK_COLOR, 100 * blank / total),
@@ -171,11 +173,18 @@ async def setup_overview():
                             common_name = species_map.get(sci_name, sci_name)
                             with (
                                 ui.row()
-                                .classes("w-full items-center q-mb-sm cursor-pointer rounded q-px-xs")
+                                .classes(
+                                    "w-full items-center q-mb-sm cursor-pointer rounded q-px-xs"
+                                )
                                 .style("transition: background 0.15s")
                                 .on("click", lambda sn=sci_name: go_review(selected_species=[sn]))
-                                .on("mouseover", lambda e: e.sender.style("background: rgba(0,0,0,0.06)"))
-                                .on("mouseout", lambda e: e.sender.style("background: transparent"))
+                                .on(
+                                    "mouseover",
+                                    lambda e: e.sender.style("background: rgba(0,0,0,0.06)"),
+                                )
+                                .on(
+                                    "mouseout", lambda e: e.sender.style("background: transparent")
+                                )
                             ):
                                 ui.label(common_name).classes("col text-body2")
                                 ui.label(str(s["observations"])).classes("text-body2 text-grey-7")
@@ -195,8 +204,13 @@ async def setup_overview():
                             ui.row()
                             .classes("w-full items-center q-mb-sm cursor-pointer rounded q-px-xs")
                             .style("transition: background 0.15s")
-                            .on("click", lambda bv=b["behavior"]: go_review(selected_behavior=[bv]))
-                            .on("mouseover", lambda e: e.sender.style("background: rgba(0,0,0,0.06)"))
+                            .on(
+                                "click", lambda bv=b["behavior"]: go_review(selected_behavior=[bv])
+                            )
+                            .on(
+                                "mouseover",
+                                lambda e: e.sender.style("background: rgba(0,0,0,0.06)"),
+                            )
                             .on("mouseout", lambda e: e.sender.style("background: transparent"))
                         ):
                             ui.label(b["behavior"]).classes("col text-body2")
@@ -208,27 +222,6 @@ async def setup_overview():
                             )
                 else:
                     ui.label(t("no_behavior_yet")).classes("text-grey-5")
-
-        # Location map
-        if locations:
-            with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
-                with ui.card().classes("col q-pa-md"):
-                    ui.label(t("location_map_title")).classes(
-                        "text-subtitle1 font-weight-medium q-mb-md"
-                    )
-                    map_markers = [
-                        MapMarker(
-                            lat=loc["latitude"],
-                            lon=loc["longitude"],
-                            label=(
-                                f"{loc['camera_id']}: {int(loc['video_count'])} video(s)"
-                                if loc.get("camera_id")
-                                else f"{int(loc['video_count'])} video(s)"
-                            ),
-                        )
-                        for loc in locations
-                    ]
-                    render_location_map(map_markers)
 
         # Camera cards
         with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
@@ -322,18 +315,52 @@ async def setup_overview():
                                 ui.column()
                                 .classes("w-full q-px-sm q-py-xs cursor-pointer rounded")
                                 .style("transition: background 0.15s")
-                                .on("click", lambda an=r["annotator"]: go_review(selected_annotator=[an]))
-                                .on("mouseover", lambda e: e.sender.style("background: rgba(0,0,0,0.06)"))
-                                .on("mouseout", lambda e: e.sender.style("background: transparent"))
+                                .on(
+                                    "click",
+                                    lambda an=r["annotator"]: go_review(selected_annotator=[an]),
+                                )
+                                .on(
+                                    "mouseover",
+                                    lambda e: e.sender.style("background: rgba(0,0,0,0.06)"),
+                                )
+                                .on(
+                                    "mouseout", lambda e: e.sender.style("background: transparent")
+                                )
                             ):
-                                with ui.row().classes("w-full justify-between items-baseline q-mb-xs"):
-                                    ui.label(r["annotator"] or "—").classes("text-body2 font-weight-medium")
+                                with ui.row().classes(
+                                    "w-full justify-between items-baseline q-mb-xs"
+                                ):
+                                    ui.label(r["annotator"] or "—").classes(
+                                        "text-body2 font-weight-medium"
+                                    )
                                     ui.label(
                                         f"{labeled_pct}% {t('col_labeled').lower()} · "
                                         f"{r['video_count']} {t('col_videos').lower()} · "
                                         f"{r['cameras']} {t('col_cameras').lower()} · "
                                         f"{r['hours']:.1f}h"
                                     ).classes("text-caption text-grey-6")
-                                _render_annotation_bar(r_blank, r_non_blank, r_unlabeled, height="8px")
+                                _render_annotation_bar(
+                                    r_blank, r_non_blank, r_unlabeled, height="8px"
+                                )
                 else:
                     ui.label(t("no_camera_data")).classes("text-grey-5")
+        # Location map
+        if locations:
+            with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
+                with ui.card().classes("col q-pa-md"):
+                    ui.label(t("location_map_title")).classes(
+                        "text-subtitle1 font-weight-medium q-mb-md"
+                    )
+                    map_markers = [
+                        MapMarker(
+                            lat=loc["latitude"],
+                            lon=loc["longitude"],
+                            label=(
+                                f"{loc['camera_id']}: {int(loc['video_count'])} video(s)"
+                                if loc.get("camera_id")
+                                else f"{int(loc['video_count'])} video(s)"
+                            ),
+                        )
+                        for loc in locations
+                    ]
+                    render_location_map(map_markers)
