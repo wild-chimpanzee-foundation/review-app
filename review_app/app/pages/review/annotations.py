@@ -90,6 +90,8 @@ def _init_annotation_state(video, default_species, default_tags):
     set_selections(selections)
     set_state_val("review_state_video_id", video.get("video_id"))
     set_state_val("video_tags", list(video.get("video_tags") or []))
+    if selections:
+        set_state_val("scroll_to_first_annotation", True)
 
 
 def _build_group_options(species_groups: dict) -> dict[str, str]:
@@ -195,6 +197,9 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                         ui.label(t("add_species"))
                     _shortcut_badge("A")
             add_species_btn._props["data-shortcut"] = "add-species"
+        scroll_on_load = get_state_val("scroll_to_first_annotation")
+        if scroll_on_load:
+            set_state_val("scroll_to_first_annotation", False)
         for i, sel in enumerate(selections):
             ann_card = (
                 ui.card()
@@ -240,9 +245,8 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                         set_state_val("focus_new_species", False)
                         sp.run_method("focus")
                         ui.run_javascript("__scrollAnnotationCardIntoView(0)")
-                    if i == 0 and get_state_val("scroll_to_first_annotation"):
-                        set_state_val("scroll_to_first_annotation", False)
-                        ui.run_javascript("__scrollAnnotationCardIntoView(0)")
+                    if scroll_on_load:
+                        ui.run_javascript(f"__scrollAnnotationCardIntoView({i})")
 
                 # Row 2: Behavior (wide) + Count + ± buttons
                 current_count = min(sel.get("count") or 1, 11)
