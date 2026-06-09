@@ -1,3 +1,4 @@
+import asyncio
 import re
 from pathlib import Path
 
@@ -214,58 +215,78 @@ async def setup_overview():
                     render_location_map(map_markers)
 
         # Camera cards
-        with (
-            ui.expansion(t("camera_summary_title"), icon="photo_camera")
-            .classes("full-width q-mb-lg")
-            .props("content-inset-level=0 header-class='q-pa-md q-py-sm'")
-        ):
-            camera_summary = stats.get("camera_summary", [])
-            if camera_summary:
-                from review_app.app.config import get_user_data_dir
+        with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
+            with ui.card().classes("w-full q-pa-md q-mb-lg"):
+                ui.label(t("camera_summary_title")).classes(
+                    "text-subtitle1 font-weight-medium q-mb-md"
+                )
+                camera_summary = stats.get("camera_summary", [])
+                if camera_summary:
+                    from review_app.app.config import get_user_data_dir
 
-                thumbnails_dir = get_user_data_dir() / "thumbnails"
+                    thumbnails_dir = get_user_data_dir() / "thumbnails"
 
-                with ui.scroll_area().style("width: 100%; height: 400px"):
-                    with ui.row().classes("no-wrap gap-md q-pb-sm"):
-                        for cam in camera_summary:
-                            labeled_pct = round(100 * cam["labeled"] / max(cam["total_videos"], 1))
-                            cam_id = cam["camera_id"]
-                            safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", cam_id or "unknown")
-                            thumb_path = thumbnails_dir / f"{safe_name}.jpg"
-                            sample_path = cam.get("sample_video_path")
-                            if not thumb_path.exists() and sample_path:
-                                await run.io_bound(
-                                    generate_thumbnail, Path(sample_path), thumb_path
+                    with ui.scroll_area().style("width: 100%; height: 400px"):
+                        with ui.row().classes("no-wrap gap-md q-pb-sm"):
+                            for cam in camera_summary:
+                                labeled_pct = round(
+                                    100 * cam["labeled"] / max(cam["total_videos"], 1)
                                 )
-                            with (
-                                ui.card()
-                                .classes("q-pa-md cursor-pointer")
-                                .style("min-width: 280px; max-width: 340px")
-                                .on("click", lambda c=cam_id: go_review(selected_camera=c))
-                            ):
-                                if thumb_path.exists():
-                                    ui.image(
-                                        f"/thumbnails/{safe_name}.jpg?v={int(thumb_path.stat().st_mtime)}"
-                                    ).style("width: 100%; border-radius: 4px").classes("q-mb-xs")
-                                ui.label(cam_id or t("col_camera")).classes(
-                                    "text-body2 font-weight-medium ellipsis"
-                                ).style("max-width: 220px")
-                                ui.linear_progress(
-                                    value=labeled_pct / 100, show_value=False
-                                ).props("color=primary style=height:4px").classes("q-my-xs")
-                                with ui.row().classes("w-full justify-between items-center"):
-                                    ui.label(f"{labeled_pct}% {t('col_labeled').lower()}").classes(
-                                        "text-caption text-grey-6"
-                                    )
-                                with ui.row().classes("w-full justify-between"):
-                                    ui.label(
-                                        f"{cam['total_videos']} {t('col_total').lower()}"
-                                    ).classes("text-caption text-grey-5")
-                                    ui.label(f"{cam['hours']:.1f}h").classes(
-                                        "text-caption text-grey-5"
-                                    )
-            else:
-                ui.label(t("no_camera_data")).classes("text-grey-5")
+                                cam_id = cam["camera_id"]
+                                safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", cam_id or "unknown")
+                                thumb_path = thumbnails_dir / f"{safe_name}.jpg"
+                                sample_path = cam.get("sample_video_path")
+                                with (
+                                    ui.card()
+                                    .classes("q-pa-md cursor-pointer")
+                                    .style("min-width: 280px; max-width: 340px")
+                                    .on("click", lambda c=cam_id: go_review(selected_camera=c))
+                                ):
+                                    if thumb_path.exists():
+                                        ui.image(
+                                            f"/thumbnails/{safe_name}.jpg?v={int(thumb_path.stat().st_mtime)}"
+                                        ).style("width: 100%; border-radius: 4px").classes(
+                                            "q-mb-xs"
+                                        )
+                                    elif sample_path:
+                                        img_el = (
+                                            ui.image("")
+                                            .style("width: 100%; border-radius: 4px")
+                                            .classes("q-mb-xs")
+                                        )
+
+                                        async def _load_thumb(
+                                            sp=Path(sample_path),
+                                            tp=thumb_path,
+                                            el=img_el,
+                                            sn=safe_name,
+                                        ):
+                                            await run.io_bound(generate_thumbnail, sp, tp)
+                                            if tp.exists():
+                                                el.set_source(
+                                                    f"/thumbnails/{sn}.jpg?v={int(tp.stat().st_mtime)}"
+                                                )
+
+                                        asyncio.create_task(_load_thumb())
+                                    ui.label(cam_id or t("col_camera")).classes(
+                                        "text-body2 font-weight-medium ellipsis"
+                                    ).style("max-width: 220px")
+                                    ui.linear_progress(
+                                        value=labeled_pct / 100, show_value=False
+                                    ).props("color=primary style=height:4px").classes("q-my-xs")
+                                    with ui.row().classes("w-full justify-between items-center"):
+                                        ui.label(
+                                            f"{labeled_pct}% {t('col_labeled').lower()}"
+                                        ).classes("text-caption text-grey-6")
+                                    with ui.row().classes("w-full justify-between"):
+                                        ui.label(
+                                            f"{cam['total_videos']} {t('col_total').lower()}"
+                                        ).classes("text-caption text-grey-5")
+                                        ui.label(f"{cam['hours']:.1f}h").classes(
+                                            "text-caption text-grey-5"
+                                        )
+                else:
+                    ui.label(t("no_camera_data")).classes("text-grey-5")
 
         # Assignment summary table
         with (
