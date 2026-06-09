@@ -243,6 +243,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
             if get_state_val("ann_format") == "app":
                 matched = validation["matched"]
                 skipped = validation["skipped"]
+                blanks = validation.get("blanks_to_set", 0)
                 ins = validation["obs_to_insert"]
                 upd = validation["obs_to_update"]
                 dlt = validation["obs_to_delete"]
@@ -267,6 +268,8 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                             ).classes("h-48")
 
                     ui.separator().classes("q-my-sm")
+                    if blanks:
+                        ui.label(t("app_csv_blanks", count=blanks)).classes("text-body2")
                     if ins == 0 and upd == 0 and dlt == 0:
                         ui.label(t("app_csv_no_changes")).classes("text-caption text-grey")
                     else:

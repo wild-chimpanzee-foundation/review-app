@@ -993,6 +993,7 @@ class ImportMixin(ProviderBase):
         obs_to_insert = 0
         obs_to_update = 0
         obs_to_delete = 0
+        blanks_to_set = 0
         append = mode == "append"
 
         with self.engine.connect() as conn:
@@ -1021,6 +1022,7 @@ class ImportMixin(ProviderBase):
             is_blank = bool(int(is_blank_raw)) if pd.notna(is_blank_raw) else None
 
             if is_blank:
+                blanks_to_set += 1
                 if not append and existing_ids:
                     obs_to_delete += len(existing_ids)
                 continue
@@ -1045,6 +1047,7 @@ class ImportMixin(ProviderBase):
         return {
             "matched": matched,
             "skipped": skipped,
+            "blanks_to_set": blanks_to_set,
             "obs_to_insert": obs_to_insert,
             "obs_to_update": obs_to_update,
             "obs_to_delete": obs_to_delete,
