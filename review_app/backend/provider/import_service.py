@@ -959,6 +959,97 @@ class ImportMixin(ProviderBase):
             "custom_tags": len(all_custom_keys),
         }
 
+    def validate_annotations_csv(
+        self, df: pd.DataFrame, active_project_id: str | None, mode: str = "override"
+    ) -> dict[str, Any]:
+        """Dry-run of import_annotations_csv: resolves paths and diffs observations without writing."""
+        has_path = "video_path" in df.columns
+        has_id = "video_id" in df.columns
+        if not has_path and not has_id:
+            raise DataImportError(
+                user_message_key="csv_error_missing_column_video_path",
+                detail="Missing required column: video_path (or video_id)",
+            )
+        if "is_blank" not in df.columns:
+            raise DataImportError(
+                user_message_key="csv_error_missing_column_is_blank",
+                detail="Missing required column: is_blank",
+            )
+
+        path_to_id = {v.lower(): k for k, v in self._known_video_map(active_project_id).items()}
+        lookup = self._build_video_path_lookup(active_project_id)
+        known_ids = self._known_video_ids(active_project_id)
+
+        def _resolve_path(path_str: str) -> str | None:
+            vid, _ = resolve_video_path(path_str, lookup, extra_suffix_map=path_to_id)
+            return vid
+
+        if has_path and not has_id:
+            df = df.copy()
+            df["video_id"] = df["video_path"].map(_resolve_path)
+
+        matched = 0
+        skipped: list[str] = []
+        obs_to_insert = 0
+        obs_to_update = 0
+        obs_to_delete = 0
+        append = mode == "append"
+
+        with self.engine.connect() as conn:
+            existing_obs_rows = conn.execute(
+                text(
+                    "SELECT video_id, id FROM individual_observations WHERE project_id = :pid"
+                    if active_project_id
+                    else "SELECT video_id, id FROM individual_observations"
+                ),
+                {"pid": active_project_id} if active_project_id else {},
+            ).fetchall()
+        existing_obs_by_video: dict[str, set[int]] = {}
+        for vid, oid in existing_obs_rows:
+            existing_obs_by_video.setdefault(vid, set()).add(oid)
+
+        for video_id, group in df.groupby("video_id", sort=False, dropna=False):
+            if pd.isna(video_id) or video_id not in known_ids:
+                label = group["video_path"].iloc[0] if has_path else str(video_id)
+                skipped.append(str(label))
+                continue
+
+            matched += 1
+            existing_ids = existing_obs_by_video.get(str(video_id), set())
+            first = group.iloc[0]
+            is_blank_raw = first["is_blank"]
+            is_blank = bool(int(is_blank_raw)) if pd.notna(is_blank_raw) else None
+
+            if is_blank:
+                if not append and existing_ids:
+                    obs_to_delete += len(existing_ids)
+                continue
+
+            incoming_ids: set[int] = set()
+            for _, row in group.iterrows():
+                sp_raw = row.get("species")
+                sp = str(sp_raw).strip() if pd.notna(sp_raw) else ""
+                if not sp:
+                    continue
+                obs_id_raw = row.get("observation_id")
+                obs_id = int(obs_id_raw) if pd.notna(obs_id_raw) and not append else None
+                if obs_id and obs_id in existing_ids:
+                    obs_to_update += 1
+                    incoming_ids.add(obs_id)
+                else:
+                    obs_to_insert += 1
+
+            if not append:
+                obs_to_delete += len(existing_ids - incoming_ids)
+
+        return {
+            "matched": matched,
+            "skipped": skipped,
+            "obs_to_insert": obs_to_insert,
+            "obs_to_update": obs_to_update,
+            "obs_to_delete": obs_to_delete,
+        }
+
     # ── Historic CSV import ───────────────────────────────────────────────────
 
     def _filter_and_group_historic(

@@ -96,9 +96,13 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                 {"override": t("mode_override"), "append": t("mode_append")},
                 value=get_state_val("manual_import_mode") or "override",
             ).props("dense size=sm")
-            mode_toggle.on_value_change(
-                lambda: set_state_val("manual_import_mode", mode_toggle.value)
-            )
+
+            async def on_mode_change() -> None:
+                set_state_val("manual_import_mode", mode_toggle.value)
+                if get_state_val("ann_format") == "app" and get_state_val("ann_df_records"):
+                    await _run_app_validate(dp, loading_dialog, results_ui, results_container)
+
+            mode_toggle.on_value_change(on_mode_change)
 
         import_status = ui.label("").classes("text-body2")
         upload_holder: list = [None]
@@ -235,6 +239,103 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
             if not validation:
                 return
 
+            # ── App format: dry-run summary + import button ───────────────────
+            if get_state_val("ann_format") == "app":
+                matched = validation["matched"]
+                skipped = validation["skipped"]
+                ins = validation["obs_to_insert"]
+                upd = validation["obs_to_update"]
+                dlt = validation["obs_to_delete"]
+
+                with ui.card().classes("full-width q-pa-md q-mb-md"):
+                    color = "text-positive" if not skipped else "text-warning"
+                    ui.label(t("app_csv_matched", count=matched)).classes(
+                        f"text-subtitle2 {color} q-mb-xs"
+                    )
+                    if skipped:
+                        with ui.expansion(
+                            t("app_csv_skipped", count=len(skipped)), icon="warning"
+                        ).classes("q-mt-xs full-width"):
+                            ui.aggrid(
+                                {
+                                    "columnDefs": [{"field": "path", "headerName": "Path"}],
+                                    "rowData": [{"path": p} for p in skipped[:500]],
+                                    "columnSize": "autoSize",
+                                    "pagination": True,
+                                    "paginationPageSize": 50,
+                                }
+                            ).classes("h-48")
+
+                    ui.separator().classes("q-my-sm")
+                    if ins == 0 and upd == 0 and dlt == 0:
+                        ui.label(t("app_csv_no_changes")).classes("text-caption text-grey")
+                    else:
+                        if ins:
+                            ui.label(t("app_csv_obs_insert", count=ins)).classes(
+                                "text-body2 text-positive"
+                            )
+                        if upd:
+                            ui.label(t("app_csv_obs_update", count=upd)).classes("text-body2")
+                        if dlt:
+                            ui.label(t("app_csv_obs_delete", count=dlt)).classes(
+                                "text-body2 text-warning"
+                            )
+
+                ui.separator().classes("q-my-md")
+
+                async def do_app_import() -> None:
+                    loading_dialog.open()
+                    try:
+                        df = get_df_from_state("ann_df_records")
+                        if df is None:
+                            ui.notify(t("no_data_import"), type="warning")
+                            return
+                        result = await run.io_bound(
+                            dp.import_annotations_csv,
+                            df,
+                            get_active_project_id(),
+                            mode=get_state_val("manual_import_mode") or "override",
+                        )
+                        summary = t("imported_annotations", count=result["imported"])
+                        by_ann = {k: v for k, v in result.get("by_annotator", {}).items() if k}
+                        if by_ann:
+                            ann_str = ", ".join(
+                                f"{name}: {count}"
+                                for name, count in sorted(by_ann.items(), key=lambda x: -x[1])
+                            )
+                            summary += " " + t("import_by_annotator", summary=ann_str)
+                        if result.get("custom_tags"):
+                            summary += " " + t("import_custom_tags", count=result["custom_tags"])
+                        skipped_vids = result.get("skipped", [])
+                        notify_type = "positive"
+                        if skipped_vids:
+                            skip_msg = t("skipped_annotations", count=len(skipped_vids))
+                            if len(skipped_vids) <= 5:
+                                skip_msg += " (" + ", ".join(skipped_vids) + ")"
+                            else:
+                                skip_msg += (
+                                    " ("
+                                    + ", ".join(skipped_vids[:5])
+                                    + f", +{len(skipped_vids) - 5} {t('more')})"
+                                )
+                            summary += " " + skip_msg
+                            notify_type = "warning"
+                        import_status.set_text(summary)
+                        ui.notify(summary, type=notify_type)
+                    except Exception as exc:
+                        ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+                    finally:
+                        loading_dialog.close()
+
+                ui.button(
+                    t("historic_import_btn"),
+                    icon="file_upload",
+                    on_click=do_app_import,
+                    color="warning",
+                )
+                return
+
+            # ── External format: validation results + import button ───────────
             matched = validation["matched"]
             unmatched = validation["unmatched"]
             skipped_inst = validation["skipped_installation"]
@@ -394,47 +495,14 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                 columns = list(df.columns)
 
                 if _is_app_format(columns):
-                    # App format: import directly
+                    # App format: validate first, show dry-run, then let user import
                     set_state_val("ann_format", "app")
-                    set_state_val("ann_df_records", None)
+                    set_state_val("ann_df_records", df.to_dict(orient="records"))
                     set_state_val("ann_validation", None)
                     col_config_section.visible = False
-                    results_container.visible = False
                     col_config_ui.refresh()
-                    results_ui.refresh()
-
-                    result = await run.io_bound(
-                        dp.import_annotations_csv,
-                        df,
-                        get_active_project_id(),
-                        mode=get_state_val("manual_import_mode") or "override",
-                    )
-                    summary = t("imported_annotations", count=result["imported"])
-                    by_ann = {k: v for k, v in result.get("by_annotator", {}).items() if k}
-                    if by_ann:
-                        ann_str = ", ".join(
-                            f"{name}: {count}"
-                            for name, count in sorted(by_ann.items(), key=lambda x: -x[1])
-                        )
-                        summary += " " + t("import_by_annotator", summary=ann_str)
-                    if result.get("custom_tags"):
-                        summary += " " + t("import_custom_tags", count=result["custom_tags"])
-                    skipped = result.get("skipped", [])
-                    notify_type = "positive"
-                    if skipped:
-                        skip_msg = t("skipped_annotations", count=len(skipped))
-                        if len(skipped) <= 5:
-                            skip_msg += " (" + ", ".join(skipped) + ")"
-                        else:
-                            skip_msg += (
-                                " ("
-                                + ", ".join(skipped[:5])
-                                + f", +{len(skipped) - 5} {t('more')})"
-                            )
-                        summary += " " + skip_msg
-                        notify_type = "warning"
-                    import_status.set_text(summary)
-                    ui.notify(summary, type=notify_type)
+                    if upload_holder[0]:
+                        upload_holder[0].visible = False
                 else:
                     # External format: show column config + validate
                     set_state_val("ann_format", "external")
@@ -469,8 +537,11 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
             finally:
                 loading_dialog.close()
 
-            if get_state_val("ann_format") == "external":
+            fmt = get_state_val("ann_format")
+            if fmt == "external":
                 await _run_validate(dp, loading_dialog, results_ui, results_container)
+            elif fmt == "app":
+                await _run_app_validate(dp, loading_dialog, results_ui, results_container)
 
         upload_holder[0] = ui.upload(
             on_upload=handle_upload,
@@ -504,6 +575,27 @@ async def _run_validate(dp, loading_dialog, results_ui, results_container) -> No
             col_val("ann_is_blank_col"),
             get_state_val("ann_tag_cols") or [],
             col_val("ann_path_col") if is_single else "",
+        )
+        set_state_val("ann_validation", result)
+        results_container.visible = True
+        results_ui.refresh()
+    except Exception as exc:
+        ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+    finally:
+        loading_dialog.close()
+
+
+async def _run_app_validate(dp, loading_dialog, results_ui, results_container) -> None:
+    loading_dialog.open()
+    try:
+        df = get_df_from_state("ann_df_records")
+        if df is None:
+            return
+        result = await run.io_bound(
+            dp.validate_annotations_csv,
+            df,
+            get_active_project_id(),
+            get_state_val("manual_import_mode") or "override",
         )
         set_state_val("ann_validation", result)
         results_container.visible = True
