@@ -50,7 +50,7 @@ def render_custom_video_player(video_url, duration, vid_key):
         ):
             v = ui.video(video_url, autoplay=autoplay, muted=muted, controls=False).classes(
                 "w-full"
-            )
+            ).props('preload="auto"')
 
         def _fmt(s):
             try:
@@ -159,7 +159,21 @@ def render_custom_video_player(video_url, duration, vid_key):
                     startY: 0
                 }};
 
-                videoEl.playbackRate = parseFloat(speedSel.value); // Set initial playback rate
+                videoEl.playbackRate = parseFloat(speedSel.value);
+                // Sync select to what browser actually accepted (browsers may cap max rate)
+                setTimeout(() => {{
+                    const actual = videoEl.playbackRate;
+                    const desired = parseFloat(speedSel.value);
+                    if (Math.abs(actual - desired) > 0.05) {{
+                        // Find closest available option
+                        let best = null;
+                        for (const opt of speedSel.options) {{
+                            if (best === null || Math.abs(parseFloat(opt.value) - actual) < Math.abs(parseFloat(best.value) - actual)) best = opt;
+                        }}
+                        if (best) speedSel.value = best.value;
+                        emitEvent('vp_speed_change_{vid_key}', actual);
+                    }}
+                }}, 100);
 
                 function updateTransform() {{
                     const brightness = brightnessSlider ? brightnessSlider.value : 1;
@@ -309,7 +323,19 @@ def render_custom_video_player(video_url, duration, vid_key):
                 speedSel.addEventListener('change', () => {{
                     const rate = parseFloat(speedSel.value);
                     videoEl.playbackRate = rate;
-                    emitEvent('vp_speed_change_{vid_key}', rate);
+                    setTimeout(() => {{
+                        const actual = videoEl.playbackRate;
+                        if (Math.abs(actual - rate) > 0.05) {{
+                            let best = null;
+                            for (const opt of speedSel.options) {{
+                                if (best === null || Math.abs(parseFloat(opt.value) - actual) < Math.abs(parseFloat(best.value) - actual)) best = opt;
+                            }}
+                            if (best) speedSel.value = best.value;
+                            emitEvent('vp_speed_change_{vid_key}', actual);
+                        }} else {{
+                            emitEvent('vp_speed_change_{vid_key}', rate);
+                        }}
+                    }}, 50);
                 }});
 
                 videoEl.addEventListener('timeupdate', () => {{
