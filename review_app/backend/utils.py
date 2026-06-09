@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pandas as pd
@@ -37,6 +38,51 @@ def df_to_records(df: pd.DataFrame, limit: int = 10) -> list[dict]:
         for _, row in df.head(limit).iterrows():
             records.append({k: make_serializable(v) for k, v in row.items()})
     return records
+
+
+def generate_thumbnail(video_path: Path, output_path: Path) -> bool:
+    """Extract a single frame from the middle of video_path and save as JPEG. Returns True on success."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        probe = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        duration = float(probe.stdout.strip() or 0)
+        seek = max(duration / 2, 0)
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-ss",
+                str(seek),
+                "-i",
+                str(video_path),
+                "-vframes",
+                "1",
+                "-vf",
+                "scale=320:-1",
+                "-q:v",
+                "5",
+                str(output_path),
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        return output_path.exists()
+    except Exception:
+        return False
 
 
 def needs_browser_transcode(video_row: dict) -> bool:

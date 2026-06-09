@@ -513,6 +513,10 @@ class GUI:
         transcoded_cache.mkdir(parents=True, exist_ok=True)
         app.add_media_files("/transcoded", transcoded_cache)
 
+        thumbnails_dir = get_user_data_dir() / "thumbnails"
+        thumbnails_dir.mkdir(parents=True, exist_ok=True)
+        app.add_static_files("/thumbnails", str(thumbnails_dir))
+
         if get_default_db_path().exists():
             try:
                 dp = LocalDataProvider()

@@ -1,3 +1,6 @@
+import re
+from pathlib import Path
+
 from nicegui import run, ui
 
 from review_app.app.components.location_map import MapMarker, render_location_map
@@ -7,6 +10,7 @@ from review_app.app.utils import (
     get_or_create_data_provider,
     render_uninitialized_state,
 )
+from review_app.backend.utils import generate_thumbnail
 
 
 async def setup_overview():
@@ -217,20 +221,35 @@ async def setup_overview():
         ):
             camera_summary = stats.get("camera_summary", [])
             if camera_summary:
-                with ui.scroll_area().style("width: 100%"):
+                from review_app.app.config import get_user_data_dir
+
+                thumbnails_dir = get_user_data_dir() / "thumbnails"
+
+                with ui.scroll_area().style("width: 100%; height: 400px"):
                     with ui.row().classes("no-wrap gap-md q-pb-sm"):
                         for cam in camera_summary:
                             labeled_pct = round(100 * cam["labeled"] / max(cam["total_videos"], 1))
                             cam_id = cam["camera_id"]
+                            safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", cam_id or "unknown")
+                            thumb_path = thumbnails_dir / f"{safe_name}.jpg"
+                            sample_path = cam.get("sample_video_path")
+                            if not thumb_path.exists() and sample_path:
+                                await run.io_bound(
+                                    generate_thumbnail, Path(sample_path), thumb_path
+                                )
                             with (
                                 ui.card()
                                 .classes("q-pa-md cursor-pointer")
-                                .style("min-width: 160px; max-width: 180px")
+                                .style("min-width: 280px; max-width: 340px")
                                 .on("click", lambda c=cam_id: go_review(selected_camera=c))
                             ):
+                                if thumb_path.exists():
+                                    ui.image(
+                                        f"/thumbnails/{safe_name}.jpg?v={int(thumb_path.stat().st_mtime)}"
+                                    ).style("width: 100%; border-radius: 4px").classes("q-mb-xs")
                                 ui.label(cam_id or t("col_camera")).classes(
                                     "text-body2 font-weight-medium ellipsis"
-                                ).style("max-width: 150px")
+                                ).style("max-width: 220px")
                                 ui.linear_progress(
                                     value=labeled_pct / 100, show_value=False
                                 ).props("color=primary style=height:4px").classes("q-my-xs")

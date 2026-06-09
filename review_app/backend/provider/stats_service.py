@@ -148,14 +148,29 @@ class StatsMixin(ProviderBase):
 
             stats["camera_summary"] = pd.read_sql(
                 text(f"""
+                WITH ranked AS (
+                    SELECT
+                        camera_id, video_path,
+                        ROW_NUMBER() OVER (PARTITION BY camera_id ORDER BY video_path) AS rn,
+                        COUNT(*) OVER (PARTITION BY camera_id) AS cnt
+                    FROM videos
+                    {pf}
+                ),
+                mid_sample AS (
+                    SELECT camera_id, video_path
+                    FROM ranked
+                    WHERE rn = (cnt + 1) / 2
+                )
                 SELECT
                     v.camera_id,
                     COUNT(*)                                               AS total_videos,
                     SUM(CASE WHEN vl.video_id IS NOT NULL THEN 1 ELSE 0 END) AS labeled,
                     SUM(CASE WHEN vl.is_blank = 1 THEN 1 ELSE 0 END)         AS blank,
-                    ROUND(SUM(COALESCE(v.duration_sec,0))/3600.0, 2)         AS hours
+                    ROUND(SUM(COALESCE(v.duration_sec,0))/3600.0, 2)         AS hours,
+                    ms.video_path                                              AS sample_video_path
                 FROM videos v
                 LEFT JOIN video_labels vl ON vl.video_id = v.video_id
+                LEFT JOIN mid_sample ms ON ms.camera_id = v.camera_id
                 {vf}
                 GROUP BY v.camera_id
                 ORDER BY total_videos DESC
