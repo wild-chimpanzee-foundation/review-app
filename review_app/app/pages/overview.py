@@ -300,9 +300,21 @@ async def setup_overview():
         # Assignment summary
         with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
             with ui.card().classes("col q-pa-md"):
-                ui.label(t("assignment_summary_title")).classes(
-                    "text-subtitle1 font-weight-medium q-mb-md"
-                )
+                with ui.row().classes("w-full justify-between items-center q-mb-md"):
+                    ui.label(t("assignment_summary_title")).classes(
+                        "text-subtitle1 font-weight-medium"
+                    )
+                    with ui.row().classes("gap-lg"):
+                        for color, label in [
+                            (_BLANK_COLOR, t("progress_blank")),
+                            (_NON_BLANK_COLOR, t("progress_non_blank")),
+                            (_UNLABELED_COLOR, t("progress_unlabeled")),
+                        ]:
+                            with ui.row().classes("items-center gap-xs"):
+                                ui.element("div").style(
+                                    f"width:8px; height:8px; border-radius:50%; background:{color}; flex-shrink:0"
+                                )
+                                ui.label(label).classes("text-caption text-grey-6")
                 assignment_summary = await run.io_bound(dp.get_assignment_summary, pid)
                 if assignment_summary:
                     with ui.column().classes("w-full gap-xs"):
