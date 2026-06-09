@@ -225,7 +225,21 @@ class AnnotationMixin(ProviderBase):
         if detail_df.empty:
             return None
 
-        suggestions = []
+        # Collect all candidates keyed by species, keeping highest probability
+        suggestion_candidates: dict[str, dict] = {}
+
+        def _add_candidate(species: str, prob: float, count_val) -> None:
+            count = max(1, int(round(count_val))) if pd.notna(count_val) else 1
+            if (
+                species not in suggestion_candidates
+                or prob > suggestion_candidates[species]["probability"]
+            ):
+                suggestion_candidates[species] = {
+                    "species": species,
+                    "probability": prob,
+                    "count": count,
+                }
+
         if not suggestion_rows.empty:
             all_sp_rows = suggestion_rows[suggestion_rows["annotation_type"] == "species"]
             sp_rows = all_sp_rows[all_sp_rows["avg_prob"] >= species_threshold]
@@ -233,29 +247,15 @@ class AnnotationMixin(ProviderBase):
             # (exactly 1 distinct species at any confidence) AND it passes threshold
             if len(all_sp_rows) == 1 and len(sp_rows) == 1:
                 r = sp_rows.iloc[0]
-                suggestions.append(
-                    {
-                        "species": r["species"],
-                        "probability": float(r["avg_prob"]),
-                        "count": max(1, int(round(r["avg_count"])))
-                        if pd.notna(r.get("avg_count"))
-                        else 1,
-                    }
-                )
+                _add_candidate(r["species"], float(r["avg_prob"]), r.get("avg_count"))
             obj_rows = suggestion_rows[
                 (suggestion_rows["annotation_type"] == "object_detection")
                 & (suggestion_rows["avg_prob"] >= obj_detection_threshold)
             ]
             for _, r in obj_rows.iterrows():
-                suggestions.append(
-                    {
-                        "species": r["species"],
-                        "probability": float(r["avg_prob"]),
-                        "count": max(1, int(round(r["avg_count"])))
-                        if pd.notna(r.get("avg_count"))
-                        else 1,
-                    }
-                )
+                _add_candidate(r["species"], float(r["avg_prob"]), r.get("avg_count"))
+
+        suggestions = list(suggestion_candidates.values())
 
         video_tag_keys = [r[0] for r in tag_rows]
         row_dict = detail_df.iloc[0].to_dict()
