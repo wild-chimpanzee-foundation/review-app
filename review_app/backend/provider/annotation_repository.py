@@ -553,13 +553,14 @@ class AnnotationMixin(ProviderBase):
                         to_delete.remove(obs_id)
                     obs_tags_to_sync[obs_id] = row["tag_ids"]
                 else:
-                    # New record
-                    max_id += 1
+                    # New record — honour caller-supplied id so re-imports stay stable
+                    new_id = obs_id if (obs_id and obs_id not in existing_map) else max_id + 1
+                    max_id = max(max_id, new_id)
                     newly_added_count += 1
                     session.add(
                         IndividualObservation(
                             video_id=video_id,
-                            id=max_id,
+                            id=new_id,
                             project_id=active_project_id,
                             species_id=row["species_id"],
                             count=row["count"],
@@ -570,7 +571,7 @@ class AnnotationMixin(ProviderBase):
                             updated_at=now,
                         )
                     )
-                    obs_tags_to_sync[max_id] = row["tag_ids"]
+                    obs_tags_to_sync[new_id] = row["tag_ids"]
 
             if to_delete:
                 session.query(IndividualObservation).filter(

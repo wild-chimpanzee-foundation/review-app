@@ -244,8 +244,10 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                 matched = validation["matched"]
                 skipped = validation["skipped"]
                 blanks = validation.get("blanks_to_set", 0)
+                blanks_already = validation.get("blanks_already_set", 0)
                 ins = validation["obs_to_insert"]
-                upd = validation["obs_to_update"]
+                chg = validation.get("obs_to_change", validation.get("obs_to_update", 0))
+                unch = validation.get("obs_unchanged", 0)
                 dlt = validation["obs_to_delete"]
 
                 with ui.card().classes("full-width q-pa-md q-mb-md"):
@@ -268,21 +270,31 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                             ).classes("h-48")
 
                     ui.separator().classes("q-my-sm")
-                    if blanks:
-                        ui.label(t("app_csv_blanks", count=blanks)).classes("text-body2")
-                    if ins == 0 and upd == 0 and dlt == 0:
+                    no_changes = ins == 0 and chg == 0 and dlt == 0 and blanks == 0
+                    if no_changes:
                         ui.label(t("app_csv_no_changes")).classes("text-caption text-grey")
                     else:
+                        if blanks:
+                            ui.label(t("app_csv_blanks", count=blanks)).classes(
+                                "text-body2 text-positive"
+                            )
                         if ins:
                             ui.label(t("app_csv_obs_insert", count=ins)).classes(
                                 "text-body2 text-positive"
                             )
-                        if upd:
-                            ui.label(t("app_csv_obs_update", count=upd)).classes("text-body2")
+                        if chg:
+                            ui.label(t("app_csv_obs_update", count=chg)).classes("text-body2")
                         if dlt:
                             ui.label(t("app_csv_obs_delete", count=dlt)).classes(
                                 "text-body2 text-warning"
                             )
+                    if unch or blanks_already:
+                        already_parts = []
+                        if blanks_already:
+                            already_parts.append(t("app_csv_blanks_already", count=blanks_already))
+                        if unch:
+                            already_parts.append(t("app_csv_obs_unchanged", count=unch))
+                        ui.label(" · ".join(already_parts)).classes("text-caption text-grey")
 
                 ui.separator().classes("q-my-md")
 
