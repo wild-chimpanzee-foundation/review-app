@@ -304,36 +304,36 @@ async def setup_overview():
                 else:
                     ui.label(t("no_camera_data")).classes("text-grey-5")
 
-        # Assignment summary table
-        with (
-            ui.expansion(t("assignment_summary_title"), icon="assignment_ind")
-            .classes("full-width q-mb-lg")
-            .props("content-inset-level=0 header-class='q-pa-md q-py-sm'")
-        ):
-            assignment_summary = await run.io_bound(dp.get_assignment_summary, pid)
-            if assignment_summary:
-                with ui.column().classes("w-full q-pa-sm gap-xs"):
-                    for r in assignment_summary:
-                        r_blank = int(r["blank"])
-                        r_non_blank = int(r["labeled"]) - r_blank
-                        r_unlabeled = max(int(r["video_count"]) - int(r["labeled"]), 0)
-                        labeled_pct = round(100 * r["labeled"] / max(r["video_count"], 1))
-                        with (
-                            ui.column()
-                            .classes("w-full q-px-sm q-py-xs cursor-pointer rounded")
-                            .style("transition: background 0.15s")
-                            .on("click", lambda an=r["annotator"]: go_review(selected_annotator=[an]))
-                            .on("mouseover", lambda e: e.sender.style("background: rgba(0,0,0,0.06)"))
-                            .on("mouseout", lambda e: e.sender.style("background: transparent"))
-                        ):
-                            with ui.row().classes("w-full justify-between items-baseline q-mb-xs"):
-                                ui.label(r["annotator"] or "—").classes("text-body2 font-weight-medium")
-                                ui.label(
-                                    f"{labeled_pct}% {t('col_labeled').lower()} · "
-                                    f"{r['video_count']} {t('col_videos').lower()} · "
-                                    f"{r['cameras']} {t('col_cameras').lower()} · "
-                                    f"{r['hours']:.1f}h"
-                                ).classes("text-caption text-grey-6")
-                            _render_annotation_bar(r_blank, r_non_blank, r_unlabeled, height="8px")
-            else:
-                ui.label(t("no_camera_data")).classes("text-grey-5 q-pa-sm")
+        # Assignment summary
+        with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
+            with ui.card().classes("col q-pa-md"):
+                ui.label(t("assignment_summary_title")).classes(
+                    "text-subtitle1 font-weight-medium q-mb-md"
+                )
+                assignment_summary = await run.io_bound(dp.get_assignment_summary, pid)
+                if assignment_summary:
+                    with ui.column().classes("w-full gap-xs"):
+                        for r in assignment_summary:
+                            r_blank = int(r["blank"])
+                            r_non_blank = int(r["labeled"]) - r_blank
+                            r_unlabeled = max(int(r["video_count"]) - int(r["labeled"]), 0)
+                            labeled_pct = round(100 * r["labeled"] / max(r["video_count"], 1))
+                            with (
+                                ui.column()
+                                .classes("w-full q-px-sm q-py-xs cursor-pointer rounded")
+                                .style("transition: background 0.15s")
+                                .on("click", lambda an=r["annotator"]: go_review(selected_annotator=[an]))
+                                .on("mouseover", lambda e: e.sender.style("background: rgba(0,0,0,0.06)"))
+                                .on("mouseout", lambda e: e.sender.style("background: transparent"))
+                            ):
+                                with ui.row().classes("w-full justify-between items-baseline q-mb-xs"):
+                                    ui.label(r["annotator"] or "—").classes("text-body2 font-weight-medium")
+                                    ui.label(
+                                        f"{labeled_pct}% {t('col_labeled').lower()} · "
+                                        f"{r['video_count']} {t('col_videos').lower()} · "
+                                        f"{r['cameras']} {t('col_cameras').lower()} · "
+                                        f"{r['hours']:.1f}h"
+                                    ).classes("text-caption text-grey-6")
+                                _render_annotation_bar(r_blank, r_non_blank, r_unlabeled, height="8px")
+                else:
+                    ui.label(t("no_camera_data")).classes("text-grey-5")
