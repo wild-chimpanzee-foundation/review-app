@@ -66,16 +66,23 @@ class TestCreateBackup:
         result = create_backup(reason="test")
         assert result.exists()
         assert result.name.startswith("review_backup_")
-        assert result.name.endswith(".db")
+        assert result.name.endswith(".db.gz")
 
     def test_backup_is_valid_sqlite(self, workspace):
+        import gzip
+        import tempfile
+
         result = create_backup(reason="test")
-        con = sqlite3.connect(str(result))
-        try:
-            rows = con.execute("SELECT name FROM test_table").fetchall()
-            assert rows[0][0] == "hello"
-        finally:
-            con.close()
+        with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+            with gzip.open(result, "rb") as gz:
+                tmp.write(gz.read())
+            tmp.flush()
+            con = sqlite3.connect(tmp.name)
+            try:
+                rows = con.execute("SELECT name FROM test_table").fetchall()
+                assert rows[0][0] == "hello"
+            finally:
+                con.close()
 
     def test_raises_when_db_missing(self, workspace, monkeypatch):
         monkeypatch.setattr(

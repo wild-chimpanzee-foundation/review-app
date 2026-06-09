@@ -312,10 +312,13 @@ def _build_settings_content(container: ui.column):
                                 type="positive",
                             )
                             download_btn.set_text(t("update_tooltip", version=tag.lstrip("v")))
-                            download_btn.on(
-                                "click",
-                                lambda u=url: ui.run_javascript(f"window.open('{u}', '_blank')"),
-                            )
+
+                            async def _open_release(u=url):
+                                from review_app.backend.db.backup import backup_if_stale
+                                await run.io_bound(backup_if_stale, reason="pre_update")
+                                ui.run_javascript(f"window.open('{u}', '_blank')")
+
+                            download_btn.on("click", _open_release)
                             download_btn.classes(remove="hidden")
                         else:
                             ui.notify(t("update_up_to_date"), type="positive")

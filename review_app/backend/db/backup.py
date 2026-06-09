@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import gzip
 import logging
 import os
 import re
 import shutil
 import sqlite3
+import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,12 +17,12 @@ from review_app.backend.errors import AppError
 
 logger = logging.getLogger(__name__)
 
-_BACKUP_TS_RE = re.compile(r"^review_backup_(\d{8}_\d{6})(?:_v(\d+))?(?:_\d+)?\.db$")
+_BACKUP_TS_RE = re.compile(r"^review_backup_(\d{8}_\d{6})(?:_v(\d+))?(?:_\d+)?\.db(?:\.gz)?$")
 
 RECENT_KEEP_COUNT = 5
 DAILY_RETENTION_DAYS = 14
 WEEKLY_RETENTION_WEEKS = 8
-MONTHLY_RETENTION_MONTHS = 12
+MONTHLY_RETENTION_MONTHS = 3
 BACKUP_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 
 
@@ -69,14 +72,32 @@ def get_backup_dir() -> Path:
     return backup_dir
 
 
-def read_schema_version(db_path: Path) -> int | None:
-    """Read _schema_version from an arbitrary SQLite file. Returns None if unreadable or missing."""
-    try:
-        con = sqlite3.connect(str(db_path))
+@contextmanager
+def _as_db_file(path: Path):
+    """Yield a readable .db path. Decompresses .db.gz to a temp file if needed."""
+    if path.suffix == ".gz":
+        tmp_fd, tmp_name = tempfile.mkstemp(suffix=".db")
+        tmp_path = Path(tmp_name)
         try:
-            row = con.execute("SELECT version FROM _schema_version").fetchone()
+            os.close(tmp_fd)
+            with gzip.open(path, "rb") as f_in, open(tmp_path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            yield tmp_path
         finally:
-            con.close()
+            tmp_path.unlink(missing_ok=True)
+    else:
+        yield path
+
+
+def read_schema_version(db_path: Path) -> int | None:
+    """Read _schema_version from an arbitrary SQLite file (plain or gzipped). Returns None if unreadable."""
+    try:
+        with _as_db_file(db_path) as p:
+            con = sqlite3.connect(str(p))
+            try:
+                row = con.execute("SELECT version FROM _schema_version").fetchone()
+            finally:
+                con.close()
         return row[0] if row else None
     except Exception as exc:
         logger.warning("Could not read schema version from %s: %s", db_path, exc)
@@ -115,7 +136,7 @@ def remove_db_sidecars(db_path: Path) -> None:
 
 
 def create_backup(reason: str = "auto", auto_prune: bool = True) -> Path:
-    """Create a VACUUM INTO backup of the live DB. Raises on any failure."""
+    """Create a gzip-compressed VACUUM INTO backup of the live DB. Raises on any failure."""
     db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
     if not db_path.exists():
         raise BackupDBNotFoundError(str(db_path))
@@ -123,15 +144,16 @@ def create_backup(reason: str = "auto", auto_prune: bool = True) -> Path:
     schema_version = read_schema_version(db_path) or 0
     timestamp = datetime.now(timezone.utc).strftime(BACKUP_TIMESTAMP_FORMAT)
     backup_dir = get_backup_dir()
-    backup_path = backup_dir / f"review_backup_{timestamp}_v{schema_version}.db"
+    backup_path = backup_dir / f"review_backup_{timestamp}_v{schema_version}.db.gz"
     if backup_path.exists():
         i = 1
-        while (backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db").exists():
+        while (backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db.gz").exists():
             i += 1
-        backup_path = backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db"
+        backup_path = backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db.gz"
 
     _validate_backup_path(backup_path)
-    escaped = str(backup_path).replace("'", "''")
+    raw_db = backup_path.with_suffix("")  # .db.gz → .db for VACUUM INTO
+    escaped = str(raw_db).replace("'", "''")
 
     con = None
     try:
@@ -139,15 +161,21 @@ def create_backup(reason: str = "auto", auto_prune: bool = True) -> Path:
         con.execute(f"VACUUM INTO '{escaped}'")
     except Exception as exc:
         logger.exception("VACUUM INTO failed")
-        if backup_path.exists():
-            try:
-                backup_path.unlink()
-            except OSError:
-                logger.warning("Could not clean up partial backup %s", backup_path)
+        raw_db.unlink(missing_ok=True)
         raise BackupVacuumError(str(exc)) from exc
     finally:
         if con is not None:
             con.close()
+
+    try:
+        with open(raw_db, "rb") as f_in, gzip.open(backup_path, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+    except Exception as exc:
+        logger.exception("Backup compression failed")
+        backup_path.unlink(missing_ok=True)
+        raise BackupVacuumError(str(exc)) from exc
+    finally:
+        raw_db.unlink(missing_ok=True)
 
     logger.info("Backup created (%s): %s", reason, backup_path)
     if auto_prune:
@@ -171,7 +199,13 @@ def _parse_backup_meta(name: str) -> tuple[datetime, int | None] | None:
 def list_backups() -> list[dict[str, Any]]:
     backup_dir = get_backup_dir()
     backups = []
-    for f in sorted(backup_dir.glob("review_backup_*.db"), reverse=True):
+    all_files = sorted(
+        list(backup_dir.glob("review_backup_*.db.gz"))
+        + list(backup_dir.glob("review_backup_*.db")),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    for f in all_files:
         meta = _parse_backup_meta(f.name)
         if meta is None:
             continue
@@ -236,6 +270,20 @@ def prune_backups() -> int:
     return count
 
 
+def backup_if_stale(max_age_seconds: int = 300, reason: str = "auto") -> bool:
+    """Create a backup only if no backup exists within max_age_seconds. Returns True if one was created."""
+    backups = list_backups()
+    if backups:
+        age = (datetime.now(timezone.utc) - backups[0]["timestamp"]).total_seconds()
+        if age < max_age_seconds:
+            return False
+    try:
+        create_backup(reason=reason)
+        return True
+    except BackupError:
+        return False
+
+
 def _check_restore_schema_version(backup_path: Path, current_version: int | None) -> None:
     """Raise RestoreSchemaVersionError if the backup is from a newer schema.
     Skips the check if current_version is None (current schema unknown)."""
@@ -250,11 +298,12 @@ def _check_restore_schema_version(backup_path: Path, current_version: int | None
 
 def _check_restore_integrity(backup_path: Path) -> None:
     try:
-        con = sqlite3.connect(str(backup_path))
-        try:
-            result = con.execute("PRAGMA integrity_check").fetchone()
-        finally:
-            con.close()
+        with _as_db_file(backup_path) as p:
+            con = sqlite3.connect(str(p))
+            try:
+                result = con.execute("PRAGMA integrity_check").fetchone()
+            finally:
+                con.close()
         if result and result[0] != "ok":
             raise RestoreCorruptError(f"integrity_check: {result[0]}")
     except RestoreCorruptError:
@@ -271,7 +320,11 @@ def _emergency_rollback(pre_restore_path: Path | None, db_path: Path) -> bool:
     try:
         if pre_restore_path.exists():
             remove_db_sidecars(db_path)
-            shutil.copy2(pre_restore_path, db_path)
+            if pre_restore_path.suffix == ".gz":
+                with gzip.open(pre_restore_path, "rb") as f_in, open(db_path, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            else:
+                shutil.copy2(pre_restore_path, db_path)
             logger.warning("Emergency rollback restored db from %s", pre_restore_path)
             return True
     except Exception:
@@ -306,7 +359,11 @@ def restore_backup(backup_path: Path, app_schema_version: int | None = None) -> 
 
     staging = Path(str(db_path) + ".restoring")
     try:
-        shutil.copy2(backup_path, staging)
+        if backup_path.suffix == ".gz":
+            with gzip.open(backup_path, "rb") as f_in, open(staging, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        else:
+            shutil.copy2(backup_path, staging)
     except OSError as exc:
         logger.exception("Failed to stage backup at %s", staging)
         staging.unlink(missing_ok=True)
@@ -338,14 +395,15 @@ def quarantine_broken_db() -> Path | None:
     schema_version = read_schema_version(db_path) or 0
     timestamp = datetime.now(timezone.utc).strftime(BACKUP_TIMESTAMP_FORMAT)
     backup_dir = get_backup_dir()
-    target = backup_dir / f"review_backup_{timestamp}_v{schema_version}.db"
+    target = backup_dir / f"review_backup_{timestamp}_v{schema_version}.db.gz"
     if target.exists():
         i = 1
-        while (backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db").exists():
+        while (backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db.gz").exists():
             i += 1
-        target = backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db"
+        target = backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db.gz"
 
-    shutil.copy2(db_path, target)
+    with open(db_path, "rb") as f_in, gzip.open(target, "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
     db_path.unlink()
     remove_db_sidecars(db_path)
     logger.warning("Quarantined broken DB to %s", target)

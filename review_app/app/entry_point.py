@@ -241,10 +241,13 @@ def shared_header(show_drawer: bool = False):
                         if result:
                             tag, url = result
                             _update_btn.tooltip(t("update_tooltip", version=tag.lstrip("v")))
-                            _update_btn.on(
-                                "click",
-                                lambda u=url: ui.run_javascript(f"window.open('{u}', '_blank')"),
-                            )
+
+                            async def _open_release(u=url):
+                                from review_app.backend.db.backup import backup_if_stale
+                                await run.io_bound(backup_if_stale, reason="pre_update")
+                                ui.run_javascript(f"window.open('{u}', '_blank')")
+
+                            _update_btn.on("click", _open_release)
                             _update_btn.classes(remove="hidden")
                             _update_btn.text = t("update_tooltip", version=tag.lstrip("v"))
                     except Exception:
@@ -524,12 +527,6 @@ class GUI:
                 self.dp = dp
                 load_settings_from_db(dp)
 
-                from review_app.backend.db.backup import BackupError, create_backup
-
-                try:
-                    create_backup(reason="startup")
-                except BackupError:
-                    pass
 
                 # Determine and persist the global default project in the DB.
                 # Per-user active project is loaded at login via load_session_defaults().
