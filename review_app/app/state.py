@@ -1,3 +1,15 @@
+"""Application state, split across two scopes:
+
+- Module-level globals (thresholds, auto_transcode, the data provider): one value
+  for the whole server process, shared by every connected browser/user, persisted
+  in the DB's app_settings table.
+- ``app.storage.user`` (filters, queue, prefs, active project): per-browser session,
+  persisted in NiceGUI's storage file keyed by the browser cookie.
+
+When adding a setting, decide which scope it belongs to and keep its getter/setter
+in the matching section.
+"""
+
 from typing import Any
 
 _data_provider = None
