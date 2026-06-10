@@ -27,7 +27,9 @@ from urllib.request import Request, urlopen
 CSV_PATH = Path(__file__).resolve().parent.parent / "review_app" / "data" / "species.csv"
 API_URL = "https://api.inaturalist.org/v1/taxa?q={q}&per_page=5"
 TAXON_URL = "https://www.inaturalist.org/taxa/{id}"
-USER_AGENT = "review-app species link resolver (https://github.com/wild-chimpanzee-foundation/review-app)"
+USER_AGENT = (
+    "review-app species link resolver (https://github.com/wild-chimpanzee-foundation/review-app)"
+)
 # iNaturalist asks for <= 1 request/second.
 REQUEST_DELAY_SEC = 1.0
 # Ranks we accept as a real, linkable taxon.
