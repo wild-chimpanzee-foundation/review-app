@@ -3,26 +3,18 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import select, text
+from sqlalchemy import text
 
-from review_app.backend.db.models import IndividualObservation, ModelAnnotation, VideoLabel
 from review_app.backend.provider.base import ProviderBase
 
 
 class QueueMixin(ProviderBase):
     """Video queue building and filter options. Requires self.engine."""
 
-    def _get_model_annotations_df(self) -> pd.DataFrame:
+    def has_model_annotations(self) -> bool:
         with self.engine.connect() as conn:
-            return pd.read_sql(select(ModelAnnotation), conn)
-
-    def _get_individuals_df(self) -> pd.DataFrame:
-        with self.engine.connect() as conn:
-            return pd.read_sql(select(IndividualObservation), conn)
-
-    def _get_labels_df(self) -> pd.DataFrame:
-        with self.engine.connect() as conn:
-            return pd.read_sql(select(VideoLabel), conn)
+            row = conn.execute(text("SELECT 1 FROM model_annotations LIMIT 1")).fetchone()
+        return row is not None
 
     def get_queue_filter_options(self, active_project_id: str | None) -> dict[str, list[str]]:
         params: dict = {}

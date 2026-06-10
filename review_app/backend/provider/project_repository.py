@@ -149,7 +149,7 @@ class ProjectMixin(ProviderBase):
             transcoded_paths = [
                 Path(p)
                 for (p,) in s.query(Video.transcoded_path)
-                .filter(Video.project_id == project_id, Video.transcoded_path is not None)
+                .filter(Video.project_id == project_id, Video.transcoded_path.isnot(None))
                 .all()
                 if p
             ]

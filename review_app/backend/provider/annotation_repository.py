@@ -491,22 +491,21 @@ class AnnotationMixin(ProviderBase):
         if is_blank is None and normalized:
             is_blank = False
 
-        # obs_id -> tag_ids for all observations we touch (for tag sync after commit)
+        # obs_id -> tag_ids for all observations we touch (for tag sync in the same transaction)
         obs_tags_to_sync: dict[int, list[str]] = {}
 
-        # Load current tags so we can detect changes without a separate query per observation
-        with self.engine.connect() as conn:
-            existing_tag_rows = conn.execute(
+        with self.Session() as session:
+            # Load current tags so we can detect changes without a separate query per observation
+            existing_tag_rows = session.execute(
                 text(
                     "SELECT observation_id, behavior_id FROM observation_tags WHERE video_id = :vid"
                 ),
                 {"vid": video_id},
             ).fetchall()
-        existing_obs_tags: dict[int, set[str]] = {}
-        for oid, bid in existing_tag_rows:
-            existing_obs_tags.setdefault(oid, set()).add(bid)
+            existing_obs_tags: dict[int, set[str]] = {}
+            for oid, bid in existing_tag_rows:
+                existing_obs_tags.setdefault(oid, set()).add(bid)
 
-        with self.Session() as session:
             # 1. Update IndividualObservations surgically
             existing = (
                 session.query(IndividualObservation)
@@ -597,6 +596,31 @@ class AnnotationMixin(ProviderBase):
 
             label.is_blank = is_blank
 
+            # 3. Sync observation_tags in the same transaction, so a crash cannot
+            #    leave observations and their tags inconsistent.
+            session.flush()
+            stale_ids = set(to_delete) | set(obs_tags_to_sync)
+            if stale_ids:
+                session.execute(
+                    text(
+                        "DELETE FROM observation_tags WHERE video_id = :vid AND observation_id = :oid"
+                    ),
+                    [{"vid": video_id, "oid": obs_id} for obs_id in stale_ids],
+                )
+            tag_rows = [
+                {"vid": video_id, "oid": obs_id, "bid": tag_id}
+                for obs_id, tag_ids in obs_tags_to_sync.items()
+                for tag_id in tag_ids
+            ]
+            if tag_rows:
+                session.execute(
+                    text(
+                        "INSERT OR IGNORE INTO observation_tags"
+                        " (video_id, observation_id, behavior_id) VALUES (:vid, :oid, :bid)"
+                    ),
+                    tag_rows,
+                )
+
             session.commit()
             logger.info(
                 "Annotation saved: video=%s is_blank=%s observations=%d labeled_by=%s",
@@ -605,33 +629,6 @@ class AnnotationMixin(ProviderBase):
                 len(normalized),
                 labeled_by,
             )
-
-        # 3. Sync observation_tags (outside the ORM session, in a separate transaction)
-        with self.engine.begin() as conn:
-            # Clear tags for deleted observations
-            for obs_id in to_delete:
-                conn.execute(
-                    text(
-                        "DELETE FROM observation_tags WHERE video_id = :vid AND observation_id = :oid"
-                    ),
-                    {"vid": video_id, "oid": obs_id},
-                )
-            # Sync tags for each observation we touched
-            for obs_id, tag_ids in obs_tags_to_sync.items():
-                conn.execute(
-                    text(
-                        "DELETE FROM observation_tags WHERE video_id = :vid AND observation_id = :oid"
-                    ),
-                    {"vid": video_id, "oid": obs_id},
-                )
-                for tag_id in tag_ids:
-                    conn.execute(
-                        text(
-                            "INSERT OR IGNORE INTO observation_tags"
-                            " (video_id, observation_id, behavior_id) VALUES (:vid, :oid, :bid)"
-                        ),
-                        {"vid": video_id, "oid": obs_id, "bid": tag_id},
-                    )
 
     def set_review_later(self, video_id: str, value: bool = True) -> None:
         with self.Session() as session:
