@@ -50,6 +50,29 @@ def test_parse_species_csv_missing_required_column_raises(tmp_path):
         SpeciesMixin._parse_species_csv(str(f))
 
 
+def test_parse_species_csv_inaturalist_column(tmp_path):
+    f = tmp_path / "s.csv"
+    f.write_text(
+        "scientific_name;english_name;inaturalist\n"
+        "deer;Red Deer; https://www.inaturalist.org/taxa/42 \n"
+        "fox;Red Fox;\n"
+        "boar;Wild Boar;   \n"
+    )
+    rows = SpeciesMixin._parse_species_csv(str(f))
+    assert rows[0]["inaturalist_url"] == "https://www.inaturalist.org/taxa/42"
+    assert rows[1]["inaturalist_url"] is None  # empty cell (NaN)
+    assert rows[2]["inaturalist_url"] is None  # whitespace-only cell
+    # inaturalist is a base column, not a collection membership flag
+    assert all(r["collections"] == {} for r in rows)
+
+
+def test_parse_species_csv_without_inaturalist_column(tmp_path):
+    f = tmp_path / "s.csv"
+    f.write_text("scientific_name;english_name\ndeer;Red Deer\n")
+    rows = SpeciesMixin._parse_species_csv(str(f))
+    assert rows[0]["inaturalist_url"] is None
+
+
 # ---------------------------------------------------------------------------
 # _parse_behaviors_csv (static, no DB needed)
 # ---------------------------------------------------------------------------
@@ -294,3 +317,55 @@ def test_import_project_behaviors_empty_csv_raises(provider_with_project):
     dp, project, _ = provider_with_project
     with pytest.raises(DataImportError, match="No valid rows"):
         dp.import_project_behaviors_from_csv(project.id, "scientific_name;key\n")
+
+
+# ---------------------------------------------------------------------------
+# iNaturalist URL loading from the bundled CSV
+# ---------------------------------------------------------------------------
+
+
+def test_load_species_data_upserts_inaturalist_url(tmp_db):
+    # The tmp_db fixture CSV has no inaturalist column.
+    dp = LocalDataProvider()
+    assert dp.get_species_catalog("en").inat == {}
+    with dp.engine.connect() as conn:
+        from sqlalchemy import text
+
+        deer_id_before = conn.execute(
+            text("SELECT id FROM species WHERE scientific_name = 'deer'")
+        ).scalar()
+
+    # Add the column to the bundled CSV; the next provider init must upsert it.
+    (tmp_db["root"] / "species.csv").write_text(
+        "scientific_name;english_name;inaturalist\n"
+        "deer;Red Deer;https://www.inaturalist.org/taxa/42\n"
+        "fox;Red Fox;\n"
+    )
+    dp2 = LocalDataProvider()
+    catalog = dp2.get_species_catalog("en")
+    assert catalog.inat == {"deer": "https://www.inaturalist.org/taxa/42"}
+
+    with dp2.engine.connect() as conn:
+        from sqlalchemy import text
+
+        deer_id_after = conn.execute(
+            text("SELECT id FROM species WHERE scientific_name = 'deer'")
+        ).scalar()
+    assert deer_id_after == deer_id_before, "upsert must preserve existing species IDs"
+
+
+def test_load_species_data_clears_removed_inaturalist_url(tmp_db):
+    (tmp_db["root"] / "species.csv").write_text(
+        "scientific_name;english_name;inaturalist\n"
+        "deer;Red Deer;https://www.inaturalist.org/taxa/42\n"
+        "fox;Red Fox;\n"
+    )
+    dp = LocalDataProvider()
+    assert dp.get_species_catalog("en").inat == {"deer": "https://www.inaturalist.org/taxa/42"}
+
+    # Removing the URL from the CSV must clear it on the next load.
+    (tmp_db["root"] / "species.csv").write_text(
+        "scientific_name;english_name;inaturalist\ndeer;Red Deer;\nfox;Red Fox;\n"
+    )
+    dp2 = LocalDataProvider()
+    assert dp2.get_species_catalog("en").inat == {}

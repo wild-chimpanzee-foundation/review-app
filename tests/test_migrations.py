@@ -7,7 +7,12 @@ runner we create a real engine, build the current schema with create_all(),
 then wind the version stamp back to simulate an older database.
 """
 
-from review_app.backend.db.migrations import MIGRATIONS, _migration_v4, run_migrations
+from review_app.backend.db.migrations import (
+    MIGRATIONS,
+    _add_column_if_missing,
+    _migration_v4,
+    run_migrations,
+)
 from review_app.backend.db.models import Base
 from sqlalchemy import create_engine, event, text
 
@@ -301,3 +306,47 @@ def test_migration_v4_preserves_existing_species(tmp_path):
         rows = conn.execute(text("SELECT scientific_name FROM species")).fetchall()
     names = {r[0] for r in rows}
     assert "deer" in names
+
+
+# ---------------------------------------------------------------------------
+# _add_column_if_missing helper and v19 (inaturalist_url)
+# ---------------------------------------------------------------------------
+
+
+def _columns(engine, table: str) -> set[str]:
+    with engine.connect() as conn:
+        return {r[1] for r in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()}
+
+
+def test_add_column_if_missing_adds_and_skips(tmp_path):
+    engine = _make_engine(tmp_path / "test.db")
+    with engine.begin() as conn:
+        _add_column_if_missing(conn, "videos", "extra_col", "TEXT")
+        # Second call with the column present must be a no-op, not raise.
+        _add_column_if_missing(conn, "videos", "extra_col", "TEXT")
+    assert "extra_col" in _columns(engine, "videos")
+
+
+def test_add_column_if_missing_with_default(tmp_path):
+    engine = _make_engine(tmp_path / "test.db")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE t (id TEXT PRIMARY KEY)"))
+        conn.execute(text("INSERT INTO t VALUES ('x')"))
+        _add_column_if_missing(conn, "t", "flag", "INTEGER NOT NULL DEFAULT 0")
+        val = conn.execute(text("SELECT flag FROM t")).scalar()
+    assert val == 0
+
+
+def test_migration_v19_adds_inaturalist_url(tmp_path):
+    """Simulate a v18 database (species without inaturalist_url) and re-run v19."""
+    engine = _make_engine(tmp_path / "test.db")
+    run_migrations(engine)
+
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE species DROP COLUMN inaturalist_url"))
+    _set_version(engine, 18)
+
+    run_migrations(engine)
+
+    assert _get_version(engine) == len(MIGRATIONS)
+    assert "inaturalist_url" in _columns(engine, "species")
