@@ -228,13 +228,16 @@ async def render_filter_drawer_body(page):
                 _init_selected_tags = []
             selected_tag_keys: set[str] = set(_init_selected_tags)
 
-            if all_tags:
+            assigned_tag_keys = set(filter_options.get("tag_values", []))
+            project_tags = [t for t in all_tags if t["key"] in assigned_tag_keys]
+
+            if project_tags:
 
                 async def on_tag_toggle(_tag_key: str):
                     await apply_filters()
 
                 refresh_tags = tag_selector(
-                    sorted(all_tags, key=_tag_label),
+                    sorted(project_tags, key=_tag_label),
                     selected_tag_keys,
                     on_tag_toggle,
                     placeholder=t("filter_by_tag"),
@@ -279,7 +282,7 @@ async def render_filter_drawer_body(page):
                 annotator_filter.value = []
                 multiple_annotators_cb.value = False
                 selected_tag_keys.clear()
-                if all_tags:
+                if project_tags:
                     refresh_tags()
                 web_safe_only_cb.value = False
                 sort_select.value = "camera"
