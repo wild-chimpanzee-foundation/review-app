@@ -1,6 +1,6 @@
 scientific_name;french_name;group_fr;IUCN;english_name;group_en;Guinea;Liberia;Cote_Ivoire;inaturalist
 Amphibien sp.;Amphibien sp.;Autre;NA;Amphibian sp.;Other;y;y;y;
-Aonyx capensis;Loutre a joues blanches;Carnivore;NT;African clawless otter;Carnivore;y;y;y;
+Aonyx capensis;Loutre a joues blanches;Carnivore;NT;African clawless otter;Carnivore;y;y;y;https://www.inaturalist.org/taxa/1638841
 Araignee sp.;Araignee sp.;Autre;NA;Spider sp.;Other;y;y;y;
 Atelerix albiventris;Herisson a ventre blanc;Erinaceomorphe;LC;Four-toed hedgehog;Hedgehog;y;y;y;https://www.inaturalist.org/taxa/43055
 Atherurus africanus;Atherure africain;Rongeur;LC;African brush-tailed porcupine;Rodent;y;y;y;https://www.inaturalist.org/taxa/44181
@@ -9,7 +9,7 @@ Bos taurus;Vache;Domestique;NA;Cow;Domestic;y;y;y;https://www.inaturalist.org/ta
 Bovide sp.;Bovide sp.;Bovide;NA;Bovid sp.;Bovid;y;y;y;
 Canis familiaris;Chien domestique;Domestique;NA;Domestic dog;Domestic;y;y;y;https://www.inaturalist.org/taxa/47144
 Capra sp.;Chevre;Domestique;NA;Goat;Domestic;y;y;y;
-Caracal aurata;Chat dore;Carnivore;VU;African golden cat;Carnivore;y;y;y;
+Caracal aurata;Chat dore;Carnivore;VU;African golden cat;Carnivore;y;y;y;https://www.inaturalist.org/taxa/74146
 Caracal caracal;Caracal;Carnivore;LC;Caracal;Carnivore;y;y;y;https://www.inaturalist.org/taxa/42042
 Cephalophus dorsalis;Cephalophe a bande dorsale noire;Bovide;NT;Bay duiker;Bovid;y;y;y;https://www.inaturalist.org/taxa/42302
 Cephalophus jentinki;Cephalophe de Jentink;Bovide;EN;Jentink's duiker;Bovid;n;y;y;https://www.inaturalist.org/taxa/42296
@@ -70,14 +70,14 @@ Hystrix cristata;Porc-epic a crete;Rongeur;LC;Crested porcupine;Rodent;y;y;y;htt
 Ichneumia albicauda;Mangouste a queue blanche;Carnivore;LC;White-tailed mongoose;Carnivore;y;y;y;https://www.inaturalist.org/taxa/41939
 Indetermine;Espece indeterminee;NA;NA;Unknown;NA;y;y;y;
 Kobus ellipsiprymnus defassa;Cobe defassa;Bovide;NT;Defassa waterbuck;Bovid;y;n;n;https://www.inaturalist.org/taxa/129888
-Kobus kob;Cobe de Buffon;Bovide;LC;Kob;Bovid;y;n;n;
+Kobus kob;Cobe de Buffon;Bovide;LC;Kob;Bovid;y;n;n;https://www.inaturalist.org/taxa/147676
 Leptailurus serval;Serval;Carnivore;LC;Serval;Carnivore;y;y;y;https://www.inaturalist.org/taxa/42025
 Lepus victoriae;Lievre des savanes;Rongeur;LC;African savanna hare;Rodent;y;n;n;https://www.inaturalist.org/taxa/1558607
 Lezard sp.;Lezard sp.;Reptile;NA;Lizard sp.;Reptile;y;y;y;
 Liberiictis kuhni;Mangouste du Liberia;Carnivore;VU;Liberian mongoose;Carnivore;n;y;y;https://www.inaturalist.org/taxa/41917
 Loutre sp.;Loutre sp.;Carnivore;NA;Otter sp.;Carnivore;y;y;y;
 Loxodonta cyclotis;Elephant de foret;Elephantide;CR;African forest elephant;Elephant;y;y;y;https://www.inaturalist.org/taxa/357910
-Lupulella adustus;Chacal a flancs rayes;Carnivore;LC;Side-striped jackal;Carnivore;y;n;n;
+Lupulella adustus;Chacal a flancs rayes;Carnivore;LC;Side-striped jackal;Carnivore;y;n;n;https://www.inaturalist.org/taxa/1210965
 Mangouste sp.;Mangouste sp.;Carnivore;NA;Mongoose sp.;Carnivore;y;y;y;
 Manidae sp.;Pangolin sp.;Pangolin;NA;Pangolin sp.;Pangolin;y;y;y;
 Mecistops cataphractus;Faux-gavial d'Afrique;Reptile;CR;Slender-snouted crocodile;Reptile;y;y;y;https://www.inaturalist.org/taxa/964788
@@ -129,9 +129,9 @@ Varanus exanthematicus;Varan des savanes;Reptile;LC;Savanna monitor;Reptile;y;n;
 Varanus niloticus;Varan du Nil;Reptile;LC;Nile monitor;Reptile;y;y;y;https://www.inaturalist.org/taxa/71085
 Varanus sp.;Varan sp.;Reptile;NA;Monitor sp.;Reptile;y;y;y;
 Xerus erythropus;Ecureuil fouisseur;Rongeur;LC;Striped ground squirrel;Rodent;y;y;y;https://www.inaturalist.org/taxa/871611
-Accipiter badius;Epervier shikra;Oiseau;LC;Shikra;Bird;y;y;y;
-Accipiter erythropus;Epervier de Hartlaub;Oiseau;LC;Red-legged sparrowhawk;Bird;y;y;y;
-Accipiter melanoleucus;Autour noir;Oiseau;LC;Black sparrowhawk;Bird;y;y;y;
+Accipiter badius;Epervier shikra;Oiseau;LC;Shikra;Bird;y;y;y;https://www.inaturalist.org/taxa/1583224
+Accipiter erythropus;Epervier de Hartlaub;Oiseau;LC;Red-legged sparrowhawk;Bird;y;y;y;https://www.inaturalist.org/taxa/1581891
+Accipiter melanoleucus;Autour noir;Oiseau;LC;Black sparrowhawk;Bird;y;y;y;https://www.inaturalist.org/taxa/1578999
 Accipiter ovampensis;Epervier des Ovampos;Oiseau;LC;Ovambo sparrowhawk;Bird;y;n;n;https://www.inaturalist.org/taxa/5133
 Accipitridae sp.;Accipitride sp.;Oiseau;LC;Accipitridae sp.;Bird;y;y;y;
 Alethe diademata;Alethe a huppe rousse;Oiseau;LC;White-tailed alethe;Bird;y;y;y;https://www.inaturalist.org/taxa/144210
@@ -144,9 +144,9 @@ Bleda canicapillus;Bulbul fourmilier;Oiseau;LC;Grey-headed bristlebill;Bird;y;y;
 Bostrychia hagedash;Ibis hagedash;Oiseau;LC;Hadada ibis;Bird;y;y;y;https://www.inaturalist.org/taxa/3743
 Bucerotidae sp.;Calao sp.;Oiseau;NA;Hornbill sp.;Bird;y;y;y;
 Bucorvus abyssinicus;Bucorve d'Abyssinie;Oiseau;VU;Absyssinian ground hornbill;Bird;y;n;n;https://www.inaturalist.org/taxa/5437
-Bubulcus ibis;Heron garde-boeuf;Oiseau;LC;Cattle egret;Bird;y;y;y;
+Bubulcus ibis;Heron garde-boeuf;Oiseau;LC;Cattle egret;Bird;y;y;y;https://www.inaturalist.org/taxa/411086
 Camaroptera brachyura;Camaroptere a tete grise;Oiseau;LC;Bleating camaroptera;Bird;y;y;y;https://www.inaturalist.org/taxa/979641
-Camaroptera brevicaudata;Camaroptere a dos gris;Oiseau;LC;Grey-backed camaroptera;Bird;y;y;y;
+Camaroptera brevicaudata;Camaroptere a dos gris;Oiseau;LC;Grey-backed camaroptera;Bird;y;y;y;https://www.inaturalist.org/taxa/133712
 Canirallus oculeus;Rale a gorge grise;Oiseau;LC;Grey-throated rail;Bird;y;y;y;https://www.inaturalist.org/taxa/464
 Caprimulgidae sp.;Engoulevent sp.;Oiseau;NA;Nightjar sp.;Bird;y;y;y;
 Caprimulgus longipennis;Engoulevent a balanciers;Oiseau;LC;Standard-winged nightjar;Bird;y;y;y;https://www.inaturalist.org/taxa/339629
@@ -176,7 +176,7 @@ Euplectes ardens;Euplecte veuve-noire;Oiseau;LC;Red-collared widowbird;Bird;y;y;
 Ficedula hypoleuca;Gobemouche noir;Oiseau;LC;European pied flycatcher;Bird;y;y;y;https://www.inaturalist.org/taxa/204512
 Euschistospiza dybowskii;Senegali a ventre noir;Oiseau;LC;Dybowski's twinspot;Bird;y;n;n;https://www.inaturalist.org/taxa/14140
 Francolin sp.;Francolin sp.;Oiseau;NA;Francolin sp.;Bird;y;y;y;
-Glaucestrilda coerulescens;Astrild queue-de-vinaigre;Oiseau;LC;Lavender waxbill;Bird;y;n;n;
+Glaucestrilda coerulescens;Astrild queue-de-vinaigre;Oiseau;LC;Lavender waxbill;Bird;y;n;n;https://www.inaturalist.org/taxa/1289375
 Gypohierax angolensis;Palmiste africain;Oiseau;LC;Palm-nut vulture;Bird;y;y;y;https://www.inaturalist.org/taxa/5418
 Halcyon leucocephala;Martin-chasseur a tete grise;Oiseau;LC;Grey-headed kingfisher;Bird;y;y;y;https://www.inaturalist.org/taxa/2328
 Halcyon malimbica;Martin-chasseur a poitrine bleue;Oiseau;LC;Blue-breasted kingfisher;Bird;y;y;y;https://www.inaturalist.org/taxa/2341
@@ -209,7 +209,7 @@ Pardipicus nivosus;Pic tachete;Oiseau;LC;Buff-spotted woodpecker;Bird;y;y;y;http
 Peliperdix lathami;Francolin de Latham;Oiseau;LC;Forest francolin;Bird;y;y;y;https://www.inaturalist.org/taxa/550885
 Phasianidae sp.;Phasianide sp.;Oiseau;NA;Phasianids;Bird;y;y;y;
 Phoeniculus purpureus;Irrisor moqueur;Oiseau;LC;Green woodhoopoe;Bird;y;n;n;https://www.inaturalist.org/taxa/20934
-Phyllanthus atripennis;Phyllanthe capucin;Oiseau;VU;Grey-hooded capuchin babbler;Bird;y;n;n;
+Phyllanthus atripennis;Phyllanthe capucin;Oiseau;VU;Grey-hooded capuchin babbler;Bird;y;n;n;https://www.inaturalist.org/taxa/339825
 Phyllastrephus baumanni;Bulbul de Baumann;Oiseau;LC;Baumann's greenbul;Bird;y;n;n;https://www.inaturalist.org/taxa/14583
 Picathartes gymnocephalus;Picatharte de Guinee;Oiseau;VU;White-necked rockfowl;Bird;y;y;y;https://www.inaturalist.org/taxa/14220
 Picidae sp.;Pic sp.;Oiseau;NA;Woodpecker sp.;Bird;y;y;y;

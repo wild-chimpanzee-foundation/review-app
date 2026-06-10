@@ -276,9 +276,7 @@ def _render_ai_annotations(model_ann, global_species_map, species_inat=None, on_
                                 _inat_icon.tooltip(t("inaturalist_tooltip"))
                                 _inat_icon.on(
                                     "click.stop",
-                                    lambda _e, u=_inat_url: ui.run_javascript(
-                                        f"window.open('{u}', '_blank')"
-                                    ),
+                                    lambda _e, u=_inat_url: ui.navigate.to(u, new_tab=True),
                                 )
                         with ui.row().classes("gap-x-1 items-center"):
                             for _m in _models:

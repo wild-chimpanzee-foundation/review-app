@@ -12,6 +12,13 @@ logger = logging.getLogger(__name__)
 # Versions must be contiguous starting at 1. Never modify or remove existing entries.
 
 
+def _add_column_if_missing(conn, table: str, column: str, decl: str) -> None:
+    """ALTER TABLE ... ADD COLUMN, skipped if the column already exists. Idempotent."""
+    cols = {r[1] for r in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()}
+    if column not in cols:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {decl}"))
+
+
 def _migration_v4(conn) -> None:
     """Migrate to surrogate-ID species/behaviors schema. Idempotent — safe to re-run."""
 
@@ -554,14 +561,8 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (
         6,
         lambda conn: [
-            conn.execute(text("ALTER TABLE videos ADD COLUMN latitude REAL"))
-            if "latitude"
-            not in {r[1] for r in conn.execute(text("PRAGMA table_info(videos)")).fetchall()}
-            else None,
-            conn.execute(text("ALTER TABLE videos ADD COLUMN longitude REAL"))
-            if "longitude"
-            not in {r[1] for r in conn.execute(text("PRAGMA table_info(videos)")).fetchall()}
-            else None,
+            _add_column_if_missing(conn, "videos", "latitude", "REAL"),
+            _add_column_if_missing(conn, "videos", "longitude", "REAL"),
         ],
     ),
     (
@@ -571,15 +572,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (
         8,
         lambda conn: [
-            conn.execute(text("ALTER TABLE individual_observations ADD COLUMN count INTEGER"))
-            if "count"
-            not in {
-                r[1]
-                for r in conn.execute(
-                    text("PRAGMA table_info(individual_observations)")
-                ).fetchall()
-            }
-            else None,
+            _add_column_if_missing(conn, "individual_observations", "count", "INTEGER"),
             conn.execute(text("UPDATE individual_observations SET count = 1 WHERE count IS NULL")),
         ],
     ),
@@ -619,13 +612,8 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     ),
     (
         14,
-        lambda conn: (
-            conn.execute(
-                text("ALTER TABLE videos ADD COLUMN is_missing INTEGER NOT NULL DEFAULT 0")
-            )
-            if "is_missing"
-            not in {r[1] for r in conn.execute(text("PRAGMA table_info(videos)")).fetchall()}
-            else None
+        lambda conn: _add_column_if_missing(
+            conn, "videos", "is_missing", "INTEGER NOT NULL DEFAULT 0"
         ),
     ),
     (15, _migration_v15),
@@ -661,12 +649,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (18, _migration_v18),
     (
         19,
-        lambda conn: (
-            conn.execute(text("ALTER TABLE species ADD COLUMN inaturalist_url TEXT"))
-            if "inaturalist_url"
-            not in {r[1] for r in conn.execute(text("PRAGMA table_info(species)")).fetchall()}
-            else None
-        ),
+        lambda conn: _add_column_if_missing(conn, "species", "inaturalist_url", "TEXT"),
     ),
 ]
 

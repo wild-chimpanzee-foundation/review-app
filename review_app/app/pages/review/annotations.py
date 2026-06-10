@@ -242,9 +242,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                         .props("outlined dense")
                         .classes("col")
                     )
-                    inat_btn = (
-                        ui.button().props("flat dense round size=sm").classes("self-center")
-                    )
+                    inat_btn = ui.button().props("flat dense round size=sm").classes("self-center")
                     with inat_btn:
                         ui.html(inat_logo_svg(20)).classes("flex items-center")
                     inat_btn.tooltip(t("inaturalist_tooltip"))
@@ -252,7 +250,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                     def _open_inat(_=None, s=sp):
                         url = page.species_inat.get(s.value)
                         if url:
-                            ui.run_javascript(f"window.open('{url}', '_blank')")
+                            ui.navigate.to(url, new_tab=True)
 
                     inat_btn.on("click", _open_inat)
 
