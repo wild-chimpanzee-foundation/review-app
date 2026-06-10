@@ -48,9 +48,11 @@ def render_custom_video_player(video_url, duration, vid_key):
             .classes("vp-video-container relative-position overflow-hidden w-full")
             .style(f"id: vp-container-{vid_key}; border: 1px solid #333; line-height: 0;")
         ):
-            v = ui.video(video_url, autoplay=autoplay, muted=muted, controls=False).classes(
-                "w-full"
-            ).props('preload="auto"')
+            v = (
+                ui.video(video_url, autoplay=autoplay, muted=muted, controls=False)
+                .classes("w-full")
+                .props('preload="auto"')
+            )
 
         def _fmt(s):
             try:

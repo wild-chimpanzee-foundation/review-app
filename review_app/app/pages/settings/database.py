@@ -62,7 +62,9 @@ def render_database_section(
                     try:
                         backup_path = await run.io_bound(create_backup, reason="manual")
                     except BackupError as exc:
-                        ui.notify(t("backup_failed", error=t(exc.user_message_key)), type="negative")
+                        ui.notify(
+                            t("backup_failed", error=t(exc.user_message_key)), type="negative"
+                        )
                         return
                 ui.download(backup_path)
                 ui.notify(t("backup_created"), type="positive")
@@ -97,10 +99,14 @@ def render_database_section(
                     try:
                         pre_restore_path = await run.io_bound(restore_backup, selected_backup_path)
                     except BackupError as exc:
-                        ui.notify(t("restore_failed", error=t(exc.user_message_key)), type="negative")
+                        ui.notify(
+                            t("restore_failed", error=t(exc.user_message_key)), type="negative"
+                        )
                         return
                     except Exception as exc:
-                        ui.notify(t("restore_failed", error=user_error_message(exc)), type="negative")
+                        ui.notify(
+                            t("restore_failed", error=user_error_message(exc)), type="negative"
+                        )
                         return
 
                     reset_app_state()

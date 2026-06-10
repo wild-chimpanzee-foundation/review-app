@@ -111,7 +111,9 @@ def _filter_species_by_group(species_map: dict, species_groups: dict, group: str
 
 
 def render_annotation_section_body(page, video, default_species, default_tags):
-    species_map = {k: v for k, v in page.catalog.display.items() if k not in _DETECTION_CLASS_SPECIES}
+    species_map = {
+        k: v for k, v in page.catalog.display.items() if k not in _DETECTION_CLASS_SPECIES
+    }
     species_groups = page.catalog.groups
     dp = page.dp
     # Always reinitialize state when the rendered video differs from what state belongs to

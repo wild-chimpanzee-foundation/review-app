@@ -315,6 +315,7 @@ def _build_settings_content(container: ui.column):
 
                             async def _open_release(u=url):
                                 from review_app.backend.db.backup import backup_if_stale
+
                                 await run.io_bound(backup_if_stale, reason="pre_update")
                                 ui.run_javascript(f"window.open('{u}', '_blank')")
 

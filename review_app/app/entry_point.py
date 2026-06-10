@@ -244,6 +244,7 @@ def shared_header(show_drawer: bool = False):
 
                             async def _open_release(u=url):
                                 from review_app.backend.db.backup import backup_if_stale
+
                                 await run.io_bound(backup_if_stale, reason="pre_update")
                                 ui.run_javascript(f"window.open('{u}', '_blank')")
 
@@ -526,7 +527,6 @@ class GUI:
                 set_data_provider(dp)
                 self.dp = dp
                 load_settings_from_db(dp)
-
 
                 # Determine and persist the global default project in the DB.
                 # Per-user active project is loaded at login via load_session_defaults().

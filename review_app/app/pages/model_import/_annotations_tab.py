@@ -338,7 +338,9 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         import_status.set_text(summary)
                         ui.notify(summary, type=notify_type)
                     except Exception as exc:
-                        ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+                        ui.notify(
+                            t("import_failed", error=user_error_message(exc)), type="negative"
+                        )
                     finally:
                         loading_dialog.close()
 
