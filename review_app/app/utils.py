@@ -17,6 +17,16 @@ def require_login() -> bool:
     return True
 
 
+def localize_inat_url(url: str | None) -> str | None:
+    """Append the current app language as iNaturalist's locale query parameter."""
+    if not url:
+        return url
+    from review_app.app.state import get_language
+
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}locale={get_language()}"
+
+
 def user_error_message(exc: Exception) -> str:
     if hasattr(exc, "user_message_key"):
         kwargs = {k: v for k, v in vars(exc).items() if k not in ("detail", "user_message_key")}

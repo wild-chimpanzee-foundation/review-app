@@ -35,6 +35,7 @@ from review_app.app.translations import t
 from review_app.app.utils import (
     get_or_create_data_provider,
     get_probability_color,
+    localize_inat_url,
     render_uninitialized_state,
 )
 from review_app.backend.provider.species import SpeciesCatalog
@@ -274,7 +275,9 @@ def _render_ai_annotations(model_ann, global_species_map, species_inat=None, on_
                                 _inat_icon.tooltip(t("inaturalist_tooltip"))
                                 _inat_icon.on(
                                     "click.stop",
-                                    lambda _e, u=_inat_url: ui.navigate.to(u, new_tab=True),
+                                    lambda _e, u=_inat_url: ui.navigate.to(
+                                        localize_inat_url(u), new_tab=True
+                                    ),
                                 )
                         with ui.row().classes("gap-x-1 items-center"):
                             for _m in _models:

@@ -14,7 +14,7 @@ from review_app.app.state import (
     set_state_val,
 )
 from review_app.app.translations import get_language, t
-from review_app.app.utils import format_utc_timestamp, get_probability_color
+from review_app.app.utils import format_utc_timestamp, get_probability_color, localize_inat_url
 from review_app.backend.errors import SpeciesError
 
 
@@ -250,7 +250,7 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                     def _open_inat(_=None, s=sp):
                         url = page.catalog.inat.get(s.value)
                         if url:
-                            ui.navigate.to(url, new_tab=True)
+                            ui.navigate.to(localize_inat_url(url), new_tab=True)
 
                     inat_btn.on("click", _open_inat)
 
