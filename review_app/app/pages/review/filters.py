@@ -20,8 +20,8 @@ from review_app.app.translations import t
 
 async def render_filter_drawer_body(page):
     dp = page.dp
-    species_map = page.species_map
-    species_groups = page.species_groups
+    species_map = page.catalog.display
+    species_groups = page.catalog.groups
     project_id = get_active_project_id()
     language = get_language()
     filter_options, behavior_display_map, all_tags = await run.io_bound(

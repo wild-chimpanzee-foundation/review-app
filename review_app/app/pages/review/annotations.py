@@ -111,8 +111,8 @@ def _filter_species_by_group(species_map: dict, species_groups: dict, group: str
 
 
 def render_annotation_section_body(page, video, default_species, default_tags):
-    species_map = {k: v for k, v in page.species_map.items() if k not in _DETECTION_CLASS_SPECIES}
-    species_groups = page.species_groups
+    species_map = {k: v for k, v in page.catalog.display.items() if k not in _DETECTION_CLASS_SPECIES}
+    species_groups = page.catalog.groups
     dp = page.dp
     # Always reinitialize state when the rendered video differs from what state belongs to
     cached_video_id = get_state_val("review_state_video_id")
@@ -248,14 +248,14 @@ def render_annotation_section_body(page, video, default_species, default_tags):
                     inat_btn.tooltip(t("inaturalist_tooltip"))
 
                     def _open_inat(_=None, s=sp):
-                        url = page.species_inat.get(s.value)
+                        url = page.catalog.inat.get(s.value)
                         if url:
                             ui.navigate.to(url, new_tab=True)
 
                     inat_btn.on("click", _open_inat)
 
                     def _sync_inat(s=sp, b=inat_btn):
-                        b.set_visibility(bool(page.species_inat.get(s.value)))
+                        b.set_visibility(bool(page.catalog.inat.get(s.value)))
 
                     _sync_inat()
                     if i == 0 and get_state_val("focus_new_species"):

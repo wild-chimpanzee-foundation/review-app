@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
 
@@ -12,6 +13,16 @@ from review_app.backend.errors import DataImportError, SpeciesError
 from review_app.backend.provider.base import ProviderBase
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SpeciesCatalog:
+    """All species lookup maps, keyed by scientific name."""
+
+    display: dict[str, str]  # project-scoped: scientific → display name
+    groups: dict[str, str | None]  # project-scoped: scientific → group
+    global_display: dict[str, str]  # global: scientific → display name
+    inat: dict[str, str]  # global: scientific → iNaturalist URL
 
 
 class SpeciesMixin(ProviderBase):
@@ -484,46 +495,42 @@ class SpeciesMixin(ProviderBase):
             ).fetchall()
         return {sci: f"{name} ({sci})" if name else sci for sci, name in rows}
 
-    def get_species_group_map(
+    def get_species_catalog(
         self, lang: str = "en", project_id: str | None = None
-    ) -> dict[str, str | None]:
-        """Return {scientific_name: group} for the active species set."""
-        col = "group_en" if lang != "fr" else "group_fr"
-        with self.engine.connect() as conn:
-            if project_id:
-                has_proj_sp = conn.execute(
-                    text("SELECT 1 FROM project_species WHERE project_id = :pid LIMIT 1"),
-                    {"pid": project_id},
-                ).fetchone()
-                if has_proj_sp:
-                    rows = conn.execute(
-                        text(
-                            f"""
-                            SELECT s.scientific_name, s.{col} FROM species s
-                            JOIN project_species ps ON ps.species_id = s.id
-                            WHERE ps.project_id = :pid
-                            ORDER BY s.scientific_name
-                            """
-                        ),
-                        {"pid": project_id},
-                    ).fetchall()
-                    return {sci: grp for sci, grp in rows}
+    ) -> SpeciesCatalog:
+        """Load all species lookup maps in a single query.
 
-            rows = conn.execute(
-                text(f"SELECT scientific_name, {col} FROM species ORDER BY scientific_name")
-            ).fetchall()
-        return {sci: grp for sci, grp in rows}
-
-    def get_species_inaturalist_map(self) -> dict[str, str]:
-        """Return {scientific_name: inaturalist_url} for species that have a URL."""
+        The project-scoped maps fall back to all species when the project has
+        no species of its own configured (matching get_species_display_map).
+        """
+        name_col = {"en": "name_en", "fr": "name_fr"}.get(lang, "name_en")
+        group_col = "group_en" if lang != "fr" else "group_fr"
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text(
-                    "SELECT scientific_name, inaturalist_url FROM species "
-                    "WHERE inaturalist_url IS NOT NULL AND inaturalist_url != ''"
-                )
+                    f"""
+                    SELECT s.scientific_name, s.{name_col}, s.{group_col},
+                           s.inaturalist_url, ps.species_id IS NOT NULL
+                    FROM species s
+                    LEFT JOIN project_species ps
+                        ON ps.species_id = s.id AND ps.project_id = :pid
+                    ORDER BY s.scientific_name
+                    """
+                ),
+                {"pid": project_id},
             ).fetchall()
-        return {sci: url for sci, url in rows}
+
+        has_project_scope = any(in_project for *_, in_project in rows)
+        catalog = SpeciesCatalog(display={}, groups={}, global_display={}, inat={})
+        for sci, name, group, inat_url, in_project in rows:
+            label = f"{name} ({sci})" if name else sci
+            catalog.global_display[sci] = label
+            if inat_url:
+                catalog.inat[sci] = inat_url
+            if in_project or not has_project_scope:
+                catalog.display[sci] = label
+                catalog.groups[sci] = group
+        return catalog
 
     def get_all_behaviors(self) -> list[dict[str, str]]:
         with self.engine.connect() as conn:

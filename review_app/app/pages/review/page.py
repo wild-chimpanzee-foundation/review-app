@@ -37,18 +37,16 @@ from review_app.app.utils import (
     get_probability_color,
     render_uninitialized_state,
 )
+from review_app.backend.provider.species import SpeciesCatalog
 from review_app.backend.utils import df_to_records
 
 logger = logging.getLogger(__name__)
 
 
 class ReviewPage:
-    def __init__(self, dp, species_map, species_groups, global_species_map, species_inat):
+    def __init__(self, dp, catalog: SpeciesCatalog):
         self.dp = dp
-        self.species_map = species_map
-        self.species_groups = species_groups
-        self.global_species_map = global_species_map
-        self.species_inat = species_inat
+        self.catalog = catalog
         self._video = None
         self._model_ann = None
         self._default_species = None
@@ -575,7 +573,7 @@ def _render_annotation_sidebar_body(page: ReviewPage):
         return
 
     model_ann = page._model_ann
-    global_species_map = page.global_species_map
+    global_species_map = page.catalog.global_display
     default_tags = page._default_tags
     default_species = page._default_species
     dp = page.dp
@@ -612,7 +610,7 @@ def _render_annotation_sidebar_body(page: ReviewPage):
     _render_ai_annotations(
         model_ann,
         global_species_map,
-        species_inat=page.species_inat,
+        species_inat=page.catalog.inat,
         on_add_species=_on_add_ai_species,
     )
     with ui.card().classes("full-width"):
@@ -651,19 +649,11 @@ async def setup_review():
         render_uninitialized_state()
         return
 
-    species_map = await run.io_bound(
-        dp.get_species_display_map, get_language(), project_id=get_active_project_id()
+    catalog = await run.io_bound(
+        dp.get_species_catalog, get_language(), project_id=get_active_project_id()
     )
-    if not species_map:
-        species_map = {"unknown": "unknown"}
-
-    species_groups = await run.io_bound(
-        dp.get_species_group_map, get_language(), project_id=get_active_project_id()
-    )
-
-    global_species_map = await run.io_bound(dp.get_species_display_map, get_language())
-
-    species_inat = await run.io_bound(dp.get_species_inaturalist_map)
+    if not catalog.display:
+        catalog.display = {"unknown": "unknown"}
 
     set_selections([])
     set_state_val("review_state_video_id", None)
@@ -731,7 +721,7 @@ async def setup_review():
     assert left_drawer is not None
     left_drawer.classes("review-sidebar")
 
-    page = ReviewPage(dp, species_map, species_groups, global_species_map, species_inat)
+    page = ReviewPage(dp, catalog)
 
     with left_drawer:
         await page.render_filter_drawer()

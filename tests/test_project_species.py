@@ -81,3 +81,48 @@ def test_behavior_display_map_ignores_species_and_project(dp):
     en_map = dp.get_behavior_display_map(lang="en", species_name="Deer", project_id="p1")
     assert "walking" in en_map
     assert "eating" in en_map
+
+
+def _seed_groups_and_inat(dp):
+    from sqlalchemy import text
+
+    with dp.engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE species SET group_en = 'Cervids', group_fr = 'Cervidés', "
+                "inaturalist_url = 'https://www.inaturalist.org/taxa/deer' "
+                "WHERE scientific_name = 'Deer'"
+            )
+        )
+
+
+def test_species_catalog_project_scoped(dp):
+    _seed_groups_and_inat(dp)
+    dp.set_project_species("p1", ["Deer"])
+    catalog = dp.get_species_catalog("en", project_id="p1")
+    assert catalog.display == dp.get_species_display_map("en", project_id="p1")
+    assert catalog.display == {"Deer": "Deer (Deer)"}
+    assert catalog.groups == {"Deer": "Cervids"}
+    assert catalog.global_display == dp.get_species_display_map("en")
+    assert sorted(catalog.global_display) == ["Deer", "Fox"]
+    assert catalog.inat == {"Deer": "https://www.inaturalist.org/taxa/deer"}
+
+    fr_catalog = dp.get_species_catalog("fr", project_id="p1")
+    assert fr_catalog.display == {"Deer": "Cerf (Deer)"}
+    assert fr_catalog.groups == {"Deer": "Cervidés"}
+
+
+def test_species_catalog_falls_back_without_project_species(dp):
+    _seed_groups_and_inat(dp)
+    # p2 has no species configured: project-scoped maps include everything
+    catalog = dp.get_species_catalog("en", project_id="p2")
+    assert sorted(catalog.display) == ["Deer", "Fox"]
+    assert catalog.groups == {"Deer": "Cervids", "Fox": None}
+    assert catalog.display == catalog.global_display
+    assert catalog.inat == {"Deer": "https://www.inaturalist.org/taxa/deer"}
+
+
+def test_species_catalog_without_project_id(dp):
+    catalog = dp.get_species_catalog("en")
+    assert sorted(catalog.display) == ["Deer", "Fox"]
+    assert catalog.display == catalog.global_display
