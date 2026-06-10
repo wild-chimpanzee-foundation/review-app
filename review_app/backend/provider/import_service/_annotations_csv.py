@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 
-from review_app.backend.provider.import_service._shared import ImportSharedMixin
+from review_app.backend.provider.import_service._shared import IGNORE_SENTINEL, ImportSharedMixin
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,11 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         return base_df
 
     def import_annotations_csv(
-        self, df: pd.DataFrame, active_project_id: str | None, mode: str = "override"
+        self,
+        df: pd.DataFrame,
+        active_project_id: str | None,
+        mode: str = "override",
+        species_mappings: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         self._safety_backup()
         logger.info(
@@ -143,9 +147,11 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             mode,
         )
         df, has_path, known_ids = self._resolve_annotation_video_ids(df, active_project_id)
+        map_species = self._build_annotation_species_mapper(df, active_project_id, species_mappings)
 
         imported = 0
         skipped: list[str] = []
+        skipped_observations = 0
         append = mode == "append"
         observations_by_annotator: Counter[str] = Counter()
         all_custom_keys: set[str] = set()
@@ -199,6 +205,10 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                     sp_raw = row.get("species")
                     sp = str(sp_raw).strip() if pd.notna(sp_raw) else ""
                     if not sp:
+                        continue
+                    sp = map_species(sp)
+                    if sp is None:
+                        skipped_observations += 1
                         continue
                     beh_raw = row.get("attributes") or row.get("behavior") or ""
                     tags_list = [
@@ -280,20 +290,91 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                 skipped[:10],
             )
         logger.info(
-            "Annotations CSV import complete: imported=%d skipped=%d", imported, len(skipped)
+            "Annotations CSV import complete: imported=%d skipped=%d skipped_obs=%d",
+            imported,
+            len(skipped),
+            skipped_observations,
         )
         return {
             "imported": imported,
             "skipped": skipped,
+            "skipped_observations": skipped_observations,
             "by_annotator": dict(observations_by_annotator),
             "custom_tags": len(all_custom_keys),
         }
 
+    def _build_annotation_species_mapper(
+        self,
+        df: pd.DataFrame,
+        active_project_id: str | None,
+        species_mappings: dict[str, str] | None,
+    ):
+        """Resolve incoming species against the project, adding any "create as new"
+        species to the project so they import as-is.
+
+        Returns a callable ``map_species(name) -> resolved_name | None`` where ``None``
+        means the observation should be skipped (mapped to ignore, or unresolvable).
+        Species not configured for the project are added to it (the "create as a new
+        species" path) when they exist in the global catalog; otherwise they are skipped.
+        """
+        mappings = species_mappings or {}
+
+        def _target(sp: str) -> str | None:
+            mapped = mappings.get(sp, sp) or sp
+            return None if mapped == IGNORE_SENTINEL else mapped
+
+        # Without a project scope every global species is valid — nothing to resolve.
+        if not active_project_id:
+            return _target
+
+        valid = set(self.get_valid_species(active_project_id))
+        targets = {
+            t
+            for sp in (
+                str(s).strip() for s in df.get("species", pd.Series(dtype=str)).dropna()
+            )
+            if sp and (t := _target(sp)) is not None
+        }
+        existing_project_species = self.get_project_species(active_project_id)
+        to_add = sorted(t for t in targets if t not in valid)
+        if to_add:
+            logger.info(
+                "Annotations CSV: adding %d species to project %s: %s",
+                len(to_add),
+                active_project_id,
+                to_add,
+            )
+            # Create the ones that aren't in the global catalog yet (the "create as a
+            # new species" path), then attach all of them to the active project.
+            for name in to_add:
+                if not self.species_exists(name):
+                    self.add_custom_species(
+                        name, name_en=name, name_fr="", group_en="", group_fr=""
+                    )
+            # Only when the project has an explicit species list — an empty list means
+            # the project implicitly allows every species, so don't narrow it to these.
+            if existing_project_species:
+                self.set_project_species(
+                    active_project_id, existing_project_species + to_add
+                )
+            valid |= set(to_add)
+
+        def map_species(sp: str) -> str | None:
+            target = _target(sp)
+            return target if target in valid else None
+
+        return map_species
+
     def validate_annotations_csv(
-        self, df: pd.DataFrame, active_project_id: str | None, mode: str = "override"
+        self,
+        df: pd.DataFrame,
+        active_project_id: str | None,
+        mode: str = "override",
+        species_mappings: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Dry-run of import_annotations_csv: resolves paths and diffs observations without writing."""
         df, has_path, known_ids = self._resolve_annotation_video_ids(df, active_project_id)
+        mappings = species_mappings or {}
 
         matched = 0
         skipped: list[str] = []
@@ -334,6 +415,30 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             existing_obs_by_video.setdefault(vid, set()).add(oid)
             existing_obs_data[(vid, oid)] = (sp_id, cnt, start, end)
 
+        # Classify each incoming species against the project: configured species
+        # import directly; non-configured ones either map to a configured species,
+        # get added to the project ("create as new"), are ignored, or stay pending.
+        valid_species = set(self.get_valid_species(active_project_id))
+        unknown_species: set[str] = set()
+        species_to_add: set[str] = set()
+
+        def resolve_species(sp: str) -> str | None:
+            """Mapped target if importable, else None (ignored / pending)."""
+            if sp in valid_species:
+                return sp
+            target = mappings.get(sp, "")
+            if target == IGNORE_SENTINEL:
+                return None
+            if not target:
+                unknown_species.add(sp)  # awaiting a mapping decision
+                return None
+            if target in valid_species:
+                return target
+            # Non-configured target: added to the project on import, creating it in the
+            # global catalog first if it isn't there yet ("create as a new species").
+            species_to_add.add(target)
+            return target
+
         for video_id, group in df.groupby("video_id", sort=False, dropna=False):
             if pd.isna(video_id) or video_id not in known_ids:
                 label = group["video_path"].iloc[0] if has_path else str(video_id)
@@ -361,6 +466,10 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                 sp = str(sp_raw).strip() if pd.notna(sp_raw) else ""
                 if not sp:
                     continue
+                resolved = resolve_species(sp)
+                if resolved is None:
+                    continue  # ignored or pending — not counted in the diff
+                sp = resolved
                 obs_id_raw = row.get("observation_id")
                 obs_id = int(obs_id_raw) if pd.notna(obs_id_raw) and not append else None
                 if obs_id and obs_id in existing_ids:
@@ -402,4 +511,6 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             "obs_to_change": obs_to_change,
             "obs_unchanged": obs_unchanged,
             "obs_to_delete": obs_to_delete,
+            "unknown_species": sorted(unknown_species),
+            "species_to_add": sorted(species_to_add),
         }

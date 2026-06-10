@@ -429,3 +429,120 @@ def test_import_annotations_creates_safety_backup(clean_provider, tmp_db):
     dp.import_annotations_csv(df, active_project_id=None)
 
     assert list(backup_dir.glob("review_backup_*.db.gz"))
+
+
+# ---------------------------------------------------------------------------
+# import_annotations_csv — species not configured for the project
+# ---------------------------------------------------------------------------
+
+
+def _project_clip_paths(dp, project):
+    queue = dp.get_video_queue({}, active_project_id=project.id)
+    return {dp.get_video_detail(vid)["video_path"]: vid for vid in queue}
+
+
+def test_validate_flags_unconfigured_species(provider_with_project):
+    """A species that exists globally but isn't in the project surfaces as unknown."""
+    dp, project, _ = provider_with_project
+    dp.set_project_species(project.id, ["deer"])
+    paths = _project_clip_paths(dp, project)
+    a_path = next(p for p in paths if p.endswith("a.mp4"))
+
+    df = pd.DataFrame([{"video_path": a_path, "is_blank": 0, "species": "fox"}])
+    result = dp.validate_annotations_csv(df, active_project_id=project.id)
+
+    assert result["unknown_species"] == ["fox"]
+    assert result["species_to_add"] == []
+
+
+def test_import_adds_unconfigured_species_to_project(provider_with_project):
+    """Default (unmapped) import adds the new species to the project and imports it."""
+    dp, project, _ = provider_with_project
+    dp.set_project_species(project.id, ["deer"])
+    paths = _project_clip_paths(dp, project)
+    a_path = next(p for p in paths if p.endswith("a.mp4"))
+
+    df = pd.DataFrame([{"video_path": a_path, "is_blank": 0, "species": "fox"}])
+    result = dp.import_annotations_csv(df, active_project_id=project.id)
+
+    assert result["imported"] == 1
+    assert result["skipped_observations"] == 0
+    assert "fox" in dp.get_project_species(project.id)
+    detail = dp.get_video_detail(paths[a_path])
+    assert detail["manual_selections"][0]["species"] == "fox"
+
+
+def test_import_maps_unconfigured_species(provider_with_project):
+    """Mapping an unconfigured species to a configured one imports it as the target."""
+    dp, project, _ = provider_with_project
+    dp.set_project_species(project.id, ["deer"])
+    paths = _project_clip_paths(dp, project)
+    a_path = next(p for p in paths if p.endswith("a.mp4"))
+
+    df = pd.DataFrame([{"video_path": a_path, "is_blank": 0, "species": "fox"}])
+    result = dp.import_annotations_csv(
+        df, active_project_id=project.id, species_mappings={"fox": "deer"}
+    )
+
+    assert result["imported"] == 1
+    assert "fox" not in dp.get_project_species(project.id)
+    detail = dp.get_video_detail(paths[a_path])
+    assert detail["manual_selections"][0]["species"] == "deer"
+
+
+def test_import_ignores_mapped_species(provider_with_project):
+    """Mapping to the ignore sentinel drops the observation instead of importing it."""
+    from review_app.backend.provider.import_service._shared import IGNORE_SENTINEL
+
+    dp, project, _ = provider_with_project
+    dp.set_project_species(project.id, ["deer"])
+    paths = _project_clip_paths(dp, project)
+    a_path = next(p for p in paths if p.endswith("a.mp4"))
+
+    df = pd.DataFrame([{"video_path": a_path, "is_blank": 0, "species": "fox"}])
+    result = dp.import_annotations_csv(
+        df, active_project_id=project.id, species_mappings={"fox": IGNORE_SENTINEL}
+    )
+
+    assert result["skipped_observations"] == 1
+    assert "fox" not in dp.get_project_species(project.id)
+    detail = dp.get_video_detail(paths[a_path])
+    assert detail["manual_selections"] == []
+
+
+def test_import_creates_brand_new_species(provider_with_project):
+    """A species absent from the global catalog is created, then attached and imported."""
+    dp, project, _ = provider_with_project
+    dp.set_project_species(project.id, ["deer"])
+    paths = _project_clip_paths(dp, project)
+    a_path = next(p for p in paths if p.endswith("a.mp4"))
+    assert not dp.species_exists("lynx")
+
+    df = pd.DataFrame([{"video_path": a_path, "is_blank": 0, "species": "lynx"}])
+    # User picked "add 'lynx' to project (new species)" → mapping points at itself.
+    result = dp.import_annotations_csv(
+        df, active_project_id=project.id, species_mappings={"lynx": "lynx"}
+    )
+
+    assert result["imported"] == 1
+    assert result["skipped_observations"] == 0
+    assert dp.species_exists("lynx")
+    assert "lynx" in dp.get_project_species(project.id)
+    detail = dp.get_video_detail(paths[a_path])
+    assert detail["manual_selections"][0]["species"] == "lynx"
+
+
+def test_validate_create_as_new_counts_species_to_add(provider_with_project):
+    """Mapping a new species to itself moves it out of unknown and into species_to_add."""
+    dp, project, _ = provider_with_project
+    dp.set_project_species(project.id, ["deer"])
+    paths = _project_clip_paths(dp, project)
+    a_path = next(p for p in paths if p.endswith("a.mp4"))
+
+    df = pd.DataFrame([{"video_path": a_path, "is_blank": 0, "species": "lynx"}])
+    result = dp.validate_annotations_csv(
+        df, active_project_id=project.id, species_mappings={"lynx": "lynx"}
+    )
+
+    assert result["unknown_species"] == []
+    assert result["species_to_add"] == ["lynx"]

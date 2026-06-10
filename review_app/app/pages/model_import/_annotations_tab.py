@@ -25,6 +25,7 @@ from ._helpers import (
 )
 
 _MAPPINGS_KEY = "ann_species_mappings"
+_APP_MAPPINGS_KEY = "app_species_mappings"
 
 # Required path-matching columns — default to the first column in the CSV
 _REQUIRED_COLS = ("ann_folder_col", "ann_video_col", "ann_species_col")
@@ -249,6 +250,8 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                 chg = validation.get("obs_to_change", validation.get("obs_to_update", 0))
                 unch = validation.get("obs_unchanged", 0)
                 dlt = validation["obs_to_delete"]
+                to_add = validation.get("species_to_add") or []
+                unknown = validation.get("unknown_species") or []
 
                 with ui.card().classes("full-width q-pa-md q-mb-md"):
                     color = "text-positive" if not skipped else "text-warning"
@@ -288,6 +291,10 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                             ui.label(t("app_csv_obs_delete", count=dlt)).classes(
                                 "text-body2 text-warning"
                             )
+                        if to_add:
+                            ui.label(t("app_csv_species_added", count=len(to_add))).classes(
+                                "text-body2 text-positive"
+                            )
                     if unch or blanks_already:
                         already_parts = []
                         if blanks_already:
@@ -295,6 +302,38 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         if unch:
                             already_parts.append(t("app_csv_obs_unchanged", count=unch))
                         ui.label(" · ".join(already_parts)).classes("text-caption text-grey")
+
+                if unknown:
+                    with ui.card().classes("full-width q-pa-md q-mb-md"):
+                        ui.label(t("app_csv_unconfigured_species")).classes(
+                            "text-subtitle2 text-warning q-mb-sm"
+                        )
+                        ui.separator().classes("q-mb-sm")
+
+                        all_mappings = get_state_val(_APP_MAPPINGS_KEY) or {}
+                        all_species = set(unknown) | set(all_mappings.keys())
+                        unmapped_origs = set(unknown)
+                        # Let the user keep each species as-is and add it to the project.
+                        extra_options = {s: t("add_as_new_species", name=s) for s in all_species}
+
+                        async def apply_app_mappings() -> None:
+                            await _run_app_validate(
+                                dp, loading_dialog, results_ui, results_container
+                            )
+
+                        render_species_mappings(
+                            dp,
+                            all_mappings,
+                            unmapped_origs,
+                            all_species,
+                            apply_fn=apply_app_mappings,
+                            update_import_button=results_ui.refresh,
+                            can_apply=bool(get_state_val("ann_df_records")),
+                            mappings_state_key=_APP_MAPPINGS_KEY,
+                            show_ignore_option=True,
+                            project_id=get_active_project_id(),
+                            extra_species_options=extra_options,
+                        )
 
                 ui.separator().classes("q-my-md")
 
@@ -309,7 +348,8 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                             dp.import_annotations_csv,
                             df,
                             get_active_project_id(),
-                            mode=get_state_val("manual_import_mode") or "override",
+                            get_state_val("manual_import_mode") or "override",
+                            get_state_val(_APP_MAPPINGS_KEY) or {},
                         )
                         summary = t("imported_annotations", count=result["imported"])
                         by_ann = {k: v for k, v in result.get("by_annotator", {}).items() if k}
@@ -334,6 +374,10 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                                     + f", +{len(skipped_vids) - 5} {t('more')})"
                                 )
                             summary += " " + skip_msg
+                            notify_type = "warning"
+                        skipped_obs = result.get("skipped_observations", 0)
+                        if skipped_obs:
+                            summary += " " + t("skipped_obs_historic", count=skipped_obs)
                             notify_type = "warning"
                         import_status.set_text(summary)
                         ui.notify(summary, type=notify_type)
@@ -516,6 +560,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     set_state_val("ann_format", "app")
                     set_state_val("ann_df_records", df.to_dict(orient="records"))
                     set_state_val("ann_validation", None)
+                    set_state_val(_APP_MAPPINGS_KEY, {})
                     col_config_section.visible = False
                     col_config_ui.refresh()
                     if upload_holder[0]:
@@ -613,6 +658,7 @@ async def _run_app_validate(dp, loading_dialog, results_ui, results_container) -
             df,
             get_active_project_id(),
             get_state_val("manual_import_mode") or "override",
+            get_state_val(_APP_MAPPINGS_KEY) or {},
         )
         set_state_val("ann_validation", result)
         results_container.visible = True

@@ -193,15 +193,20 @@ def render_species_mappings(
     show_ignore_option: bool = False,
     project_id: str | None = None,
     species_counts: dict[str, int] | None = None,
+    extra_species_options: dict[str, str] | None = None,
 ) -> None:
-    """Shared species-mapping editor used by both the model-import and historic-import tabs."""
+    """Shared species-mapping editor used by both the model-import and historic-import tabs.
+
+    ``extra_species_options`` adds selectable targets beyond the project's configured
+    species — used for the "keep original / add to project as a new species" option.
+    """
     ui.label(t("species_mappings")).classes("text-subtitle1 font-weight-medium q-mb-sm")
     ui.label(t("edit_mappings_desc")).classes("text-caption q-mb-md")
 
     species_map = dp.get_species_display_map(get_language(), project_id)
     blank_opt = {BLANK_SENTINEL: f"— {t('map_to_blank_video')} —"} if show_blank_option else {}
     ignore_opt = {IGNORE_SENTINEL: f"— {t('map_to_ignore')} —"} if show_ignore_option else {}
-    select_options = {"": "", **blank_opt, **ignore_opt, **species_map}
+    select_options = {"": "", **blank_opt, **ignore_opt, **(extra_species_options or {}), **species_map}
 
     for orig in sorted(all_species):
         current_mapping = all_mappings.get(orig, "")
