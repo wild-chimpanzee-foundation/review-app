@@ -747,7 +747,7 @@ async def setup_review():
         ui.run_javascript(f"history.pushState(null, '', '/review?v={queue_ids[initial_idx]}')")
 
     if not is_tour_completed():
-        has_ai = await run.io_bound(lambda: not dp._get_model_annotations_df().empty)
+        has_ai = await run.io_bound(dp.has_model_annotations)
         logger.info("Tour AI annotations check: has_ai=%s", has_ai)
         set_state_val("has_ai_annotations", has_ai)
     show_tour_if_needed(t)
