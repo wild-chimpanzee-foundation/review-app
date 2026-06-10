@@ -309,6 +309,7 @@ def test_export_model_annotations_csv(populated_provider):
 def test_export_project_bundle_model_annotations_with_camera_filter(populated_provider):
     import io
     import zipfile
+
     import pandas as pd
 
     dp, ids = populated_provider
@@ -335,6 +336,7 @@ def test_export_project_bundle_model_annotations_with_camera_filter(populated_pr
 def test_export_project_bundle_model_annotations_no_filter(populated_provider):
     import io
     import zipfile
+
     import pandas as pd
 
     dp, ids = populated_provider

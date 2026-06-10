@@ -9,9 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-
 from review_app.backend.provider.local_data_provider import LocalDataProvider
-
 
 # ---------------------------------------------------------------------------
 # Fixture: two cameras, two videos each
@@ -118,9 +116,7 @@ def test_export_bundle_metadata_camera_filter(two_camera_provider):
     dp, project = two_camera_provider
     dp.apply_distribution(project.id, {"alice": ["cam_a"], "bob": ["cam_b"]})
 
-    bundle = _read_bundle(
-        dp.export_project_bundle(project.id, ["metadata"], camera_ids=["cam_a"])
-    )
+    bundle = _read_bundle(dp.export_project_bundle(project.id, ["metadata"], camera_ids=["cam_a"]))
     df = pd.read_csv(io.BytesIO(bundle["metadata.csv"]))
 
     assert set(df["camera_id"].unique()) == {"cam_a"}
@@ -221,7 +217,11 @@ def test_export_all_bundles_produces_one_zip_per_assigned_annotator(two_camera_p
     # With only alice assigned, only one bundle is produced
     dp2 = LocalDataProvider()
     project2 = dp2.create_project("P2", dp.get_project_dirs(project.id)[0].path)
-    dp2.sync_videos(progress_callback=None, video_dir=Path(dp.get_project_dirs(project.id)[0].path), active_project_id=project2.id)
+    dp2.sync_videos(
+        progress_callback=None,
+        video_dir=Path(dp.get_project_dirs(project.id)[0].path),
+        active_project_id=project2.id,
+    )
     dp2.add_annotator("alice")
     dp2.add_annotator("bob")
     dp2.apply_distribution(project2.id, {"alice": ["cam_a"]})
@@ -240,9 +240,7 @@ def test_bundle_roundtrip_restores_assignments(two_camera_provider):
     dp, project = two_camera_provider
     dp.apply_distribution(project.id, {"alice": ["cam_a"], "bob": ["cam_b"]})
 
-    alice_bundle_bytes = dp.export_project_bundle(
-        project.id, ["metadata"], camera_ids=["cam_a"]
-    )
+    alice_bundle_bytes = dp.export_project_bundle(project.id, ["metadata"], camera_ids=["cam_a"])
 
     # Simulate fresh install: new provider, same video files synced
     video_dir = Path(dp.get_project_dirs(project.id)[0].path)

@@ -820,6 +820,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-asyncio"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/7c/d36d04db312ecf4298932ef77e6e4a9e8ad017906e24e34f0b0c361a2473/pytest_asyncio-1.4.0.tar.gz", hash = "sha256:c6c0d2259945122819f171a32ecea2c349ead889ee28176caaf492143424be42", size = 58514, upload-time = "2026-05-26T09:56:04.083Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl", hash = "sha256:933ca923a23075a87fb7070c0ec272a6848489824d887c85c812670932835aa1", size = 16930, upload-time = "2026-05-26T09:56:02.576Z" },
+]
+
+[[package]]
 name = "pytest-cov"
 version = "7.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1150,11 +1163,9 @@ dependencies = [
     { name = "nicegui" },
     { name = "pandas" },
     { name = "platformdirs" },
-    { name = "pyinstaller" },
     { name = "pyproj" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "pyyaml" },
-    { name = "ruff" },
     { name = "sqlalchemy" },
     { name = "thefuzz" },
 ]
@@ -1162,8 +1173,11 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pre-commit" },
+    { name = "pyinstaller" },
     { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -1172,11 +1186,9 @@ requires-dist = [
     { name = "nicegui", specifier = ">=1.4.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "platformdirs", specifier = ">=4.0.0" },
-    { name = "pyinstaller", specifier = ">=6.19.0" },
     { name = "pyproj", specifier = ">=3.0.0" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "ruff", specifier = ">=0.15.13" },
     { name = "sqlalchemy", specifier = ">=2.0.38" },
     { name = "thefuzz" },
 ]
@@ -1184,8 +1196,11 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "pre-commit", specifier = ">=4.2.0" },
+    { name = "pyinstaller", specifier = ">=6.19.0" },
     { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "ruff", specifier = ">=0.15.13" },
 ]
 
 [[package]]

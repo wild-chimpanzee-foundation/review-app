@@ -1,8 +1,4 @@
-from pathlib import Path
-
 import pandas as pd
-import pytest
-
 from review_app.backend.utils import (
     df_to_records,
     get_video_mime,
@@ -51,11 +47,7 @@ def test_needs_browser_transcode():
     assert needs_browser_transcode({"is_web_safe": False, "video_path": "test.mp4"}) is True
 
     # web_safe is None, extension is safe
-    assert (
-        needs_browser_transcode({"is_web_safe": None, "video_path": "test.mp4"}) is False
-    )
+    assert needs_browser_transcode({"is_web_safe": None, "video_path": "test.mp4"}) is False
 
     # web_safe is None, extension is unsafe
-    assert (
-        needs_browser_transcode({"is_web_safe": None, "video_path": "test.avi"}) is True
-    )
+    assert needs_browser_transcode({"is_web_safe": None, "video_path": "test.avi"}) is True

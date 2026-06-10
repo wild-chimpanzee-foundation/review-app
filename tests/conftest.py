@@ -60,14 +60,14 @@ def tmp_db(tmp_path, monkeypatch):
 
     behavior_csv = tmp_path / "behaviors.csv"
     behavior_csv.write_text(
-        "scientific_name;key;name_en;name_fr\n"
-        "*;grazing;Grazing;\n"
-        "*;running;Running;\n"
+        "scientific_name;key;name_en;name_fr\n*;grazing;Grazing;\n*;running;Running;\n"
     )
 
     monkeypatch.setattr(
         "review_app.backend.provider.local_data_provider.get_user_data_dir", lambda: db_dir
     )
+    # Keep safety backups (e.g. pre-import) inside the temp workspace too.
+    monkeypatch.setattr("review_app.backend.db.backup.get_user_data_dir", lambda: db_dir)
     monkeypatch.setattr("review_app.app.config.get_bundled_species_csv", lambda: str(species_csv))
     monkeypatch.setattr(
         "review_app.app.config.get_bundled_behaviors_csv", lambda: str(behavior_csv)

@@ -10,20 +10,18 @@ dependencies = [
   "dotenv>=0.9.9",
   "nicegui>=1.4.0",
   "pandas>=2.3.3",
-  "pyinstaller>=6.19.0",
   "pywin32; sys_platform == 'win32'",
   "platformdirs>=4.0.0",
   "pyyaml>=6.0.3",
   "sqlalchemy>=2.0.38",
   "thefuzz",
   "pyproj>=3.0.0",
-  "ruff>=0.15.13",
 ]
 
 [tool.ruff]
 line-length = 99
 src = ["review_app"]
-include = ["pyproject.toml", "review_app/**/*.py"]
+include = ["pyproject.toml", "review_app/**/*.py", "tests/**/*.py", "scripts/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]
@@ -46,6 +44,14 @@ reportCallIssue = "none"
 [dependency-groups]
 dev = [
     "pre-commit>=4.2.0",
+    "pyinstaller>=6.19.0",
     "pytest>=9.0.2",
+    "pytest-asyncio>=0.24.0",
     "pytest-cov>=7.1.0",
+    "ruff>=0.15.13",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# nicegui.testing: pages are registered per-test, there is no main.py to auto-import
+main_file = ""

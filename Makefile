@@ -15,7 +15,7 @@ lint:
 	uv run ruff check review_app/ tests/ --fix
 
 format:
-	uv run ruff format review_app/
+	uv run ruff format review_app/ tests/ scripts/
 
 run:
 	uv run python -m review_app.app.entry_point

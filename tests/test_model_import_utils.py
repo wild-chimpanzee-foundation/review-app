@@ -15,7 +15,9 @@ class TestIsLongFormat:
 
     def test_detects_with_extra_columns(self):
         assert (
-            _is_long_format(["video_path", "annotation_type", "model_name", "value_text", "probability"])
+            _is_long_format(
+                ["video_path", "annotation_type", "model_name", "value_text", "probability"]
+            )
             is True
         )
 

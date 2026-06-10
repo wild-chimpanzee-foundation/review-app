@@ -334,9 +334,15 @@ def test_import_custom_tag_mixed_case_applied(clean_provider):
     v1_id = paths[next(p for p in paths if p.endswith("v1.mp4"))]
 
     dp.update_manual_review(v1_id, [], is_blank=True)
-    df = pd.DataFrame([{"video_path": next(p for p in paths if p.endswith("v1.mp4")),
-                        "is_blank": 1,
-                        "custom_tags": "My Cool Tag"}])
+    df = pd.DataFrame(
+        [
+            {
+                "video_path": next(p for p in paths if p.endswith("v1.mp4")),
+                "is_blank": 1,
+                "custom_tags": "My Cool Tag",
+            }
+        ]
+    )
     dp.import_annotations_csv(df, active_project_id=None)
 
     tags = set(dp.get_video_tags(v1_id))
@@ -408,3 +414,18 @@ def test_overview_stats_camera_summary(populated_provider):
     stats = dp.get_overview_stats()
     cameras = {row["camera_id"] for row in stats["camera_summary"]}
     assert cameras == {"cam_a", "cam_b"}
+
+
+def test_import_annotations_creates_safety_backup(clean_provider, tmp_db):
+    """Destructive imports must leave a pre-import backup in the backup dir."""
+    dp = clean_provider
+    paths = _video_paths(dp)
+    v1_path = next(p for p in paths if p.endswith("v1.mp4"))
+
+    backup_dir = tmp_db["root"] / "db" / "backups"
+    assert not backup_dir.exists() or not list(backup_dir.glob("review_backup_*"))
+
+    df = pd.DataFrame([{"video_path": v1_path, "is_blank": 1}])
+    dp.import_annotations_csv(df, active_project_id=None)
+
+    assert list(backup_dir.glob("review_backup_*.db.gz"))
