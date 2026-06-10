@@ -147,7 +147,9 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             mode,
         )
         df, has_path, known_ids = self._resolve_annotation_video_ids(df, active_project_id)
-        map_species = self._build_annotation_species_mapper(df, active_project_id, species_mappings)
+        map_species = self._build_annotation_species_mapper(
+            df, active_project_id, species_mappings
+        )
 
         imported = 0
         skipped: list[str] = []
@@ -330,9 +332,7 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         valid = set(self.get_valid_species(active_project_id))
         targets = {
             t
-            for sp in (
-                str(s).strip() for s in df.get("species", pd.Series(dtype=str)).dropna()
-            )
+            for sp in (str(s).strip() for s in df.get("species", pd.Series(dtype=str)).dropna())
             if sp and (t := _target(sp)) is not None
         }
         existing_project_species = self.get_project_species(active_project_id)
@@ -354,9 +354,7 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             # Only when the project has an explicit species list — an empty list means
             # the project implicitly allows every species, so don't narrow it to these.
             if existing_project_species:
-                self.set_project_species(
-                    active_project_id, existing_project_species + to_add
-                )
+                self.set_project_species(active_project_id, existing_project_species + to_add)
             valid |= set(to_add)
 
         def map_species(sp: str) -> str | None:

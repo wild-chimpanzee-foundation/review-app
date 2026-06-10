@@ -206,7 +206,13 @@ def render_species_mappings(
     species_map = dp.get_species_display_map(get_language(), project_id)
     blank_opt = {BLANK_SENTINEL: f"— {t('map_to_blank_video')} —"} if show_blank_option else {}
     ignore_opt = {IGNORE_SENTINEL: f"— {t('map_to_ignore')} —"} if show_ignore_option else {}
-    select_options = {"": "", **blank_opt, **ignore_opt, **(extra_species_options or {}), **species_map}
+    select_options = {
+        "": "",
+        **blank_opt,
+        **ignore_opt,
+        **(extra_species_options or {}),
+        **species_map,
+    }
 
     for orig in sorted(all_species):
         current_mapping = all_mappings.get(orig, "")
