@@ -123,10 +123,10 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         other_cols = [c for c in base_df.columns if c not in tag_cols]
         base_df = base_df[other_cols + tag_cols]
 
-        # Format float timestamp columns as fixed-decimal strings so that to_csv() writes them
-        # quoted. Without this, LibreOffice with European locale settings misreads "60.085" as
-        # the integer 60085 (treating "." as a thousands separator).
-        for col in "duration_sec":
+        # Format float columns as fixed-decimal strings so that to_csv() writes them
+        # quoted. Without this, LibreOffice with European locale settings misreads "60.085"
+        # as the integer 60085 (treating "." as a thousands separator).
+        for col in ("duration_sec", "start_sec", "end_sec"):
             if col in base_df.columns:
                 base_df[col] = base_df[col].apply(lambda v: f"{v:.3f}" if pd.notna(v) else "")
 
