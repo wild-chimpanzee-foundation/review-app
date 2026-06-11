@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import datetime
 
 import pandas as pd
 from nicegui import run, ui
@@ -63,7 +63,8 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     else "project"
                 )
                 annotator = get_annotator_name().replace(" ", "_")
-                filename = f"annotations_{project_name}_{annotator}_{date.today()}.csv"
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                filename = f"annotations_{project_name}_{annotator}_{timestamp}.csv"
                 ui.download(df.to_csv(index=False).encode("utf-8"), filename)
             except Exception as exc:
                 ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
@@ -72,8 +73,10 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
             try:
                 project_id = get_active_project_id()
                 df = await run.io_bound(dp.export_model_annotations_csv, project_id)
-                project_name = project_id.replace(" ", "_") if project_id else "project"
-                filename = f"ai_annotations_{project_name}_{date.today()}.csv"
+                project = dp.get_project(project_id) if project_id else None
+                project_name = project.name.replace(" ", "_") if project else "project"
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                filename = f"ai_annotations_{project_name}_{timestamp}.csv"
                 ui.download(df.to_csv(index=False).encode("utf-8"), filename)
             except Exception as exc:
                 ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
