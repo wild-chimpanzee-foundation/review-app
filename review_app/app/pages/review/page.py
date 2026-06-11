@@ -712,6 +712,11 @@ async def setup_review():
                 height: 100% !important;
                 object-fit: contain !important;
             }
+            /* Keep overlay drawers below the header on mobile.
+               --q-z-header defaults to 2000; setting drawer-on-top below it
+               and offsetting the drawer top by the actual header height. */
+            :root { --q-z-drawer-on-top: 1999; }
+            .q-drawer--on-top { top: var(--q-header-offset, 50px) !important; }
             input[type=number]::-webkit-inner-spin-button,
             input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
             input[type=number] { -moz-appearance: textfield; }
@@ -720,14 +725,7 @@ async def setup_review():
         shared=True,
     )
 
-    left_drawer, toggle_mini = shared_header(show_drawer=True)
-    assert left_drawer is not None
-    left_drawer.classes("review-sidebar")
-
     page = ReviewPage(dp, catalog)
-
-    with left_drawer:
-        await page.render_filter_drawer()
 
     right_drawer = (
         ui.right_drawer(value=True)
@@ -737,11 +735,22 @@ async def setup_review():
     with right_drawer:
         page.render_annotation_sidebar()
 
+    left_drawer, toggle_mini = shared_header(show_drawer=True)
+    assert left_drawer is not None
+    left_drawer.classes("review-sidebar")
+
+    with left_drawer:
+        await page.render_filter_drawer()
+
     with ui.column().classes("w-full q-pa-xs"):
         with ui.element("div").style("width: 100%; max-width: 1280px; margin: 0 auto"):
             await page.render_video_section()
 
     ui.run_javascript("document.activeElement?.blur()")
+    ui.run_javascript("""
+        const h = document.querySelector('.q-header');
+        if (h) document.documentElement.style.setProperty('--q-header-offset', h.offsetHeight + 'px');
+    """)
 
     if queue_ids:
         ui.run_javascript(f"history.pushState(null, '', '/review?v={queue_ids[initial_idx]}')")

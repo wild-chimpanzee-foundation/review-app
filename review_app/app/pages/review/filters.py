@@ -33,7 +33,7 @@ async def render_filter_drawer_body(page):
     )
     filters = get_filters()
 
-    with ui.element("div").classes("q-mini-drawer-hide full-width"):
+    with ui.element("div").classes("full-width"):
         # ── Filters ──────────────────────────────────────────────────
         with ui.card().classes("full-width q-mb-md tour-target-filters"):
             ui.label(t("filter_section_general")).classes("text-caption q-mt-xs")

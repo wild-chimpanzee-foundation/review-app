@@ -12,8 +12,11 @@ from review_app.app.state import (
     get_language,
     get_obj_detection_threshold,
     get_species_threshold,
+    is_dark_mode,
     set_active_project,
     set_blank_threshold,
+    set_dark_mode,
+    set_language,
     set_obj_detection_threshold,
     set_species_threshold,
 )
@@ -52,6 +55,31 @@ def _build_settings_content(container: ui.column):
     with container:
         with ui.row().classes("items-center q-mb-lg"):
             ui.label(t("settings_title")).classes("text-h5 font-weight-bold")
+
+        with ui.card().classes("full-width q-mb-lg"):
+            with ui.row().classes("items-center q-mb-sm"):
+                ui.icon("tune", size="sm").classes("text-primary q-mr-sm")
+                ui.label(t("settings_preferences")).classes("text-subtitle1 font-weight-medium")
+            with ui.row().classes("w-full items-center gap-md"):
+                ui.label(t("language_label")).classes("text-body2").style("min-width: 120px")
+                ui.select(
+                    options={"en": t("lang_en"), "fr": t("lang_fr")},
+                    value=get_language(),
+                    on_change=lambda e: (
+                        set_language(e.value),
+                        ui.run_javascript("window.location.reload()"),
+                    ),
+                ).props("outlined dense").classes("col")
+            ui.separator().classes("q-my-sm")
+            pref_dark = ui.dark_mode(value=is_dark_mode())
+            ui.switch(
+                t("dark_mode_label"),
+                value=is_dark_mode(),
+                on_change=lambda e: (
+                    set_dark_mode(e.value),
+                    setattr(pref_dark, "value", e.value),
+                ),
+            )
 
         if active_project_id:
             with ui.card().classes("full-width q-mb-lg"):

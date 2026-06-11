@@ -101,8 +101,8 @@ def shared_header(show_drawer: bool = False):
         set_dark_mode(new_val)
         dark.value = new_val
 
-    def change_language(e):
-        set_language(e.value)
+    def set_lang(code):
+        set_language(code)
         ui.run_javascript("window.location.reload()")
 
     # Define shortcuts dialog once per page
@@ -160,25 +160,20 @@ def shared_header(show_drawer: bool = False):
 
     def toggle_drawer():
         if drawer is not None:
-            if "mini" in drawer._props:
-                drawer.props(remove="mini")
-            else:
-                drawer.props("mini")
+            drawer.toggle()
 
     if show_drawer:
-        drawer = ui.left_drawer(value=True).props("behavior=desktop").classes("q-pa-sm")
+        drawer = ui.left_drawer(value=True).props("behavior=default").classes("q-pa-sm")
 
         with drawer:
-            with ui.row().classes("items-center q-mb-sm"):
-                ui.button(icon="menu", on_click=toggle_drawer).props(
-                    "flat round color=primary"
-                ).tooltip(t("filters_label"))
-                ui.label(t("filters_label")).classes(
-                    "q-mini-drawer-hide text-subtitle2 font-weight-medium"
-                )
+            ui.label(t("filters_label")).classes("text-subtitle2 font-weight-medium q-mb-sm")
 
     with ui.header().classes("bg-primary text-white"):
         with ui.row().classes("w-full items-center q-px-md no-wrap gap-2"):
+            if show_drawer:
+                ui.button(icon="filter_list", on_click=toggle_drawer).props(
+                    "flat round color=white"
+                ).tooltip(t("filters_label"))
             _active_pid = get_active_project_id()
             if _active_pid:
                 _header_dp = get_data_provider()
@@ -256,32 +251,58 @@ def shared_header(show_drawer: bool = False):
 
                 ui.timer(0, _check_update, once=True)
 
-                ui.select(
-                    options={"en": t("lang_en"), "fr": t("lang_fr")},
-                    value=get_language(),
-                    on_change=change_language,
-                ).props("dense outlined dark popup-content-class=header-dropdown").classes("w-32")
-                ui.button(icon="help_outline", on_click=shortcuts_dialog.open).props(
-                    "flat round color=white"
-                )
-                ui.button(icon="dark_mode", on_click=toggle_dark).props("flat round color=white")
-
                 annotator = get_annotator_name()
-                if annotator:
-                    with (
-                        ui.button(icon="person").props("flat round color=white").tooltip(annotator)
-                    ):
-                        with ui.menu().props("auto-close"):
+
+                def _do_logout():
+                    from review_app.app.state import clear_session
+
+                    clear_session(keep_prefs=True)
+                    ui.navigate.to("/login")
+
+                _current_lang = get_language()
+                with (
+                    ui.button(icon="account_circle")
+                    .props("flat round color=white")
+                    .tooltip(annotator or t("nav_settings"))
+                ):
+                    with ui.menu().props("auto-close"):
+                        if annotator:
                             ui.menu_item(annotator).props("disabled")
                             ui.separator()
 
-                            def _do_logout():
-                                from review_app.app.state import clear_session
+                        ui.item_label(t("language_label")).props("header").classes(
+                            "text-caption text-grey"
+                        )
+                        for _code, _name in (("en", t("lang_en")), ("fr", t("lang_fr"))):
+                            with ui.menu_item(on_click=lambda _e, c=_code: set_lang(c)):
+                                with ui.row().classes("items-center gap-sm no-wrap w-full"):
+                                    ui.icon(
+                                        "check" if _code == _current_lang else "", size="xs"
+                                    ).classes("text-primary").style("width: 18px")
+                                    ui.label(_name)
+                        ui.separator()
 
-                                clear_session(keep_prefs=True)
-                                ui.navigate.to("/login")
+                        with ui.menu_item(on_click=toggle_dark):
+                            with ui.row().classes("items-center gap-sm no-wrap w-full"):
+                                ui.icon(
+                                    "light_mode" if is_dark_mode() else "dark_mode", size="xs"
+                                ).style("width: 18px")
+                                ui.label(
+                                    t("light_mode_label")
+                                    if is_dark_mode()
+                                    else t("dark_mode_label")
+                                )
+                        with ui.menu_item(on_click=shortcuts_dialog.open):
+                            with ui.row().classes("items-center gap-sm no-wrap w-full"):
+                                ui.icon("help_outline", size="xs").style("width: 18px")
+                                ui.label(t("shortcuts_title"))
 
-                            ui.menu_item(t("login_logout"), on_click=_do_logout)
+                        if annotator:
+                            ui.separator()
+                            with ui.menu_item(on_click=_do_logout):
+                                with ui.row().classes("items-center gap-sm no-wrap w-full"):
+                                    ui.icon("logout", size="xs").style("width: 18px")
+                                    ui.label(t("login_logout"))
 
     return drawer, toggle_drawer
 
