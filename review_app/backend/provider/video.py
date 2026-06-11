@@ -12,7 +12,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pandas as pd
 from sqlalchemy import select, text
@@ -26,6 +26,18 @@ logger = logging.getLogger(__name__)
 
 _FFPROBE_MAX_WORKERS: int = int(os.getenv("FFPROBE_MAX_WORKERS", "16"))
 _FFPROBE_TIMEOUT_SEC: int = int(os.getenv("FFPROBE_TIMEOUT_SEC", "10"))
+
+
+class ProbeResult(NamedTuple):
+    """Outcome of probing a single video file with ffprobe."""
+
+    duration_sec: float | None
+    is_valid: bool
+    is_web_safe: bool
+    error: str | None
+    created_at: datetime | None
+    latitude: float | None
+    longitude: float | None
 
 
 def _subprocess_env() -> dict[str, str]:
@@ -66,17 +78,12 @@ def _parse_iso6709(s: str) -> tuple[float, float] | None:
     return None
 
 
-def _probe_video(
-    path: Path,
-) -> tuple[float | None, bool, bool, str | None, datetime | None, float | None, float | None]:
-    """
-    Run ffprobe on *path* and return
-    ``(duration_sec, is_valid, is_web_safe, error_message, created_at, latitude, longitude)``.
-    """
+def _probe_video(path: Path) -> ProbeResult:
+    """Run ffprobe on *path* and return a :class:`ProbeResult`."""
     ffprobe = _find_ffprobe()
     if ffprobe is None:
         logger.error("ffprobe not found on PATH — video probing unavailable")
-        return None, False, False, "ffprobe executable not found", None, None, None
+        return ProbeResult(None, False, False, "ffprobe executable not found", None, None, None)
 
     cmd = [
         ffprobe,
@@ -99,7 +106,7 @@ def _probe_video(
         )
     except subprocess.TimeoutExpired:
         logger.warning("ffprobe timed out after %ds on %s", _FFPROBE_TIMEOUT_SEC, path)
-        return (
+        return ProbeResult(
             None,
             False,
             False,
@@ -110,12 +117,12 @@ def _probe_video(
         )
     except OSError as exc:
         logger.error("ffprobe OS error on %s: %s", path, exc)
-        return None, False, False, f"ffprobe OS error: {exc}", None, None, None
+        return ProbeResult(None, False, False, f"ffprobe OS error: {exc}", None, None, None)
 
     if result.returncode != 0:
         stderr_text = result.stderr.strip()
         logger.warning("ffprobe non-zero exit for %s: %s", path, stderr_text[:200])
-        return (
+        return ProbeResult(
             None,
             False,
             False,
@@ -174,22 +181,22 @@ def _probe_video(
 
     except (json.JSONDecodeError, ValueError, TypeError):
         logger.warning("ffprobe returned unparseable JSON for %s", path)
-        return None, False, False, "ffprobe returned unparseable JSON", None, None, None
+        return ProbeResult(
+            None, False, False, "ffprobe returned unparseable JSON", None, None, None
+        )
 
-    return raw_duration, True, is_web_safe, None, created_at, latitude, longitude
+    return ProbeResult(raw_duration, True, is_web_safe, None, created_at, latitude, longitude)
 
 
 def _probe_many(
     paths: list[Path],
     max_workers: int = _FFPROBE_MAX_WORKERS,
     progress_callback: Callable[[int, int, str], None] | None = None,
-) -> dict[
-    Path, tuple[float | None, bool, bool, str | None, datetime | None, float | None, float | None]
-]:
+) -> dict[Path, ProbeResult]:
     if not paths:
         return {}
 
-    results: dict[Path, tuple[float | None, bool, bool, str | None]] = {}
+    results: dict[Path, ProbeResult] = {}
     total = len(paths)
 
     with ThreadPoolExecutor(max_workers=min(max_workers, len(paths))) as pool:
@@ -200,7 +207,7 @@ def _probe_many(
                 results[path] = future.result()
             except Exception as exc:  # pragma: no cover
                 logger.error("Unexpected error probing %s: %s", path, exc)
-                results[path] = (None, False, False, str(exc), None, None, None)
+                results[path] = ProbeResult(None, False, False, str(exc), None, None, None)
             if progress_callback:
                 progress_callback(i + 1, total, path.name)
 
@@ -298,33 +305,23 @@ class VideoMixin(ProviderBase):
 
             if not new_rows.empty:
                 insert_rows = []
+                empty = ProbeResult(None, None, None, None, None, None, None)
                 for _, row in new_rows.iterrows():
-                    probe = probe_results.get(
-                        Path(row["video_path"]), (None, None, None, None, None, None, None)
-                    )
-                    (
-                        duration_sec,
-                        is_valid,
-                        is_web_safe,
-                        validation_error,
-                        ffprobe_created_at,
-                        latitude,
-                        longitude,
-                    ) = probe
+                    probe = ProbeResult._make(probe_results.get(Path(row["video_path"]), empty))
                     insert_rows.append(
                         {
                             "video_id": str(uuid.uuid4()),
                             "project_id": active_project_id,
                             "video_path": row["video_path"],
                             "camera_id": row["camera_id"],
-                            "created_at": ffprobe_created_at,
+                            "created_at": probe.created_at,
                             "last_seen_at": now,
-                            "duration_sec": duration_sec,
-                            "is_valid": is_valid,
-                            "is_web_safe": is_web_safe,
-                            "validation_error": validation_error,
-                            "latitude": latitude,
-                            "longitude": longitude,
+                            "duration_sec": probe.duration_sec,
+                            "is_valid": probe.is_valid,
+                            "is_web_safe": probe.is_web_safe,
+                            "validation_error": probe.error,
+                            "latitude": probe.latitude,
+                            "longitude": probe.longitude,
                         }
                     )
                 session.execute(Video.__table__.insert(), insert_rows)
@@ -382,6 +379,22 @@ class VideoMixin(ProviderBase):
         )
         return result
 
+    @staticmethod
+    def _apply_probe_result(video: Video, probe) -> None:
+        """Copy a ProbeResult onto a Video row. Location/timestamp fields are only
+        filled in when still empty, so a re-probe never clobbers existing metadata."""
+        probe = ProbeResult._make(probe)
+        video.duration_sec = probe.duration_sec
+        video.is_valid = probe.is_valid
+        video.is_web_safe = probe.is_web_safe
+        video.validation_error = probe.error
+        if probe.created_at is not None and video.created_at is None:
+            video.created_at = probe.created_at
+        if probe.latitude is not None and video.latitude is None:
+            video.latitude = probe.latitude
+        if probe.longitude is not None and video.longitude is None:
+            video.longitude = probe.longitude
+
     def reprobe_video(self, video_id: str) -> None:
         with self.Session() as session:
             video = session.get(Video, video_id)
@@ -390,19 +403,7 @@ class VideoMixin(ProviderBase):
                     user_message_key="video_error_not_found",
                     detail=f"Unknown video_id: {video_id!r}",
                 )
-            duration, is_valid, is_web_safe, validation_error, created_at, latitude, longitude = (
-                _probe_video(Path(video.video_path))
-            )
-            video.duration_sec = duration
-            video.is_valid = is_valid
-            video.is_web_safe = is_web_safe
-            video.validation_error = validation_error
-            if created_at is not None and video.created_at is None:
-                video.created_at = created_at
-            if latitude is not None and video.latitude is None:
-                video.latitude = latitude
-            if longitude is not None and video.longitude is None:
-                video.longitude = longitude
+            self._apply_probe_result(video, _probe_video(Path(video.video_path)))
             session.commit()
 
     def reprobe_invalid_videos(self) -> dict[str, Any]:
@@ -420,30 +421,12 @@ class VideoMixin(ProviderBase):
 
             now_valid = 0
             still_invalid = 0
-            for path, (
-                duration,
-                is_valid,
-                is_web_safe,
-                validation_error,
-                created_at,
-                latitude,
-                longitude,
-            ) in probe_results.items():
-                vid_id = path_map[path]
-                video = session.get(Video, vid_id)
+            for path, probe in probe_results.items():
+                video = session.get(Video, path_map[path])
                 if video is None:
                     continue
-                video.duration_sec = duration
-                video.is_valid = is_valid
-                video.is_web_safe = is_web_safe
-                video.validation_error = validation_error
-                if created_at is not None and video.created_at is None:
-                    video.created_at = created_at
-                if latitude is not None and video.latitude is None:
-                    video.latitude = latitude
-                if longitude is not None and video.longitude is None:
-                    video.longitude = longitude
-                if is_valid:
+                self._apply_probe_result(video, probe)
+                if video.is_valid:
                     now_valid += 1
                 else:
                     still_invalid += 1
