@@ -10,9 +10,12 @@ When adding a setting, decide which scope it belongs to and keep its getter/sett
 in the matching section.
 """
 
+import logging
 from typing import Any
 
 from review_app.backend.utils import DEFAULT_REVIEW_THRESHOLD
+
+logger = logging.getLogger(__name__)
 
 _data_provider = None
 
@@ -96,7 +99,8 @@ def clear_session(keep_prefs: bool = True) -> None:
         else:
             storage.clear()
     except Exception:
-        pass
+        # Best-effort: app.storage.user is unavailable outside a request context.
+        logger.debug("clear_session: could not clear user storage", exc_info=True)
 
 
 def _parse_bool(raw: str | None, default: bool) -> bool:
