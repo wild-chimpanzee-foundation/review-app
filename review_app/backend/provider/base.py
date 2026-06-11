@@ -5,6 +5,28 @@ from datetime import datetime, timezone
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from review_app.backend.db.models import (
+    IndividualObservation,
+    ModelAnnotation,
+    ObservationTag,
+    Video,
+    VideoAssignment,
+    VideoLabel,
+    VideoTag,
+)
+
+# Tables that reference videos.video_id. The schema has no ON DELETE CASCADE, so these
+# must be cleared before the Video rows or SQLite (foreign_keys=ON) raises IntegrityError.
+# observation_tags in particular is not covered by any ORM relationship cascade.
+_VIDEO_CHILD_MODELS = (
+    ObservationTag,
+    VideoLabel,
+    VideoTag,
+    VideoAssignment,
+    IndividualObservation,
+    ModelAnnotation,
+)
+
 
 class ProviderBase:
     """Shared attribute declarations for the mixin composition that forms LocalDataProvider.
@@ -21,6 +43,21 @@ class ProviderBase:
     @staticmethod
     def _utcnow_dt() -> datetime:
         return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _cascade_delete_videos(session: Session, video_filter) -> None:
+        """Delete every Video matching *video_filter* and all rows referencing them.
+
+        Children are removed before the videos themselves so the FK-enforced delete
+        cannot fail. Use this for any video deletion — ORM cascade misses
+        observation_tags, and bulk ``.delete()`` triggers no cascade at all.
+        """
+        v_sub = session.query(Video.video_id).filter(video_filter).scalar_subquery()
+        for model in _VIDEO_CHILD_MODELS:
+            session.query(model).filter(model.video_id.in_(v_sub)).delete(
+                synchronize_session=False
+            )
+        session.query(Video).filter(video_filter).delete(synchronize_session=False)
 
     # ── Cross-mixin stubs ─────────────────────────────────────────────────────
     # Declared here so mixins that call methods from other mixins satisfy pyright.

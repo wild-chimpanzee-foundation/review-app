@@ -7,16 +7,10 @@ from pathlib import Path
 from sqlalchemy import text
 
 from review_app.backend.db.models import (
-    IndividualObservation,
-    ModelAnnotation,
-    ObservationTag,
     Project,
     ProjectDir,
     ProjectSpecies,
     Video,
-    VideoAssignment,
-    VideoLabel,
-    VideoTag,
 )
 from review_app.backend.provider.base import ProviderBase
 
@@ -121,10 +115,10 @@ class ProjectMixin(ProviderBase):
             if not d:
                 return
             prefix = d.path.rstrip("/") + "/"
-            s.query(Video).filter(
-                Video.project_id == d.project_id,
-                Video.video_path.startswith(prefix),
-            ).delete(synchronize_session=False)
+            self._cascade_delete_videos(
+                s,
+                (Video.project_id == d.project_id) & Video.video_path.startswith(prefix),
+            )
             s.delete(d)
             s.commit()
         logger.info("Removed directory %s from project %s", d.path, d.project_id)
@@ -154,33 +148,13 @@ class ProjectMixin(ProviderBase):
                 if p
             ]
 
-            # 2. Bulk delete related data in reverse dependency order.
-            # This is much faster than SQLAlchemy's cascade which loads every object.
-
-            # Tables with direct project_id
+            # 2. Bulk delete related data. This is much faster than SQLAlchemy's
+            # relationship cascade, which loads every object.
             video_count = s.query(Video).filter_by(project_id=project_id).count()
-            s.query(ModelAnnotation).filter_by(project_id=project_id).delete()
-            s.query(IndividualObservation).filter_by(project_id=project_id).delete()
+            self._cascade_delete_videos(s, Video.project_id == project_id)
+            # Project-only tables (not linked via video_id)
             s.query(ProjectSpecies).filter_by(project_id=project_id).delete()
             s.query(ProjectDir).filter_by(project_id=project_id).delete()
-
-            # Tables without project_id (linked via video_id)
-            v_sub = s.query(Video.video_id).filter_by(project_id=project_id).scalar_subquery()
-            s.query(ObservationTag).filter(ObservationTag.video_id.in_(v_sub)).delete(
-                synchronize_session=False
-            )
-            s.query(VideoLabel).filter(VideoLabel.video_id.in_(v_sub)).delete(
-                synchronize_session=False
-            )
-            s.query(VideoTag).filter(VideoTag.video_id.in_(v_sub)).delete(
-                synchronize_session=False
-            )
-            s.query(VideoAssignment).filter(VideoAssignment.video_id.in_(v_sub)).delete(
-                synchronize_session=False
-            )
-
-            # Finally delete videos and the project itself
-            s.query(Video).filter_by(project_id=project_id).delete()
             s.delete(project)
             s.commit()
 

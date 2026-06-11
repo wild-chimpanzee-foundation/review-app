@@ -530,11 +530,12 @@ class VideoMixin(ProviderBase):
 
     def delete_missing_videos(self, project_id: str) -> int:
         with self.Session() as session:
-            videos = session.query(Video).filter_by(project_id=project_id, is_missing=True).all()
-            for v in videos:
-                session.delete(v)
+            count = session.query(Video).filter_by(project_id=project_id, is_missing=True).count()
+            self._cascade_delete_videos(
+                session, (Video.project_id == project_id) & Video.is_missing.is_(True)
+            )
             session.commit()
-        return len(videos)
+        return count
 
 
 def cleanup_orphaned_transcoded_files(engine: Any, cache_dir: Path) -> int:
