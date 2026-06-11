@@ -3,6 +3,10 @@ from pathlib import Path
 
 import pandas as pd
 
+# Default confidence cutoff for model-prediction review aids (blank / species /
+# object detection). Used as the fallback wherever a stored threshold is absent.
+DEFAULT_REVIEW_THRESHOLD = 0.75
+
 _MIME_BY_EXT = {
     ".mp4": "video/mp4",
     ".avi": "video/x-msvideo",

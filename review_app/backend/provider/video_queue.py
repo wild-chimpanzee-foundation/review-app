@@ -6,6 +6,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from review_app.backend.provider.base import ProviderBase
+from review_app.backend.utils import DEFAULT_REVIEW_THRESHOLD
 
 
 class QueueMixin(ProviderBase):
@@ -152,8 +153,8 @@ class QueueMixin(ProviderBase):
             raise ValueError(f"Invalid sort direction: {selected_sort_direction!r}")
         web_safe_only = bool(filters.get("web_safe_only", False))
         selected_needs_review = filters.get("selected_needs_review", "All")
-        blank_threshold = float(filters.get("blank_threshold", 0.75))
-        species_threshold = float(filters.get("species_threshold", 0.75))
+        blank_threshold = float(filters.get("blank_threshold", DEFAULT_REVIEW_THRESHOLD))
+        species_threshold = float(filters.get("species_threshold", DEFAULT_REVIEW_THRESHOLD))
 
         params: dict[str, Any] = {}
         ctes: list[str] = []

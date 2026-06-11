@@ -10,7 +10,7 @@ from sqlalchemy import text
 from review_app.backend.db.models import IndividualObservation, ObservationTag, VideoLabel
 from review_app.backend.errors import SpeciesError
 from review_app.backend.provider.base import ProviderBase
-from review_app.backend.utils import needs_browser_transcode
+from review_app.backend.utils import DEFAULT_REVIEW_THRESHOLD, needs_browser_transcode
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +21,9 @@ class AnnotationMixin(ProviderBase):
     def get_video_detail(
         self,
         video_id: str,
-        blank_threshold: float = 0.75,
-        species_threshold: float = 0.75,
-        obj_detection_threshold: float = 0.75,
+        blank_threshold: float = DEFAULT_REVIEW_THRESHOLD,
+        species_threshold: float = DEFAULT_REVIEW_THRESHOLD,
+        obj_detection_threshold: float = DEFAULT_REVIEW_THRESHOLD,
     ) -> dict[str, Any] | None:
         with self.engine.connect() as conn:
             detail_df = pd.read_sql(

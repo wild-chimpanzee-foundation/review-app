@@ -12,12 +12,14 @@ in the matching section.
 
 from typing import Any
 
+from review_app.backend.utils import DEFAULT_REVIEW_THRESHOLD
+
 _data_provider = None
 
 GLOBAL_DEFAULTS: dict[str, Any] = {
-    "blank_threshold": 0.75,
-    "species_threshold": 0.75,
-    "obj_detection_threshold": 0.75,
+    "blank_threshold": DEFAULT_REVIEW_THRESHOLD,
+    "species_threshold": DEFAULT_REVIEW_THRESHOLD,
+    "obj_detection_threshold": DEFAULT_REVIEW_THRESHOLD,
     "auto_transcode": True,
     "dark_mode": True,
     "language": "en",
