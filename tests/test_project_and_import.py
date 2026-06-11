@@ -455,8 +455,12 @@ def test_validate_flags_unconfigured_species(provider_with_project):
     assert result["species_to_add"] == []
 
 
-def test_import_adds_unconfigured_species_to_project(provider_with_project):
-    """Default (unmapped) import adds the new species to the project and imports it."""
+def test_import_skips_unconfigured_species(provider_with_project):
+    """Without an explicit mapping, an unconfigured species is skipped — not auto-created.
+
+    This matches validate_annotations_csv (which surfaces it as unknown_species) and the
+    UI's "will be skipped" promise. Importing it requires an explicit map/create decision.
+    """
     dp, project, _ = provider_with_project
     dp.set_project_species(project.id, ["deer"])
     paths = _project_clip_paths(dp, project)
@@ -465,11 +469,10 @@ def test_import_adds_unconfigured_species_to_project(provider_with_project):
     df = pd.DataFrame([{"video_path": a_path, "is_blank": 0, "species": "fox"}])
     result = dp.import_annotations_csv(df, active_project_id=project.id)
 
-    assert result["imported"] == 1
-    assert result["skipped_observations"] == 0
-    assert "fox" in dp.get_project_species(project.id)
+    assert result["skipped_observations"] == 1
+    assert "fox" not in dp.get_project_species(project.id)
     detail = dp.get_video_detail(paths[a_path])
-    assert detail["manual_selections"][0]["species"] == "fox"
+    assert detail["manual_selections"] == []
 
 
 def test_import_maps_unconfigured_species(provider_with_project):

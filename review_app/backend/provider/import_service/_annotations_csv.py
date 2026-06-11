@@ -311,25 +311,42 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         active_project_id: str | None,
         species_mappings: dict[str, str] | None,
     ):
-        """Resolve incoming species against the project, adding any "create as new"
-        species to the project so they import as-is.
+        """Resolve incoming species against the project, attaching explicitly-mapped
+        "create as new" targets to the project so they import as-is.
 
         Returns a callable ``map_species(name) -> resolved_name | None`` where ``None``
-        means the observation should be skipped (mapped to ignore, or unresolvable).
-        Species not configured for the project are added to it (the "create as a new
-        species" path) when they exist in the global catalog; otherwise they are skipped.
+        means the observation should be skipped (mapped to ignore, or awaiting a mapping
+        decision). A species that is neither already configured nor given an explicit
+        mapping is skipped — matching the dry-run in ``validate_annotations_csv``.
         """
         mappings = species_mappings or {}
 
-        def _target(sp: str) -> str | None:
-            mapped = mappings.get(sp, sp) or sp
-            return None if mapped == IGNORE_SENTINEL else mapped
-
-        # Without a project scope every global species is valid — nothing to resolve.
+        # Without a project scope every global species is valid — import as-is,
+        # honouring explicit mappings/ignore but never skipping as "unconfigured".
         if not active_project_id:
-            return _target
+
+            def _target_global(sp: str) -> str | None:
+                mapped = mappings.get(sp, sp) or sp
+                return None if mapped == IGNORE_SENTINEL else mapped
+
+            return _target_global
 
         valid = set(self.get_valid_species(active_project_id))
+
+        def _target(sp: str) -> str | None:
+            """Mapped target if importable, else None (ignored or awaiting a decision).
+
+            Mirrors validate_annotations_csv.resolve_species so the dry-run preview and
+            the real import agree on which species get written. An unmapped species that
+            isn't already configured is skipped — it is NOT silently auto-created.
+            """
+            if sp in valid:
+                return sp
+            raw = mappings.get(sp)
+            if not raw or raw == IGNORE_SENTINEL:
+                return None
+            return raw
+
         targets = {
             t
             for sp in (str(s).strip() for s in df.get("species", pd.Series(dtype=str)).dropna())
