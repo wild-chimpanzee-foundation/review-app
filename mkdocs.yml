@@ -1,5 +1,6 @@
 site_name: Video Annotation Review App
 site_description: User documentation for the Video Annotation Review App
+site_url: https://wild-chimpanzee-foundation.github.io/review-app/
 repo_url: https://github.com/wild-chimpanzee-foundation/review-app
 docs_dir: userdocs
 
