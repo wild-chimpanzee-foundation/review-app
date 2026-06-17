@@ -17,6 +17,7 @@ from review_app.app.utils import format_utc_timestamp, sync_with_progress, user_
 FFMPEG_INSTALL_MAC = "brew install ffmpeg"
 FFMPEG_INSTALL_WINDOWS = "winget install ffmpeg OR download from https://ffmpeg.org/download.html"
 FFMPEG_INSTALL_LINUX = "sudo apt install ffmpeg"
+FFMPEG_DOCS_URL = "https://wild-chimpanzee-foundation.github.io/review-app/getting-started/#ffmpeg"
 
 
 def validate_video_dir(path: str) -> tuple[str, dict] | None:
@@ -611,6 +612,9 @@ class SetupWizard:
                         )
                         ui.label(t("ffmpeg_install_instructions")).classes("text-caption q-mb-sm")
                         ui.code(get_ffmpeg_install_cmd()).classes("full-width")
+                        ui.link(t("ffmpeg_docs_link"), FFMPEG_DOCS_URL, new_tab=True).classes(
+                            "text-white text-caption q-mt-sm"
+                        )
 
                     continue_btn_holder[0] = (
                         ui.button(t("tour_next"), icon="arrow_forward", color="primary")
