@@ -19,3 +19,5 @@ Exporte les prédictions brutes du modèle au format CSV.
 ## Export par bundle
 
 Toujours depuis la page Import de modèle, vous pouvez exporter un bundle `.zip` contenant la liste d'espèces du projet, les étiquettes, les annotations du modèle et les métadonnées sous forme de CSV séparés. Ceci est destiné à distribuer la configuration d'un projet à d'autres annotateurs — voir [Premiers pas](getting-started.md) pour le flux d'import correspondant.
+
+Suite : [Paramètres](settings.md)

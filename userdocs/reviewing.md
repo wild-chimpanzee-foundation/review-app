@@ -1,5 +1,7 @@
 # Reviewing Videos
 
+![The review screen: filters drawer, video player, AI predictions and the manual annotation panel](img/reviewing.jpg)
+
 ## Layout
 
 The review screen has:

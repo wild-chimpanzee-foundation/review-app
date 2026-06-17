@@ -2,6 +2,8 @@
 
 Imports happen on the **Model Import** page, which has separate tabs for model annotations, historic/manual annotations, metadata, and bundles.
 
+![The Import / Export page with the AI output import tab selected](img/importing.jpg)
+
 ## AI model annotations
 
 Two CSV shapes are accepted:

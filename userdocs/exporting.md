@@ -19,3 +19,5 @@ Exports the raw model predictions as a CSV.
 ## Bundle export
 
 Also from the Model Import page, you can export a `.zip` bundle containing the project's species list, tags, model annotations, and metadata as separate CSVs. This is meant for distributing project setup to other annotators — see [Getting started](getting-started.md) for the matching bundle import flow.
+
+Next: [Settings](settings.md)

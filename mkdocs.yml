@@ -18,8 +18,9 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   features:
-    - navigation.tabs
+    # Nav lives in the left sidebar (omit navigation.tabs to keep the header uncrowded).
     - navigation.top
+    - navigation.expand
     - content.code.copy
     - search.suggest
 
@@ -45,6 +46,8 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
+  - Dashboard: dashboard.md
   - Importing model results: importing.md
   - Reviewing videos: reviewing.md
   - Exporting annotations: exporting.md
+  - Settings: settings.md

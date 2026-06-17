@@ -2,6 +2,8 @@
 
 A desktop app for manually reviewing camera trap footage and correcting AI model annotations. Built for small wildlife research teams.
 
+![The review app dashboard](img/dashboard.jpg)
+
 ## What it does
 
 - **Import model results** — load AI species/behavior/blank predictions from CSV

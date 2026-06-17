@@ -2,6 +2,8 @@
 
 Une application de bureau pour revoir manuellement les vidéos de pièges photographiques et corriger les annotations générées par un modèle d'IA. Conçue pour de petites équipes de recherche sur la faune.
 
+![Le tableau de bord de l'application](img/dashboard.jpg)
+
 ## Fonctionnalités
 
 - **Importer les résultats du modèle** — charger les prédictions d'espèces/comportements/vidéos vides depuis un CSV

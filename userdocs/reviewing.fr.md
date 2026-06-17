@@ -1,5 +1,7 @@
 # Revoir les vidéos
 
+![L'écran de révision : tiroir de filtres, lecteur vidéo, prédictions de l'IA et panneau d'annotation manuelle](img/reviewing.jpg)
+
 ## Disposition
 
 L'écran de revue comprend :

@@ -2,6 +2,8 @@
 
 Les importations se font sur la page **Import de modèle**, qui comporte des onglets séparés pour les annotations du modèle, les annotations historiques/manuelles, les métadonnées et les bundles.
 
+![La page Import / Export avec l'onglet d'import des sorties de l'IA sélectionné](img/importing.jpg)
+
 ## Annotations du modèle IA
 
 Deux formats de CSV sont acceptés :
