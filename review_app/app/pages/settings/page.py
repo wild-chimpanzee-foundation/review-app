@@ -26,6 +26,7 @@ from review_app.app.utils import get_or_create_data_provider, sync_with_progress
 from .database import render_database_section
 from .species import render_species_section
 from .tags import TagsSection
+from .users import render_users_section
 
 
 def _build_settings_content(container: ui.column):
@@ -289,6 +290,11 @@ def _build_settings_content(container: ui.column):
                 if active_project_id:
                     with ui.expansion(t("nav_distribution"), icon="group").classes("full-width"):
                         render_distribution_section(_dp, active_project_id)
+
+                with ui.expansion(t("users_section_title"), icon="manage_accounts").classes(
+                    "full-width"
+                ):
+                    render_users_section(_dp)
 
                 with ui.expansion(t("database_management"), icon="storage").classes("full-width"):
                     render_database_section(current_db_path, active_project_id)

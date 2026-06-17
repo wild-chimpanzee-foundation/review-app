@@ -313,6 +313,19 @@ TRANSLATIONS = {
         "behaviors_csv_desc": "Species-behavior mappings (optional)",
         "custom_behaviors_csv": "Custom Behaviors CSV Path",
         "database_management": "Database Management",
+        "users_section_title": "User Management",
+        "users_section_desc": (
+            "Remove annotators who have no saved annotations in any project. "
+            "Users with annotations can't be deleted."
+        ),
+        "users_none": "No users yet.",
+        "users_annotation_count": "{n} annotations",
+        "users_no_annotations": "No annotations",
+        "users_delete_btn": "Delete user",
+        "users_cannot_delete_has_annotations": "Has annotations — can't delete",
+        "users_cannot_delete_self": "You can't delete your own account",
+        "users_delete_confirm": "Delete {name}? This also removes their video assignments.",
+        "users_deleted": "Deleted {name}",
         "sync_videos_label": "Sync Videos",
         "reset_database_label": "Reset Database",
         "reset_confirm": "Reset database?",
@@ -1082,6 +1095,19 @@ TRANSLATIONS = {
         "behaviors_csv_desc": "Mappages espèce-comportement (optionnel)",
         "custom_behaviors_csv": "Chemin CSV des Comportements Personnalisés",
         "database_management": "Gestion de la Base de Données",
+        "users_section_title": "Gestion des Utilisateurs",
+        "users_section_desc": (
+            "Supprimez les annotateurs qui n'ont aucune annotation enregistrée dans aucun "
+            "projet. Les utilisateurs ayant des annotations ne peuvent pas être supprimés."
+        ),
+        "users_none": "Aucun utilisateur.",
+        "users_annotation_count": "{n} annotations",
+        "users_no_annotations": "Aucune annotation",
+        "users_delete_btn": "Supprimer l'utilisateur",
+        "users_cannot_delete_has_annotations": "Possède des annotations — suppression impossible",
+        "users_cannot_delete_self": "Vous ne pouvez pas supprimer votre propre compte",
+        "users_delete_confirm": "Supprimer {name} ? Cela retire aussi ses assignations de vidéos.",
+        "users_deleted": "{name} supprimé",
         "sync_videos_label": "Synchroniser Vidéos",
         "reset_database_label": "Réinitialiser Base de Données",
         "reset_confirm": "Réinitialiser la base de données?",

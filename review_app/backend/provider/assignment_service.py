@@ -38,6 +38,30 @@ class AssignmentMixin(ProviderBase):
             )
             conn.execute(text("DELETE FROM annotators WHERE name = :name"), {"name": name})
 
+    def get_annotator_annotation_counts(self) -> dict[str, int]:
+        """Map each annotator name to their total saved annotation count across
+        all projects (manual video labels plus individual observations).
+
+        Used to decide whether an annotator may be safely deleted: a name that
+        is absent from the result has no annotations anywhere.
+        """
+        sql = text("""
+            SELECT name, SUM(cnt) AS total FROM (
+                SELECT labeled_by AS name, COUNT(*) AS cnt
+                FROM video_labels
+                WHERE labeled_by IS NOT NULL AND labeled_by != ''
+                GROUP BY labeled_by
+                UNION ALL
+                SELECT labeled_by AS name, COUNT(*) AS cnt
+                FROM individual_observations
+                WHERE labeled_by IS NOT NULL AND labeled_by != ''
+                GROUP BY labeled_by
+            ) GROUP BY name
+        """)
+        with self.engine.connect() as conn:
+            rows = conn.execute(sql).fetchall()
+        return {r[0]: int(r[1]) for r in rows}
+
     # ── Camera stats ──────────────────────────────────────────────────────────
 
     def get_camera_stats(self, project_id: str) -> list[dict]:
