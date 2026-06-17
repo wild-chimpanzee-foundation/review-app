@@ -1,5 +1,6 @@
 from nicegui import app, run, ui
 
+from review_app.app.state import get_language, set_language
 from review_app.app.translations import t
 
 
@@ -19,6 +20,24 @@ async def setup_login():
 
     with ui.column().classes("w-full items-center justify-center").style("min-height: 80vh"):
         with ui.card().classes("q-pa-xl").style("min-width: 360px; max-width: 480px"):
+            current_lang = get_language()
+
+            def _set_lang(code):
+                set_language(code)
+                ui.run_javascript("window.location.reload()")
+
+            with ui.row().classes("w-full justify-end q-mb-sm"):
+                with ui.button_group().props("outline rounded"):
+                    for _code, _key in (("en", "lang_en"), ("fr", "lang_fr")):
+                        _btn = ui.button(
+                            t(_key),
+                            on_click=lambda _e, c=_code: _set_lang(c),
+                        ).props("size=sm no-caps")
+                        if _code == current_lang:
+                            _btn.props("color=primary")
+                        else:
+                            _btn.props("flat color=grey-6")
+
             ui.label(t("login_title")).classes("text-h5 q-mb-sm")
             ui.label(t("annotator_setup_desc")).classes("text-caption text-grey-6 q-mb-md")
 
