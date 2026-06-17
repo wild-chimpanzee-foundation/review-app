@@ -696,8 +696,9 @@ TRANSLATIONS = {
         "login_name_required": "Please enter your name.",
         "login_continue": "Continue",
         "login_logout": "Sign out",
-        "login_select_label": "Choose your name",
+        "login_select_label": "Select or type your name",
         "login_create_new": "I'm new — type a name",
+        "login_select_hint": "Pick your name, or type a new one and press Enter.",
         "assigned_to_me_filter": "Assigned to me",
         "assigned_to": "Assigned to",
         # Bundle tab
@@ -1464,8 +1465,9 @@ TRANSLATIONS = {
         "login_name_required": "Veuillez saisir votre nom.",
         "login_continue": "Continuer",
         "login_logout": "Se déconnecter",
-        "login_select_label": "Choisissez votre nom",
+        "login_select_label": "Sélectionnez ou saisissez votre nom",
         "login_create_new": "Je suis nouveau — saisir un nom",
+        "login_select_hint": "Choisissez votre nom, ou saisissez-en un nouveau et appuyez sur Entrée.",
         "assigned_to_me_filter": "Assigné à moi",
         "assigned_to": "Assigné à",
         # Bundle tab
