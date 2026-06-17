@@ -1,4 +1,4 @@
-.PHONY: test coverage lint format run build ci changelog bump release docs docs-build
+.PHONY: test coverage lint format run build ci changelog bump release docs docs-build docs-screenshots
 
 ci:
 	uv run ruff check review_app/ tests/
@@ -36,10 +36,16 @@ bump:
 	@echo "Version bumped to $(VERSION)"
 
 docs:
-	uv run mkdocs serve
+	uv run --group docs mkdocs serve
 
 docs-build:
-	uv run mkdocs build --strict
+	uv run --group docs mkdocs build --strict
+
+# Regenerate userdocs/img/*.jpg: drives the first-run wizard (empty DB) and the
+# main pages (seeded demo DB) headlessly. Requires ffmpeg + chromium +
+# chromedriver on PATH. The real user data dir is never touched.
+docs-screenshots:
+	bash scripts/screenshots/capture.sh
 
 release:
 	$(eval VERSION ?= $(shell uvx git-cliff --bumped-version 2>/dev/null | sed 's/^v//'))
