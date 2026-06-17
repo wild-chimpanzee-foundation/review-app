@@ -12,6 +12,8 @@ A desktop app for manually reviewing camera trap footage and correcting AI model
 
 Supports multiple projects, English/French UI, dark mode, and configurable confidence thresholds.
 
+**[User documentation](https://wild-chimpanzee-foundation.github.io/review-app/)** (English / Français)
+
 ## Requirements
 
 - Python 3.12+

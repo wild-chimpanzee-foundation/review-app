@@ -1,0 +1,49 @@
+site_name: Video Annotation Review App
+site_description: User documentation for the Video Annotation Review App
+repo_url: https://github.com/wild-chimpanzee-foundation/review-app
+docs_dir: userdocs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: fr
+          name: Français
+          build: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Importing model results: importing.md
+  - Reviewing videos: reviewing.md
+  - Exporting annotations: exporting.md

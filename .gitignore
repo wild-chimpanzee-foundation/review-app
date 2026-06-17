@@ -43,3 +43,6 @@ ffmpeg/
 
 # NiceGUI
 .nicegui/
+
+# Docs build output
+site/
