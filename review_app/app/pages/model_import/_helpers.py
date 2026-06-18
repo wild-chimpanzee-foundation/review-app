@@ -1,4 +1,5 @@
 import csv
+import inspect
 import io
 from typing import Callable
 
@@ -17,6 +18,12 @@ def get_df_from_state(key: str) -> pd.DataFrame | None:
 
 def col_val(key: str) -> str:
     return get_state_val(key) or ""
+
+
+async def _call_maybe_async(fn: Callable) -> None:
+    result = fn()
+    if inspect.isawaitable(result):
+        await result
 
 
 def read_upload_file(content: bytes) -> pd.DataFrame:
@@ -191,6 +198,7 @@ def render_species_mappings(
     mappings_state_key: str = "species_mappings",
     show_blank_option: bool = False,
     show_ignore_option: bool = False,
+    show_apply_button: bool = True,
     project_id: str | None = None,
     species_counts: dict[str, int] | None = None,
     extra_species_options: dict[str, str] | None = None,
@@ -232,11 +240,11 @@ def render_species_mappings(
             ).props("outlined dense class=col-4")
 
             def make_update_fn(o: str, sel) -> Callable:
-                def _update():
+                async def _update():
                     mappings = get_state_val(mappings_state_key) or {}
                     mappings[o] = sel.value
                     set_state_val(mappings_state_key, mappings)
-                    update_import_button()
+                    await _call_maybe_async(update_import_button)
 
                 return _update
 
@@ -245,27 +253,33 @@ def render_species_mappings(
     pending_unmapped = [k for k, v in (get_state_val(mappings_state_key) or {}).items() if not v]
 
     with ui.row().classes("items-center gap-sm q-mt-sm"):
-        apply_btn = ui.button(
-            t("apply"), icon="refresh", on_click=apply_fn, color="primary"
-        ).props(f"wide {'disabled' if not can_apply else ''}")
+        apply_btn = (
+            ui.button(t("apply"), icon="refresh", on_click=apply_fn, color="primary").props(
+                f"wide {'disabled' if not can_apply else ''}"
+            )
+            if show_apply_button
+            else None
+        )
 
-        def accept_originals():
+        async def accept_originals():
             mappings = get_state_val(mappings_state_key) or {}
             for orig in all_species:
                 if not mappings.get(orig):
                     mappings[orig] = orig
             set_state_val(mappings_state_key, mappings)
-            update_import_button()
-            apply_btn.props("wide")
+            await _call_maybe_async(update_import_button)
+            if apply_btn:
+                apply_btn.props("wide")
 
-        def ignore_unmapped():
+        async def ignore_unmapped():
             mappings = get_state_val(mappings_state_key) or {}
             for orig in all_species:
                 if not mappings.get(orig):
                     mappings[orig] = IGNORE_SENTINEL
             set_state_val(mappings_state_key, mappings)
-            update_import_button()
-            apply_btn.props("wide")
+            await _call_maybe_async(update_import_button)
+            if apply_btn:
+                apply_btn.props("wide")
 
         if pending_unmapped:
             ui.button(t("accept_originals"), icon="check", on_click=accept_originals).props(

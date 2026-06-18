@@ -17,7 +17,12 @@ from ._helpers import (
     render_species_mappings,
 )
 
-_SCROLL_TO_CTA = 'setTimeout(()=>document.getElementById("import-cta")?.scrollIntoView({behavior:"smooth",block:"start"}),100)'
+_SCROLL_TO_CTA = (
+    "setTimeout(()=>{"
+    'const el = document.getElementById("species-mapping") || document.getElementById("import-cta");'
+    'el?.scrollIntoView({behavior:"smooth",block:"start"});'
+    "},100)"
+)
 _MAX_ERRORS_PER_TYPE = 50
 
 
@@ -245,12 +250,29 @@ async def setup_model_tab(dp, loading_dialog) -> None:
     async def do_import():
         loading_dialog.open()
         try:
-            cleaned_df = get_df_from_state("cleaned_df")
+            mappings = get_state_val("species_mappings", {})
+            uploaded_df = get_df_from_state("uploaded_df")
+            if uploaded_df is not None:
+                # Re-validate with the current mappings so species mapped just before
+                # import are reflected in cleaned_df, without a separate "Apply" step.
+                cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
+                    dp.validate_model_csv, uploaded_df, mappings, get_active_project_id()
+                )
+                set_state_val(
+                    "cleaned_df",
+                    cleaned_df.to_dict(orient="records") if cleaned_df is not None else None,
+                )
+                errors_recs, error_counts = _cap_errors_for_state(errors_df)
+                set_state_val("errors_df", errors_recs)
+                set_state_val("error_counts", error_counts)
+                set_state_val("unmapped_species", unmapped_species)
+            else:
+                cleaned_df = get_df_from_state("cleaned_df")
+
             if cleaned_df is None or cleaned_df.empty:
                 raise DataImportError("No data to import", user_message_key="no_data_import")
 
             df_to_import = cleaned_df.copy()
-            mappings = get_state_val("species_mappings", {})
             if mappings:
                 mask = df_to_import["annotation_type"].isin({"species", "object_detection"})
                 df_to_import.loc[mask, "value_text"] = df_to_import.loc[
@@ -313,25 +335,6 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             else:
                 cta_label = t("rows_ready_to_import", count=valid_count)
 
-            # Import CTA — first thing user sees after scrolling to step 3
-            with ui.card().classes("full-width q-mb-md q-pa-md").props("id=import-cta"):
-                with ui.row().classes("items-center justify-between w-full"):
-                    with ui.column().classes("gap-xs"):
-                        ui.label(cta_label).classes(
-                            "text-subtitle1 font-weight-bold text-positive"
-                        )
-                        pending_warning_holder[0] = ui.label("").classes(
-                            "text-warning text-caption"
-                        )
-                        pending_warning_holder[0].visible = False
-                    import_button_holder[0] = ui.button(
-                        t("import_valid_rows"),
-                        icon="file_upload",
-                        on_click=do_import,
-                        color="warning",
-                    ).props(f"{'disabled' if not can_import else ''}")
-            update_import_button()
-
             # Match stats
             _render_match_stats(get_state_val("match_stats"))
 
@@ -368,57 +371,60 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             if all_species:
                 ui.separator().classes("q-my-md")
 
-                async def apply_mappings_model():
-                    loading_dialog.open()
-                    try:
-                        uploaded_df = get_df_from_state("uploaded_df")
-                        mappings = get_state_val("species_mappings", {})
-                        cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
-                            dp.validate_model_csv,
-                            uploaded_df,
-                            mappings,
-                            get_active_project_id(),
-                        )
-                        set_state_val(
-                            "cleaned_df",
-                            cleaned_df.to_dict(orient="records")
-                            if cleaned_df is not None
-                            else None,
-                        )
-                        errors_recs, error_counts = _cap_errors_for_state(errors_df)
-                        set_state_val("errors_df", errors_recs)
-                        set_state_val("error_counts", error_counts)
-                        set_state_val("unmapped_species", unmapped_species)
-                        ui.notify(t("mappings_applied"), type="positive")
-                        refresh_results()
-                    except Exception as exc:
-                        ui.notify(
-                            t("mapping_failed", error=user_error_message(exc)), type="negative"
-                        )
-                    finally:
-                        loading_dialog.close()
+                async def auto_revalidate():
+                    # Re-validate against the current mappings so the valid/invalid
+                    # counts and CTA update live as the user maps each species.
+                    mappings = get_state_val("species_mappings", {})
+                    uploaded_df = get_df_from_state("uploaded_df")
+                    if uploaded_df is None:
+                        return
+                    cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
+                        dp.validate_model_csv, uploaded_df, mappings, get_active_project_id()
+                    )
+                    set_state_val(
+                        "cleaned_df",
+                        cleaned_df.to_dict(orient="records") if cleaned_df is not None else None,
+                    )
+                    errors_recs, error_counts = _cap_errors_for_state(errors_df)
+                    set_state_val("errors_df", errors_recs)
+                    set_state_val("error_counts", error_counts)
+                    set_state_val("unmapped_species", unmapped_species)
+                    refresh_results()
 
-                pending_unmapped_now = [
-                    k for k, v in (get_state_val("species_mappings") or {}).items() if not v
-                ]
-                cleaned_df_now = get_df_from_state("cleaned_df")
-                can_apply = (
-                    cleaned_df_now is not None
-                    and not cleaned_df_now.empty
-                    and not pending_unmapped_now
-                )
-                render_species_mappings(
-                    dp,
-                    all_mappings,
-                    unmapped_origs,
-                    all_species,
-                    apply_fn=apply_mappings_model,
-                    update_import_button=update_import_button,
-                    can_apply=can_apply,
-                    show_ignore_option=True,
-                    project_id=get_active_project_id(),
-                    species_counts=species_counts,
-                )
+                with ui.element("div").classes("w-full").props("id=species-mapping"):
+                    render_species_mappings(
+                        dp,
+                        all_mappings,
+                        unmapped_origs,
+                        all_species,
+                        apply_fn=lambda: None,
+                        update_import_button=auto_revalidate,
+                        can_apply=False,
+                        show_ignore_option=True,
+                        show_apply_button=False,
+                        project_id=get_active_project_id(),
+                        species_counts=species_counts,
+                    )
+
+            # Import CTA — shown after species mappings so unmapped species are resolved first
+            ui.separator().classes("q-my-md")
+            with ui.card().classes("full-width q-mb-md q-pa-md").props("id=import-cta"):
+                with ui.row().classes("items-center justify-between w-full"):
+                    with ui.column().classes("gap-xs"):
+                        ui.label(cta_label).classes(
+                            "text-subtitle1 font-weight-bold text-positive"
+                        )
+                        pending_warning_holder[0] = ui.label("").classes(
+                            "text-warning text-caption"
+                        )
+                        pending_warning_holder[0].visible = False
+                    import_button_holder[0] = ui.button(
+                        t("import_valid_rows"),
+                        icon="file_upload",
+                        on_click=do_import,
+                        color="warning",
+                    ).props(f"{'disabled' if not can_import else ''}")
+            update_import_button()
 
             # Error details
             if errors_df is not None and not errors_df.empty:
