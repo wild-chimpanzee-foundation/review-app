@@ -26,6 +26,7 @@ _MODEL_NAME_ALIASES: dict[str, str] = {
     "humans": "Homo sapiens sapiens - villager",
     "brookes duiker": "Cephalophus ogilbyi brookei",
     "brooke duiker": "Cephalophus ogilbyi brookei",
+    "ogilbys duiker": "Cephalophus ogilbyi brookei",
 }
 
 
