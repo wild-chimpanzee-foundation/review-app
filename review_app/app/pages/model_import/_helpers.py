@@ -6,18 +6,13 @@ from typing import Callable
 import pandas as pd
 from nicegui import ui
 
-from review_app.app.state import get_language, get_state_val, set_state_val
+from review_app.app.state import get_language
 from review_app.app.translations import t
 from review_app.backend.provider.import_service import BLANK_SENTINEL, IGNORE_SENTINEL
 
 
-def get_df_from_state(key: str) -> pd.DataFrame | None:
-    data = get_state_val(key)
-    return pd.DataFrame(data) if data is not None else None
-
-
-def col_val(key: str) -> str:
-    return get_state_val(key) or ""
+def col_val(state: dict, key: str) -> str:
+    return state.get(key) or ""
 
 
 async def _call_maybe_async(fn: Callable) -> None:
@@ -44,14 +39,14 @@ def read_upload_file(content: bytes) -> pd.DataFrame:
     raise ValueError("Could not parse file — try saving as UTF-8 CSV")
 
 
-def make_col_selects(specs: list[tuple[str, dict]]) -> list[tuple[str, object]]:
+def make_col_selects(state: dict, specs: list[tuple[str, dict]]) -> list[tuple[str, object]]:
     result = []
     for key, opts in specs:
         sel = (
             ui.select(
                 label=t(key),
                 options=opts,
-                value=get_state_val(key) or "",
+                value=state.get(key) or "",
             )
             .props("outlined dense")
             .classes("col")
@@ -189,6 +184,7 @@ def is_long_format(columns: list[str]) -> bool:
 
 def render_species_mappings(
     dp,
+    state: dict,
     all_mappings: dict,
     unmapped_origs: set,
     all_species: set,
@@ -241,16 +237,16 @@ def render_species_mappings(
 
             def make_update_fn(o: str, sel) -> Callable:
                 async def _update():
-                    mappings = get_state_val(mappings_state_key) or {}
+                    mappings = state.get(mappings_state_key) or {}
                     mappings[o] = sel.value
-                    set_state_val(mappings_state_key, mappings)
+                    state[mappings_state_key] = mappings
                     await _call_maybe_async(update_import_button)
 
                 return _update
 
             select.on_value_change(make_update_fn(orig, select))
 
-    pending_unmapped = [k for k, v in (get_state_val(mappings_state_key) or {}).items() if not v]
+    pending_unmapped = [k for k, v in (state.get(mappings_state_key) or {}).items() if not v]
 
     with ui.row().classes("items-center gap-sm q-mt-sm"):
         apply_btn = (
@@ -262,21 +258,21 @@ def render_species_mappings(
         )
 
         async def accept_originals():
-            mappings = get_state_val(mappings_state_key) or {}
+            mappings = state.get(mappings_state_key) or {}
             for orig in all_species:
                 if not mappings.get(orig):
                     mappings[orig] = orig
-            set_state_val(mappings_state_key, mappings)
+            state[mappings_state_key] = mappings
             await _call_maybe_async(update_import_button)
             if apply_btn:
                 apply_btn.props("wide")
 
         async def ignore_unmapped():
-            mappings = get_state_val(mappings_state_key) or {}
+            mappings = state.get(mappings_state_key) or {}
             for orig in all_species:
                 if not mappings.get(orig):
                     mappings[orig] = IGNORE_SENTINEL
-            set_state_val(mappings_state_key, mappings)
+            state[mappings_state_key] = mappings
             await _call_maybe_async(update_import_button)
             if apply_btn:
                 apply_btn.props("wide")

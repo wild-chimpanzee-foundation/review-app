@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from nicegui import run, ui
 
-from review_app.app.state import get_active_project_id, get_state_val, set_state_val
+from review_app.app.state import get_active_project_id
 from review_app.app.translations import t
 from review_app.app.utils import user_error_message
 
-from ._helpers import col_val, get_df_from_state, make_col_selects, read_upload_file
+from ._helpers import col_val, make_col_selects, read_upload_file
 
 _TEMPLATE_CSV = "path,created_at,latitude,longitude\nparent_dir/video.mp4,2024-06-01T08:30:00Z,46.9481,7.4474\n"
 _NONE_VALUE = ""
@@ -16,8 +16,8 @@ _OPTIONAL_COLS = ("meta_datetime_col", "meta_lat_col", "meta_lon_col")
 _SOURCE_EPSG_KEY = "meta_source_epsg"
 
 
-def _source_epsg() -> int | None:
-    val = get_state_val(_SOURCE_EPSG_KEY)
+def _source_epsg(state: dict) -> int | None:
+    val = state.get(_SOURCE_EPSG_KEY)
     try:
         return int(val) if val else None
     except (ValueError, TypeError):
@@ -25,6 +25,13 @@ def _source_epsg() -> int | None:
 
 
 def setup_metadata_tab(dp, loading_dialog) -> None:
+    # Per-page in-memory state. Kept out of app.storage.user on purpose: that
+    # store re-serializes to disk on every mutation, so routing per-keystroke
+    # config here (and the uploaded frame) avoids dumping it repeatedly. Both
+    # dicts are fresh per page build and die on navigate.
+    frames: dict = {}
+    state: dict = {}
+
     with ui.card().classes("q-pa-md q-mt-md"):
         ui.label(t("metadata_import_title")).classes("text-subtitle2 font-weight-medium q-mb-xs")
         ui.label(t("metadata_import_desc")).classes("text-caption q-mb-md")
@@ -43,7 +50,7 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
         @ui.refreshable
         def col_config_ui() -> None:
             col_config_section.clear()
-            columns = get_state_val("meta_columns") or []
+            columns = state.get("meta_columns") or []
             if not columns:
                 return
 
@@ -54,20 +61,22 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
                 ui.label(t("meta_path_matching")).classes("text-caption text-grey q-mb-xs q-mt-sm")
                 with ui.row().classes("w-full gap-md q-mb-sm items-end"):
                     sels = make_col_selects(
+                        state,
                         [
                             ("meta_folder_col", required_opts),
                             ("meta_file_col", required_opts),
-                        ]
+                        ],
                     )
 
                 ui.label(t("meta_data_cols")).classes("text-caption text-grey q-mb-xs q-mt-sm")
                 with ui.row().classes("w-full gap-md q-mb-sm items-end"):
                     sels += make_col_selects(
+                        state,
                         [
                             ("meta_datetime_col", optional_opts),
                             ("meta_lat_col", optional_opts),
                             ("meta_lon_col", optional_opts),
-                        ]
+                        ],
                     )
 
                 ui.label(t("meta_source_crs")).classes("text-caption text-grey q-mb-xs q-mt-sm")
@@ -75,7 +84,7 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
                     ui.input(
                         label=t("meta_source_epsg"),
                         placeholder="e.g. 32632",
-                        value=get_state_val(_SOURCE_EPSG_KEY) or "",
+                        value=state.get(_SOURCE_EPSG_KEY) or "",
                     )
                     .props("clearable")
                     .classes("w-48")
@@ -84,12 +93,14 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
 
                 async def on_col_change() -> None:
                     for key, sel in sels:
-                        set_state_val(key, sel.value)
-                    set_state_val(_SOURCE_EPSG_KEY, epsg_input.value)
-                    await _run_validate(dp, loading_dialog, results_ui, results_container)
+                        state[key] = sel.value
+                    state[_SOURCE_EPSG_KEY] = epsg_input.value
+                    await _run_validate(
+                        dp, loading_dialog, frames, state, results_ui, results_container
+                    )
 
                 async def on_epsg_change() -> None:
-                    set_state_val(_SOURCE_EPSG_KEY, epsg_input.value)
+                    state[_SOURCE_EPSG_KEY] = epsg_input.value
 
                 epsg_input.on_value_change(on_epsg_change)
 
@@ -102,7 +113,7 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
 
         @ui.refreshable
         def results_ui() -> None:
-            validation = get_state_val("meta_validation")
+            validation = state.get("meta_validation")
             if not validation:
                 return
 
@@ -124,7 +135,7 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
             async def do_import() -> None:
                 loading_dialog.open()
                 try:
-                    df = get_df_from_state("meta_df_records")
+                    df = frames.get("meta_df")
                     if df is None:
                         ui.notify(t("no_data_import"), type="warning")
                         return
@@ -132,12 +143,12 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
                         dp.import_video_metadata_csv,
                         df,
                         get_active_project_id(),
-                        col_val("meta_folder_col"),
-                        col_val("meta_file_col"),
-                        col_val("meta_datetime_col"),
-                        col_val("meta_lat_col"),
-                        col_val("meta_lon_col"),
-                        _source_epsg(),
+                        col_val(state, "meta_folder_col"),
+                        col_val(state, "meta_file_col"),
+                        col_val(state, "meta_datetime_col"),
+                        col_val(state, "meta_lat_col"),
+                        col_val(state, "meta_lon_col"),
+                        _source_epsg(state),
                     )
                     msg = t("metadata_imported", count=result["updated"])
                     if result["skipped"]:
@@ -167,8 +178,8 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
 
                 if "path" in columns:
                     # Standard format: import directly
-                    set_state_val("meta_df_records", None)
-                    set_state_val("meta_validation", None)
+                    frames["meta_df"] = None
+                    state["meta_validation"] = None
                     col_config_section.visible = False
                     results_container.visible = False
                     col_config_ui.refresh()
@@ -184,14 +195,14 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
                     ui.notify(msg, type="positive")
                 else:
                     # External format: show column config
-                    set_state_val("meta_df_records", df.to_dict(orient="records"))
-                    set_state_val("meta_columns", columns)
-                    set_state_val("meta_validation", None)
+                    frames["meta_df"] = df
+                    state["meta_columns"] = columns
+                    state["meta_validation"] = None
 
                     for key in _REQUIRED_COLS:
-                        set_state_val(key, columns[0])
+                        state[key] = columns[0]
                     for key in _OPTIONAL_COLS:
-                        set_state_val(key, "")
+                        state[key] = ""
 
                     col_config_section.visible = True
                     col_config_ui.refresh()
@@ -203,8 +214,10 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
             finally:
                 loading_dialog.close()
 
-            if get_state_val("meta_df_records") is not None:
-                await _run_validate(dp, loading_dialog, results_ui, results_container)
+            if frames.get("meta_df") is not None:
+                await _run_validate(
+                    dp, loading_dialog, frames, state, results_ui, results_container
+                )
 
         upload_holder[0] = ui.upload(
             on_upload=handle_upload,
@@ -223,20 +236,20 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
         results_ui()
 
 
-async def _run_validate(dp, loading_dialog, results_ui, results_container) -> None:
+async def _run_validate(dp, loading_dialog, frames, state, results_ui, results_container) -> None:
     loading_dialog.open()
     try:
-        df = get_df_from_state("meta_df_records")
+        df = frames.get("meta_df")
         if df is None:
             return
         result = await run.io_bound(
             dp.validate_metadata_csv,
             df,
             get_active_project_id(),
-            col_val("meta_folder_col"),
-            col_val("meta_file_col"),
+            col_val(state, "meta_folder_col"),
+            col_val(state, "meta_file_col"),
         )
-        set_state_val("meta_validation", result)
+        state["meta_validation"] = result
         results_container.visible = True
         results_ui.refresh()
     except Exception as exc:

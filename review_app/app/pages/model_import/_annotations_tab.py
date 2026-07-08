@@ -8,8 +8,6 @@ from nicegui import run, ui
 from review_app.app.state import (
     get_active_project_id,
     get_annotator_name,
-    get_state_val,
-    set_state_val,
 )
 from review_app.app.translations import t
 from review_app.app.utils import user_error_message
@@ -18,7 +16,6 @@ from review_app.backend.utils import df_to_records
 from ._helpers import (
     auto_suggest_ann_cols,
     col_val,
-    get_df_from_state,
     make_col_selects,
     read_upload_file,
     render_species_mappings,
@@ -49,6 +46,14 @@ def _is_app_format(columns: list[str]) -> bool:
 
 
 def setup_annotations_tab(dp, loading_dialog) -> None:
+    # Per-page in-memory state. Kept out of app.storage.user on purpose: that
+    # store re-serializes to disk on every mutation, so routing per-keystroke
+    # config (`state`) and the uploaded frame here stops each species-mapping
+    # keystroke from re-dumping to disk. Both dicts are fresh per page build and
+    # die on navigate.
+    frames: dict[str, pd.DataFrame | None] = {}
+    state: dict = {}
+
     # ── Export ────────────────────────────────────────────────────────────────
     with ui.card().classes("full-width q-pa-md q-mb-md"):
         ui.label(t("export_annotations")).classes("text-subtitle2 font-weight-medium q-mb-xs")
@@ -98,13 +103,15 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
             ui.label(t("csv_mode_label")).classes("text-caption")
             mode_toggle = ui.toggle(
                 {"override": t("mode_override"), "append": t("mode_append")},
-                value=get_state_val("manual_import_mode") or "override",
+                value=state.get("manual_import_mode") or "override",
             ).props("dense size=sm")
 
             async def on_mode_change() -> None:
-                set_state_val("manual_import_mode", mode_toggle.value)
-                if get_state_val("ann_format") == "app" and get_state_val("ann_df_records"):
-                    await _run_app_validate(dp, loading_dialog, results_ui, results_container)
+                state["manual_import_mode"] = mode_toggle.value
+                if state.get("ann_format") == "app" and frames.get("ann_df") is not None:
+                    await _run_app_validate(
+                        dp, loading_dialog, frames, state, results_ui, results_container
+                    )
 
             mode_toggle.on_value_change(on_mode_change)
 
@@ -122,13 +129,13 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
         @ui.refreshable
         def col_config_ui() -> None:
             col_config_section.clear()
-            columns = get_state_val("ann_columns") or []
+            columns = state.get("ann_columns") or []
             if not columns:
                 return
 
             required_opts = {c: c for c in columns}
             optional_opts = {_NONE_VALUE: f"— {t('historic_col_none')} —", **required_opts}
-            path_mode = get_state_val("ann_path_mode") or "split"
+            path_mode = state.get("ann_path_mode") or "split"
 
             with col_config_section:
                 ui.label(t("historic_path_matching")).classes(
@@ -143,21 +150,24 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                 ).props("dense size=sm q-mb-sm")
 
                 async def on_path_mode_change() -> None:
-                    set_state_val("ann_path_mode", path_toggle.value)
+                    state["ann_path_mode"] = path_toggle.value
                     col_config_ui.refresh()
-                    await _run_validate(dp, loading_dialog, results_ui, results_container)
+                    await _run_validate(
+                        dp, loading_dialog, frames, state, results_ui, results_container
+                    )
 
                 path_toggle.on_value_change(on_path_mode_change)
 
                 with ui.row().classes("w-full gap-md q-mb-sm items-end"):
                     if path_mode == "single":
-                        sels = make_col_selects([("ann_path_col", required_opts)])
+                        sels = make_col_selects(state, [("ann_path_col", required_opts)])
                     else:
                         sels = make_col_selects(
+                            state,
                             [
                                 ("ann_folder_col", required_opts),
                                 ("ann_video_col", required_opts),
-                            ]
+                            ],
                         )
 
                 ui.label(t("historic_annotation_cols")).classes(
@@ -165,26 +175,27 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                 )
                 with ui.row().classes("w-full gap-md q-mb-sm items-end"):
                     sels += make_col_selects(
+                        state,
                         [
                             ("ann_species_col", required_opts),
                             ("ann_behavior_col", optional_opts),
                             ("ann_count_col", optional_opts),
                             ("ann_observer_col", optional_opts),
                             ("ann_timestamp_col", optional_opts),
-                        ]
+                        ],
                     )
 
                 ui.label(t("historic_extra_cols")).classes(
                     "text-caption text-grey q-mb-xs q-mt-sm"
                 )
                 with ui.row().classes("w-full gap-md q-mb-sm items-end"):
-                    sels += make_col_selects([("ann_is_blank_col", optional_opts)])
+                    sels += make_col_selects(state, [("ann_is_blank_col", optional_opts)])
 
                     tag_sel = (
                         ui.select(
                             label=t("ann_tag_cols"),
                             options=required_opts,
-                            value=get_state_val("ann_tag_cols") or [],
+                            value=state.get("ann_tag_cols") or [],
                             multiple=True,
                             with_input=True,
                         )
@@ -194,13 +205,13 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     tag_sel._props["hint"] = t("ann_tag_cols_hint")
 
                 with ui.row().classes("w-full gap-md q-mb-sm items-end"):
-                    sels += make_col_selects([("ann_data_type_col", optional_opts)])
+                    sels += make_col_selects(state, [("ann_data_type_col", optional_opts)])
 
                     data_type_val_sel = (
                         ui.select(
                             label=t("ann_data_type_val"),
                             options={},
-                            value=get_state_val("ann_data_type_val") or None,
+                            value=state.get("ann_data_type_val") or None,
                             with_input=True,
                         )
                         .props("outlined dense")
@@ -209,24 +220,26 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     data_type_val_sel._props["hint"] = t("ann_data_type_val_hint")
 
                 async def on_col_change() -> None:
-                    prev_data_type_col = get_state_val("ann_data_type_col")
+                    prev_data_type_col = state.get("ann_data_type_col")
                     for key, sel in sels:
-                        set_state_val(key, sel.value)
-                    set_state_val("ann_tag_cols", tag_sel.value)
-                    set_state_val("ann_data_type_val", data_type_val_sel.value)
-                    if get_state_val("ann_data_type_col") != prev_data_type_col:
-                        new_col = get_state_val("ann_data_type_col") or ""
-                        set_state_val("ann_data_type_val", None)
+                        state[key] = sel.value
+                    state["ann_tag_cols"] = tag_sel.value
+                    state["ann_data_type_val"] = data_type_val_sel.value
+                    if state.get("ann_data_type_col") != prev_data_type_col:
+                        new_col = state.get("ann_data_type_col") or ""
+                        state["ann_data_type_val"] = None
                         new_opts: dict[str, str] = {}
                         if new_col:
-                            df = get_df_from_state("ann_df_records")
+                            df = frames.get("ann_df")
                             if df is not None and new_col in df.columns:
                                 vals = sorted(
                                     df[new_col].dropna().astype(str).str.strip().unique().tolist()
                                 )
                                 new_opts = {v: v for v in vals if v}
                         data_type_val_sel.set_options(new_opts, value=None)
-                    await _run_validate(dp, loading_dialog, results_ui, results_container)
+                    await _run_validate(
+                        dp, loading_dialog, frames, state, results_ui, results_container
+                    )
 
                 for _, sel in sels:
                     sel.on_value_change(on_col_change)
@@ -239,12 +252,12 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
 
         @ui.refreshable
         def results_ui() -> None:
-            validation = get_state_val("ann_validation")
+            validation = state.get("ann_validation")
             if not validation:
                 return
 
             # ── App format: dry-run summary + import button ───────────────────
-            if get_state_val("ann_format") == "app":
+            if state.get("ann_format") == "app":
                 matched = validation["matched"]
                 skipped = validation["skipped"]
                 blanks = validation.get("blanks_to_set", 0)
@@ -313,7 +326,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         )
                         ui.separator().classes("q-mb-sm")
 
-                        all_mappings = get_state_val(_APP_MAPPINGS_KEY) or {}
+                        all_mappings = state.get(_APP_MAPPINGS_KEY) or {}
                         all_species = set(unknown) | set(all_mappings.keys())
                         unmapped_origs = set(unknown)
                         # Let the user keep each species as-is and add it to the project.
@@ -321,17 +334,18 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
 
                         async def apply_app_mappings() -> None:
                             await _run_app_validate(
-                                dp, loading_dialog, results_ui, results_container
+                                dp, loading_dialog, frames, state, results_ui, results_container
                             )
 
                         render_species_mappings(
                             dp,
+                            state,
                             all_mappings,
                             unmapped_origs,
                             all_species,
                             apply_fn=apply_app_mappings,
                             update_import_button=results_ui.refresh,
-                            can_apply=bool(get_state_val("ann_df_records")),
+                            can_apply=frames.get("ann_df") is not None,
                             mappings_state_key=_APP_MAPPINGS_KEY,
                             show_ignore_option=True,
                             project_id=get_active_project_id(),
@@ -343,7 +357,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                 async def do_app_import() -> None:
                     loading_dialog.open()
                     try:
-                        df = get_df_from_state("ann_df_records")
+                        df = frames.get("ann_df")
                         if df is None:
                             ui.notify(t("no_data_import"), type="warning")
                             return
@@ -351,8 +365,8 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                             dp.import_annotations_csv,
                             df,
                             get_active_project_id(),
-                            get_state_val("manual_import_mode") or "override",
-                            get_state_val(_APP_MAPPINGS_KEY) or {},
+                            state.get("manual_import_mode") or "override",
+                            state.get(_APP_MAPPINGS_KEY) or {},
                         )
                         summary = t("imported_annotations", count=result["imported"])
                         by_ann = {k: v for k, v in result.get("by_annotator", {}).items() if k}
@@ -449,33 +463,33 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     )
                     ui.separator().classes("q-mb-sm")
 
-                    all_mappings = get_state_val(_MAPPINGS_KEY) or {}
+                    all_mappings = state.get(_MAPPINGS_KEY) or {}
                     all_species = set(unknown) | set(all_mappings.keys())
                     unmapped_origs = set(unknown)
 
                     async def apply_mappings() -> None:
                         loading_dialog.open()
                         try:
-                            df = get_df_from_state("ann_df_records")
+                            df = frames.get("ann_df")
                             if df is None:
                                 return
-                            mappings = get_state_val(_MAPPINGS_KEY) or {}
-                            is_single = (get_state_val("ann_path_mode") or "split") == "single"
+                            mappings = state.get(_MAPPINGS_KEY) or {}
+                            is_single = (state.get("ann_path_mode") or "split") == "single"
                             result = await run.io_bound(
                                 dp.validate_historic_csv,
                                 df,
                                 get_active_project_id(),
-                                col_val("ann_folder_col"),
-                                col_val("ann_video_col"),
-                                col_val("ann_species_col"),
-                                col_val("ann_data_type_col"),
-                                col_val("ann_data_type_val"),
+                                col_val(state, "ann_folder_col"),
+                                col_val(state, "ann_video_col"),
+                                col_val(state, "ann_species_col"),
+                                col_val(state, "ann_data_type_col"),
+                                col_val(state, "ann_data_type_val"),
                                 mappings,
-                                col_val("ann_is_blank_col"),
-                                get_state_val("ann_tag_cols") or [],
-                                col_val("ann_path_col") if is_single else "",
+                                col_val(state, "ann_is_blank_col"),
+                                state.get("ann_tag_cols") or [],
+                                col_val(state, "ann_path_col") if is_single else "",
                             )
-                            set_state_val("ann_validation", result)
+                            state["ann_validation"] = result
                             ui.notify(t("mappings_applied"), type="positive")
                             results_ui.refresh()
                         except Exception as exc:
@@ -485,11 +499,12 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         finally:
                             loading_dialog.close()
 
-                    pending = [k for k, v in (get_state_val(_MAPPINGS_KEY) or {}).items() if not v]
-                    can_apply = bool(get_state_val("ann_df_records")) and not pending
+                    pending = [k for k, v in (state.get(_MAPPINGS_KEY) or {}).items() if not v]
+                    can_apply = frames.get("ann_df") is not None and not pending
 
                     render_species_mappings(
                         dp,
+                        state,
                         all_mappings,
                         unmapped_origs,
                         all_species,
@@ -506,29 +521,29 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
             async def do_external_import() -> None:
                 loading_dialog.open()
                 try:
-                    df = get_df_from_state("ann_df_records")
+                    df = frames.get("ann_df")
                     if df is None:
                         ui.notify(t("no_data_import"), type="warning")
                         return
-                    is_single = (get_state_val("ann_path_mode") or "split") == "single"
+                    is_single = (state.get("ann_path_mode") or "split") == "single"
                     result = await run.io_bound(
                         dp.import_historic_csv,
                         df,
                         get_active_project_id(),
-                        col_val("ann_folder_col"),
-                        col_val("ann_video_col"),
-                        col_val("ann_species_col"),
-                        col_val("ann_data_type_col"),
-                        col_val("ann_data_type_val"),
-                        col_val("ann_behavior_col"),
-                        col_val("ann_count_col"),
-                        col_val("ann_observer_col"),
-                        col_val("ann_timestamp_col"),
-                        get_state_val("manual_import_mode") or "override",
-                        get_state_val(_MAPPINGS_KEY) or {},
-                        col_val("ann_is_blank_col"),
-                        get_state_val("ann_tag_cols") or [],
-                        col_val("ann_path_col") if is_single else "",
+                        col_val(state, "ann_folder_col"),
+                        col_val(state, "ann_video_col"),
+                        col_val(state, "ann_species_col"),
+                        col_val(state, "ann_data_type_col"),
+                        col_val(state, "ann_data_type_val"),
+                        col_val(state, "ann_behavior_col"),
+                        col_val(state, "ann_count_col"),
+                        col_val(state, "ann_observer_col"),
+                        col_val(state, "ann_timestamp_col"),
+                        state.get("manual_import_mode") or "override",
+                        state.get(_MAPPINGS_KEY) or {},
+                        col_val(state, "ann_is_blank_col"),
+                        state.get("ann_tag_cols") or [],
+                        col_val(state, "ann_path_col") if is_single else "",
                     )
                     msg = t("imported_historic", count=result["imported"])
                     if result["skipped"]:
@@ -560,37 +575,37 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
 
                 if _is_app_format(columns):
                     # App format: validate first, show dry-run, then let user import
-                    set_state_val("ann_format", "app")
-                    set_state_val("ann_df_records", df.to_dict(orient="records"))
-                    set_state_val("ann_validation", None)
-                    set_state_val(_APP_MAPPINGS_KEY, {})
+                    state["ann_format"] = "app"
+                    frames["ann_df"] = df
+                    state["ann_validation"] = None
+                    state[_APP_MAPPINGS_KEY] = {}
                     col_config_section.visible = False
                     col_config_ui.refresh()
                     if upload_holder[0]:
                         upload_holder[0].visible = False
                 else:
                     # External format: show column config + validate
-                    set_state_val("ann_format", "external")
-                    set_state_val("ann_df_records", df.to_dict(orient="records"))
-                    set_state_val("ann_columns", columns)
-                    set_state_val(_MAPPINGS_KEY, {})
-                    set_state_val("ann_validation", None)
+                    state["ann_format"] = "external"
+                    frames["ann_df"] = df
+                    state["ann_columns"] = columns
+                    state[_MAPPINGS_KEY] = {}
+                    state["ann_validation"] = None
 
                     for key in _REQUIRED_COLS:
-                        set_state_val(key, columns[0])
+                        state[key] = columns[0]
                     for key in _OPTIONAL_COLS:
-                        set_state_val(key, "")
-                    set_state_val("ann_tag_cols", [])
-                    set_state_val("ann_path_mode", "split")
-                    set_state_val("ann_path_col", columns[0])
+                        state[key] = ""
+                    state["ann_tag_cols"] = []
+                    state["ann_path_mode"] = "split"
+                    state["ann_path_col"] = columns[0]
 
                     # Apply conservative auto-suggestions based on column names
                     suggestions = auto_suggest_ann_cols(columns)
                     for key, val in suggestions.items():
                         if key == "ann_path_mode":
-                            set_state_val(key, val)
+                            state[key] = val
                         elif val in columns:
-                            set_state_val(key, val)
+                            state[key] = val
 
                     col_config_section.visible = True
                     col_config_ui.refresh()
@@ -602,11 +617,15 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
             finally:
                 loading_dialog.close()
 
-            fmt = get_state_val("ann_format")
+            fmt = state.get("ann_format")
             if fmt == "external":
-                await _run_validate(dp, loading_dialog, results_ui, results_container)
+                await _run_validate(
+                    dp, loading_dialog, frames, state, results_ui, results_container
+                )
             elif fmt == "app":
-                await _run_app_validate(dp, loading_dialog, results_ui, results_container)
+                await _run_app_validate(
+                    dp, loading_dialog, frames, state, results_ui, results_container
+                )
 
         upload_holder[0] = ui.upload(
             on_upload=handle_upload,
@@ -619,29 +638,29 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
         results_ui()
 
 
-async def _run_validate(dp, loading_dialog, results_ui, results_container) -> None:
+async def _run_validate(dp, loading_dialog, frames, state, results_ui, results_container) -> None:
     loading_dialog.open()
     try:
-        df = get_df_from_state("ann_df_records")
+        df = frames.get("ann_df")
         if df is None:
             return
-        mappings = get_state_val(_MAPPINGS_KEY) or {}
-        is_single = (get_state_val("ann_path_mode") or "split") == "single"
+        mappings = state.get(_MAPPINGS_KEY) or {}
+        is_single = (state.get("ann_path_mode") or "split") == "single"
         result = await run.io_bound(
             dp.validate_historic_csv,
             df,
             get_active_project_id(),
-            col_val("ann_folder_col"),
-            col_val("ann_video_col"),
-            col_val("ann_species_col"),
-            col_val("ann_data_type_col"),
-            col_val("ann_data_type_val"),
+            col_val(state, "ann_folder_col"),
+            col_val(state, "ann_video_col"),
+            col_val(state, "ann_species_col"),
+            col_val(state, "ann_data_type_col"),
+            col_val(state, "ann_data_type_val"),
             mappings,
-            col_val("ann_is_blank_col"),
-            get_state_val("ann_tag_cols") or [],
-            col_val("ann_path_col") if is_single else "",
+            col_val(state, "ann_is_blank_col"),
+            state.get("ann_tag_cols") or [],
+            col_val(state, "ann_path_col") if is_single else "",
         )
-        set_state_val("ann_validation", result)
+        state["ann_validation"] = result
         results_container.visible = True
         results_ui.refresh()
     except Exception as exc:
@@ -650,20 +669,22 @@ async def _run_validate(dp, loading_dialog, results_ui, results_container) -> No
         loading_dialog.close()
 
 
-async def _run_app_validate(dp, loading_dialog, results_ui, results_container) -> None:
+async def _run_app_validate(
+    dp, loading_dialog, frames, state, results_ui, results_container
+) -> None:
     loading_dialog.open()
     try:
-        df = get_df_from_state("ann_df_records")
+        df = frames.get("ann_df")
         if df is None:
             return
         result = await run.io_bound(
             dp.validate_annotations_csv,
             df,
             get_active_project_id(),
-            get_state_val("manual_import_mode") or "override",
-            get_state_val(_APP_MAPPINGS_KEY) or {},
+            state.get("manual_import_mode") or "override",
+            state.get(_APP_MAPPINGS_KEY) or {},
         )
-        set_state_val("ann_validation", result)
+        state["ann_validation"] = result
         results_container.visible = True
         results_ui.refresh()
     except Exception as exc:

@@ -1,7 +1,7 @@
 import pandas as pd
 from nicegui import run, ui
 
-from review_app.app.state import get_active_project_id, get_state_val, set_state_val
+from review_app.app.state import get_active_project_id
 from review_app.app.translations import t
 from review_app.app.utils import user_error_message
 from review_app.backend.errors import DataImportError
@@ -11,29 +11,36 @@ from review_app.backend.utils import df_to_records
 from ._helpers import (
     auto_suggest_mappings,
     auto_suggest_path_col,
-    get_df_from_state,
     is_long_format,
     read_upload_file,
     render_species_mappings,
 )
 
-_SCROLL_TO_CTA = (
-    "setTimeout(()=>{"
-    'const el = document.getElementById("species-mapping") || document.getElementById("import-cta");'
-    'el?.scrollIntoView({behavior:"smooth",block:"start"});'
-    "},100)"
-)
 _MAX_ERRORS_PER_TYPE = 50
 
 
-def _cap_errors_for_state(errors_df) -> tuple[list | None, dict]:
-    """Return (capped records, full counts). Keeps at most _MAX_ERRORS_PER_TYPE rows per
-    error type so large imports don't bloat session state."""
+def _friendly_import_error(exc: Exception) -> str:
+    """Map low-level failures to an actionable message.
+
+    A dropped websocket / deleted client mid-import (common with very large
+    files that stall the event loop) surfaces as TimeoutError or a "has been
+    deleted" RuntimeError. Those don't mean the import failed — the DB write
+    usually finished — so tell the user to check the review page instead of
+    blindly re-uploading."""
+    text = str(exc).lower()
+    if isinstance(exc, TimeoutError) or "has been deleted" in text or "connection" in text:
+        return t("import_connection_interrupted")
+    return user_error_message(exc)
+
+
+def _cap_errors_for_state(errors_df) -> tuple[pd.DataFrame | None, dict]:
+    """Return (capped frame, full counts). Keeps at most _MAX_ERRORS_PER_TYPE rows per
+    error type so the display frame stays bounded on large imports."""
     if errors_df is None or errors_df.empty:
         return None, {}
     counts = errors_df["error"].value_counts().to_dict()
     capped = errors_df.groupby("error", group_keys=False).head(_MAX_ERRORS_PER_TYPE)
-    return capped.to_dict(orient="records"), counts
+    return capped, counts
 
 
 async def setup_model_tab(dp, loading_dialog) -> None:
@@ -42,6 +49,14 @@ async def setup_model_tab(dp, loading_dialog) -> None:
 
     import_button_holder: list = [None]
     pending_warning_holder: list = [None]
+
+    # Per-page in-memory state, kept out of app.storage.user on purpose: that store
+    # re-serializes the whole user-storage dict to disk on every mutation, so routing
+    # the multi-MB frames (`frames`) and the per-keystroke config (`state`) here stops
+    # each species-mapping keystroke from dumping tens of MB to disk. Both dicts are
+    # fresh per page build and die on navigate.
+    frames: dict[str, pd.DataFrame | None] = {}
+    state: dict = {}
 
     # ── Template download ─────────────────────────────────────────────────────
     ui.label(t("model_import_desc")).classes("text-body2 q-mb-md")
@@ -62,6 +77,31 @@ async def setup_model_tab(dp, loading_dialog) -> None:
         ui.label(t("upload_csv")).classes("text-subtitle1 font-weight-medium q-mb-md")
         upload_result = ui.label(t("upload_csv_msg")).classes("text-body2")
 
+        # Persistent error banner — a toast vanishes, so failures during a long
+        # batch of uploads went unnoticed. This stays until the next upload.
+        error_banner = (
+            ui.card()
+            .classes("full-width q-pa-sm q-mt-sm bg-red-1 text-red-10")
+            .props("flat bordered")
+        )
+        error_banner.visible = False
+        with error_banner:
+            with ui.row().classes("items-center no-wrap w-full"):
+                ui.icon("error_outline").classes("q-mr-sm")
+                error_banner_label = ui.label("").classes("col text-body2")
+                ui.button(icon="close", on_click=lambda: error_banner.set_visibility(False)).props(
+                    "flat round dense size=sm"
+                )
+
+        def report_error(exc: Exception) -> None:
+            msg = _friendly_import_error(exc)
+            error_banner_label.text = msg
+            error_banner.set_visibility(True)
+            ui.notify(msg, type="negative", multi_line=True, timeout=8000)
+
+        def clear_error() -> None:
+            error_banner.set_visibility(False)
+
         step2_header = ui.row().classes("items-center gap-sm q-mb-sm")
         step2_header.visible = False
 
@@ -77,48 +117,49 @@ async def setup_model_tab(dp, loading_dialog) -> None:
         upload_widget_holder: list = [None]
 
         async def run_preview_logic():
-            recs = get_state_val("raw_df_records")
-            if not recs:
+            raw_df = frames.get("raw_df")
+            if raw_df is None:
                 return
             loading_dialog.open()
             try:
                 _, stats = await run.io_bound(
                     dp.normalize_model_csv_with_mapping,
-                    pd.DataFrame(recs),
-                    get_state_val("path_col") or "",
-                    get_state_val("ann_mappings") or [],
+                    raw_df,
+                    state.get("path_col") or "",
+                    state.get("ann_mappings") or [],
                     get_active_project_id(),
-                    get_state_val("filename_match") or False,
+                    state.get("filename_match") or False,
                 )
-                set_state_val("match_preview", stats)
+                state["match_preview"] = stats
                 config_ui.refresh()
             except Exception as exc:
-                ui.notify(f"{t('error')}: {user_error_message(exc)}", type="negative")
+                report_error(exc)
             finally:
                 loading_dialog.close()
 
         async def handle_upload(e):
             loading_dialog.open()
+            clear_error()
             try:
                 content = await e.file.read()
                 raw_df = read_upload_file(content)
                 columns = list(raw_df.columns)
                 sample = raw_df.head(3).to_dict(orient="records")
 
-                set_state_val("raw_df_records", raw_df.to_dict(orient="records"))
-                set_state_val("raw_csv_columns", columns)
-                set_state_val("path_col", auto_suggest_path_col(columns, sample))
-                set_state_val("ann_mappings", auto_suggest_mappings(columns))
-                set_state_val("csv_format", "long" if is_long_format(columns) else "wide")
-                set_state_val("match_preview", None)
-                set_state_val("match_stats", None)
-                set_state_val("uploaded_df", None)
-                set_state_val("cleaned_df", None)
-                set_state_val("errors_df", None)
-                set_state_val("species_mappings", {})
-                set_state_val("unmapped_species", [])
-                set_state_val("filename_match", False)
-                set_state_val("error_counts", {})
+                frames["raw_df"] = raw_df
+                frames["uploaded"] = None
+                frames["cleaned"] = None
+                frames["errors"] = None
+                state["raw_csv_columns"] = columns
+                state["path_col"] = auto_suggest_path_col(columns, sample)
+                state["ann_mappings"] = auto_suggest_mappings(columns)
+                state["csv_format"] = "long" if is_long_format(columns) else "wide"
+                state["match_preview"] = None
+                state["match_stats"] = None
+                state["species_mappings"] = {}
+                state["unmapped_species"] = []
+                state["filename_match"] = False
+                state["error_counts"] = {}
 
                 upload_result.text = t("loaded_rows", count=len(raw_df))
                 if upload_widget_holder[0]:
@@ -129,14 +170,14 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 results_container.visible = False
                 config_ui.refresh()
             except Exception as exc:
-                ui.notify(f"{t('error')}: {user_error_message(exc)}", type="negative")
+                report_error(exc)
                 loading_dialog.close()
                 return
 
             loading_dialog.close()
 
             # Auto-run preview for wide format so user immediately sees match quality
-            if get_state_val("csv_format") == "wide":
+            if state.get("csv_format") == "wide":
                 await run_preview_logic()
 
         upload_widget_holder[0] = ui.upload(
@@ -153,23 +194,24 @@ async def setup_model_tab(dp, loading_dialog) -> None:
 
     @ui.refreshable
     def config_ui():
-        columns = get_state_val("raw_csv_columns") or []
-        ann_mappings = get_state_val("ann_mappings") or []
+        columns = state.get("raw_csv_columns") or []
+        ann_mappings = state.get("ann_mappings") or []
         col_opts = {c: c for c in columns}
         col_opts_none = {"": t("no_columns_col"), **col_opts}
 
         async def do_process():
-            recs = get_state_val("raw_df_records")
-            if not recs:
+            if frames.get("raw_df") is None:
                 ui.notify(t("no_data_import"), type="warning")
                 return
 
-            if get_state_val("csv_format") == "long":
-                await _validate_long(dp, loading_dialog, refresh_results)
+            if state.get("csv_format") == "long":
+                await _validate_long(
+                    dp, loading_dialog, frames, state, refresh_results, report_error
+                )
                 return
 
-            path_col = get_state_val("path_col") or ""
-            ann_maps = get_state_val("ann_mappings") or []
+            path_col = state.get("path_col") or ""
+            ann_maps = state.get("ann_mappings") or []
             if not path_col:
                 ui.notify(t("error_no_path_col"), type="warning")
                 return
@@ -177,9 +219,18 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 ui.notify(t("error_no_ann_mappings"), type="warning")
                 return
 
-            await _validate_wide(dp, loading_dialog, path_col, ann_maps, refresh_results)
+            await _validate_wide(
+                dp,
+                loading_dialog,
+                frames,
+                state,
+                path_col,
+                ann_maps,
+                refresh_results,
+                report_error,
+            )
 
-        if get_state_val("csv_format") == "long":
+        if state.get("csv_format") == "long":
             _render_long_format_config(do_process)
             return
 
@@ -193,28 +244,28 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                     ui.select(
                         label=t("path_col_label"),
                         options=col_opts,
-                        value=get_state_val("path_col"),
+                        value=state.get("path_col"),
                     )
                     .props("outlined dense")
                     .classes("col")
                 )
 
                 async def on_path_col_change():
-                    set_state_val("path_col", path_sel.value)
-                    set_state_val("match_preview", None)
+                    state["path_col"] = path_sel.value
+                    state["match_preview"] = None
                     await run_preview_logic()
 
                 path_sel.on_value_change(on_path_col_change)
 
-            filename_match_val = get_state_val("filename_match") or False
+            filename_match_val = state.get("filename_match") or False
             filename_toggle = ui.checkbox(
                 t("filename_match_label"),
                 value=filename_match_val,
             ).classes("q-mb-xs")
 
             async def on_filename_match_change():
-                set_state_val("filename_match", filename_toggle.value)
-                set_state_val("match_preview", None)
+                state["filename_match"] = filename_toggle.value
+                state["match_preview"] = None
                 await run_preview_logic()
 
             filename_toggle.on_value_change(on_filename_match_change)
@@ -222,16 +273,16 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             if filename_match_val:
                 ui.label(t("filename_match_warning")).classes("text-caption text-warning q-mb-xs")
 
-            preview = get_state_val("match_preview")
+            preview = state.get("match_preview")
             if preview:
                 _render_preview_result(preview)
 
         # Annotation columns card
         with ui.card().classes("full-width q-mb-md"):
             ui.label(t("annotation_columns")).classes("text-subtitle2 q-mb-xs")
-            _render_annotation_mappings(ann_mappings, col_opts_none, config_ui)
+            _render_annotation_mappings(state, ann_mappings, col_opts_none, config_ui)
 
-        has_preview = get_state_val("match_preview") is not None
+        has_preview = state.get("match_preview") is not None
         validate_btn = ui.button(
             t("validate_csv"), icon="play_arrow", on_click=do_process, color="primary"
         ).classes("q-mt-sm")
@@ -249,25 +300,23 @@ async def setup_model_tab(dp, loading_dialog) -> None:
 
     async def do_import():
         loading_dialog.open()
+        clear_error()
         try:
-            mappings = get_state_val("species_mappings", {})
-            uploaded_df = get_df_from_state("uploaded_df")
+            mappings = state.get("species_mappings") or {}
+            uploaded_df = frames.get("uploaded")
             if uploaded_df is not None:
                 # Re-validate with the current mappings so species mapped just before
                 # import are reflected in cleaned_df, without a separate "Apply" step.
                 cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
                     dp.validate_model_csv, uploaded_df, mappings, get_active_project_id()
                 )
-                set_state_val(
-                    "cleaned_df",
-                    cleaned_df.to_dict(orient="records") if cleaned_df is not None else None,
-                )
-                errors_recs, error_counts = _cap_errors_for_state(errors_df)
-                set_state_val("errors_df", errors_recs)
-                set_state_val("error_counts", error_counts)
-                set_state_val("unmapped_species", unmapped_species)
+                frames["cleaned"] = cleaned_df
+                errors_capped, error_counts = _cap_errors_for_state(errors_df)
+                frames["errors"] = errors_capped
+                state["error_counts"] = error_counts
+                state["unmapped_species"] = unmapped_species
             else:
-                cleaned_df = get_df_from_state("cleaned_df")
+                cleaned_df = frames.get("cleaned")
 
             if cleaned_df is None or cleaned_df.empty:
                 raise DataImportError("No data to import", user_message_key="no_data_import")
@@ -288,12 +337,12 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             ui.notify(t("imported_rows", count=result.get("inserted_rows", 0)), type="positive")
             ui.navigate.to("/review")
         except Exception as exc:
-            ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+            report_error(exc)
             loading_dialog.close()
 
     def update_import_button():
-        cleaned_df = get_df_from_state("cleaned_df")
-        species_mappings = get_state_val("species_mappings", {})
+        cleaned_df = frames.get("cleaned")
+        species_mappings = state.get("species_mappings") or {}
         can_import = (
             cleaned_df is not None
             and not cleaned_df.empty
@@ -313,14 +362,25 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 warning.visible = False
 
     def refresh_results():
+        # A large import can stall the loop long enough for the browser socket to
+        # drop; if the client was deleted, touching its elements raises. Skip the
+        # UI update in that case rather than crash the whole handler — the browser
+        # reconnects and the data is already in session state.
+        try:
+            client = ui.context.client
+        except Exception:
+            client = None
+        if client is not None and not client.has_socket_connection:
+            return
+
         step3_header.visible = True
         results_container.clear()
         results_container.visible = True
 
         with results_container:
-            cleaned_df = get_df_from_state("cleaned_df")
+            cleaned_df = frames.get("cleaned")
             valid_count = len(cleaned_df) if cleaned_df is not None else 0
-            species_mappings_now = get_state_val("species_mappings", {})
+            species_mappings_now = state.get("species_mappings") or {}
             can_import = (
                 cleaned_df is not None
                 and not cleaned_df.empty
@@ -329,18 +389,18 @@ async def setup_model_tab(dp, loading_dialog) -> None:
 
             # For wide format use matched-video count in CTA; annotation record
             # count goes in the validation section below to avoid confusion.
-            match_stats = get_state_val("match_stats")
+            match_stats = state.get("match_stats")
             if match_stats is not None:
                 cta_label = t("videos_ready_to_import", count=match_stats["matched"])
             else:
                 cta_label = t("rows_ready_to_import", count=valid_count)
 
             # Match stats
-            _render_match_stats(get_state_val("match_stats"))
+            _render_match_stats(state.get("match_stats"))
 
             # Valid / invalid summary
-            errors_df = get_df_from_state("errors_df")
-            error_counts = get_state_val("error_counts") or {}
+            errors_df = frames.get("errors")
+            error_counts = state.get("error_counts") or {}
             total_invalid = (
                 sum(error_counts.values())
                 if error_counts
@@ -349,12 +409,12 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             _render_validation_counts(valid_count, errors_df, cleaned_df, total_invalid)
 
             # Species mappings (if any unknown species require mapping)
-            all_mappings = dict(get_state_val("species_mappings", {}))
-            unmapped = get_state_val("unmapped_species", [])
+            all_mappings = dict(state.get("species_mappings") or {})
+            unmapped = state.get("unmapped_species") or []
             unmapped_origs = {u["original"] for u in unmapped}
             all_species = set(all_mappings.keys()) | unmapped_origs
 
-            uploaded_df_for_counts = get_df_from_state("uploaded_df")
+            uploaded_df_for_counts = frames.get("uploaded")
             if (
                 uploaded_df_for_counts is not None
                 and "value_text" in uploaded_df_for_counts.columns
@@ -374,26 +434,24 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 async def auto_revalidate():
                     # Re-validate against the current mappings so the valid/invalid
                     # counts and CTA update live as the user maps each species.
-                    mappings = get_state_val("species_mappings", {})
-                    uploaded_df = get_df_from_state("uploaded_df")
+                    mappings = state.get("species_mappings") or {}
+                    uploaded_df = frames.get("uploaded")
                     if uploaded_df is None:
                         return
                     cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
                         dp.validate_model_csv, uploaded_df, mappings, get_active_project_id()
                     )
-                    set_state_val(
-                        "cleaned_df",
-                        cleaned_df.to_dict(orient="records") if cleaned_df is not None else None,
-                    )
-                    errors_recs, error_counts = _cap_errors_for_state(errors_df)
-                    set_state_val("errors_df", errors_recs)
-                    set_state_val("error_counts", error_counts)
-                    set_state_val("unmapped_species", unmapped_species)
+                    frames["cleaned"] = cleaned_df
+                    errors_capped, error_counts = _cap_errors_for_state(errors_df)
+                    frames["errors"] = errors_capped
+                    state["error_counts"] = error_counts
+                    state["unmapped_species"] = unmapped_species
                     refresh_results()
 
                 with ui.element("div").classes("w-full").props("id=species-mapping"):
                     render_species_mappings(
                         dp,
+                        state,
                         all_mappings,
                         unmapped_origs,
                         all_species,
@@ -479,7 +537,9 @@ def _render_preview_result(preview: dict) -> None:
                 ui.label(up).classes("text-caption")
 
 
-def _render_annotation_mappings(ann_mappings: list, col_opts_none: dict, config_ui) -> None:
+def _render_annotation_mappings(
+    state: dict, ann_mappings: list, col_opts_none: dict, config_ui
+) -> None:
     type_opts = {
         "species": t("ann_type_species"),
         "blank_non_blank": t("ann_type_blank"),
@@ -527,7 +587,7 @@ def _render_annotation_mappings(ann_mappings: list, col_opts_none: dict, config_
 
             def make_updater(idx, ni, ts, vs, ps, cs):
                 def _upd():
-                    ms = get_state_val("ann_mappings") or []
+                    ms = state.get("ann_mappings") or []
                     if idx < len(ms):
                         ms[idx].update(
                             {
@@ -538,7 +598,7 @@ def _render_annotation_mappings(ann_mappings: list, col_opts_none: dict, config_
                                 "count_col": cs.value or "",
                             }
                         )
-                        set_state_val("ann_mappings", ms)
+                        state["ann_mappings"] = ms
 
                 return _upd
 
@@ -551,9 +611,9 @@ def _render_annotation_mappings(ann_mappings: list, col_opts_none: dict, config_
 
             def make_remover(idx):
                 def _rem():
-                    ms = get_state_val("ann_mappings") or []
+                    ms = state.get("ann_mappings") or []
                     ms.pop(idx)
-                    set_state_val("ann_mappings", ms)
+                    state["ann_mappings"] = ms
                     config_ui.refresh()
 
                 return _rem
@@ -561,7 +621,7 @@ def _render_annotation_mappings(ann_mappings: list, col_opts_none: dict, config_
             ui.button(icon="close", on_click=make_remover(i)).props("flat round dense")
 
     def add_row():
-        ms = get_state_val("ann_mappings") or []
+        ms = state.get("ann_mappings") or []
         ms.append(
             {
                 "model_name": "",
@@ -571,7 +631,7 @@ def _render_annotation_mappings(ann_mappings: list, col_opts_none: dict, config_
                 "count_col": "",
             }
         )
-        set_state_val("ann_mappings", ms)
+        state["ann_mappings"] = ms
         config_ui.refresh()
 
     ui.button(t("add_annotation_row"), icon="add", on_click=add_row).props(
@@ -671,72 +731,62 @@ def _render_error_details(errors_df, error_counts: dict | None = None) -> None:
 # ── Validation logic (pulled out of config_ui to keep it short) ───────────────
 
 
-async def _validate_long(dp, loading_dialog, refresh_results) -> None:
-    recs = get_state_val("raw_df_records")
+async def _validate_long(dp, loading_dialog, frames, state, refresh_results, report_error) -> None:
+    raw_df = frames.get("raw_df")
     loading_dialog.open()
     try:
-        raw_df = pd.DataFrame(recs)
         cleaned_df, errors_df, species_mappings, unmapped_species = await run.io_bound(
             dp.validate_model_csv, raw_df, None, get_active_project_id()
         )
-        set_state_val("match_stats", None)
-        set_state_val("uploaded_df", raw_df.to_dict(orient="records"))
-        set_state_val(
-            "cleaned_df",
-            cleaned_df.to_dict(orient="records") if cleaned_df is not None else None,
-        )
-        errors_recs, error_counts = _cap_errors_for_state(errors_df)
-        set_state_val("errors_df", errors_recs)
-        set_state_val("error_counts", error_counts)
-        set_state_val(
-            "species_mappings",
-            {m["original"]: m.get("mapped_to", "") for m in species_mappings},
-        )
-        set_state_val("unmapped_species", unmapped_species)
+        state["match_stats"] = None
+        frames["uploaded"] = raw_df
+        frames["cleaned"] = cleaned_df
+        errors_capped, error_counts = _cap_errors_for_state(errors_df)
+        frames["errors"] = errors_capped
+        state["error_counts"] = error_counts
+        state["species_mappings"] = {
+            m["original"]: m.get("mapped_to", "") for m in species_mappings
+        }
+        state["unmapped_species"] = unmapped_species
         ui.notify(t("csv_validated"), type="positive")
         refresh_results()
-        await ui.run_javascript(_SCROLL_TO_CTA)
     except Exception as exc:
-        ui.notify(f"{t('error')}: {user_error_message(exc)}", type="negative")
+        report_error(exc)
     finally:
         loading_dialog.close()
 
 
-async def _validate_wide(dp, loading_dialog, path_col, ann_maps, refresh_results) -> None:
-    recs = get_state_val("raw_df_records")
+async def _validate_wide(
+    dp, loading_dialog, frames, state, path_col, ann_maps, refresh_results, report_error
+) -> None:
+    raw_df = frames.get("raw_df")
     loading_dialog.open()
     try:
-        raw_df = pd.DataFrame(recs)
         normalized_df, match_stats = await run.io_bound(
             dp.normalize_model_csv_with_mapping,
             raw_df,
             path_col,
             ann_maps,
             get_active_project_id(),
-            get_state_val("filename_match") or False,
+            state.get("filename_match") or False,
         )
-        set_state_val("match_stats", match_stats)
-        set_state_val("uploaded_df", normalized_df.to_dict(orient="records"))
+        state["match_stats"] = match_stats
+        frames["uploaded"] = normalized_df
 
         cleaned_df, errors_df, species_mappings, unmapped_species = await run.io_bound(
             dp.validate_model_csv, normalized_df, None, get_active_project_id()
         )
-        set_state_val(
-            "cleaned_df",
-            cleaned_df.to_dict(orient="records") if cleaned_df is not None else None,
-        )
-        errors_recs, error_counts = _cap_errors_for_state(errors_df)
-        set_state_val("errors_df", errors_recs)
-        set_state_val("error_counts", error_counts)
-        set_state_val(
-            "species_mappings",
-            {m["original"]: m.get("mapped_to", "") for m in species_mappings},
-        )
-        set_state_val("unmapped_species", unmapped_species)
+        frames["cleaned"] = cleaned_df
+        errors_capped, error_counts = _cap_errors_for_state(errors_df)
+        frames["errors"] = errors_capped
+        state["error_counts"] = error_counts
+        state["species_mappings"] = {
+            m["original"]: m.get("mapped_to", "") for m in species_mappings
+        }
+        state["unmapped_species"] = unmapped_species
         ui.notify(t("csv_validated"), type="positive")
         refresh_results()
-        await ui.run_javascript(_SCROLL_TO_CTA)
     except Exception as exc:
-        ui.notify(f"{t('error')}: {user_error_message(exc)}", type="negative")
+        report_error(exc)
     finally:
         loading_dialog.close()
