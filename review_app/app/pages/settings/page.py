@@ -46,9 +46,7 @@ def _build_settings_content(container: ui.column):
             _proj = _dp_stats.get_project(active_project_id)
             current_project_name = _proj.name if _proj else ""
         current_video_dirs = (
-            [Path(d.path) for d in _dp_stats.get_project_dirs(active_project_id)]
-            if active_project_id
-            else []
+            list(_dp_stats.get_project_dirs(active_project_id)) if active_project_id else []
         )
     except Exception:
         pass
@@ -145,16 +143,56 @@ def _build_settings_content(container: ui.column):
                     ui.label(t("video_dir_label")).classes("text-subtitle1 font-weight-medium")
                 ui.label(t("video_dir_desc")).classes("text-caption  q-mb-md")
 
-                video_dir = current_video_dirs[0] if current_video_dirs else None
-                dir_label = str(video_dir) if video_dir else t("not_available")
-                ui.label(dir_label).classes(
-                    "text-body2  q-pa-xs rounded-borders full-width q-mb-sm"
-                )
+                video_dir_obj = current_video_dirs[0] if current_video_dirs else None
+                if video_dir_obj is not None:
+                    with ui.row().classes("w-full items-center gap-sm q-mb-sm"):
+                        dir_path_input = (
+                            ui.input(value=str(video_dir_obj.path))
+                            .props("outlined dense")
+                            .classes("col")
+                        )
+
+                        async def save_dir_path(dir_id=video_dir_obj.id):
+                            new_path = dir_path_input.value.strip()
+                            if not new_path:
+                                ui.notify(t("video_dir_required"), type="warning")
+                                return
+                            if not Path(new_path).is_dir():
+                                ui.notify(t("video_dir_not_exist"), type="warning")
+                                return
+                            _dp = get_data_provider()
+                            await run.io_bound(_dp.update_project_dir, dir_id, new_path)
+                            ui.notify(t("video_dir_saved"), type="positive")
+                            await asyncio.sleep(0.5)
+                            ui.navigate.to("/settings")
+
+                        ui.button(
+                            t("save"), icon="check", color="primary", on_click=save_dir_path
+                        ).props("dense")
+                    ui.label(t("video_dir_change_hint")).classes(
+                        "text-caption text-grey-6 q-mb-sm"
+                    )
+                else:
+                    ui.label(t("not_available")).classes(
+                        "text-body2  q-pa-xs rounded-borders full-width q-mb-sm"
+                    )
 
                 dir_sync_dialog = ui.dialog()
 
                 async def sync_dir():
                     _dp = get_data_provider()
+                    missing = [
+                        d.path
+                        for d in _dp.get_project_dirs(active_project_id)
+                        if not Path(d.path).is_dir()
+                    ]
+                    if missing:
+                        ui.notify(
+                            t("dir_not_found", path=", ".join(missing)),
+                            type="negative",
+                            multi_line=True,
+                        )
+                        return
                     dir_sync_dialog.clear()
                     with dir_sync_dialog, ui.card().classes("q-pa-lg").style("min-width: 360px"):
                         ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")

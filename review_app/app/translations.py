@@ -306,6 +306,11 @@ TRANSLATIONS = {
         "database": "Database",
         "video_dir_desc": "Path to folder containing your video files",
         "video_dir_placeholder": "/path/to/videos",
+        "video_dir_saved": "Video directory updated",
+        "video_dir_change_hint": (
+            "Use this when the videos moved to a new location. Existing annotations are"
+            " kept; run Sync afterwards to detect added or removed files."
+        ),
         "database_file": "Database File",
         "database_file_desc": "Path to the SQLite database file",
         "database_file_placeholder": "/path/to/review_data.db",
@@ -1092,6 +1097,12 @@ TRANSLATIONS = {
         "database": "Base de Données",
         "video_dir_desc": "Chemin du dossier contenant vos fichiers vidéo",
         "video_dir_placeholder": "/chemin/vers/videos",
+        "video_dir_saved": "Répertoire vidéo mis à jour",
+        "video_dir_change_hint": (
+            "À utiliser lorsque les vidéos ont été déplacées. Les annotations existantes"
+            " sont conservées ; lancez la synchronisation ensuite pour détecter les fichiers"
+            " ajoutés ou supprimés."
+        ),
         "database_file": "Fichier Base de Données",
         "database_file_desc": "Chemin du fichier base de données SQLite",
         "database_file_placeholder": "/chemin/vers/review_data.db",

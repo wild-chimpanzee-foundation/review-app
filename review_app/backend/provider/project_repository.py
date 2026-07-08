@@ -109,6 +109,38 @@ class ProjectMixin(ProviderBase):
         logger.info("Added directory %s to project %s", path, project_id)
         return d
 
+    def update_project_dir(self, dir_id: str, new_path: str) -> ProjectDir | None:
+        """Repoint a project directory to `new_path`, rewriting the stored absolute
+        video_path prefix of every video under it so existing rows (and their
+        annotations) survive the move. A re-sync afterwards picks up added/removed files."""
+        with self.Session() as s:
+            d = s.query(ProjectDir).filter_by(id=dir_id).first()
+            if not d:
+                return None
+            old_prefix = d.path.rstrip("/") + "/"
+            new_prefix = str(new_path).rstrip("/") + "/"
+            if old_prefix != new_prefix:
+                s.execute(
+                    text("""
+                        UPDATE videos
+                        SET video_path = :new_prefix || substr(video_path, :remainder_at)
+                        WHERE project_id IS :pid
+                          AND substr(video_path, 1, :prefix_len) = :old_prefix
+                    """),
+                    {
+                        "new_prefix": new_prefix,
+                        "remainder_at": len(old_prefix) + 1,
+                        "prefix_len": len(old_prefix),
+                        "old_prefix": old_prefix,
+                        "pid": d.project_id,
+                    },
+                )
+            d.path = str(new_path)
+            s.commit()
+            s.refresh(d)
+        logger.info("Updated directory %s to %s (project %s)", dir_id, new_path, d.project_id)
+        return d
+
     def remove_project_dir(self, dir_id: str) -> None:
         with self.Session() as s:
             d = s.query(ProjectDir).filter_by(id=dir_id).first()
