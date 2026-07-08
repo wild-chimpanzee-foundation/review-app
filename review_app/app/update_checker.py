@@ -11,7 +11,7 @@ from review_app import __version__
 from review_app.app.config import get_user_data_dir
 
 GITHUB_REPO = "wild-chimpanzee-foundation/review-app"
-_CACHE_TTL = timedelta(hours=24)
+_CACHE_TTL = timedelta(hours=1)
 logger = logging.getLogger(__name__)
 
 
