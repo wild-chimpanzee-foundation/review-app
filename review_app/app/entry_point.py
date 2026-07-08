@@ -605,6 +605,14 @@ class GUI:
             reload=dev_mode,
             storage_secret=storage_secret,
             session_middleware_kwargs={"max_age": 90 * 24 * 60 * 60},
+            # Heavy CSV imports (tens of thousands of rows) run pandas work that
+            # holds the GIL for several seconds, stalling the event loop past the
+            # 3s default. Without a longer window the browser socket is dropped
+            # and the client deleted mid-import, so UI callbacks then crash with
+            # "client ... has been deleted". Keep the client alive across the
+            # stall and resend more buffered messages after reconnect.
+            reconnect_timeout=60.0,
+            message_history_length=10000,
         )
 
 
