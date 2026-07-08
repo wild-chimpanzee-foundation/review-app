@@ -14,6 +14,20 @@ from review_app.backend.provider.base import ProviderBase
 
 logger = logging.getLogger(__name__)
 
+# Model-output names that don't match any species name/alias by fuzzy matching.
+# Maps lowercase model label -> scientific_name. Only applied when the target
+# species exists in the DB. Keeps model imports from flagging these as unmapped.
+_MODEL_NAME_ALIASES: dict[str, str] = {
+    "chimpanzee": "Pan troglodytes verus",
+    "chimpanzees": "Pan troglodytes verus",
+    "common chimpanzee": "Pan troglodytes verus",
+    "domestic cow": "Bos taurus",
+    "human": "Homo sapiens sapiens - villager",
+    "humans": "Homo sapiens sapiens - villager",
+    "brookes duiker": "Cephalophus ogilbyi brookei",
+    "brooke duiker": "Cephalophus ogilbyi brookei",
+}
+
 
 @dataclass
 class SpeciesCatalog:
@@ -410,6 +424,12 @@ class SpeciesMixin(ProviderBase):
                 variant_to_sci[name_en.lower()] = sci
             if name_fr:
                 variant_to_sci[name_fr.lower()] = sci
+
+        # Fixed model-output aliases, only for species that actually exist.
+        known_sci = {sci for sci, _, _ in rows}
+        for alias, sci in _MODEL_NAME_ALIASES.items():
+            if sci in known_sci:
+                variant_to_sci.setdefault(alias, sci)
         return variant_to_sci
 
     def _validate_species_fuzzy(
