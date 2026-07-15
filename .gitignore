@@ -38,6 +38,9 @@ config.yaml
 *.db-shm
 *.db-wal
 
+# Local log/report dumps
+reports/
+
 # Downloaded/bundled tools
 ffmpeg/
 
