@@ -586,6 +586,56 @@ class GUI:
             get_user_data_dir().mkdir(parents=True, exist_ok=True)
             _secret_path.write_text(storage_secret)
 
+        # Diagnostics for imports that finish server-side but leave the browser stuck on
+        # the loading spinner. That happens when the client is deleted mid-session, which
+        # only follows a dropped socket — but what drops it is not yet known. Validation
+        # speed is ruled out: see tests/test_import_performance.py, where a threaded
+        # validate of 205k rows keeps loop lag at ~15ms because CPython yields the GIL
+        # every 5ms. These logs are here to identify the real trigger in the field: the
+        # connect/disconnect/delete trail dates the death, the watchdog says whether a
+        # stall (from swapping, or any future loop-blocking call) caused it.
+        @app.on_connect
+        def _log_client_connect(client):
+            logger.info("Client connected: %s", client.id)
+
+        @app.on_disconnect
+        def _log_client_disconnect(client):
+            logger.info(
+                "Client disconnected: %s (deleted in %.0fs unless it reconnects)",
+                client.id,
+                client.page.resolve_reconnect_timeout(),
+            )
+
+        @app.on_delete
+        def _log_client_delete(client):
+            # The fatal one: past this point every callback still holding this client's
+            # elements raises "has been deleted", so the page is a zombie even though
+            # the browser still renders it.
+            logger.warning("Client deleted: %s", client.id)
+
+        @app.on_startup
+        async def _watch_event_loop_lag():
+            import asyncio
+            import time
+
+            from nicegui import background_tasks
+
+            interval = 1.0
+            # Well under the engine.io budget (ping_interval + ping_timeout, ~72s at
+            # reconnect_timeout=60) so a stall big enough to drop a socket is obvious,
+            # but high enough that ordinary work stays quiet.
+            warn_at = 5.0
+
+            async def _loop():
+                while True:
+                    before = time.monotonic()
+                    await asyncio.sleep(interval)
+                    lag = time.monotonic() - before - interval
+                    if lag >= warn_at:
+                        logger.warning("Event loop stalled %.1fs (sockets drop at ~72s)", lag)
+
+            background_tasks.create(_loop(), name="event loop lag watchdog")
+
         @app.on_shutdown
         def _backup_on_shutdown():
             logger.info("Shutting down")
