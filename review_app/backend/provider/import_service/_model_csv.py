@@ -312,7 +312,7 @@ class ModelCsvMixin(ImportSharedMixin):
         self, cleaned_df: pd.DataFrame, active_project_id: str | None
     ) -> dict[str, Any]:
         if cleaned_df.empty:
-            return {"inserted_rows": 0}
+            return {"imported": 0}
 
         self._safety_backup()
         logger.info(

@@ -1,9 +1,11 @@
+import logging
+
 import pandas as pd
 from nicegui import run, ui
 
 from review_app.app.state import get_active_project_id
 from review_app.app.translations import t
-from review_app.app.utils import user_error_message
+from review_app.app.utils import ignore_deleted_client, user_error_message
 from review_app.backend.errors import DataImportError
 from review_app.backend.provider.import_service import IGNORE_SENTINEL
 from review_app.backend.utils import df_to_records
@@ -15,6 +17,8 @@ from ._helpers import (
     read_upload_file,
     render_species_mappings,
 )
+
+logger = logging.getLogger(__name__)
 
 _MAX_ERRORS_PER_TYPE = 50
 
@@ -97,7 +101,6 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             msg = _friendly_import_error(exc)
             error_banner_label.text = msg
             error_banner.set_visibility(True)
-            ui.notify(msg, type="negative", multi_line=True, timeout=8000)
 
         def clear_error() -> None:
             error_banner.set_visibility(False)
@@ -113,6 +116,32 @@ async def setup_model_tab(dp, loading_dialog) -> None:
 
         results_container = ui.card().classes("full-width q-mb-lg")
         results_container.visible = False
+
+        # Persistent success banner — a toast vanishes (and can be missed entirely if
+        # the socket dropped during a long import), so import completion is shown
+        # on-page instead of via ui.notify. It sits below the results card, next to the
+        # step 3 import button that triggers it, and outside results_container so a
+        # refresh of that card doesn't clear it.
+        success_banner = (
+            ui.card()
+            .classes("full-width q-pa-sm q-mb-lg bg-green-1 text-green-10")
+            .props("flat bordered")
+        )
+        success_banner.visible = False
+        with success_banner:
+            with ui.row().classes("items-center no-wrap w-full"):
+                ui.icon("check_circle").classes("q-mr-sm")
+                success_banner_label = ui.label("").classes("col text-body2")
+                ui.button(
+                    icon="close", on_click=lambda: success_banner.set_visibility(False)
+                ).props("flat round dense size=sm")
+
+        def report_success(msg: str) -> None:
+            success_banner_label.text = msg
+            success_banner.set_visibility(True)
+
+        def clear_success() -> None:
+            success_banner.set_visibility(False)
 
         upload_widget_holder: list = [None]
 
@@ -301,6 +330,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
     async def do_import():
         loading_dialog.open()
         clear_error()
+        clear_success()
         try:
             mappings = state.get("species_mappings") or {}
             uploaded_df = frames.get("uploaded")
@@ -334,11 +364,15 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 cleaned_df=df_to_import,
                 active_project_id=get_active_project_id(),
             )
-            ui.notify(t("imported_rows", count=result.get("inserted_rows", 0)), type="positive")
-            ui.navigate.to("/review")
+            with ignore_deleted_client():
+                report_success(t("imported_rows", count=result.get("imported", 0)))
         except Exception as exc:
-            report_error(exc)
-            loading_dialog.close()
+            logger.exception("Model CSV import failed")
+            with ignore_deleted_client():
+                report_error(exc)
+        finally:
+            with ignore_deleted_client():
+                loading_dialog.close()
 
     def update_import_button():
         cleaned_df = frames.get("cleaned")
@@ -361,18 +395,12 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             else:
                 warning.visible = False
 
+    @ignore_deleted_client()
     def refresh_results():
-        # A large import can stall the loop long enough for the browser socket to
-        # drop; if the client was deleted, touching its elements raises. Skip the
-        # UI update in that case rather than crash the whole handler — the browser
-        # reconnects and the data is already in session state.
-        try:
-            client = ui.context.client
-        except Exception:
-            client = None
-        if client is not None and not client.has_socket_connection:
-            return
-
+        # A large import can stall the loop long enough for the browser to give up and
+        # the client to be pruned; touching its elements then raises. Skip the UI update
+        # in that case rather than crash the whole handler — the data is already in
+        # session state.
         step3_header.visible = True
         results_container.clear()
         results_container.visible = True

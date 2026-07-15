@@ -4,7 +4,7 @@ from nicegui import run, ui
 
 from review_app.app.state import get_active_project_id
 from review_app.app.translations import t
-from review_app.app.utils import user_error_message
+from review_app.app.utils import ignore_deleted_client, user_error_message
 
 from ._helpers import col_val, make_col_selects, read_upload_file
 
@@ -153,12 +153,17 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
                     msg = t("metadata_imported", count=result["updated"])
                     if result["skipped"]:
                         msg += t("metadata_skipped", count=len(result["skipped"]))
-                    status_label.set_text(msg)
-                    ui.notify(msg, type="positive")
+                    with ignore_deleted_client():
+                        status_label.set_text(msg)
+                        ui.notify(msg, type="positive")
                 except Exception as exc:
-                    ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+                    with ignore_deleted_client():
+                        ui.notify(
+                            t("import_failed", error=user_error_message(exc)), type="negative"
+                        )
                 finally:
-                    loading_dialog.close()
+                    with ignore_deleted_client():
+                        loading_dialog.close()
 
             ui.button(
                 t("metadata_import_btn"),
@@ -191,8 +196,9 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
                     msg = t("metadata_imported", count=result["updated"])
                     if result["skipped"]:
                         msg += t("metadata_skipped", count=len(result["skipped"]))
-                    status_label.set_text(msg)
-                    ui.notify(msg, type="positive")
+                    with ignore_deleted_client():
+                        status_label.set_text(msg)
+                        ui.notify(msg, type="positive")
                 else:
                     # External format: show column config
                     frames["meta_df"] = df
@@ -209,10 +215,12 @@ def setup_metadata_tab(dp, loading_dialog) -> None:
                     if upload_holder[0]:
                         upload_holder[0].visible = False
             except Exception as exc:
-                ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+                with ignore_deleted_client():
+                    ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
                 return
             finally:
-                loading_dialog.close()
+                with ignore_deleted_client():
+                    loading_dialog.close()
 
             if frames.get("meta_df") is not None:
                 await _run_validate(
@@ -250,9 +258,12 @@ async def _run_validate(dp, loading_dialog, frames, state, results_ui, results_c
             col_val(state, "meta_file_col"),
         )
         state["meta_validation"] = result
-        results_container.visible = True
-        results_ui.refresh()
+        with ignore_deleted_client():
+            results_container.visible = True
+            results_ui.refresh()
     except Exception as exc:
-        ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+        with ignore_deleted_client():
+            ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
     finally:
-        loading_dialog.close()
+        with ignore_deleted_client():
+            loading_dialog.close()

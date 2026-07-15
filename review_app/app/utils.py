@@ -1,11 +1,29 @@
 import asyncio
 import logging
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from review_app.app.translations import t
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def ignore_deleted_client():
+    """Swallow the RuntimeError NiceGUI raises when the client this code is updating
+    has already been deleted — the browser was closed, or the tab stayed offline long
+    enough to be pruned. Guard UI calls that trail a long operation with this.
+
+    Do not test `has_socket_connection` instead: a socket drop is usually transient,
+    the outbox queues updates and flushes them on reconnect, so skipping the call on
+    a disconnect strands whatever it was meant to do (an open loading dialog, say)."""
+    try:
+        yield
+    except RuntimeError as exc:
+        if "has been deleted" not in str(exc):
+            raise
+        logger.debug("Skipped UI update; client gone: %s", exc)
 
 
 def require_login() -> bool:

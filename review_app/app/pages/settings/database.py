@@ -16,7 +16,11 @@ from review_app.app.state import (
     set_data_provider,
 )
 from review_app.app.translations import t
-from review_app.app.utils import format_utc_timestamp, user_error_message
+from review_app.app.utils import (
+    format_utc_timestamp,
+    ignore_deleted_client,
+    user_error_message,
+)
 from review_app.backend.db.backup import (
     BackupError,
     create_backup,
@@ -62,14 +66,17 @@ def render_database_section(
                     try:
                         backup_path = await run.io_bound(create_backup, reason="manual")
                     except BackupError as exc:
-                        ui.notify(
-                            t("backup_failed", error=t(exc.user_message_key)), type="negative"
-                        )
+                        with ignore_deleted_client():
+                            ui.notify(
+                                t("backup_failed", error=t(exc.user_message_key)), type="negative"
+                            )
                         return
-                ui.download(backup_path)
-                ui.notify(t("backup_created"), type="positive")
+                with ignore_deleted_client():
+                    ui.download(backup_path)
+                    ui.notify(t("backup_created"), type="positive")
             finally:
-                loading_dialog.close()
+                with ignore_deleted_client():
+                    loading_dialog.close()
 
         ui.button(
             t("backup_download_btn"), icon="download", color="primary", on_click=do_backup_download
@@ -99,14 +106,16 @@ def render_database_section(
                     try:
                         pre_restore_path = await run.io_bound(restore_backup, selected_backup_path)
                     except BackupError as exc:
-                        ui.notify(
-                            t("restore_failed", error=t(exc.user_message_key)), type="negative"
-                        )
+                        with ignore_deleted_client():
+                            ui.notify(
+                                t("restore_failed", error=t(exc.user_message_key)), type="negative"
+                            )
                         return
                     except Exception as exc:
-                        ui.notify(
-                            t("restore_failed", error=user_error_message(exc)), type="negative"
-                        )
+                        with ignore_deleted_client():
+                            ui.notify(
+                                t("restore_failed", error=user_error_message(exc)), type="negative"
+                            )
                         return
 
                     reset_app_state()
@@ -115,9 +124,11 @@ def render_database_section(
                     except Exception as exc:
                         logger.exception("Restored DB failed to open; rolling back")
                         if pre_restore_path is None:
-                            ui.notify(
-                                t("restore_failed", error=user_error_message(exc)), type="negative"
-                            )
+                            with ignore_deleted_client():
+                                ui.notify(
+                                    t("restore_failed", error=user_error_message(exc)),
+                                    type="negative",
+                                )
                             return
                         try:
                             await run.io_bound(remove_db_sidecars, db_path)
@@ -125,12 +136,15 @@ def render_database_section(
                             new_dp = LocalDataProvider()
                             set_data_provider(new_dp)
                             load_settings_from_db(new_dp)
-                            ui.notify(
-                                t("restore_failed", error=user_error_message(exc)), type="negative"
-                            )
+                            with ignore_deleted_client():
+                                ui.notify(
+                                    t("restore_failed", error=user_error_message(exc)),
+                                    type="negative",
+                                )
                         except Exception:
                             logger.exception("Rollback after restore failure also failed")
-                            ui.notify(t("restore_rollback_failed"), type="negative")
+                            with ignore_deleted_client():
+                                ui.notify(t("restore_rollback_failed"), type="negative")
                         return
 
                     set_data_provider(new_dp)
@@ -153,11 +167,13 @@ def render_database_section(
                     ]
                     set_media_dirs(all_dirs)
 
-                    ui.notify(t("restore_success"), type="positive")
-                    await asyncio.sleep(0.5)
-                    ui.navigate.to("/overview")
+                    with ignore_deleted_client():
+                        ui.notify(t("restore_success"), type="positive")
+                        await asyncio.sleep(0.5)
+                        ui.navigate.to("/overview")
             finally:
-                loading_dialog.close()
+                with ignore_deleted_client():
+                    loading_dialog.close()
 
         async def open_restore_dialog():
             backups = list_backups()
@@ -235,7 +251,8 @@ def render_database_section(
             async with _db_op_lock:
                 dp = _get_dp()
                 await run.io_bound(dp.delete_model_annotations, active_project_id)
-                ui.notify(t("delete_model_ann_success"), type="positive")
+                with ignore_deleted_client():
+                    ui.notify(t("delete_model_ann_success"), type="positive")
 
         with delete_ann_dialog, ui.card().classes("q-pa-lg"):
             ui.label(t("delete_model_ann_confirm")).classes("text-h6 q-mb-sm")
@@ -272,9 +289,10 @@ def render_database_section(
                     try:
                         await run.io_bound(create_backup, reason="reset_database")
                     except BackupError as exc:
-                        ui.notify(
-                            t("backup_failed", error=t(exc.user_message_key)), type="negative"
-                        )
+                        with ignore_deleted_client():
+                            ui.notify(
+                                t("backup_failed", error=t(exc.user_message_key)), type="negative"
+                            )
                         return
                     old_dp.engine.dispose()
                     current_db_path.unlink()
@@ -282,8 +300,9 @@ def render_database_section(
                 else:
                     old_dp.engine.dispose()
                 reset_app_state(keep_prefs=True)
-                ui.notify(t("database_reset"), type="positive")
-                ui.navigate.to("/login")
+                with ignore_deleted_client():
+                    ui.notify(t("database_reset"), type="positive")
+                    ui.navigate.to("/login")
 
         with reset_dialog, ui.card().classes("q-pa-lg"):
             ui.label(t("reset_confirm")).classes("text-h6 q-mb-sm")

@@ -10,7 +10,7 @@ from review_app.app.state import (
     get_annotator_name,
 )
 from review_app.app.translations import t
-from review_app.app.utils import user_error_message
+from review_app.app.utils import ignore_deleted_client, user_error_message
 from review_app.backend.utils import df_to_records
 
 from ._helpers import (
@@ -70,9 +70,11 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                 annotator = get_annotator_name().replace(" ", "_")
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                 filename = f"annotations_{project_name}_{annotator}_{timestamp}.csv"
-                ui.download(df.to_csv(index=False).encode("utf-8"), filename)
+                with ignore_deleted_client():
+                    ui.download(df.to_csv(index=False).encode("utf-8"), filename)
             except Exception as exc:
-                ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
+                with ignore_deleted_client():
+                    ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
 
         async def do_export_ai() -> None:
             try:
@@ -82,9 +84,11 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                 project_name = project.name.replace(" ", "_") if project else "project"
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                 filename = f"ai_annotations_{project_name}_{timestamp}.csv"
-                ui.download(df.to_csv(index=False).encode("utf-8"), filename)
+                with ignore_deleted_client():
+                    ui.download(df.to_csv(index=False).encode("utf-8"), filename)
             except Exception as exc:
-                ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
+                with ignore_deleted_client():
+                    ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
 
         with ui.row().classes("gap-sm"):
             ui.button(t("export_annotations"), icon="download", on_click=do_export).props(
@@ -396,14 +400,17 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         if skipped_obs:
                             summary += " " + t("skipped_obs_historic", count=skipped_obs)
                             notify_type = "warning"
-                        import_status.set_text(summary)
-                        ui.notify(summary, type=notify_type)
+                        with ignore_deleted_client():
+                            import_status.set_text(summary)
+                            ui.notify(summary, type=notify_type)
                     except Exception as exc:
-                        ui.notify(
-                            t("import_failed", error=user_error_message(exc)), type="negative"
-                        )
+                        with ignore_deleted_client():
+                            ui.notify(
+                                t("import_failed", error=user_error_message(exc)), type="negative"
+                            )
                     finally:
-                        loading_dialog.close()
+                        with ignore_deleted_client():
+                            loading_dialog.close()
 
                 ui.button(
                     t("historic_import_btn"),
@@ -490,14 +497,18 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                                 col_val(state, "ann_path_col") if is_single else "",
                             )
                             state["ann_validation"] = result
-                            ui.notify(t("mappings_applied"), type="positive")
-                            results_ui.refresh()
+                            with ignore_deleted_client():
+                                ui.notify(t("mappings_applied"), type="positive")
+                                results_ui.refresh()
                         except Exception as exc:
-                            ui.notify(
-                                t("mapping_failed", error=user_error_message(exc)), type="negative"
-                            )
+                            with ignore_deleted_client():
+                                ui.notify(
+                                    t("mapping_failed", error=user_error_message(exc)),
+                                    type="negative",
+                                )
                         finally:
-                            loading_dialog.close()
+                            with ignore_deleted_client():
+                                loading_dialog.close()
 
                     pending = [k for k, v in (state.get(_MAPPINGS_KEY) or {}).items() if not v]
                     can_apply = frames.get("ann_df") is not None and not pending
@@ -550,12 +561,17 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         msg += t("skipped_historic", count=len(result["skipped"]))
                     if result["skipped_observations"]:
                         msg += t("skipped_obs_historic", count=len(result["skipped_observations"]))
-                    import_status.set_text(msg)
-                    ui.notify(msg, type="positive")
+                    with ignore_deleted_client():
+                        import_status.set_text(msg)
+                        ui.notify(msg, type="positive")
                 except Exception as exc:
-                    ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+                    with ignore_deleted_client():
+                        ui.notify(
+                            t("import_failed", error=user_error_message(exc)), type="negative"
+                        )
                 finally:
-                    loading_dialog.close()
+                    with ignore_deleted_client():
+                        loading_dialog.close()
 
             ui.button(
                 t("historic_import_btn"),
@@ -612,10 +628,12 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     if upload_holder[0]:
                         upload_holder[0].visible = False
             except Exception as exc:
-                ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+                with ignore_deleted_client():
+                    ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
                 return
             finally:
-                loading_dialog.close()
+                with ignore_deleted_client():
+                    loading_dialog.close()
 
             fmt = state.get("ann_format")
             if fmt == "external":
@@ -661,12 +679,15 @@ async def _run_validate(dp, loading_dialog, frames, state, results_ui, results_c
             col_val(state, "ann_path_col") if is_single else "",
         )
         state["ann_validation"] = result
-        results_container.visible = True
-        results_ui.refresh()
+        with ignore_deleted_client():
+            results_container.visible = True
+            results_ui.refresh()
     except Exception as exc:
-        ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+        with ignore_deleted_client():
+            ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
     finally:
-        loading_dialog.close()
+        with ignore_deleted_client():
+            loading_dialog.close()
 
 
 async def _run_app_validate(
@@ -685,9 +706,12 @@ async def _run_app_validate(
             state.get(_APP_MAPPINGS_KEY) or {},
         )
         state["ann_validation"] = result
-        results_container.visible = True
-        results_ui.refresh()
+        with ignore_deleted_client():
+            results_container.visible = True
+            results_ui.refresh()
     except Exception as exc:
-        ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
+        with ignore_deleted_client():
+            ui.notify(t("import_failed", error=user_error_message(exc)), type="negative")
     finally:
-        loading_dialog.close()
+        with ignore_deleted_client():
+            loading_dialog.close()
