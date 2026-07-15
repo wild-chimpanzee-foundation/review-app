@@ -1,10 +1,12 @@
 import logging
+import time
 
 import pandas as pd
 from nicegui import run, ui
 
 from review_app.app.state import get_active_project_id
 from review_app.app.translations import t
+from review_app.app.utils import client_id as _client_id
 from review_app.app.utils import ignore_deleted_client, user_error_message
 from review_app.backend.errors import DataImportError
 from review_app.backend.provider.import_service import IGNORE_SENTINEL
@@ -53,6 +55,8 @@ async def setup_model_tab(dp, loading_dialog) -> None:
 
     import_button_holder: list = [None]
     pending_warning_holder: list = [None]
+    # Concurrent revalidations in flight; logged to show them overlapping.
+    _revalidate_depth: list = [0]
 
     # Per-page in-memory state, kept out of app.storage.user on purpose: that store
     # re-serializes the whole user-storage dict to disk on every mutation, so routing
@@ -174,6 +178,14 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 raw_df = read_upload_file(content)
                 columns = list(raw_df.columns)
                 sample = raw_df.head(3).to_dict(orient="records")
+                logger.info(
+                    "CSV uploaded: %.1f MB, %d rows, %d cols, format=%s (client=%s)",
+                    len(content) / 1e6,
+                    len(raw_df),
+                    len(columns),
+                    "long" if is_long_format(columns) else "wide",
+                    _client_id(),
+                )
 
                 frames["raw_df"] = raw_df
                 frames["uploaded"] = None
@@ -328,6 +340,8 @@ async def setup_model_tab(dp, loading_dialog) -> None:
         ui.label(t("step_review_import")).classes("text-subtitle1 font-weight-bold")
 
     async def do_import():
+        started = time.monotonic()
+        logger.info("Import clicked (client=%s)", _client_id())
         loading_dialog.open()
         clear_error()
         clear_success()
@@ -364,14 +378,20 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 cleaned_df=df_to_import,
                 active_project_id=get_active_project_id(),
             )
-            with ignore_deleted_client():
+            logger.info(
+                "Import finished in %.1fs: %s rows (client=%s)",
+                time.monotonic() - started,
+                result.get("imported", 0),
+                _client_id(),
+            )
+            with ignore_deleted_client("import success banner"):
                 report_success(t("imported_rows", count=result.get("imported", 0)))
         except Exception as exc:
-            logger.exception("Model CSV import failed")
-            with ignore_deleted_client():
+            logger.exception("Import failed after %.1fs", time.monotonic() - started)
+            with ignore_deleted_client("import error banner"):
                 report_error(exc)
         finally:
-            with ignore_deleted_client():
+            with ignore_deleted_client("import loading dialog close"):
                 loading_dialog.close()
 
     def update_import_button():
@@ -466,8 +486,30 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                     uploaded_df = frames.get("uploaded")
                     if uploaded_df is None:
                         return
-                    cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
-                        dp.validate_model_csv, uploaded_df, mappings, get_active_project_id()
+                    # One of these runs per species the user maps, each re-validating the
+                    # whole frame. The in-flight count exposes them piling up: nothing
+                    # debounces or cancels them, so mapping quickly starts several at once.
+                    _revalidate_depth[0] += 1
+                    started = time.monotonic()
+                    logger.info(
+                        "Revalidate start: %d rows, %d mappings, %d already in flight (client=%s)",
+                        len(uploaded_df),
+                        len(mappings),
+                        _revalidate_depth[0] - 1,
+                        _client_id(),
+                    )
+                    try:
+                        cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
+                            dp.validate_model_csv, uploaded_df, mappings, get_active_project_id()
+                        )
+                    finally:
+                        _revalidate_depth[0] -= 1
+                    logger.info(
+                        "Revalidate done in %.1fs: %d valid, %d invalid, %d unmapped",
+                        time.monotonic() - started,
+                        len(cleaned_df),
+                        len(errors_df),
+                        len(unmapped_species),
                     )
                     frames["cleaned"] = cleaned_df
                     errors_capped, error_counts = _cap_errors_for_state(errors_df)

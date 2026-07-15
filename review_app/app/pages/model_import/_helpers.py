@@ -1,6 +1,7 @@
 import csv
 import inspect
 import io
+import logging
 from typing import Callable
 
 import pandas as pd
@@ -9,6 +10,8 @@ from nicegui import ui
 from review_app.app.state import get_language
 from review_app.app.translations import t
 from review_app.backend.provider.import_service import BLANK_SENTINEL, IGNORE_SENTINEL
+
+logger = logging.getLogger(__name__)
 
 
 def col_val(state: dict, key: str) -> str:
@@ -240,6 +243,9 @@ def render_species_mappings(
                     mappings = state.get(mappings_state_key) or {}
                     mappings[o] = sel.value
                     state[mappings_state_key] = mappings
+                    # The user-action trail: each of these kicks off a full revalidation,
+                    # so the gaps between them show how hard the page is being worked.
+                    logger.info("Species mapping changed: %r -> %r", o, sel.value)
                     await _call_maybe_async(update_import_button)
 
                 return _update

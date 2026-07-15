@@ -49,6 +49,15 @@ def _setup_logging(user_data_dir: Path, dev_mode: bool) -> None:
     logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
     logging.getLogger("watchfiles").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
+    # Per-chunk upload spam: ~3.7k lines for a single large CSV.
+    logging.getLogger("python_multipart").setLevel(logging.INFO)
+    if not dev_mode:
+        # Logs one line per saved annotation, so a bulk import alone can evict the whole
+        # rotating log. Field logs are the only way we can diagnose import problems on
+        # the annotators' machines, so keep it out of release builds.
+        logging.getLogger("review_app.backend.provider.annotation_repository").setLevel(
+            logging.INFO
+        )
 
     def _excepthook(exc_type, exc_value, exc_tb):
         if issubclass(exc_type, KeyboardInterrupt):

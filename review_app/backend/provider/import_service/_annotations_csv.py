@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections import Counter
 from typing import Any
 
@@ -139,12 +140,14 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         mode: str = "override",
         species_mappings: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        _t0 = time.monotonic()
         self._safety_backup()
         logger.info(
-            "Importing annotations CSV: %d rows (project=%s, mode=%s)",
+            "Importing annotations CSV: %d rows (project=%s, mode=%s), backup took %.1fs",
             len(df),
             active_project_id,
             mode,
+            time.monotonic() - _t0,
         )
         df, has_path, known_ids = self._resolve_annotation_video_ids(df, active_project_id)
         map_species = self._build_annotation_species_mapper(
@@ -292,7 +295,8 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                 skipped[:10],
             )
         logger.info(
-            "Annotations CSV import complete: imported=%d skipped=%d skipped_obs=%d",
+            "Annotations CSV import complete in %.1fs: imported=%d skipped=%d skipped_obs=%d",
+            time.monotonic() - _t0,
             imported,
             len(skipped),
             skipped_observations,
@@ -388,6 +392,7 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         species_mappings: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Dry-run of import_annotations_csv: resolves paths and diffs observations without writing."""
+        _t0 = time.monotonic()
         df, has_path, known_ids = self._resolve_annotation_video_ids(df, active_project_id)
         mappings = species_mappings or {}
 
@@ -517,6 +522,13 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             if not append:
                 obs_to_delete += len(existing_ids - incoming_ids)
 
+        logger.info(
+            "Validated annotations CSV in %.1fs: %d matched, %d skipped, %d unknown species",
+            time.monotonic() - _t0,
+            matched,
+            len(skipped),
+            len(unknown_species),
+        )
         return {
             "matched": matched,
             "skipped": skipped,

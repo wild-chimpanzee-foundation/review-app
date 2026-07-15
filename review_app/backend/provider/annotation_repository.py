@@ -622,7 +622,9 @@ class AnnotationMixin(ProviderBase):
                 )
 
             session.commit()
-            logger.info(
+            # DEBUG, not INFO: bulk imports call this per row, and at INFO it drowned
+            # everything else out of the rotating log (18k of 24k lines in one report).
+            logger.debug(
                 "Annotation saved: video=%s is_blank=%s observations=%d labeled_by=%s",
                 video_id,
                 is_blank,

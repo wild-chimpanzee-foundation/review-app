@@ -9,11 +9,27 @@ from review_app.app.translations import t
 logger = logging.getLogger(__name__)
 
 
+def client_id() -> str:
+    """Best-effort NiceGUI client id, for correlating an operation against the
+    connect/disconnect/delete trail. Never raises — it is only ever used for logging,
+    and it gets called on paths where the client may already be gone."""
+    try:
+        from nicegui import ui
+
+        return str(ui.context.client.id)
+    except Exception:
+        return "?"
+
+
 @contextmanager
-def ignore_deleted_client():
+def ignore_deleted_client(context: str = ""):
     """Swallow the RuntimeError NiceGUI raises when the client this code is updating
     has already been deleted — the browser was closed, or the tab stayed offline long
     enough to be pruned. Guard UI calls that trail a long operation with this.
+
+    Pass `context` naming the update being skipped: each hit means the user is sitting
+    in front of a page that can no longer be updated, so these lines are the trail we
+    follow when someone reports a stuck spinner.
 
     Do not test `has_socket_connection` instead: a socket drop is usually transient,
     the outbox queues updates and flushes them on reconnect, so skipping the call on
@@ -23,7 +39,11 @@ def ignore_deleted_client():
     except RuntimeError as exc:
         if "has been deleted" not in str(exc):
             raise
-        logger.debug("Skipped UI update; client gone: %s", exc)
+        # exc_info pins the exact UI call that was dropped without needing every one of
+        # the ~50 call sites labelled by hand. Rare enough that the traceback is cheap.
+        logger.warning(
+            "Client gone, skipped UI update (%s)", context or "unlabelled", exc_info=True
+        )
 
 
 def require_login() -> bool:

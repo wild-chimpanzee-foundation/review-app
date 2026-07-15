@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -55,6 +56,7 @@ class ModelCsvMixin(ImportSharedMixin):
         Matching: tries parent_dir/filename (suffix) first, falls back to unambiguous stem.
         ann_mappings: list of {model_name, annotation_type, value_col, prob_col}
         """
+        _t0 = time.monotonic()
         lookup = self._build_video_path_lookup(active_project_id)
 
         rows: list[dict[str, Any]] = []
@@ -141,6 +143,14 @@ class ModelCsvMixin(ImportSharedMixin):
             "unmatched": len(unmatched_paths),
             "unmatched_sample": unmatched_paths[:10],
         }
+        logger.info(
+            "Normalized %d rows to %d in %.1fs: %d matched, %d unmatched",
+            len(df),
+            len(rows),
+            time.monotonic() - _t0,
+            stats["matched"],
+            stats["unmatched"],
+        )
         return pd.DataFrame(rows) if rows else empty, stats
 
     def validate_model_csv(
@@ -149,6 +159,7 @@ class ModelCsvMixin(ImportSharedMixin):
         mappings: dict[str, str] | None = None,
         active_project_id: str | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame, list[dict], list[dict]]:
+        _t0 = time.monotonic()
         src = df.copy()
         src.columns = [str(c).strip() for c in src.columns]
 
@@ -301,6 +312,15 @@ class ModelCsvMixin(ImportSharedMixin):
             )
 
         unmapped_species_list = [{"original": s} for s in sorted(unmapped_species)]
+        logger.info(
+            "Validated %d rows in %.1fs: %d valid, %d invalid, %d unique species, %d need mapping",
+            len(src),
+            time.monotonic() - _t0,
+            len(prepared_rows),
+            len(errors),
+            len(unique_species),
+            len(unmapped_species_list),
+        )
         return (
             pd.DataFrame(prepared_rows),
             pd.DataFrame(errors),
@@ -312,11 +332,16 @@ class ModelCsvMixin(ImportSharedMixin):
         self, cleaned_df: pd.DataFrame, active_project_id: str | None
     ) -> dict[str, Any]:
         if cleaned_df.empty:
+            logger.info("Import skipped: nothing to import")
             return {"imported": 0}
 
+        _t0 = time.monotonic()
         self._safety_backup()
         logger.info(
-            "Importing %d model annotation rows (project=%s)", len(cleaned_df), active_project_id
+            "Importing %d model annotation rows (project=%s), backup took %.1fs",
+            len(cleaned_df),
+            active_project_id,
+            time.monotonic() - _t0,
         )
 
         now = self._utcnow_dt()
@@ -358,7 +383,11 @@ class ModelCsvMixin(ImportSharedMixin):
                 rows,
             )
 
-        logger.info("Model CSV import complete: %d rows upserted", len(rows))
+        logger.info(
+            "Model CSV import complete: %d rows upserted in %.1fs",
+            len(rows),
+            time.monotonic() - _t0,
+        )
         return {"imported": len(rows)}
 
     def export_model_annotations_csv(
