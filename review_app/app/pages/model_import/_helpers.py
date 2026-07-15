@@ -276,16 +276,6 @@ def render_species_mappings(
             else None
         )
 
-        async def accept_originals():
-            mappings = state.get(mappings_state_key) or {}
-            for orig in all_species:
-                if not mappings.get(orig):
-                    mappings[orig] = orig
-            state[mappings_state_key] = mappings
-            await _call_maybe_async(update_import_button)
-            if apply_btn:
-                apply_btn.props("wide")
-
         async def ignore_unmapped():
             mappings = state.get(mappings_state_key) or {}
             for orig in all_species:
@@ -296,10 +286,6 @@ def render_species_mappings(
             if apply_btn:
                 apply_btn.props("wide")
 
-        if pending_unmapped:
-            ui.button(t("accept_originals"), icon="check", on_click=accept_originals).props(
-                "flat dense color=warning"
-            )
         if pending_unmapped and show_ignore_option:
             ui.button(t("ignore_unmapped"), icon="block", on_click=ignore_unmapped).props(
                 "flat dense color=grey"
