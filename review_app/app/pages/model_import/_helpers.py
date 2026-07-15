@@ -2,7 +2,7 @@ import csv
 import inspect
 import io
 import logging
-from typing import Callable
+from typing import Callable, Iterable
 
 import pandas as pd
 from nicegui import ui
@@ -16,6 +16,19 @@ logger = logging.getLogger(__name__)
 
 def col_val(state: dict, key: str) -> str:
     return state.get(key) or ""
+
+
+def pending_species(all_species: Iterable[str], mappings: dict[str, str] | None) -> list[str]:
+    """Which of `all_species` still need a mapping decision from the user, sorted.
+
+    Ask with the full species set, never with just the keys of the mappings dict: a
+    species the fuzzy matcher had no suggestion for is only ever recorded in
+    state["unmapped_species"], so it is absent from that dict until the user touches it.
+    Reading the dict alone therefore reported "nothing pending" for exactly the species
+    that most needed attention — hiding the bulk-resolve buttons and leaving the import
+    button enabled while those rows were being silently dropped."""
+    current = mappings or {}
+    return [s for s in sorted(all_species) if not current.get(s)]
 
 
 async def _call_maybe_async(fn: Callable) -> None:
@@ -252,7 +265,7 @@ def render_species_mappings(
 
             select.on_value_change(make_update_fn(orig, select))
 
-    pending_unmapped = [k for k, v in (state.get(mappings_state_key) or {}).items() if not v]
+    pending_unmapped = pending_species(all_species, state.get(mappings_state_key))
 
     with ui.row().classes("items-center gap-sm q-mt-sm"):
         apply_btn = (

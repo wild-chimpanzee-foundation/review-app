@@ -16,6 +16,7 @@ from ._helpers import (
     auto_suggest_mappings,
     auto_suggest_path_col,
     is_long_format,
+    pending_species,
     read_upload_file,
     render_species_mappings,
 )
@@ -394,19 +395,21 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             with ignore_deleted_client("import loading dialog close"):
                 loading_dialog.close()
 
+    def _pending_species() -> list[str]:
+        species_mappings = state.get("species_mappings") or {}
+        unmapped = state.get("unmapped_species") or []
+        return pending_species(
+            set(species_mappings) | {u["original"] for u in unmapped}, species_mappings
+        )
+
     def update_import_button():
         cleaned_df = frames.get("cleaned")
-        species_mappings = state.get("species_mappings") or {}
-        can_import = (
-            cleaned_df is not None
-            and not cleaned_df.empty
-            and all(v for v in species_mappings.values())
-        )
+        pending = _pending_species()
+        can_import = cleaned_df is not None and not cleaned_df.empty and not pending
         btn = import_button_holder[0]
         if btn:
             btn.props(f"{'disabled' if not can_import else ''}")
 
-        pending = [k for k, v in species_mappings.items() if not v]
         warning = pending_warning_holder[0]
         if warning:
             if pending:
@@ -428,12 +431,7 @@ async def setup_model_tab(dp, loading_dialog) -> None:
         with results_container:
             cleaned_df = frames.get("cleaned")
             valid_count = len(cleaned_df) if cleaned_df is not None else 0
-            species_mappings_now = state.get("species_mappings") or {}
-            can_import = (
-                cleaned_df is not None
-                and not cleaned_df.empty
-                and all(v for v in species_mappings_now.values())
-            )
+            can_import = cleaned_df is not None and not cleaned_df.empty and not _pending_species()
 
             # For wide format use matched-video count in CTA; annotation record
             # count goes in the validation section below to avoid confusion.
