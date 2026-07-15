@@ -1,40 +1,14 @@
 import csv
-import inspect
 import io
-import logging
-from typing import Callable, Iterable
 
 import pandas as pd
 from nicegui import ui
 
-from review_app.app.state import get_language
 from review_app.app.translations import t
-from review_app.backend.provider.import_service import BLANK_SENTINEL, IGNORE_SENTINEL
-
-logger = logging.getLogger(__name__)
 
 
 def col_val(state: dict, key: str) -> str:
     return state.get(key) or ""
-
-
-def pending_species(all_species: Iterable[str], mappings: dict[str, str] | None) -> list[str]:
-    """Which of `all_species` still need a mapping decision from the user, sorted.
-
-    Ask with the full species set, never with just the keys of the mappings dict: a
-    species the fuzzy matcher had no suggestion for is only ever recorded in
-    state["unmapped_species"], so it is absent from that dict until the user touches it.
-    Reading the dict alone therefore reported "nothing pending" for exactly the species
-    that most needed attention — hiding the bulk-resolve buttons and leaving the import
-    button enabled while those rows were being silently dropped."""
-    current = mappings or {}
-    return [s for s in sorted(all_species) if not current.get(s)]
-
-
-async def _call_maybe_async(fn: Callable) -> None:
-    result = fn()
-    if inspect.isawaitable(result):
-        await result
 
 
 def read_upload_file(content: bytes) -> pd.DataFrame:
@@ -196,101 +170,3 @@ def is_long_format(columns: list[str]) -> bool:
     col_set = set(columns)
     has_path = bool(col_set & _PATH_COL_ALIASES)
     return has_path and {"annotation_type", "model_name"}.issubset(col_set)
-
-
-def render_species_mappings(
-    dp,
-    state: dict,
-    all_mappings: dict,
-    unmapped_origs: set,
-    all_species: set,
-    apply_fn: Callable,
-    update_import_button: Callable,
-    can_apply: bool,
-    mappings_state_key: str = "species_mappings",
-    show_blank_option: bool = False,
-    show_ignore_option: bool = False,
-    show_apply_button: bool = True,
-    project_id: str | None = None,
-    species_counts: dict[str, int] | None = None,
-    extra_species_options: dict[str, str] | None = None,
-) -> None:
-    """Shared species-mapping editor used by both the model-import and historic-import tabs.
-
-    ``extra_species_options`` adds selectable targets beyond the project's configured
-    species — used for the "keep original / add to project as a new species" option.
-    """
-    ui.label(t("species_mappings")).classes("text-subtitle1 font-weight-medium q-mb-sm")
-    ui.label(t("edit_mappings_desc")).classes("text-caption q-mb-md")
-
-    species_map = dp.get_species_display_map(get_language(), project_id)
-    blank_opt = {BLANK_SENTINEL: f"— {t('map_to_blank_video')} —"} if show_blank_option else {}
-    ignore_opt = {IGNORE_SENTINEL: f"— {t('map_to_ignore')} —"} if show_ignore_option else {}
-    select_options = {
-        "": "",
-        **blank_opt,
-        **ignore_opt,
-        **(extra_species_options or {}),
-        **species_map,
-    }
-
-    for orig in sorted(all_species):
-        current_mapping = all_mappings.get(orig, "")
-        is_unmapped = orig in unmapped_origs
-        with ui.row().classes("w-full items-center q-mb-sm"):
-            count = species_counts.get(orig) if species_counts else None
-            count_suffix = f" ({count})" if count is not None else ""
-            ui.label(f"{orig}{count_suffix}").classes(
-                f"col {'text-negative' if is_unmapped else ''}"
-            )
-            safe_value = current_mapping if current_mapping in select_options else ""
-            select = ui.select(
-                label=t("mapped_to"),
-                options=select_options,
-                value=safe_value,
-                with_input=True,
-            ).props("outlined dense class=col-4")
-
-            def make_update_fn(o: str, sel) -> Callable:
-                async def _update():
-                    mappings = state.get(mappings_state_key) or {}
-                    mappings[o] = sel.value
-                    state[mappings_state_key] = mappings
-                    # The user-action trail: each of these kicks off a full revalidation,
-                    # so the gaps between them show how hard the page is being worked.
-                    logger.info("Species mapping changed: %r -> %r", o, sel.value)
-                    await _call_maybe_async(update_import_button)
-
-                return _update
-
-            select.on_value_change(make_update_fn(orig, select))
-
-    pending_unmapped = pending_species(all_species, state.get(mappings_state_key))
-
-    with ui.row().classes("items-center gap-sm q-mt-sm"):
-        apply_btn = (
-            ui.button(t("apply"), icon="refresh", on_click=apply_fn, color="primary").props(
-                f"wide {'disabled' if not can_apply else ''}"
-            )
-            if show_apply_button
-            else None
-        )
-
-        async def ignore_unmapped():
-            mappings = state.get(mappings_state_key) or {}
-            for orig in all_species:
-                if not mappings.get(orig):
-                    mappings[orig] = IGNORE_SENTINEL
-            state[mappings_state_key] = mappings
-            await _call_maybe_async(update_import_button)
-            if apply_btn:
-                apply_btn.props("wide")
-
-        if pending_unmapped and show_ignore_option:
-            ui.button(t("ignore_unmapped"), icon="block", on_click=ignore_unmapped).props(
-                "flat dense color=grey"
-            )
-    if pending_unmapped:
-        ui.label(t("map_all_to_import", list=", ".join(pending_unmapped))).classes(
-            "text-warning text-caption q-mt-xs"
-        )

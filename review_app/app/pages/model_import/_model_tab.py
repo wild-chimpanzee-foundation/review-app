@@ -16,10 +16,9 @@ from ._helpers import (
     auto_suggest_mappings,
     auto_suggest_path_col,
     is_long_format,
-    pending_species,
     read_upload_file,
-    render_species_mappings,
 )
+from ._species_mapping import MODEL_IMPORT, pending_species, render_species_mappings
 
 logger = logging.getLogger(__name__)
 
@@ -513,10 +512,9 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                         unmapped_origs,
                         all_species,
                         apply_fn=lambda: None,
-                        update_import_button=auto_revalidate,
+                        on_change=auto_revalidate,
                         can_apply=False,
-                        show_ignore_option=True,
-                        show_apply_button=False,
+                        options=MODEL_IMPORT,
                         project_id=get_active_project_id(),
                         species_counts=species_counts,
                     )

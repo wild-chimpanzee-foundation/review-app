@@ -18,11 +18,15 @@ from ._helpers import (
     col_val,
     make_col_selects,
     read_upload_file,
+)
+from ._species_mapping import (
+    ANNOTATIONS_APP_FORMAT,
+    ANNOTATIONS_EXTERNAL_FORMAT,
     render_species_mappings,
 )
 
-_MAPPINGS_KEY = "ann_species_mappings"
-_APP_MAPPINGS_KEY = "app_species_mappings"
+_MAPPINGS_KEY = ANNOTATIONS_EXTERNAL_FORMAT.mappings_state_key
+_APP_MAPPINGS_KEY = ANNOTATIONS_APP_FORMAT.mappings_state_key
 
 # Required path-matching columns — default to the first column in the CSV
 _REQUIRED_COLS = ("ann_folder_col", "ann_video_col", "ann_species_col")
@@ -333,8 +337,6 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         all_mappings = state.get(_APP_MAPPINGS_KEY) or {}
                         all_species = set(unknown) | set(all_mappings.keys())
                         unmapped_origs = set(unknown)
-                        # Let the user keep each species as-is and add it to the project.
-                        extra_options = {s: t("add_as_new_species", name=s) for s in all_species}
 
                         async def apply_app_mappings() -> None:
                             await _run_app_validate(
@@ -348,12 +350,10 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                             unmapped_origs,
                             all_species,
                             apply_fn=apply_app_mappings,
-                            update_import_button=results_ui.refresh,
+                            on_change=results_ui.refresh,
                             can_apply=frames.get("ann_df") is not None,
-                            mappings_state_key=_APP_MAPPINGS_KEY,
-                            show_ignore_option=True,
+                            options=ANNOTATIONS_APP_FORMAT,
                             project_id=get_active_project_id(),
-                            extra_species_options=extra_options,
                         )
 
                 ui.separator().classes("q-my-md")
@@ -520,10 +520,9 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         unmapped_origs,
                         all_species,
                         apply_fn=apply_mappings,
-                        update_import_button=results_ui.refresh,
+                        on_change=results_ui.refresh,
                         can_apply=can_apply,
-                        mappings_state_key=_MAPPINGS_KEY,
-                        show_blank_option=True,
+                        options=ANNOTATIONS_EXTERNAL_FORMAT,
                         project_id=get_active_project_id(),
                     )
 

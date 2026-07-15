@@ -8,7 +8,7 @@ buttons until the user set that species to "" once, and left Import enabled whil
 species' rows were being dropped from the import.
 """
 
-from review_app.app.pages.model_import._helpers import pending_species
+from review_app.app.pages.model_import._species_mapping import pending_species
 
 
 def test_species_with_no_suggestion_is_pending_before_the_user_touches_it():
