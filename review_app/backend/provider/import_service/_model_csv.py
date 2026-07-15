@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
@@ -16,6 +17,43 @@ from review_app.backend.path_matching import resolve_video_path
 from review_app.backend.provider.import_service._shared import ImportSharedMixin
 
 logger = logging.getLogger(__name__)
+
+# Columns of the frame handed to import_model_csv.
+_CLEANED_COLUMNS = [
+    "video_id",
+    "video_path",
+    "annotation_type",
+    "model_name",
+    "value_text",
+    "value_num",
+    "probability",
+    "t_start_sec",
+    "t_end_sec",
+]
+# Base rows additionally carry the bookkeeping the mapping pass needs. Underscore-
+# prefixed so they are obviously not part of the imported data; dropped on the way out.
+_BASE_ROW_COLUMNS = [*_CLEANED_COLUMNS, "_pos", "_row_number", "_species"]
+_BASE_ERROR_COLUMNS = ["_pos", "row_number", "video_path", "error"]
+
+
+@dataclass
+class ModelCsvBase:
+    """The mapping-independent half of validating a model CSV.
+
+    Produced once per uploaded frame by validate_model_csv_base and then reused across
+    however many species mappings the user tries, since none of this depends on them.
+    Treat as read-only: apply_species_mappings may be called on it repeatedly.
+    """
+
+    rows: pd.DataFrame
+    """Rows that passed every mapping-independent check, value_text still original."""
+    errors: pd.DataFrame
+    """Rejections no mapping can fix (unknown path, bad probability, ...)."""
+    fuzzy: dict[str, tuple[bool, str | None]] = field(default_factory=dict)
+    """Per distinct species: (matched the catalog?, best match)."""
+    unique_species: set[str] = field(default_factory=set)
+    """Distinct species values seen across the frame, before any mapping."""
+    total_rows: int = 0
 
 
 class ModelCsvMixin(ImportSharedMixin):
@@ -159,6 +197,31 @@ class ModelCsvMixin(ImportSharedMixin):
         mappings: dict[str, str] | None = None,
         active_project_id: str | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame, list[dict], list[dict]]:
+        """Validate an uploaded model CSV against `mappings`.
+
+        Convenience wrapper: does the whole job in one call. Callers that re-validate the
+        same frame under changing species mappings (the import page does, once per species
+        the user maps) should instead call validate_model_csv_base once and then
+        apply_species_mappings per change — see those two for why."""
+        base = self.validate_model_csv_base(df, active_project_id)
+        return self.apply_species_mappings(base, mappings)
+
+    def validate_model_csv_base(
+        self,
+        df: pd.DataFrame,
+        active_project_id: str | None = None,
+    ) -> ModelCsvBase:
+        """Everything about validating a model CSV that species mappings cannot change.
+
+        Path resolution, numeric parsing and annotation-type normalisation all produce the
+        same answer no matter what the user maps a species to, and they cost a per-row
+        Python loop over the whole frame (~8s for 205k rows, dominated by iterrows and
+        per-cell to_numeric). So this runs once per uploaded frame and the result feeds
+        apply_species_mappings, which is vectorised and cheap.
+
+        The returned rows are the ones that survived these checks. They still carry their
+        original value_text; a row that turns out to need a species mapping is only
+        rejected in the mapping pass."""
         _t0 = time.monotonic()
         src = df.copy()
         src.columns = [str(c).strip() for c in src.columns]
@@ -170,8 +233,6 @@ class ModelCsvMixin(ImportSharedMixin):
                 if alias in src.columns:
                     src = src.rename(columns={alias: "video_path"})
                     break
-
-        mappings = mappings or {}
 
         required = {"video_path", "annotation_type", "model_name"}
         missing = required - set(src.columns)
@@ -208,22 +269,21 @@ class ModelCsvMixin(ImportSharedMixin):
 
         prepared_rows: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
-        species_mappings: list[dict[str, str]] = []
-        unmapped_species: set[str] = set()
 
-        for idx, row in src.iterrows():
+        for pos, (idx, row) in enumerate(src.iterrows()):
             row_num = int(idx) + 1
             video_id = str(row.get("video_path", "")).strip()
             model_name = str(row.get("model_name", "")).strip()
             raw_type = str(row.get("annotation_type", "")).strip()
 
             if not video_id:
-                errors.append({"row_number": row_num, "error": "error_missing_path"})
+                errors.append({"_pos": pos, "row_number": row_num, "error": "error_missing_path"})
                 continue
             video_path = video_map.get(video_id, video_id)
             if video_id not in known_videos:
                 errors.append(
                     {
+                        "_pos": pos,
                         "row_number": row_num,
                         "video_path": video_path,
                         "error": "error_unknown_path",
@@ -233,6 +293,7 @@ class ModelCsvMixin(ImportSharedMixin):
             if not model_name:
                 errors.append(
                     {
+                        "_pos": pos,
                         "row_number": row_num,
                         "video_path": video_path,
                         "error": "error_missing_model_name",
@@ -245,6 +306,7 @@ class ModelCsvMixin(ImportSharedMixin):
             except DataImportError as exc:
                 errors.append(
                     {
+                        "_pos": pos,
                         "row_number": row_num,
                         "video_path": video_path,
                         "error": exc.user_message_key,
@@ -257,6 +319,7 @@ class ModelCsvMixin(ImportSharedMixin):
             if probability is not None and not (0.0 <= probability <= 1.0):
                 errors.append(
                     {
+                        "_pos": pos,
                         "row_number": row_num,
                         "video_path": video_path,
                         "error": "error_invalid_probability",
@@ -274,28 +337,12 @@ class ModelCsvMixin(ImportSharedMixin):
             value_num = pd.to_numeric(row.get("value_num"), errors="coerce")
             value_num = None if pd.isna(value_num) else float(value_num)
 
-            if annotation_type in {"species", "object_detection"} and value_text:
-                original_value = value_text
-                mapped_to = mappings.get(original_value)
-                if mapped_to:
-                    value_text = mapped_to
-                else:
-                    is_valid, best_match = species_fuzzy_cache.get(original_value, (False, None))
-                    if not is_valid:
-                        unmapped_species.add(original_value)
-                        errors.append(
-                            {
-                                "row_number": row_num,
-                                "video_path": video_path,
-                                "error": "error_species_needs_mapping",
-                            }
-                        )
-                        continue
-                    if best_match != original_value:
-                        species_mappings.append(
-                            {"original": original_value, "mapped_to": best_match}
-                        )
-                    value_text = best_match
+            # Whether this row's value_text is a species that needs resolving. Left
+            # unresolved: which species map to what is exactly the part the user is
+            # still changing, so it belongs to the mapping pass.
+            needs_species = (
+                value_text if (annotation_type in {"species", "object_detection"}) else None
+            )
 
             prepared_rows.append(
                 {
@@ -308,24 +355,112 @@ class ModelCsvMixin(ImportSharedMixin):
                     "probability": probability,
                     "t_start_sec": t_start,
                     "t_end_sec": t_end,
+                    "_pos": pos,
+                    "_row_number": row_num,
+                    "_species": needs_species,
                 }
             )
 
-        unmapped_species_list = [{"original": s} for s in sorted(unmapped_species)]
         logger.info(
-            "Validated %d rows in %.1fs: %d valid, %d invalid, %d unique species, %d need mapping",
+            "Validated %d rows in %.1fs (mapping-independent pass): %d rows kept, "
+            "%d rejected, %d unique species",
             len(src),
             time.monotonic() - _t0,
             len(prepared_rows),
             len(errors),
             len(unique_species),
-            len(unmapped_species_list),
+        )
+        return ModelCsvBase(
+            rows=pd.DataFrame(prepared_rows, columns=_BASE_ROW_COLUMNS),
+            errors=pd.DataFrame(errors, columns=_BASE_ERROR_COLUMNS),
+            fuzzy=species_fuzzy_cache,
+            unique_species=unique_species,
+            total_rows=len(src),
+        )
+
+    def apply_species_mappings(
+        self, base: ModelCsvBase, mappings: dict[str, str] | None = None
+    ) -> tuple[pd.DataFrame, pd.DataFrame, list[dict], list[dict]]:
+        """Resolve species against `mappings` and split base rows into valid and invalid.
+
+        Vectorised and cheap, because it is the part the import page repeats: once per
+        species the user maps, plus once more on import. All the per-row work already
+        happened in validate_model_csv_base.
+
+        Resolution per distinct species (there are tens of these, not hundreds of
+        thousands): an explicit mapping wins; otherwise the catalog match found by the
+        base pass is used; otherwise the row is rejected as needing a mapping."""
+        _t0 = time.monotonic()
+        mappings = mappings or {}
+
+        # Resolve once per distinct species, then broadcast over the rows.
+        resolution: dict[str, str | None] = {}
+        suggested: dict[str, str] = {}
+        for species in base.unique_species:
+            mapped_to = mappings.get(species)
+            if mapped_to:
+                resolution[species] = mapped_to
+                continue
+            is_valid, best_match = base.fuzzy.get(species, (False, None))
+            resolution[species] = best_match if is_valid else None
+            if is_valid and best_match != species:
+                suggested[species] = best_match
+
+        rows = base.rows
+        is_species = rows["_species"].notna()
+        resolved = rows["_species"].map(resolution)
+        needs_mapping = is_species & resolved.isna()
+
+        kept = rows.loc[~needs_mapping].copy()
+        # Only species rows take their resolved value; everything else keeps value_text.
+        kept_is_species = is_species.loc[~needs_mapping]
+        kept.loc[kept_is_species, "value_text"] = resolved.loc[~needs_mapping][kept_is_species]
+
+        rejected = rows.loc[needs_mapping]
+        mapping_errors = pd.DataFrame(
+            {
+                "_pos": rejected["_pos"],
+                "row_number": rejected["_row_number"],
+                "video_path": rejected["video_path"],
+                "error": "error_species_needs_mapping",
+            },
+            columns=_BASE_ERROR_COLUMNS,
+        )
+        # Sorting by _pos re-interleaves mapping errors with the base ones, so the frame
+        # stays in CSV row order as it was when both were produced by a single loop.
+        errors = (
+            pd.concat([base.errors, mapping_errors], ignore_index=True)
+            .sort_values("_pos", kind="stable")
+            .drop(columns=["_pos"])
+            .reset_index(drop=True)
+        )
+
+        # One entry per affected row rather than per species: callers collapse this into
+        # a dict, and the row counts are what the mapping UI displays.
+        kept_species = kept.loc[kept_is_species, "_species"]
+        species_mappings: list[dict[str, str]] = []
+        for species in sorted(suggested):
+            count = int((kept_species == species).sum())
+            species_mappings.extend(
+                [{"original": species, "mapped_to": suggested[species]}] * count
+            )
+
+        unmapped_species = sorted(set(rejected["_species"]))
+        cleaned = kept.drop(columns=["_pos", "_row_number", "_species"]).reset_index(drop=True)
+
+        logger.info(
+            "Applied %d species mappings in %.2fs: %d valid, %d invalid, %d still unmapped",
+            len(mappings),
+            time.monotonic() - _t0,
+            len(cleaned),
+            len(errors),
+            len(unmapped_species),
         )
         return (
-            pd.DataFrame(prepared_rows),
-            pd.DataFrame(errors),
+            cleaned,
+            errors,
             species_mappings,
-            unmapped_species_list,
+            [{"original": s} for s in unmapped_species],
         )
 
     def import_model_csv(

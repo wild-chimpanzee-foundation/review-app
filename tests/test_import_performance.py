@@ -54,27 +54,63 @@ def _make_frame(paths, n_rows=N_ROWS):
 
 @pytest.mark.slow
 def test_validate_model_csv_timing(tmp_db, mock_probe, capsys):
-    """Print the cost of one validation pass, with and without a species mapping.
+    """Print the cost of the whole-frame validation, base pass and mapping pass.
 
-    The app re-runs this on every species-mapping dropdown change, so this cost is paid
-    once per mapped species, not once per import.
+    The mapping pass is the one that matters: the import page runs it once per species
+    the user maps, so it is what stands between a usable page and one that grinds for
+    seconds per dropdown change.
     """
     dp, paths = _make_provider(tmp_db)
     df = _make_frame(paths)
 
     with capsys.disabled():
         print(f"\nframe: {len(df)} rows over {len(paths)} videos")
+
+        t0 = time.monotonic()
+        cleaned, errors, _sm, unmapped = dp.validate_model_csv(df, {}, None)
+        print(
+            f"  validate_model_csv (both)  {time.monotonic() - t0:6.2f}s  "
+            f"cleaned={len(cleaned):7d} errors={len(errors):7d} unmapped={len(unmapped)}"
+        )
+
+        t0 = time.monotonic()
+        base = dp.validate_model_csv_base(df, None)
+        base_dt = time.monotonic() - t0
+        print(f"  base pass (once/upload)    {base_dt:6.2f}s  rows={len(base.rows)}")
+
         for label, mappings in [
-            ("first pass (no mappings)", {}),
-            ("after mapping 1 species", {"wild_boar_XX": "deer"}),
+            ("apply, no mappings", {}),
+            ("apply, 1 species mapped", {"wild_boar_XX": "deer"}),
+            ("apply, 2 species mapped", {"wild_boar_XX": "deer", "unknown_thing_YY": "fox"}),
         ]:
             t0 = time.monotonic()
-            cleaned, errors, _sm, unmapped = dp.validate_model_csv(df, mappings, None)
-            dt = time.monotonic() - t0
+            cleaned, errors, _sm, unmapped = dp.apply_species_mappings(base, mappings)
+            apply_dt = time.monotonic() - t0
             print(
-                f"  {label:26s} {dt:6.1f}s  cleaned={len(cleaned):7d} "
-                f"errors={len(errors):7d} unmapped={len(unmapped)}"
+                f"  {label:26s} {apply_dt:6.2f}s  cleaned={len(cleaned):7d} "
+                f"errors={len(errors):7d} unmapped={len(unmapped)} "
+                f"({base_dt / max(apply_dt, 1e-9):.0f}x cheaper than the base pass)"
             )
+
+
+@pytest.mark.slow
+def test_apply_species_mappings_is_fast_enough_for_interactive_use(tmp_db, mock_probe):
+    """The mapping pass runs on every dropdown change, so it must feel instant.
+
+    Threshold is loose (annotators' laptops are much slower than a dev machine) but far
+    below the ~8s that the old whole-frame revalidation cost per mapped species.
+    """
+    dp, paths = _make_provider(tmp_db)
+    base = dp.validate_model_csv_base(_make_frame(paths), None)
+
+    t0 = time.monotonic()
+    dp.apply_species_mappings(base, {"wild_boar_XX": "deer"})
+    elapsed = time.monotonic() - t0
+
+    assert elapsed < 1.0, (
+        f"applying a species mapping to {N_ROWS} rows took {elapsed:.2f}s; "
+        "the import page runs this on every dropdown change"
+    )
 
 
 @pytest.mark.slow

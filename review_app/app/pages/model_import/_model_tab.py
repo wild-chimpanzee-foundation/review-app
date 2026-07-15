@@ -55,8 +55,6 @@ async def setup_model_tab(dp, loading_dialog) -> None:
 
     import_button_holder: list = [None]
     pending_warning_holder: list = [None]
-    # Concurrent revalidations in flight; logged to show them overlapping.
-    _revalidate_depth: list = [0]
 
     # Per-page in-memory state, kept out of app.storage.user on purpose: that store
     # re-serializes the whole user-storage dict to disk on every mutation, so routing
@@ -191,6 +189,8 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 frames["uploaded"] = None
                 frames["cleaned"] = None
                 frames["errors"] = None
+                # Belongs to the previous CSV; validating the new one rebuilds it.
+                frames["base"] = None
                 state["raw_csv_columns"] = columns
                 state["path_col"] = auto_suggest_path_col(columns, sample)
                 state["ann_mappings"] = auto_suggest_mappings(columns)
@@ -347,12 +347,12 @@ async def setup_model_tab(dp, loading_dialog) -> None:
         clear_success()
         try:
             mappings = state.get("species_mappings") or {}
-            uploaded_df = frames.get("uploaded")
-            if uploaded_df is not None:
-                # Re-validate with the current mappings so species mapped just before
-                # import are reflected in cleaned_df, without a separate "Apply" step.
-                cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
-                    dp.validate_model_csv, uploaded_df, mappings, get_active_project_id()
+            base = frames.get("base")
+            if base is not None:
+                # Re-apply the current mappings so species mapped just before import are
+                # reflected in cleaned_df, without a separate "Apply" step.
+                cleaned_df, errors_df, _, unmapped_species = dp.apply_species_mappings(
+                    base, mappings
                 )
                 frames["cleaned"] = cleaned_df
                 errors_capped, error_counts = _cap_errors_for_state(errors_df)
@@ -480,36 +480,25 @@ async def setup_model_tab(dp, loading_dialog) -> None:
                 ui.separator().classes("q-my-md")
 
                 async def auto_revalidate():
-                    # Re-validate against the current mappings so the valid/invalid
-                    # counts and CTA update live as the user maps each species.
+                    # Re-apply the current mappings so the valid/invalid counts and the
+                    # CTA update live as the user maps each species. Only the mapping
+                    # pass runs here; the base pass was done once at validate time, which
+                    # is what keeps this off the event loop for more than a moment.
                     mappings = state.get("species_mappings") or {}
-                    uploaded_df = frames.get("uploaded")
-                    if uploaded_df is None:
+                    base = frames.get("base")
+                    if base is None:
                         return
-                    # One of these runs per species the user maps, each re-validating the
-                    # whole frame. The in-flight count exposes them piling up: nothing
-                    # debounces or cancels them, so mapping quickly starts several at once.
-                    _revalidate_depth[0] += 1
                     started = time.monotonic()
-                    logger.info(
-                        "Revalidate start: %d rows, %d mappings, %d already in flight (client=%s)",
-                        len(uploaded_df),
-                        len(mappings),
-                        _revalidate_depth[0] - 1,
-                        _client_id(),
+                    cleaned_df, errors_df, _, unmapped_species = dp.apply_species_mappings(
+                        base, mappings
                     )
-                    try:
-                        cleaned_df, errors_df, _, unmapped_species = await run.io_bound(
-                            dp.validate_model_csv, uploaded_df, mappings, get_active_project_id()
-                        )
-                    finally:
-                        _revalidate_depth[0] -= 1
                     logger.info(
-                        "Revalidate done in %.1fs: %d valid, %d invalid, %d unmapped",
+                        "Revalidate done in %.2fs: %d valid, %d invalid, %d unmapped (client=%s)",
                         time.monotonic() - started,
                         len(cleaned_df),
                         len(errors_df),
                         len(unmapped_species),
+                        _client_id(),
                     )
                     frames["cleaned"] = cleaned_df
                     errors_capped, error_counts = _cap_errors_for_state(errors_df)
@@ -805,8 +794,12 @@ async def _validate_long(dp, loading_dialog, frames, state, refresh_results, rep
     raw_df = frames.get("raw_df")
     loading_dialog.open()
     try:
-        cleaned_df, errors_df, species_mappings, unmapped_species = await run.io_bound(
-            dp.validate_model_csv, raw_df, None, get_active_project_id()
+        # The expensive pass, run once here and cached in frames["base"]; every later
+        # species mapping only re-runs apply_species_mappings against it.
+        base = await run.io_bound(dp.validate_model_csv_base, raw_df, get_active_project_id())
+        frames["base"] = base
+        cleaned_df, errors_df, species_mappings, unmapped_species = dp.apply_species_mappings(
+            base, None
         )
         state["match_stats"] = None
         frames["uploaded"] = raw_df
@@ -843,8 +836,13 @@ async def _validate_wide(
         state["match_stats"] = match_stats
         frames["uploaded"] = normalized_df
 
-        cleaned_df, errors_df, species_mappings, unmapped_species = await run.io_bound(
-            dp.validate_model_csv, normalized_df, None, get_active_project_id()
+        # See _validate_long: base pass once, mapping pass per change.
+        base = await run.io_bound(
+            dp.validate_model_csv_base, normalized_df, get_active_project_id()
+        )
+        frames["base"] = base
+        cleaned_df, errors_df, species_mappings, unmapped_species = dp.apply_species_mappings(
+            base, None
         )
         frames["cleaned"] = cleaned_df
         errors_capped, error_counts = _cap_errors_for_state(errors_df)
