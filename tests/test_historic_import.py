@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 from conftest import seed_builtin_tags
-from review_app.backend.provider.import_service import BLANK_SENTINEL
+from review_app.backend.provider.import_service import BLANK_SENTINEL, IGNORE_SENTINEL
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 # ---------------------------------------------------------------------------
@@ -125,13 +125,32 @@ def test_validate_mapped_species_not_flagged(historic_provider):
     assert result["unknown_species"] == []
 
 
-def test_validate_mapped_to_invalid_species_is_flagged(historic_provider):
-    """Mapping an unknown species to another unknown target must still be reported."""
+def test_validate_mapped_to_unknown_target_is_an_add_new(historic_provider):
+    """A target matching no catalog entry is the "add as a new species" choice, not an error."""
     df = pd.DataFrame([_row(species="unmappable_xyz")])
     result = historic_provider.validate_historic_csv(
         df, active_project_id=None, species_mappings={"unmappable_xyz": "also_invalid_xyz"}
     )
-    assert "unmappable_xyz" in result["unknown_species"]
+    assert result["unknown_species"] == []
+    assert result["species_to_add"] == ["also_invalid_xyz"]
+
+
+def test_validate_cleared_mapping_stays_unknown(historic_provider):
+    """A species whose mapping the user cleared is still awaiting a decision."""
+    df = pd.DataFrame([_row(species="unmappable_xyz")])
+    result = historic_provider.validate_historic_csv(
+        df, active_project_id=None, species_mappings={"unmappable_xyz": ""}
+    )
+    assert result["unknown_species"] == ["unmappable_xyz"]
+
+
+def test_validate_mapped_to_ignore_not_flagged(historic_provider):
+    """Mapping to the ignore sentinel resolves the species; its rows are dropped on import."""
+    df = pd.DataFrame([_row(species="unmappable_xyz")])
+    result = historic_provider.validate_historic_csv(
+        df, active_project_id=None, species_mappings={"unmappable_xyz": IGNORE_SENTINEL}
+    )
+    assert result["unknown_species"] == []
 
 
 def test_validate_mapped_to_blank_sentinel_not_flagged(historic_provider):
@@ -218,6 +237,56 @@ def test_import_blank_sentinel_mapping_creates_blank_label(historic_provider):
     )
     assert result["imported"] == 1
     assert historic_provider.get_video_detail(ids["v1"])["is_blank"] == 1
+
+
+def test_import_ignore_sentinel_drops_the_observation(historic_provider):
+    ids = _ids(historic_provider)
+    df = pd.DataFrame([_row(species="unknown_sp")])
+    result = historic_provider.import_historic_csv(
+        df, active_project_id=None, species_mappings={"unknown_sp": IGNORE_SENTINEL}
+    )
+    assert result["imported"] == 1
+    assert result["skipped_observations"] == []
+    detail = historic_provider.get_video_detail(ids["v1"])
+    assert detail["manual_selections"] == []
+
+
+def test_import_ignore_sentinel_does_not_mark_the_video_blank(historic_provider):
+    """Ignoring the only species says nothing about whether the video was empty."""
+    ids = _ids(historic_provider)
+    df = pd.DataFrame([_row(species="unknown_sp")])
+    historic_provider.import_historic_csv(
+        df, active_project_id=None, species_mappings={"unknown_sp": IGNORE_SENTINEL}
+    )
+    assert not historic_provider.get_video_detail(ids["v1"])["is_blank"]
+
+
+def test_import_ignored_species_leaves_its_siblings_alone(historic_provider):
+    ids = _ids(historic_provider)
+    df = pd.DataFrame(
+        [
+            _row("cam_a", "v1", species="unknown_sp"),
+            _row("cam_a", "v1", species="deer"),
+        ]
+    )
+    historic_provider.import_historic_csv(
+        df, active_project_id=None, species_mappings={"unknown_sp": IGNORE_SENTINEL}
+    )
+    sels = historic_provider.get_video_detail(ids["v1"])["manual_selections"]
+    assert [s["species"] for s in sels] == ["deer"]
+
+
+def test_import_add_new_species_registers_and_imports_it(historic_provider):
+    ids = _ids(historic_provider)
+    df = pd.DataFrame([_row(species="unknown_sp")])
+    result = historic_provider.import_historic_csv(
+        df, active_project_id=None, species_mappings={"unknown_sp": "Novum inventum"}
+    )
+    assert result["imported"] == 1
+    assert result["skipped_observations"] == []
+    assert historic_provider.species_exists("Novum inventum")
+    sels = historic_provider.get_video_detail(ids["v1"])["manual_selections"]
+    assert [s["species"] for s in sels] == ["Novum inventum"]
 
 
 def test_import_multiple_species_same_video(historic_provider):

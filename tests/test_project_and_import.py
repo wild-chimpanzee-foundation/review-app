@@ -513,6 +513,71 @@ def test_import_ignores_mapped_species(provider_with_project):
     assert detail["manual_selections"] == []
 
 
+def test_import_blank_mapped_species_labels_the_video_blank(provider_with_project):
+    """Mapping to the blank sentinel means the video was empty, not that a species was seen."""
+    from review_app.backend.provider.import_service._shared import BLANK_SENTINEL
+
+    dp, project, _ = provider_with_project
+    dp.set_project_species(project.id, ["deer"])
+    paths = _project_clip_paths(dp, project)
+    a_path = next(p for p in paths if p.endswith("a.mp4"))
+
+    df = pd.DataFrame([{"video_path": a_path, "is_blank": 0, "species": "rien"}])
+    result = dp.import_annotations_csv(
+        df, active_project_id=project.id, species_mappings={"rien": BLANK_SENTINEL}
+    )
+
+    assert result["imported"] == 1
+    assert result["skipped_observations"] == 0
+    assert not dp.species_exists("rien")
+    detail = dp.get_video_detail(paths[a_path])
+    assert detail["is_blank"] == 1
+    assert detail["manual_selections"] == []
+
+
+def test_blank_mapped_species_loses_to_a_real_observation(provider_with_project):
+    """One real species on the video outvotes a blank-mapped row on the same video."""
+    from review_app.backend.provider.import_service._shared import BLANK_SENTINEL
+
+    dp, project, _ = provider_with_project
+    dp.set_project_species(project.id, ["deer"])
+    paths = _project_clip_paths(dp, project)
+    a_path = next(p for p in paths if p.endswith("a.mp4"))
+
+    df = pd.DataFrame(
+        [
+            {"video_path": a_path, "is_blank": 0, "species": "rien"},
+            {"video_path": a_path, "is_blank": 0, "species": "deer"},
+        ]
+    )
+    dp.import_annotations_csv(
+        df, active_project_id=project.id, species_mappings={"rien": BLANK_SENTINEL}
+    )
+
+    detail = dp.get_video_detail(paths[a_path])
+    assert not detail["is_blank"]
+    assert [s["species"] for s in detail["manual_selections"]] == ["deer"]
+
+
+def test_validate_blank_mapped_species_previews_the_blank(provider_with_project):
+    """The dry-run must report the blank the import would set, or the preview lies."""
+    from review_app.backend.provider.import_service._shared import BLANK_SENTINEL
+
+    dp, project, _ = provider_with_project
+    dp.set_project_species(project.id, ["deer"])
+    paths = _project_clip_paths(dp, project)
+    a_path = next(p for p in paths if p.endswith("a.mp4"))
+
+    df = pd.DataFrame([{"video_path": a_path, "is_blank": 0, "species": "rien"}])
+    result = dp.validate_annotations_csv(
+        df, active_project_id=project.id, species_mappings={"rien": BLANK_SENTINEL}
+    )
+
+    assert result["blanks_to_set"] == 1
+    assert result["unknown_species"] == []
+    assert result["species_to_add"] == []
+
+
 def test_import_creates_brand_new_species(provider_with_project):
     """A species absent from the global catalog is created, then attached and imported."""
     dp, project, _ = provider_with_project

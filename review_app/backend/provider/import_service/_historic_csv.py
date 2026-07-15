@@ -11,6 +11,7 @@ from review_app.backend.provider.import_service._shared import (
     BLANK_SENTINEL,
     BLANK_SPECIES,
     FALSY_STRINGS,
+    IGNORE_SENTINEL,
     ImportSharedMixin,
 )
 
@@ -113,6 +114,7 @@ class HistoricCsvMixin(ImportSharedMixin):
         }
 
         unknown_species: set[str] = set()
+        species_to_add: set[str] = set()
         seen_unmatched: set[str] = set()
         unmatched_paths: list[str] = []
 
@@ -129,22 +131,31 @@ class HistoricCsvMixin(ImportSharedMixin):
                         continue
                     if sp in species_mappings:
                         mapped = species_mappings[sp]
-                        # Blank sentinel is always valid; empty means not yet mapped
-                        if mapped and mapped != BLANK_SENTINEL:
-                            is_valid, _ = self._validate_species_fuzzy(mapped, variant_map)
-                            if not is_valid:
-                                unknown_species.add(sp)
+                        # Both sentinels resolve the species without naming one: the rows
+                        # are dropped, or they say the video is blank.
+                        if mapped in (BLANK_SENTINEL, IGNORE_SENTINEL):
+                            continue
+                        if not mapped:
+                            unknown_species.add(sp)  # awaiting a mapping decision
+                            continue
+                        is_valid, _ = self._validate_species_fuzzy(mapped, variant_map)
+                        if not is_valid:
+                            # A target that matches no catalog entry is the "add as a new
+                            # species" choice; the import creates it.
+                            species_to_add.add(mapped)
                     else:
                         is_valid, _ = self._validate_species_fuzzy(sp, variant_map)
                         if not is_valid:
                             unknown_species.add(sp)
 
         logger.info(
-            "Historic CSV validation: total=%d matched=%d unmatched=%d unknown_species=%d",
+            "Historic CSV validation: total=%d matched=%d unmatched=%d unknown_species=%d "
+            "species_to_add=%d",
             len(video_df),
             len(groups),
             len(seen_unmatched),
             len(unknown_species),
+            len(species_to_add),
         )
         return {
             "total_rows": len(video_df),
@@ -153,6 +164,7 @@ class HistoricCsvMixin(ImportSharedMixin):
             "unmatched": len(seen_unmatched),
             "unmatched_paths": unmatched_paths,
             "unknown_species": sorted(unknown_species),
+            "species_to_add": sorted(species_to_add),
         }
 
     def import_historic_csv(
@@ -186,10 +198,30 @@ class HistoricCsvMixin(ImportSharedMixin):
             data_type_val,
             path_col=path_col,
         )
-        valid_for_project = set(self.get_valid_species(active_project_id))
-        variant_map = {
-            k: v for k, v in self._build_species_variant_map().items() if v in valid_for_project
-        }
+
+        def _project_variant_map() -> dict[str, str]:
+            valid_for_project = set(self.get_valid_species(active_project_id))
+            return {
+                k: v
+                for k, v in self._build_species_variant_map().items()
+                if v in valid_for_project
+            }
+
+        variant_map = _project_variant_map()
+        # A mapping target that matches no catalog entry is the "add as a new species"
+        # choice, so create it up front — then rebuild the map so it validates below.
+        to_add = sorted(
+            {
+                target
+                for target in species_mappings.values()
+                if target
+                and target not in (BLANK_SENTINEL, IGNORE_SENTINEL)
+                and not self._validate_species_fuzzy(target, variant_map)[0]
+            }
+        )
+        if to_add:
+            self._attach_species_to_project(to_add, active_project_id)
+            variant_map = _project_variant_map()
         append = mode == "append"
 
         imported = 0
@@ -206,16 +238,29 @@ class HistoricCsvMixin(ImportSharedMixin):
                 and str(first.get(is_blank_col, "")).strip() not in FALSY_STRINGS
             )
 
+            def _mapping_of(r: dict) -> str | None:
+                return species_mappings.get(str(r.get(species_col, "")).strip())
+
+            # Ignored rows are struck out before anything is inferred from what remains:
+            # "ignore this species" is not evidence that the video was blank.
+            kept_rows = [r for r in rows if _mapping_of(r) != IGNORE_SENTINEL]
+
             non_blank = (
                 []
                 if force_blank
                 else [
                     r
-                    for r in rows
+                    for r in kept_rows
                     if str(r.get(species_col, "")).strip() not in BLANK_SPECIES
-                    and species_mappings.get(str(r.get(species_col, "")).strip()) != BLANK_SENTINEL
+                    and _mapping_of(r) != BLANK_SENTINEL
                 ]
             )
+
+            if not non_blank and not force_blank and not kept_rows:
+                # Every row was ignored — leave the video's annotations alone.
+                _apply_historic_tags(self, video_id, first, tag_cols, append)
+                imported += 1
+                continue
 
             if not non_blank:
                 self.update_manual_review(

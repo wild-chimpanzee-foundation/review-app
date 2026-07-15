@@ -9,7 +9,6 @@ from review_app.app.translations import t
 from review_app.app.utils import client_id as _client_id
 from review_app.app.utils import ignore_deleted_client, user_error_message
 from review_app.backend.errors import DataImportError
-from review_app.backend.provider.import_service import IGNORE_SENTINEL
 from review_app.backend.utils import df_to_records
 
 from ._helpers import (
@@ -365,17 +364,11 @@ async def setup_model_tab(dp, loading_dialog) -> None:
             if cleaned_df is None or cleaned_df.empty:
                 raise DataImportError("No data to import", user_message_key="no_data_import")
 
-            df_to_import = cleaned_df.copy()
-            if mappings:
-                mask = df_to_import["annotation_type"].isin({"species", "object_detection"})
-                df_to_import.loc[mask, "value_text"] = df_to_import.loc[
-                    mask, "value_text"
-                ].replace(mappings)
-            df_to_import = df_to_import[df_to_import["value_text"] != IGNORE_SENTINEL]
-
+            # cleaned_df is already mapped: apply_species_mappings resolved every species,
+            # dropped the ignored rows and rewrote the blank-mapped ones.
             result = await run.io_bound(
                 dp.import_model_csv,
-                cleaned_df=df_to_import,
+                cleaned_df=cleaned_df,
                 active_project_id=get_active_project_id(),
             )
             logger.info(

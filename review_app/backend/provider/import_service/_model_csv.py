@@ -14,7 +14,11 @@ from sqlalchemy import text
 from review_app.app.config import CSV_TEMPLATES
 from review_app.backend.errors import DataImportError
 from review_app.backend.path_matching import resolve_video_path
-from review_app.backend.provider.import_service._shared import ImportSharedMixin
+from review_app.backend.provider.import_service._shared import (
+    BLANK_SENTINEL,
+    IGNORE_SENTINEL,
+    ImportSharedMixin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -389,7 +393,11 @@ class ModelCsvMixin(ImportSharedMixin):
 
         Resolution per distinct species (there are tens of these, not hundreds of
         thousands): an explicit mapping wins; otherwise the catalog match found by the
-        base pass is used; otherwise the row is rejected as needing a mapping."""
+        base pass is used; otherwise the row is rejected as needing a mapping.
+
+        The two sentinels resolve a species without naming one: IGNORE_SENTINEL drops its
+        rows (silently — the user asked for that, so they are not errors), and
+        BLANK_SENTINEL turns them into this model's blank_non_blank prediction."""
         _t0 = time.monotonic()
         mappings = mappings or {}
 
@@ -410,11 +418,19 @@ class ModelCsvMixin(ImportSharedMixin):
         is_species = rows["_species"].notna()
         resolved = rows["_species"].map(resolution)
         needs_mapping = is_species & resolved.isna()
+        ignored = is_species & resolved.eq(IGNORE_SENTINEL)
 
-        kept = rows.loc[~needs_mapping].copy()
+        keep_mask = ~needs_mapping & ~ignored
+        kept = rows.loc[keep_mask].copy()
         # Only species rows take their resolved value; everything else keeps value_text.
-        kept_is_species = is_species.loc[~needs_mapping]
-        kept.loc[kept_is_species, "value_text"] = resolved.loc[~needs_mapping][kept_is_species]
+        kept_is_species = is_species.loc[keep_mask]
+        kept.loc[kept_is_species, "value_text"] = resolved.loc[keep_mask][kept_is_species]
+
+        # "This species means the video is empty" is the same claim the model would have
+        # made as a blank prediction, so store it as one rather than as a species name.
+        blank_mapped = kept_is_species & kept["value_text"].eq(BLANK_SENTINEL)
+        kept.loc[blank_mapped, "annotation_type"] = "blank_non_blank"
+        kept.loc[blank_mapped, "value_text"] = "blank"
 
         rejected = rows.loc[needs_mapping]
         mapping_errors = pd.DataFrame(
@@ -449,11 +465,13 @@ class ModelCsvMixin(ImportSharedMixin):
         cleaned = kept.drop(columns=["_pos", "_row_number", "_species"]).reset_index(drop=True)
 
         logger.info(
-            "Applied %d species mappings in %.2fs: %d valid, %d invalid, %d still unmapped",
+            "Applied %d species mappings in %.2fs: %d valid, %d invalid, %d ignored, "
+            "%d still unmapped",
             len(mappings),
             time.monotonic() - _t0,
             len(cleaned),
             len(errors),
+            int(ignored.sum()),
             len(unmapped_species),
         )
         return (
@@ -462,6 +480,25 @@ class ModelCsvMixin(ImportSharedMixin):
             species_mappings,
             [{"original": s} for s in unmapped_species],
         )
+
+    def _register_mapped_species(
+        self, cleaned_df: pd.DataFrame, active_project_id: str | None
+    ) -> None:
+        """Create and attach any species value_text that the catalog does not have yet.
+
+        apply_species_mappings only lets a species row through with a value_text that is
+        either a catalog match or a target the user chose by hand, so anything unknown
+        here is the mapping editor's "add as a new species" choice. Registering it keeps
+        model_annotations.value_text pointing at a real species — otherwise the name would
+        show up as its own entry in the review page's species filter and match nothing."""
+        species_rows = cleaned_df["annotation_type"].isin({"species", "object_detection"})
+        targets = {
+            name
+            for value in cleaned_df.loc[species_rows, "value_text"].dropna()
+            if (name := str(value).strip())
+        }
+        valid = set(self.get_valid_species(active_project_id))
+        self._attach_species_to_project(sorted(targets - valid), active_project_id)
 
     def import_model_csv(
         self, cleaned_df: pd.DataFrame, active_project_id: str | None
@@ -478,6 +515,7 @@ class ModelCsvMixin(ImportSharedMixin):
             active_project_id,
             time.monotonic() - _t0,
         )
+        self._register_mapped_species(cleaned_df, active_project_id)
 
         now = self._utcnow_dt()
         rows = [

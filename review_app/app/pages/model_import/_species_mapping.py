@@ -2,14 +2,15 @@
 
 Every import page has the same problem: the CSV names species that the project's catalog
 does not recognise, and the user has to say what each one means before those rows can be
-imported. What differs is which answers a page can offer — only the annotations import can
-register a new species in the catalog, only it understands "this means the video is
-blank", and only the model import gates its own button rather than an Apply button here.
+imported. Every page offers the same three answers — map it to a catalog species, ignore
+it, mark the video blank, or add it to the catalog under its own name — because all three
+importers implement all of them.
 
-Those differences used to live as four loose keyword arguments repeated at each call site,
-which made it easy to miss that one site offered no way at all to resolve an unmatched
-species. SpeciesMappingOptions names them once per site instead, so the sites can be
-compared at a glance — see the presets at the bottom of this module.
+They did not always: the options started out as loose keyword arguments repeated at each
+call site, and each site enabled whatever its importer happened to support. Naming them
+per site is what made the gaps visible. Keep it that way — an option turned on here does
+nothing (or worse, imports a sentinel as a species name) unless the importer behind it
+handles the sentinel. See the presets at the bottom of this module.
 """
 
 from __future__ import annotations
@@ -47,21 +48,25 @@ class SpeciesMappingOptions:
     Resolves to IGNORE_SENTINEL; the importer drops those rows."""
 
     allow_blank: bool = False
-    """Offer "— mark video blank —". Resolves to BLANK_SENTINEL, which only the
-    annotations importer understands."""
+    """Offer "— mark video blank —". Resolves to BLANK_SENTINEL: the annotations importers
+    label the video blank when nothing but blank votes survives, and the model importer
+    rewrites the row into the same model's blank_non_blank prediction."""
 
     allow_add_new: bool = False
     """Offer keeping the species' own name and adding it to the project.
 
-    Only for sites whose import actually performs that registration: the annotations
-    importer collects such targets as `species_to_add` and creates them. The model
-    importer does not, so enabling this there would write a name into
-    model_annotations.value_text that exists in no catalog, and which then shows up as
-    its own entry in the review page's species filter."""
+    Only for sites whose import actually performs that registration — all three do, via
+    `_attach_species_to_project`. Without it the name would reach the database matching no
+    catalog entry, and then show up as its own entry in the review page's species
+    filter."""
 
     show_apply_button: bool = True
-    """Whether the editor renders its own Apply button. Sites that re-validate on every
-    change (the model import) have nothing for it to do."""
+    """Whether the editor renders its own Apply button.
+
+    False only for sites whose `on_change` re-validates rather than just re-rendering. The
+    model import can afford that per keystroke because validate_model_csv_base splits the
+    expensive pass out; the annotations sites re-run their whole per-row loop, so they keep
+    the button and validate once, when asked."""
 
 
 def pending_species(all_species: Iterable[str], mappings: dict[str, str] | None) -> list[str]:
@@ -184,34 +189,24 @@ def render_species_mappings(
         )
 
 
-# ── Per-site configuration ────────────────────────────────────────────────────
-#
-#                        ignore   blank   add new   apply button
-#   model import           yes      -        -           -
-#   annotations, app       yes      -       yes         yes
-#   annotations, external   -      yes       -          yes
-#
-# The external-format site is the odd one out: it offers no way to resolve a species that
-# matches no catalog entry, so such a species stays pending and its rows are dropped from
-# the import. Its Apply button is only reachable because that site still gates on the
-# mappings dict rather than on pending_species(). Turning on allow_ignore (and probably
-# allow_add_new, since unfamiliar species are most likely here) is what would let it be
-# gated properly.
-
 MODEL_IMPORT = SpeciesMappingOptions(
     mappings_state_key="species_mappings",
     allow_ignore=True,
-    # The page re-validates on every change and drives its own Import button.
+    allow_blank=True,
+    allow_add_new=True,
     show_apply_button=False,
 )
 
 ANNOTATIONS_APP_FORMAT = SpeciesMappingOptions(
     mappings_state_key="app_species_mappings",
     allow_ignore=True,
+    allow_blank=True,
     allow_add_new=True,
 )
 
 ANNOTATIONS_EXTERNAL_FORMAT = SpeciesMappingOptions(
     mappings_state_key="ann_species_mappings",
+    allow_ignore=True,
     allow_blank=True,
+    allow_add_new=True,
 )

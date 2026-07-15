@@ -1,10 +1,10 @@
-"""Characterisation tests for validate_model_csv.
+"""Tests for validate_model_csv and import_model_csv.
 
-Written before splitting the function into a mapping-independent pass and a cheap
-mapping pass, to pin down exactly what it does today. They describe current behaviour
-rather than desired behaviour — where something looks like a wart it is called out in
-the test name or a comment, so the refactor can be checked for behaviour preservation
-first and any deliberate change made separately on top.
+Most of these started as characterisation tests, written before validate_model_csv was
+split into a mapping-independent pass and a cheap mapping pass, to pin down exactly what
+it did at the time. The sentinel tests have since been rewritten: the importer now
+resolves IGNORE_SENTINEL and BLANK_SENTINEL itself rather than leaving them in value_text
+for the import page to filter.
 
 validate_model_csv returns (cleaned_df, errors_df, species_mappings, unmapped_species).
 """
@@ -12,7 +12,7 @@ validate_model_csv returns (cleaned_df, errors_df, species_mappings, unmapped_sp
 import pandas as pd
 import pytest
 from review_app.backend.errors import DataImportError
-from review_app.backend.provider.import_service import IGNORE_SENTINEL
+from review_app.backend.provider.import_service import BLANK_SENTINEL, IGNORE_SENTINEL
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 
@@ -260,13 +260,26 @@ def test_empty_mapping_value_falls_through_to_catalog(dp_videos):
     assert unmapped == [{"original": "tyrannosaurus"}]
 
 
-def test_ignore_sentinel_is_carried_through_not_dropped(dp_videos):
-    """Rows mapped to IGNORE are kept here; do_import filters them out later."""
+def test_ignore_sentinel_drops_the_rows_without_erroring(dp_videos):
+    """Rows mapped to IGNORE are dropped — the user asked for that, so they aren't errors."""
     dp, v = dp_videos
     df = pd.DataFrame([_row(v["v1"], value_text="tyrannosaurus")])
-    cleaned, errors, _, _ = dp.validate_model_csv(df, {"tyrannosaurus": IGNORE_SENTINEL}, None)
+    cleaned, errors, _, unmapped = dp.validate_model_csv(
+        df, {"tyrannosaurus": IGNORE_SENTINEL}, None
+    )
     assert errors.empty
-    assert cleaned.iloc[0]["value_text"] == IGNORE_SENTINEL
+    assert cleaned.empty
+    assert unmapped == []
+
+
+def test_blank_sentinel_becomes_a_blank_prediction(dp_videos):
+    """Mapping a species to blank restates the row as the same model's blank prediction."""
+    dp, v = dp_videos
+    df = pd.DataFrame([_row(v["v1"], value_text="tyrannosaurus")])
+    cleaned, errors, _, _ = dp.validate_model_csv(df, {"tyrannosaurus": BLANK_SENTINEL}, None)
+    assert errors.empty
+    assert cleaned.iloc[0]["annotation_type"] == "blank_non_blank"
+    assert cleaned.iloc[0]["value_text"] == "blank"
 
 
 def test_mapping_applies_to_object_detection_too(dp_videos):
@@ -387,3 +400,31 @@ def test_valid_and_invalid_rows_are_partitioned(dp_videos):
         "error_missing_model_name",
     ]
     assert unmapped == [{"original": "tyrannosaurus"}]
+
+
+# ── import_model_csv ──────────────────────────────────────────────────────────
+
+
+def test_import_registers_add_new_species(dp_videos):
+    """ "Add as a new species" must reach the catalog, or value_text matches nothing."""
+    dp, v = dp_videos
+    assert not dp.species_exists("Novum inventum")
+    df = pd.DataFrame([_row(v["v1"], value_text="tyrannosaurus")])
+    cleaned, _, _, _ = dp.validate_model_csv(df, {"tyrannosaurus": "Novum inventum"}, None)
+
+    result = dp.import_model_csv(cleaned_df=cleaned, active_project_id=None)
+
+    assert result["imported"] == 1
+    assert dp.species_exists("Novum inventum")
+
+
+def test_import_does_not_register_fuzzy_matched_species(dp_videos):
+    """A row the catalog already matched must not create anything."""
+    dp, v = dp_videos
+    df = pd.DataFrame([_row(v["v1"], value_text="deer")])
+    cleaned, _, _, _ = dp.validate_model_csv(df, None, None)
+
+    before = set(dp.get_valid_species(None))
+    dp.import_model_csv(cleaned_df=cleaned, active_project_id=None)
+
+    assert set(dp.get_valid_species(None)) == before

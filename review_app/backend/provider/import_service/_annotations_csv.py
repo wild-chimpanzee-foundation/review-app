@@ -10,7 +10,11 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 
-from review_app.backend.provider.import_service._shared import IGNORE_SENTINEL, ImportSharedMixin
+from review_app.backend.provider.import_service._shared import (
+    BLANK_SENTINEL,
+    IGNORE_SENTINEL,
+    ImportSharedMixin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -206,12 +210,16 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                 observations_by_annotator[blank_labeled_by or ""] += 1
             else:
                 selections = []
+                blank_votes = 0
                 for _, row in group.iterrows():
                     sp_raw = row.get("species")
                     sp = str(sp_raw).strip() if pd.notna(sp_raw) else ""
                     if not sp:
                         continue
                     sp = map_species(sp)
+                    if sp == BLANK_SENTINEL:
+                        blank_votes += 1
+                        continue
                     if sp is None:
                         skipped_observations += 1
                         continue
@@ -260,6 +268,19 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                     )
                     for sel in selections:
                         observations_by_annotator[sel.get("labeled_by") or ""] += 1
+                elif blank_votes:
+                    # Every species this video named means "nothing was there", so the
+                    # video itself is blank. Only when nothing else survived: one real
+                    # observation outvotes the blank rows.
+                    self.update_manual_review(
+                        str(video_id),
+                        [],
+                        is_blank=True,
+                        labeled_by=blank_labeled_by,
+                        active_project_id=active_project_id,
+                        append=append,
+                    )
+                    observations_by_annotator[blank_labeled_by or ""] += 1
 
             # Restore review_later — reset to False too so override is complete
             rl_raw = first.get("review_later") if "review_later" in group.columns else None
@@ -320,13 +341,15 @@ class AnnotationsCsvMixin(ImportSharedMixin):
 
         Returns a callable ``map_species(name) -> resolved_name | None`` where ``None``
         means the observation should be skipped (mapped to ignore, or awaiting a mapping
-        decision). A species that is neither already configured nor given an explicit
-        mapping is skipped — matching the dry-run in ``validate_annotations_csv``.
+        decision) and ``BLANK_SENTINEL`` means it is a vote for the video being blank
+        rather than an observation. A species that is neither already configured nor given
+        an explicit mapping is skipped — matching the dry-run in
+        ``validate_annotations_csv``.
         """
         mappings = species_mappings or {}
 
         # Without a project scope every global species is valid — import as-is,
-        # honouring explicit mappings/ignore but never skipping as "unconfigured".
+        # honouring explicit mappings/ignore/blank but never skipping as "unconfigured".
         if not active_project_id:
 
             def _target_global(sp: str) -> str | None:
@@ -347,6 +370,8 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             if sp in valid:
                 return sp
             raw = mappings.get(sp)
+            if raw == BLANK_SENTINEL:
+                return BLANK_SENTINEL
             if not raw or raw == IGNORE_SENTINEL:
                 return None
             return raw
@@ -354,32 +379,16 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         targets = {
             t
             for sp in (str(s).strip() for s in df.get("species", pd.Series(dtype=str)).dropna())
-            if sp and (t := _target(sp)) is not None
+            if sp and (t := _target(sp)) is not None and t != BLANK_SENTINEL
         }
-        existing_project_species = self.get_project_species(active_project_id)
         to_add = sorted(t for t in targets if t not in valid)
-        if to_add:
-            logger.info(
-                "Annotations CSV: adding %d species to project %s: %s",
-                len(to_add),
-                active_project_id,
-                to_add,
-            )
-            # Create the ones that aren't in the global catalog yet (the "create as a
-            # new species" path), then attach all of them to the active project.
-            for name in to_add:
-                if not self.species_exists(name):
-                    self.add_custom_species(
-                        name, name_en=name, name_fr="", group_en="", group_fr=""
-                    )
-            # Only when the project has an explicit species list — an empty list means
-            # the project implicitly allows every species, so don't narrow it to these.
-            if existing_project_species:
-                self.set_project_species(active_project_id, existing_project_species + to_add)
-            valid |= set(to_add)
+        self._attach_species_to_project(to_add, active_project_id)
+        valid |= set(to_add)
 
         def map_species(sp: str) -> str | None:
             target = _target(sp)
+            if target == BLANK_SENTINEL:
+                return BLANK_SENTINEL
             return target if target in valid else None
 
         return map_species
@@ -443,12 +452,15 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         species_to_add: set[str] = set()
 
         def resolve_species(sp: str) -> str | None:
-            """Mapped target if importable, else None (ignored / pending)."""
+            """Mapped target if importable, BLANK_SENTINEL if it means "video is blank",
+            else None (ignored / pending)."""
             if sp in valid_species:
                 return sp
             target = mappings.get(sp, "")
             if target == IGNORE_SENTINEL:
                 return None
+            if target == BLANK_SENTINEL:
+                return BLANK_SENTINEL
             if not target:
                 unknown_species.add(sp)  # awaiting a mapping decision
                 return None
@@ -481,15 +493,21 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                 continue
 
             incoming_ids: set[int] = set()
+            blank_votes = 0
+            resolved_any = False
             for _, row in group.iterrows():
                 sp_raw = row.get("species")
                 sp = str(sp_raw).strip() if pd.notna(sp_raw) else ""
                 if not sp:
                     continue
                 resolved = resolve_species(sp)
+                if resolved == BLANK_SENTINEL:
+                    blank_votes += 1
+                    continue
                 if resolved is None:
                     continue  # ignored or pending — not counted in the diff
                 sp = resolved
+                resolved_any = True
                 obs_id_raw = row.get("observation_id")
                 obs_id = int(obs_id_raw) if pd.notna(obs_id_raw) and not append else None
                 if obs_id and obs_id in existing_ids:
@@ -518,6 +536,17 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                         obs_to_change += 1
                 else:
                     obs_to_insert += 1
+
+            if blank_votes and not resolved_any:
+                # Mirrors import_annotations_csv: nothing survived except blank votes, so
+                # the video is labelled blank and its existing observations go.
+                if str(video_id) in already_blank:
+                    blanks_already_set += 1
+                else:
+                    blanks_to_set += 1
+                if not append and existing_ids:
+                    obs_to_delete += len(existing_ids)
+                continue
 
             if not append:
                 obs_to_delete += len(existing_ids - incoming_ids)

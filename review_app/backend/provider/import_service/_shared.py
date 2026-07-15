@@ -36,6 +36,38 @@ class ImportSharedMixin(ProviderBase):
 
         backup_if_stale(reason="pre_import")
 
+    def _attach_species_to_project(
+        self, names: list[str], active_project_id: str | None
+    ) -> list[str]:
+        """Make `names` importable: create the ones the catalog lacks, attach all to the project.
+
+        This is the "add as a new species" path every import page's mapping editor offers.
+        Returns the names that were newly created in the global catalog."""
+        if not names:
+            return []
+        created = [
+            name
+            for name in names
+            if not self.species_exists(name)
+            and self.add_custom_species(name, name_en=name, name_fr="", group_en="", group_fr="")
+        ]
+        if active_project_id:
+            existing = self.get_project_species(active_project_id)
+            # An empty list means the project implicitly allows every species, so don't
+            # narrow it down to just these.
+            if existing:
+                missing = [n for n in names if n not in existing]
+                if missing:
+                    self.set_project_species(active_project_id, existing + missing)
+        logger.info(
+            "Registered %d imported species (%d new to the catalog) for project %s: %s",
+            len(names),
+            len(created),
+            active_project_id,
+            names,
+        )
+        return created
+
     def _known_video_ids(self, active_project_id: str | None) -> set[str]:
         with self.engine.connect() as conn:
             q = text(
