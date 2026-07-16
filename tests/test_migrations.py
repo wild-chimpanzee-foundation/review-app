@@ -350,3 +350,70 @@ def test_migration_v19_adds_inaturalist_url(tmp_path):
 
     assert _get_version(engine) == len(MIGRATIONS)
     assert "inaturalist_url" in _columns(engine, "species")
+
+
+# ---------------------------------------------------------------------------
+# v21: normalize backslash paths (Windows-origin DBs)
+# ---------------------------------------------------------------------------
+
+
+def test_migration_v21_normalizes_backslash_paths(tmp_path):
+    """A DB (or bundle) created on Windows stores '\\'-separated paths; opening it
+    on any OS must not require a rescan for matching/serving to work."""
+    engine = _make_engine(tmp_path / "test.db")
+    run_migrations(engine)  # stamp at latest first
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO projects (id, name, created_at) VALUES ('p1', 'Test', '2024-01-01')")
+        )
+        conn.execute(
+            text(
+                "INSERT INTO videos (video_id, project_id, video_path, camera_id, last_seen_at) "
+                "VALUES ('v1', 'p1', 'D:\\Videos\\Cam1\\file.mp4', 'Cam1', '2024-01-01')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO project_dirs (id, project_id, path, sort_order) "
+                "VALUES ('d1', 'p1', 'D:\\Videos', 0)"
+            )
+        )
+    _set_version(engine, 20)
+
+    run_migrations(engine)
+
+    with engine.connect() as conn:
+        video_path = conn.execute(
+            text("SELECT video_path FROM videos WHERE video_id = 'v1'")
+        ).scalar()
+        dir_path = conn.execute(text("SELECT path FROM project_dirs WHERE id = 'd1'")).scalar()
+
+    assert video_path == "D:/Videos/Cam1/file.mp4"
+    assert dir_path == "D:/Videos"
+    assert _get_version(engine) == len(MIGRATIONS)
+
+
+def test_migration_v21_leaves_forward_slash_paths_unchanged(tmp_path):
+    engine = _make_engine(tmp_path / "test.db")
+    run_migrations(engine)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO projects (id, name, created_at) VALUES ('p1', 'Test', '2024-01-01')")
+        )
+        conn.execute(
+            text(
+                "INSERT INTO videos (video_id, project_id, video_path, camera_id, last_seen_at) "
+                "VALUES ('v1', 'p1', '/mnt/videos/cam1/file.mp4', 'cam1', '2024-01-01')"
+            )
+        )
+    _set_version(engine, 20)
+
+    run_migrations(engine)
+
+    with engine.connect() as conn:
+        video_path = conn.execute(
+            text("SELECT video_path FROM videos WHERE video_id = 'v1'")
+        ).scalar()
+    assert video_path == "/mnt/videos/cam1/file.mp4"

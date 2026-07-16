@@ -13,6 +13,7 @@ from review_app.backend.errors import DataImportError
 from review_app.backend.path_matching import (
     VideoPathLookup,
     build_video_path_lookup,
+    normalize_path_str,
     resolve_video_path,
 )
 from review_app.backend.provider.base import ProviderBase
@@ -105,7 +106,7 @@ class ImportSharedMixin(ProviderBase):
                     text("SELECT path FROM project_dirs WHERE project_id = :pid"),
                     {"pid": active_project_id},
                 ).fetchall()
-                scan_dirs = [Path(r[0]) for r in dir_rows]
+                scan_dirs = [Path(normalize_path_str(r[0])) for r in dir_rows]
 
         return build_video_path_lookup(
             [(str(r[0]), str(r[1]), r[2]) for r in rows],
@@ -146,7 +147,8 @@ class ImportSharedMixin(ProviderBase):
         known_ids = self._known_video_ids(active_project_id)
         if has_path and not has_id:
             path_to_id = {
-                v.lower(): k for k, v in self._known_video_map(active_project_id).items()
+                normalize_path_str(v).lower(): k
+                for k, v in self._known_video_map(active_project_id).items()
             }
             lookup = self._build_video_path_lookup(active_project_id)
             df = df.copy()

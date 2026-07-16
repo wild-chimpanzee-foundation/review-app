@@ -190,6 +190,31 @@ def test_import_unknown_path_is_skipped(clean_provider):
     assert "/nonexistent/ghost.mp4" in result["skipped"]
 
 
+def test_import_matches_backslash_stored_path_via_exact_fast_path(clean_provider):
+    """DB row stored with Windows backslashes (legacy/cross-OS DB) must still resolve
+    via the exact-match fast path when the CSV uses forward slashes, not just by luck
+    of falling through to fuzzy suffix matching."""
+    from sqlalchemy import text
+
+    dp = clean_provider
+    paths = _video_paths(dp)
+    v1_path = next(p for p in paths if p.endswith("v1.mp4"))
+    video_id = paths[v1_path]
+
+    win_path = v1_path.replace("/", "\\")
+    with dp.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE videos SET video_path = :p WHERE video_id = :vid"),
+            {"p": win_path, "vid": video_id},
+        )
+
+    df = pd.DataFrame([{"video_path": v1_path, "is_blank": 1}])
+    result = dp.import_annotations_csv(df, active_project_id=None)
+
+    assert result["imported"] == 1
+    assert result["skipped"] == []
+
+
 def test_import_mixed_known_and_unknown(clean_provider):
     dp = clean_provider
     paths = _video_paths(dp)

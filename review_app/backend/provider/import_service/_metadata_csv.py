@@ -10,7 +10,7 @@ from pyproj import Transformer
 from sqlalchemy import text
 
 from review_app.backend.errors import DataImportError
-from review_app.backend.path_matching import resolve_video_path
+from review_app.backend.path_matching import normalize_path_str, resolve_video_path
 from review_app.backend.provider.import_service._shared import ImportSharedMixin
 
 logger = logging.getLogger(__name__)
@@ -104,7 +104,10 @@ class MetadataCsvMixin(ImportSharedMixin):
                 for a in all_annotators:
                     self.add_annotator(a)
 
-        path_to_id = {v.lower(): k for k, v in self._known_video_map(active_project_id).items()}
+        path_to_id = {
+            normalize_path_str(v).lower(): k
+            for k, v in self._known_video_map(active_project_id).items()
+        }
 
         updated = 0
         skipped: list[str] = []

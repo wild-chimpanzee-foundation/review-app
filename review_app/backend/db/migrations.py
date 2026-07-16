@@ -664,6 +664,16 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
         WHERE project_id IS NULL
         """,
     ),
+    (
+        # Canonicalize stored paths to forward slashes so DBs/bundles created on
+        # Windows match correctly when opened on macOS/Linux (and vice versa).
+        21,
+        [
+            "UPDATE videos SET video_path = REPLACE(video_path, '\\', '/')"
+            " WHERE video_path LIKE '%\\%'",
+            "UPDATE project_dirs SET path = REPLACE(path, '\\', '/') WHERE path LIKE '%\\%'",
+        ],
+    ),
 ]
 
 

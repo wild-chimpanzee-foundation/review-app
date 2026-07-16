@@ -24,6 +24,7 @@ from review_app.app.state import (
 )
 from review_app.app.theme import apply_theme
 from review_app.app.translations import t
+from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 logger = logging.getLogger(__name__)
@@ -572,7 +573,7 @@ class GUI:
 
                 # Load media dirs from all projects so any user can serve their videos.
                 all_dirs = [
-                    Path(d.path)
+                    Path(normalize_path_str(d.path))
                     for proj in dp.list_projects()
                     for d in dp.get_project_dirs(proj.id)
                 ]

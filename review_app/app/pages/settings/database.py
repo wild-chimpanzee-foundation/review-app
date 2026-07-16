@@ -28,6 +28,7 @@ from review_app.backend.db.backup import (
     remove_db_sidecars,
     restore_backup,
 )
+from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 logger = logging.getLogger(__name__)
@@ -161,7 +162,7 @@ def render_database_section(
                         else:
                             set_active_project(None)
                     all_dirs = [
-                        Path(d.path)
+                        Path(normalize_path_str(d.path))
                         for _p in new_dp.list_projects()
                         for d in new_dp.get_project_dirs(_p.id)
                     ]

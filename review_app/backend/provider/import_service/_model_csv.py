@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 from review_app.app.config import CSV_TEMPLATES
 from review_app.backend.errors import DataImportError
-from review_app.backend.path_matching import resolve_video_path
+from review_app.backend.path_matching import normalize_path_str, resolve_video_path
 from review_app.backend.provider.import_service._shared import (
     BLANK_SENTINEL,
     IGNORE_SENTINEL,
@@ -248,7 +248,7 @@ class ModelCsvMixin(ImportSharedMixin):
 
         video_map = self._known_video_map(active_project_id)
         known_videos = set(video_map.keys())
-        path_to_id = {v.lower(): k for k, v in video_map.items()}
+        path_to_id = {normalize_path_str(v).lower(): k for k, v in video_map.items()}
 
         lookup = self._build_video_path_lookup(active_project_id)
 

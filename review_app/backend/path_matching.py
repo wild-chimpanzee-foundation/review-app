@@ -4,6 +4,16 @@ from pathlib import Path
 from typing import NamedTuple
 
 
+def normalize_path_str(path: str) -> str:
+    """Canonicalize a path string for storage/matching: backslashes -> forward slashes.
+
+    Windows paths (native or pasted from Explorer) use "\\"; every other OS uses "/".
+    Normalizing at every DB write/read boundary makes stored paths, CSV/bundle exports,
+    and cross-machine matching independent of which OS produced the string.
+    """
+    return path.replace("\\", "/")
+
+
 class VideoPathLookup(NamedTuple):
     by_suffix: dict[str, str]
     # stem -> [(video_id, camera_id_lower)] — all videos sharing that stem
@@ -45,7 +55,7 @@ def build_video_path_lookup(
     legacy_suffix_lists: dict[str, list[str]] = {}
 
     for vid, video_path, camera_id in video_rows:
-        p = Path(video_path.replace("\\", "/"))
+        p = Path(normalize_path_str(video_path))
         cam_lower = (camera_id or "").lower()
         cam_by_id[vid] = cam_lower
         by_filename_lists.setdefault(p.name.lower(), []).append(vid)
@@ -113,7 +123,7 @@ def resolve_video_path(
     if known_video_ids and raw_path in known_video_ids:
         return raw_path, "exact_id"
 
-    raw_path = raw_path.replace("\\", "/")
+    raw_path = normalize_path_str(raw_path)
     p = Path(raw_path)
     raw_lower = raw_path.lower()
 

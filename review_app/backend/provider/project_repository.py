@@ -4,7 +4,7 @@ import logging
 import uuid
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 
 from review_app.backend.db.models import (
     Project,
@@ -12,6 +12,7 @@ from review_app.backend.db.models import (
     ProjectSpecies,
     Video,
 )
+from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ class ProjectMixin(ProviderBase):
                     ProjectDir(
                         id=str(uuid.uuid4()),
                         project_id=project.id,
-                        path=str(video_dir),
+                        path=normalize_path_str(str(video_dir)),
                         sort_order=0,
                     )
                 )
@@ -100,7 +101,7 @@ class ProjectMixin(ProviderBase):
             d = ProjectDir(
                 id=str(uuid.uuid4()),
                 project_id=project_id,
-                path=str(path),
+                path=normalize_path_str(str(path)),
                 sort_order=sort_order,
             )
             s.add(d)
@@ -117,15 +118,15 @@ class ProjectMixin(ProviderBase):
             d = s.query(ProjectDir).filter_by(id=dir_id).first()
             if not d:
                 return None
-            old_prefix = d.path.rstrip("/") + "/"
-            new_prefix = str(new_path).rstrip("/") + "/"
+            old_prefix = normalize_path_str(d.path).rstrip("/") + "/"
+            new_prefix = normalize_path_str(str(new_path)).rstrip("/") + "/"
             if old_prefix != new_prefix:
                 s.execute(
                     text("""
                         UPDATE videos
-                        SET video_path = :new_prefix || substr(video_path, :remainder_at)
+                        SET video_path = :new_prefix || substr(REPLACE(video_path, '\\', '/'), :remainder_at)
                         WHERE project_id IS :pid
-                          AND substr(video_path, 1, :prefix_len) = :old_prefix
+                          AND substr(REPLACE(video_path, '\\', '/'), 1, :prefix_len) = :old_prefix
                     """),
                     {
                         "new_prefix": new_prefix,
@@ -135,7 +136,7 @@ class ProjectMixin(ProviderBase):
                         "pid": d.project_id,
                     },
                 )
-            d.path = str(new_path)
+            d.path = normalize_path_str(str(new_path))
             s.commit()
             s.refresh(d)
         logger.info("Updated directory %s to %s (project %s)", dir_id, new_path, d.project_id)
@@ -146,10 +147,11 @@ class ProjectMixin(ProviderBase):
             d = s.query(ProjectDir).filter_by(id=dir_id).first()
             if not d:
                 return
-            prefix = d.path.rstrip("/") + "/"
+            prefix = normalize_path_str(d.path).rstrip("/") + "/"
             self._cascade_delete_videos(
                 s,
-                (Video.project_id == d.project_id) & Video.video_path.startswith(prefix),
+                (Video.project_id == d.project_id)
+                & func.replace(Video.video_path, "\\", "/").startswith(prefix),
             )
             s.delete(d)
             s.commit()
