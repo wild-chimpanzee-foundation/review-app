@@ -273,12 +273,16 @@ def list_backups() -> list[dict[str, Any]]:
         if meta is None:
             continue
         dt, schema_version = meta
+        try:
+            size_mb = round(f.stat().st_size / (1024 * 1024), 2)
+        except FileNotFoundError:
+            continue
         backups.append(
             {
                 "path": f,
                 "name": f.name,
                 "timestamp": dt,
-                "size_mb": round(f.stat().st_size / (1024 * 1024), 2),
+                "size_mb": size_mb,
                 "schema_version": schema_version,
             }
         )
