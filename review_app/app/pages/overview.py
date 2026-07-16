@@ -11,6 +11,7 @@ from review_app.app.utils import (
     get_or_create_data_provider,
     render_uninitialized_state,
 )
+from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.utils import generate_thumbnail
 
 _BLANK_COLOR = "#4caf50"
@@ -133,9 +134,9 @@ async def setup_overview():
                         with ui.scroll_area().style("max-height: 300px"):
                             with ui.column().classes("q-pa-sm gap-xs"):
                                 for _, mv in missing_videos_df.head(_MAX_MISSING_SHOWN).iterrows():
-                                    ui.label(mv["video_path"]).classes(
-                                        "text-body2 text-mono text-grey-8"
-                                    )
+                                    ui.label(
+                                        str(Path(normalize_path_str(mv["video_path"])))
+                                    ).classes("text-body2 text-mono text-grey-8")
                                 if missing_count > _MAX_MISSING_SHOWN:
                                     ui.label(
                                         t(
@@ -275,7 +276,7 @@ async def setup_overview():
                                         )
 
                                         async def _load_thumb(
-                                            sp=Path(sample_path),
+                                            sp=Path(normalize_path_str(sample_path)),
                                             tp=thumb_path,
                                             el=img_el,
                                             sn=safe_name,

@@ -22,6 +22,7 @@ from review_app.app.state import (
 )
 from review_app.app.translations import t
 from review_app.app.utils import get_or_create_data_provider, sync_with_progress
+from review_app.backend.path_matching import normalize_path_str
 
 from .database import render_database_section
 from .species import render_species_section
@@ -147,7 +148,7 @@ def _build_settings_content(container: ui.column):
                 if video_dir_obj is not None:
                     with ui.row().classes("w-full items-center gap-sm q-mb-sm"):
                         dir_path_input = (
-                            ui.input(value=str(video_dir_obj.path))
+                            ui.input(value=str(Path(normalize_path_str(video_dir_obj.path))))
                             .props("outlined dense")
                             .classes("col")
                         )
@@ -182,9 +183,9 @@ def _build_settings_content(container: ui.column):
                 async def sync_dir():
                     _dp = get_data_provider()
                     missing = [
-                        d.path
+                        str(Path(normalize_path_str(d.path)))
                         for d in _dp.get_project_dirs(active_project_id)
-                        if not Path(d.path).is_dir()
+                        if not Path(normalize_path_str(d.path)).is_dir()
                     ]
                     if missing:
                         ui.notify(

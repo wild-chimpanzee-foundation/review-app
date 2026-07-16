@@ -153,11 +153,14 @@ def switch_project(dp, project_id: str) -> None:
     set_current_idx(0)
     set_selections([])
 
+    from review_app.backend.path_matching import normalize_path_str
+
     dirs = dp.get_project_dirs(project_id) or []
-    missing = [d.path for d in dirs if not Path(d.path).exists()]
+    dir_paths = [Path(normalize_path_str(d.path)) for d in dirs]
+    missing = [str(p) for p in dir_paths if not p.exists()]
     from review_app.app.media import add_media_dirs
 
-    add_media_dirs([Path(d.path) for d in dirs])
+    add_media_dirs(dir_paths)
     return missing
 
 

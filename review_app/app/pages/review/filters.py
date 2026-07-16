@@ -194,35 +194,6 @@ async def render_filter_drawer_body(page):
                 .classes("full-width")
             )
 
-            ui.label(t("annotation_filter")).classes("text-caption text-grey q-mt-xs")
-            annotation_filter = (
-                ui.toggle(
-                    {
-                        "All": t("all_option"),
-                        "Annotated": t("annotated"),
-                        "Not Annotated": t("not_annotated"),
-                    },
-                    value=filters.get("selected_annotation_status", "All"),
-                    on_change=lambda _: apply_filters(),
-                )
-                .props("dense spread unelevated")
-                .classes("full-width")
-            )
-
-            annotator_values = filter_options.get("annotator_values", [])
-            selected_annotator = filters.get("selected_annotator", [])
-            if not isinstance(selected_annotator, list):
-                selected_annotator = []
-            selected_annotator = [v for v in selected_annotator if v in annotator_values]
-            annotator_filter = ui.select(
-                label=t("annotator_filter"),
-                options={v: v for v in annotator_values},
-                value=selected_annotator,
-                with_input=True,
-                multiple=True,
-                on_change=lambda _: apply_filters(),
-            ).props("outlined dense class=full-width use-chips")
-
             _init_selected_tags = filters.get("selected_tags", [])
             if not isinstance(_init_selected_tags, list):
                 _init_selected_tags = []
@@ -242,11 +213,65 @@ async def render_filter_drawer_body(page):
                     on_tag_toggle,
                     placeholder=t("filter_by_tag"),
                 )
+
+            ui.label(t("annotation_filter")).classes("text-caption text-grey q-mt-xs")
+            annotation_filter = (
+                ui.toggle(
+                    {
+                        "All": t("all_option"),
+                        "Annotated": t("annotated"),
+                        "Not Annotated": t("not_annotated"),
+                    },
+                    value=filters.get("selected_annotation_status", "All"),
+                )
+                .props("dense spread unelevated")
+                .classes("full-width")
+            )
+
+            annotator_values = filter_options.get("annotator_values", [])
+            selected_annotator = filters.get("selected_annotator", [])
+            if not isinstance(selected_annotator, list):
+                selected_annotator = []
+            selected_annotator = [v for v in selected_annotator if v in annotator_values]
+            annotator_filter = ui.select(
+                label=t("annotator_filter"),
+                options={v: v for v in annotator_values},
+                value=selected_annotator,
+                with_input=True,
+                multiple=True,
+                on_change=lambda _: apply_filters(),
+            ).props("outlined dense class=full-width use-chips")
+            annotator_filter_tooltip = ui.tooltip("").props(f"target=#{annotator_filter.html_id}")
+
             multiple_annotators_cb = ui.checkbox(
                 t("multiple_annotators_filter"),
                 value=bool(filters.get("selected_multiple_annotators", False)),
                 on_change=lambda _: apply_filters(),
             ).props("class=full-width")
+            multiple_annotators_tooltip = ui.tooltip("").props(
+                f"target=#{multiple_annotators_cb.html_id}"
+            )
+
+            def update_annotator_dependent_fields():
+                if annotation_filter.value == "Not Annotated":
+                    annotator_filter.value = []
+                    multiple_annotators_cb.value = False
+                    annotator_filter.disable()
+                    multiple_annotators_cb.disable()
+                    annotator_filter_tooltip.text = t("annotator_fields_disabled_not_annotated")
+                    multiple_annotators_tooltip.text = t("annotator_fields_disabled_not_annotated")
+                else:
+                    annotator_filter.enable()
+                    multiple_annotators_cb.enable()
+                    annotator_filter_tooltip.text = ""
+                    multiple_annotators_tooltip.text = ""
+
+            async def on_annotation_filter_change():
+                update_annotator_dependent_fields()
+                await apply_filters()
+
+            annotation_filter.on_value_change(lambda _: on_annotation_filter_change())
+            update_annotator_dependent_fields()
 
             is_review_later = ui.checkbox(
                 t("review_later_filter"),

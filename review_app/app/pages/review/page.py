@@ -38,6 +38,7 @@ from review_app.app.utils import (
     localize_inat_url,
     render_uninitialized_state,
 )
+from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.species import SpeciesCatalog
 from review_app.backend.utils import df_to_records
 
@@ -386,9 +387,9 @@ async def _render_video_section_body(page: ReviewPage):
                     ui.label(video["camera_id"]).classes("text-caption")
             with ui.element("div").classes("col text-center"):
                 with ui.row().classes("items-center justify-center no-wrap"):
-                    ui.label(Path(video.get("video_path", "")).name).classes("text-caption").style(
-                        "white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
-                    )
+                    ui.label(Path(normalize_path_str(video.get("video_path", ""))).name).classes(
+                        "text-caption"
+                    ).style("white-space: nowrap; overflow: hidden; text-overflow: ellipsis;")
                     _assign = video.get("assigned_to")
                     if _assign:
                         ui.label("·").classes("text-caption text-grey-6 q-mx-xs")
@@ -475,22 +476,23 @@ async def _render_video_section_body(page: ReviewPage):
                 if transcoded_path and transcoded_path.exists():
                     video_url = f"/transcoded/{quote(transcoded_path.name)}"
                 else:
-                    serve_path = Path(video["video_path"])
+                    serve_path = Path(normalize_path_str(video["video_path"]))
                     if serve_path.exists():
                         video_url = None
                         for _base in [
-                            Path(d.path) for d in dp.get_project_dirs(get_active_project_id())
+                            Path(normalize_path_str(d.path))
+                            for d in dp.get_project_dirs(get_active_project_id())
                         ]:
                             try:
                                 rel_path = serve_path.relative_to(_base)
-                                video_url = f"/media/{quote(str(rel_path), safe='/')}"
+                                video_url = f"/media/{quote(rel_path.as_posix(), safe='/')}"
                                 break
                             except ValueError:
                                 continue
                         if video_url is None:
                             ui.label(t("video_outside_media")).classes("text-negative")
                     else:
-                        ui.label(t("video_not_found", path=video["video_path"])).classes(
+                        ui.label(t("video_not_found", path=str(serve_path))).classes(
                             "text-negative"
                         )
                         video_url = None
@@ -504,9 +506,10 @@ async def _render_video_section_body(page: ReviewPage):
 
             if not video.get("is_video_valid", True):
                 _err = video.get("video_validation_details", "Unknown error")
+                _vp = video.get("video_path")
                 logger.warning(
                     "Displaying invalid video %s: %s",
-                    video.get("video_path", "<unknown>"),
+                    str(Path(normalize_path_str(_vp))) if _vp else "<unknown>",
                     _err,
                 )
                 ui.label(t("video_validation_failed", error=_err)).classes(

@@ -20,6 +20,7 @@ from sqlalchemy import select, text
 from review_app.app.config import VIDEO_EXTENSIONS
 from review_app.backend.db.models import ProjectDir, Video
 from review_app.backend.errors import VideoError
+from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
 
 logger = logging.getLogger(__name__)
@@ -225,7 +226,7 @@ class VideoMixin(ProviderBase):
         elif active_project_id:
             with self.Session() as s:
                 scan_dirs = [
-                    Path(d.path)
+                    Path(normalize_path_str(d.path))
                     for d in s.query(ProjectDir)
                     .filter_by(project_id=active_project_id)
                     .order_by(ProjectDir.sort_order)
@@ -245,8 +246,8 @@ class VideoMixin(ProviderBase):
                 if any(part.startswith(".") for part in p.relative_to(scan_dir).parts):
                     continue
                 rel = p.parent.relative_to(scan_dir)
-                camera_id = rel.as_posix() if str(rel) != "." else "default"
-                rows.append({"video_path": p.as_posix(), "camera_id": camera_id})
+                camera_id = normalize_path_str(str(rel)) if str(rel) != "." else "default"
+                rows.append({"video_path": normalize_path_str(str(p)), "camera_id": camera_id})
 
         if not rows:
             return pd.DataFrame(columns=["video_path", "camera_id"])
@@ -404,7 +405,9 @@ class VideoMixin(ProviderBase):
                     user_message_key="video_error_not_found",
                     detail=f"Unknown video_id: {video_id!r}",
                 )
-            self._apply_probe_result(video, _probe_video(Path(video.video_path)))
+            self._apply_probe_result(
+                video, _probe_video(Path(normalize_path_str(video.video_path)))
+            )
             session.commit()
 
     def reprobe_invalid_videos(self) -> dict[str, Any]:
@@ -417,7 +420,9 @@ class VideoMixin(ProviderBase):
             if not invalid_videos:
                 return {"re_probed": 0, "now_valid": 0, "still_invalid": 0}
 
-            path_map: dict[Path, str] = {Path(v.video_path): v.video_id for v in invalid_videos}
+            path_map: dict[Path, str] = {
+                Path(normalize_path_str(v.video_path)): v.video_id for v in invalid_videos
+            }
             probe_results = _probe_many(list(path_map.keys()))
 
             now_valid = 0
@@ -448,7 +453,7 @@ class VideoMixin(ProviderBase):
                     detail=f"Unknown video_id: {video_id!r}",
                 )
 
-            input_path = Path(video.video_path)
+            input_path = Path(normalize_path_str(video.video_path))
             if not input_path.exists():
                 video.is_missing = True
                 session.commit()

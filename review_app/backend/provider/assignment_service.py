@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 
+from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
 from review_app.backend.utils import bind_id_list
 
@@ -586,7 +587,7 @@ class AssignmentMixin(ProviderBase):
         dirs = self.get_project_dirs(project_id)
         if not dirs:
             raise RuntimeError("Project has no video directory configured.")
-        project_root = Path(dirs[0].path)
+        project_root = Path(normalize_path_str(dirs[0].path))
         if output_dir:
             exports_root = Path(output_dir)
         else:
@@ -635,7 +636,7 @@ class AssignmentMixin(ProviderBase):
             dest_dir.mkdir(exist_ok=True)
             copied_in_annotator = 0
             for video_path in paths:
-                src = Path(video_path)
+                src = Path(normalize_path_str(video_path))
                 if not src.exists():
                     missing_count += 1
                     continue

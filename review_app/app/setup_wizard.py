@@ -699,6 +699,7 @@ class SetupWizard:
                         )
                         from review_app.backend.db.backup import BackupError, restore_backup
                         from review_app.backend.db.migrations import MIGRATIONS
+                        from review_app.backend.path_matching import normalize_path_str
                         from review_app.backend.provider.local_data_provider import (
                             LocalDataProvider,
                         )
@@ -734,7 +735,7 @@ class SetupWizard:
                                 set_active_project(proj.id)
                                 dp.touch_project(proj.id)
                             all_dirs = [
-                                Path(d.path)
+                                Path(normalize_path_str(d.path))
                                 for _p in dp.list_projects()
                                 for d in dp.get_project_dirs(_p.id)
                             ]
