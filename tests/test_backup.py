@@ -132,6 +132,33 @@ class TestCreateBackup:
             create_backup(reason="test")
         assert set(workspace["backup_dir"].iterdir()) == before
 
+    def test_background_compress_returns_raw_db_then_gzips(self, workspace):
+        import time
+
+        result = create_backup(reason="test", compress="background")
+        assert result.suffix == ".db", "background mode must return before compression"
+        assert result.exists() or result.with_suffix(".db.gz").exists()
+
+        gz_path = Path(str(result) + ".gz")
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if gz_path.exists() and not result.exists():
+                break
+            time.sleep(0.05)
+        assert gz_path.exists(), "compression thread should produce the .db.gz"
+        assert not result.exists(), "raw .db should be removed after compression"
+
+        # Compressed backup must still be a restorable database
+        version = read_schema_version(gz_path)
+        assert version == 3
+
+    def test_backup_if_stale_creates_then_skips(self, workspace):
+        from review_app.backend.db.backup import backup_if_stale
+
+        assert backup_if_stale(reason="test") is True
+        assert backup_if_stale(reason="test") is False, "fresh backup exists — must skip"
+        assert backup_if_stale(max_age_seconds=0, reason="test") is True
+
     def test_backup_filename_includes_schema_version(self, workspace):
         result = create_backup(reason="test")
         assert "_v3" in result.name

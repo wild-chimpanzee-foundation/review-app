@@ -649,12 +649,12 @@ class GUI:
         def _backup_on_shutdown():
             logger.info("Shutting down")
             if self.dp and self.dp.engine:
-                from review_app.backend.db.backup import BackupError, create_backup
+                # Skip when a recent backup exists — a multi-minute VACUUM+gzip on
+                # huge databases makes users force-kill the app, which is exactly
+                # when corruption happens.
+                from review_app.backend.db.backup import backup_if_stale
 
-                try:
-                    create_backup(reason="shutdown")
-                except BackupError:
-                    pass
+                backup_if_stale(reason="shutdown")
 
         ui.run(
             title="Video Annotation",

@@ -651,6 +651,19 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
         19,
         lambda conn: _add_column_if_missing(conn, "species", "inaturalist_url", "TEXT"),
     ),
+    (
+        # Queue queries now filter model_annotations by project_id; backfill rows
+        # imported before the column existed so they don't vanish from the filters.
+        20,
+        """
+        UPDATE model_annotations
+        SET project_id = (
+            SELECT project_id FROM videos
+            WHERE videos.video_id = model_annotations.video_id
+        )
+        WHERE project_id IS NULL
+        """,
+    ),
 ]
 
 

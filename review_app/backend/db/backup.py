@@ -7,6 +7,8 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +26,10 @@ DAILY_RETENTION_DAYS = 14
 WEEKLY_RETENTION_WEEKS = 8
 MONTHLY_RETENTION_MONTHS = 3
 BACKUP_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
+
+# Level 1 is ~5-10x faster than the gzip default (9) at ~15% larger files. Backups
+# on multi-GB databases block imports, so speed wins over size here.
+BACKUP_GZIP_LEVEL = 1
 
 
 class BackupError(AppError):
@@ -135,8 +141,46 @@ def remove_db_sidecars(db_path: Path) -> None:
                 logger.warning("Failed to remove sidecar %s", p)
 
 
-def create_backup(reason: str = "auto", auto_prune: bool = True) -> Path:
-    """Create a gzip-compressed VACUUM INTO backup of the live DB. Raises on any failure."""
+def _compress_backup(raw_db: Path, backup_path: Path, auto_prune: bool, atomic: bool) -> Path:
+    """gzip raw_db into backup_path and remove the raw file. Returns the final path.
+
+    atomic=True writes to a .tmp file first and renames — required in the background
+    thread so list_backups/restore never see a half-written .gz. On compression
+    failure the raw .db is kept — it is already a valid backup (list_backups and
+    restore handle both .db and .db.gz)."""
+    target = Path(str(backup_path) + ".tmp") if atomic else backup_path
+    try:
+        with (
+            open(raw_db, "rb") as f_in,
+            gzip.open(target, "wb", compresslevel=BACKUP_GZIP_LEVEL) as f_out,
+        ):
+            shutil.copyfileobj(f_in, f_out)
+        if atomic:
+            os.replace(target, backup_path)
+        raw_db.unlink(missing_ok=True)
+        result = backup_path
+    except Exception:
+        logger.exception("Backup compression failed; keeping uncompressed backup %s", raw_db)
+        target.unlink(missing_ok=True)
+        result = raw_db
+    if auto_prune:
+        try:
+            prune_backups()
+        except Exception:
+            logger.exception("Backup pruning failed")
+    return result
+
+
+def create_backup(reason: str = "auto", auto_prune: bool = True, compress: str = "sync") -> Path:
+    """Create a VACUUM INTO backup of the live DB. Raises on any failure.
+
+    compress:
+      "sync"       – gzip before returning; returns the .db.gz path.
+      "background" – return the plain .db right after VACUUM INTO; gzip + prune run
+                     in a daemon thread. If the app exits mid-compression the raw
+                     .db stays behind as a valid backup.
+    """
+    _t0 = time.monotonic()
     db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
     if not db_path.exists():
         raise BackupDBNotFoundError(str(db_path))
@@ -144,8 +188,13 @@ def create_backup(reason: str = "auto", auto_prune: bool = True) -> Path:
     schema_version = read_schema_version(db_path) or 0
     timestamp = datetime.now(timezone.utc).strftime(BACKUP_TIMESTAMP_FORMAT)
     backup_dir = get_backup_dir()
+
+    # Clear leftovers from a compression thread killed by a previous shutdown
+    for stale in backup_dir.glob("review_backup_*.tmp"):
+        stale.unlink(missing_ok=True)
+
     backup_path = backup_dir / f"review_backup_{timestamp}_v{schema_version}.db.gz"
-    if backup_path.exists():
+    if backup_path.exists() or backup_path.with_suffix("").exists():
         i = 1
         while (backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db.gz").exists():
             i += 1
@@ -167,19 +216,33 @@ def create_backup(reason: str = "auto", auto_prune: bool = True) -> Path:
         if con is not None:
             con.close()
 
-    try:
-        with open(raw_db, "rb") as f_in, gzip.open(backup_path, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
-    except Exception as exc:
-        logger.exception("Backup compression failed")
-        backup_path.unlink(missing_ok=True)
-        raise BackupVacuumError(str(exc)) from exc
-    finally:
-        raw_db.unlink(missing_ok=True)
+    vacuum_secs = time.monotonic() - _t0
 
-    logger.info("Backup created (%s): %s", reason, backup_path)
-    if auto_prune:
-        prune_backups()
+    if compress == "background":
+        threading.Thread(
+            target=_compress_backup,
+            args=(raw_db, backup_path, auto_prune, True),
+            name="backup-compress",
+            daemon=True,
+        ).start()
+        logger.info(
+            "Backup created (%s): %s (vacuum %.1fs, compressing in background)",
+            reason,
+            raw_db,
+            vacuum_secs,
+        )
+        return raw_db
+
+    result = _compress_backup(raw_db, backup_path, auto_prune, atomic=False)
+    if result != backup_path:
+        raise BackupVacuumError(f"compression failed, uncompressed backup kept at {result}")
+    logger.info(
+        "Backup created (%s): %s (vacuum %.1fs, gzip %.1fs)",
+        reason,
+        backup_path,
+        vacuum_secs,
+        time.monotonic() - _t0 - vacuum_secs,
+    )
     return backup_path
 
 
@@ -270,15 +333,18 @@ def prune_backups() -> int:
     return count
 
 
-def backup_if_stale(max_age_seconds: int = 300, reason: str = "auto") -> bool:
-    """Create a backup only if no backup exists within max_age_seconds. Returns True if one was created."""
+def backup_if_stale(max_age_seconds: int = 1800, reason: str = "auto") -> bool:
+    """Create a backup only if no backup exists within max_age_seconds. Returns True if one was created.
+
+    Safety-net path (pre-import, pre-update, shutdown): compression runs in the
+    background so the caller only waits for the VACUUM INTO."""
     backups = list_backups()
     if backups:
         age = (datetime.now(timezone.utc) - backups[0]["timestamp"]).total_seconds()
         if age < max_age_seconds:
             return False
     try:
-        create_backup(reason=reason)
+        create_backup(reason=reason, compress="background")
         return True
     except BackupError:
         return False
@@ -402,7 +468,10 @@ def quarantine_broken_db() -> Path | None:
             i += 1
         target = backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db.gz"
 
-    with open(db_path, "rb") as f_in, gzip.open(target, "wb") as f_out:
+    with (
+        open(db_path, "rb") as f_in,
+        gzip.open(target, "wb", compresslevel=BACKUP_GZIP_LEVEL) as f_out,
+    ):
         shutil.copyfileobj(f_in, f_out)
     db_path.unlink()
     remove_db_sidecars(db_path)
