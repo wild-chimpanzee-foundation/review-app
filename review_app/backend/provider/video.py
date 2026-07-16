@@ -282,7 +282,8 @@ class VideoMixin(ProviderBase):
 
             new_rows = scanned[~scanned["video_path"].isin(existing)]
             existing_df = scanned[scanned["video_path"].isin(existing)]
-            orphaned_paths = [p for p in existing if p not in scanned["video_path"].values]
+            scanned_paths = set(scanned["video_path"])
+            orphaned_paths = [p for p in existing if p not in scanned_paths]
 
             total_scanned = len(scanned)
 
