@@ -428,7 +428,9 @@ def test_import_annotations_creates_safety_backup(clean_provider, tmp_db):
     df = pd.DataFrame([{"video_path": v1_path, "is_blank": 1}])
     dp.import_annotations_csv(df, active_project_id=None)
 
-    assert list(backup_dir.glob("review_backup_*.db.gz"))
+    # Pre-import backups compress in the background: right after the import either
+    # the raw .db or the finished .db.gz may be present — both are valid backups.
+    assert list(backup_dir.glob("review_backup_*.db*"))
 
 
 # ---------------------------------------------------------------------------

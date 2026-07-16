@@ -178,6 +178,50 @@ def test_queue_combined_camera_and_not_annotated(populated_provider):
     assert result == {ids["v4"]}
 
 
+def test_queue_model_filters_scoped_to_active_project(tmp_db, mock_probe):
+    """Model-annotation CTEs must bind the active project's id (they filter the
+    model_annotations table by project_id to avoid scanning other projects)."""
+    import uuid
+    from datetime import datetime, timezone
+
+    from review_app.backend.db.models import ModelAnnotation
+
+    video_dir = tmp_db["video_dir"]
+    (video_dir / "cam_a").mkdir()
+    (video_dir / "cam_a" / "p1.mp4").touch()
+    dp = LocalDataProvider()
+    project = dp.create_project("P", str(video_dir))
+    dp.sync_videos(progress_callback=None, video_dir=video_dir, active_project_id=project.id)
+    vid = dp.get_video_queue({}, active_project_id=project.id)[0]
+
+    with dp.Session() as s:
+        s.add(
+            ModelAnnotation(
+                id=str(uuid.uuid4()),
+                video_id=vid,
+                project_id=project.id,
+                annotation_type="blank_non_blank",
+                model_name="m",
+                value_text="blank",
+                probability=0.99,
+                updated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+        s.commit()
+
+    assert queue(dp, {"selected_model_blank": "Blank"}, project_id=project.id) == {vid}
+    assert queue(dp, {"selected_model_blank": "Non-Blank"}, project_id=project.id) == set()
+    assert queue(dp, {"selected_needs_review": "No Review"}, project_id=project.id) == {vid}
+    assert (
+        queue(
+            dp,
+            {"selected_sort": "species_prob", "selected_possible_species": ["deer"]},
+            project_id=project.id,
+        )
+        == set()
+    )
+
+
 def test_queue_sort_direction_does_not_crash(populated_provider):
     dp, ids = populated_provider
     asc = dp.get_video_queue(

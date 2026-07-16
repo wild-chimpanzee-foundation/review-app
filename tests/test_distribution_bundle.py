@@ -102,6 +102,64 @@ def test_get_assignment_summary(two_camera_provider):
 
 
 # ---------------------------------------------------------------------------
+# Large projects — SQLite caps bound variables at 32766 (regression: CI project
+# with 36k videos failed apply_chunk_assignment with "too many SQL variables")
+# ---------------------------------------------------------------------------
+
+
+def test_chunk_assignment_survives_more_videos_than_sqlite_variable_limit(two_camera_provider):
+    from sqlalchemy import text
+
+    dp, project = two_camera_provider
+    n = 33_000
+    video_ids = [f"bulk_{i}" for i in range(n)]
+    with dp.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO videos (video_id, project_id, video_path, camera_id, last_seen_at) "
+                "VALUES (:vid, :pid, :vid, 'cam_bulk', CURRENT_TIMESTAMP)"
+            ),
+            [{"vid": v, "pid": project.id} for v in video_ids],
+        )
+
+    chunks = [{"chunk_id": "big", "video_ids": video_ids}]
+    total = dp.apply_chunk_assignment(project.id, {"alice": ["big"]}, chunks)
+    assert total == n
+
+    chunk_map = dp.get_chunk_assignment_map(project.id, chunks)
+    assert chunk_map["big"] == "alice"
+
+    # Re-applying (which first deletes all affected rows) must also survive
+    total = dp.apply_chunk_assignment(project.id, {"bob": ["big"]}, chunks)
+    assert total == n
+    assert dp.get_chunk_assignment_map(project.id, chunks)["big"] == "bob"
+
+    # Bundle export filters by the annotator's full video list — same limit
+    bundle = _read_bundle(dp.export_project_bundle(project.id, ["metadata"], video_ids=video_ids))
+    df = pd.read_csv(io.BytesIO(bundle["metadata.csv"]))
+    assert len(df) == n
+
+
+def test_export_all_bundles_returns_empty_bytes_when_nothing_to_export(two_camera_provider):
+    from sqlalchemy import text
+
+    dp, project = two_camera_provider
+    dp.apply_distribution(project.id, {"alice": ["cam_a"]})
+
+    # Label every assigned video: nothing left to bundle
+    with dp.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO video_labels (video_id, is_blank, labeled_by) "
+                "VALUES (:vid, 1, 'alice')"
+            ),
+            [{"vid": v} for v in dp.get_assigned_video_ids(project.id, "alice")],
+        )
+
+    assert dp.export_all_bundles(project.id, ["metadata"]) == b""
+
+
+# ---------------------------------------------------------------------------
 # export_project_bundle — camera filter
 # ---------------------------------------------------------------------------
 
