@@ -33,8 +33,10 @@ def _make_provider(tmp_db):
 
     dp = LocalDataProvider()
     dp.sync_videos(progress_callback=None, video_dir=video_dir)
-    queue = dp.get_video_queue({}, active_project_id=None)
-    paths = [dp.get_video_detail(v)["video_path"] for v in queue]
+    with dp.engine.connect() as conn:
+        from sqlalchemy import text
+
+        paths = [r[0] for r in conn.execute(text("SELECT video_path FROM videos")).fetchall()]
     return dp, paths
 
 
