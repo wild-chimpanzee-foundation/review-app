@@ -101,6 +101,46 @@ def test_get_assignment_summary(two_camera_provider):
     assert by_name["bob"]["video_count"] == 2
 
 
+def test_get_assigned_annotators(two_camera_provider):
+    dp, project = two_camera_provider
+    assert dp.get_assigned_annotators(project.id) == []
+
+    dp.apply_distribution(project.id, {"alice": ["cam_a"], "bob": ["cam_b"]})
+    assert dp.get_assigned_annotators(project.id) == ["alice", "bob"]
+
+    # Manually insert video assignments on the same camera (cam_a) for different annotators
+    from sqlalchemy import text
+
+    with dp.engine.begin() as conn:
+        conn.execute(text("DELETE FROM video_assignments"))
+        # Get video IDs for cam_a
+        vids = [
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT video_id FROM videos WHERE camera_id = 'cam_a' AND project_id = :pid"
+                ),
+                {"pid": project.id},
+            ).fetchall()
+        ]
+        assert len(vids) >= 2
+        # Assign video 1 to alice, video 2 to bob
+        conn.execute(
+            text(
+                "INSERT INTO video_assignments (video_id, assigned_to, assigned_at) VALUES (:vid, :ann, CURRENT_TIMESTAMP)"
+            ),
+            [{"vid": vids[0], "ann": "alice"}, {"vid": vids[1], "ann": "bob"}],
+        )
+
+    # Both should be returned by get_assigned_annotators, even though they share cam_a
+    assert dp.get_assigned_annotators(project.id) == ["alice", "bob"]
+
+    # But get_camera_assignment_map will only return one of them for cam_a due to key overwrite
+    cam_map = dp.get_camera_assignment_map(project.id)
+    assert cam_map["cam_a"] in ["alice", "bob"]
+    assert cam_map["cam_b"] is None
+
+
 # ---------------------------------------------------------------------------
 # Large projects — SQLite caps bound variables at 32766 (regression: CI project
 # with 36k videos failed apply_chunk_assignment with "too many SQL variables")

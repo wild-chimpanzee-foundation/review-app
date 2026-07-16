@@ -245,8 +245,8 @@ class VideoMixin(ProviderBase):
                 if any(part.startswith(".") for part in p.relative_to(scan_dir).parts):
                     continue
                 rel = p.parent.relative_to(scan_dir)
-                camera_id = str(rel) if str(rel) != "." else "default"
-                rows.append({"video_path": str(p), "camera_id": camera_id})
+                camera_id = rel.as_posix() if str(rel) != "." else "default"
+                rows.append({"video_path": p.as_posix(), "camera_id": camera_id})
 
         if not rows:
             return pd.DataFrame(columns=["video_path", "camera_id"])

@@ -547,6 +547,20 @@ class AssignmentMixin(ProviderBase):
             cameras[camera_id] = assigned_to
         return cameras
 
+    def get_assigned_annotators(self, project_id: str) -> list[str]:
+        """Return a sorted list of annotator names who have at least one video assignment in the project."""
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text("""
+                    SELECT DISTINCT va.assigned_to
+                    FROM video_assignments va
+                    JOIN videos v ON v.video_id = va.video_id
+                    WHERE v.project_id = :pid AND va.assigned_to IS NOT NULL
+                """),
+                {"pid": project_id},
+            ).fetchall()
+        return sorted([r[0] for r in rows])
+
     def export_annotator_videos(
         self,
         project_id: str,

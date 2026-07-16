@@ -16,9 +16,10 @@ from review_app.app.utils import (
 
 
 class DistributionSection:
-    def __init__(self, dp, project_id: str):
+    def __init__(self, dp, project_id: str, on_change=None):
         self.dp = dp
         self.project_id = project_id
+        self.on_change = on_change
         self._pending: dict[str, str | None] = {}
         self._active_annotators: set[str] | None = None
         self.camera_stats: list[dict] = []
@@ -129,6 +130,8 @@ class DistributionSection:
             ui.notify(t("distribution_applied", n=n, annotators=filled), type="positive")
             self.render.refresh()
             self.render_summary.refresh()
+            if self.on_change:
+                self.on_change()
 
         has_pending = any(v is not None for v in self._pending.values())
 
@@ -145,6 +148,8 @@ class DistributionSection:
                         self.chunks = []
                         self.render.refresh()
                         self.render_summary.refresh()
+                        if self.on_change:
+                            self.on_change()
                         ui.notify(t("distribution_reset_done"), type="positive")
 
                     ui.button(
@@ -218,13 +223,51 @@ class DistributionSection:
 
 
 def render_distribution_section(dp, project_id: str) -> None:
+    _vz_annotators: list[str] = []
+    _vz_selected: set[str] = set()
+
+    @ui.refreshable
+    def render_vz_chips():
+        nonlocal _vz_annotators, _vz_selected
+        if _vz_annotators:
+            ui.label(t("video_zip_annotators_label")).classes("text-caption text-grey-6 q-mb-xs")
+            with ui.row().classes("gap-xs flex-wrap q-mb-sm"):
+                for ann in _vz_annotators:
+                    active = ann in _vz_selected
+
+                    def _toggle(a=ann):
+                        if a in _vz_selected:
+                            _vz_selected.discard(a)
+                        else:
+                            _vz_selected.add(a)
+                        render_vz_chips.refresh()
+
+                    chip = ui.chip(ann, icon="person", on_click=_toggle)
+                    chip.props("clickable")
+                    if active:
+                        chip.props("color=primary")
+                    else:
+                        chip.props("outline color=grey-6")
+
+    def reload_vz_annotators():
+        nonlocal _vz_annotators, _vz_selected
+        _vz_annotators = dp.get_assigned_annotators(project_id)
+        _vz_selected = _vz_selected.intersection(_vz_annotators)
+        if not _vz_selected and _vz_annotators:
+            _vz_selected = set(_vz_annotators)
+        render_vz_chips.refresh()
+
+    # Initial load of annotators
+    _vz_annotators = dp.get_assigned_annotators(project_id)
+    _vz_selected = set(_vz_annotators)
+
     # ── Work Distribution ─────────────────────────────────────────────────
     with ui.card().classes("full-width q-mb-lg"):
         with ui.row().classes("items-center q-mb-sm"):
             ui.icon("group", size="sm").classes("text-primary q-mr-sm")
             ui.label(t("distribution_title")).classes("text-subtitle1 font-weight-medium")
         ui.label(t("distribution_desc")).classes("text-caption text-grey-6 q-mb-md")
-        section = DistributionSection(dp, project_id)
+        section = DistributionSection(dp, project_id, on_change=reload_vz_annotators)
         section.render()
         section.render_summary()
 
@@ -238,8 +281,8 @@ def render_distribution_section(dp, project_id: str) -> None:
         _all_include = ["species", "tags", "model_annotations", "metadata"]
 
         async def download_all_bundles():
-            camera_map = await run.io_bound(dp.get_camera_assignment_map, project_id)
-            if not any(a is not None for a in camera_map.values()):
+            annotators = await run.io_bound(dp.get_assigned_annotators, project_id)
+            if not annotators:
                 ui.notify(t("bundle_no_annotators"), type="warning")
                 return
             try:
@@ -263,34 +306,7 @@ def render_distribution_section(dp, project_id: str) -> None:
             ui.label(t("video_zip_title")).classes("text-subtitle1 font-weight-medium")
         ui.label(t("video_zip_desc")).classes("text-caption text-grey-6 q-mb-md")
 
-        _vz_camera_map = dp.get_camera_assignment_map(project_id)
-        _vz_annotators = sorted({a for a in _vz_camera_map.values() if a is not None})
-        _vz_selected: set[str] = set(_vz_annotators)
-
-        if _vz_annotators:
-            ui.label(t("video_zip_annotators_label")).classes("text-caption text-grey-6 q-mb-xs")
-
-            @ui.refreshable
-            def render_vz_chips():
-                with ui.row().classes("gap-xs flex-wrap q-mb-sm"):
-                    for ann in _vz_annotators:
-                        active = ann in _vz_selected
-
-                        def _toggle(a=ann):
-                            if a in _vz_selected:
-                                _vz_selected.discard(a)
-                            else:
-                                _vz_selected.add(a)
-                            render_vz_chips.refresh()
-
-                        chip = ui.chip(ann, icon="person", on_click=_toggle)
-                        chip.props("clickable")
-                        if active:
-                            chip.props("color=primary")
-                        else:
-                            chip.props("outline color=grey-6")
-
-            render_vz_chips()
+        render_vz_chips()
 
         ui.label(t("video_zip_output_label")).classes("text-caption text-grey-6 q-mb-xs")
         video_zip_output_input = (
@@ -301,16 +317,14 @@ def render_distribution_section(dp, project_id: str) -> None:
 
         async def export_video_zips():
             if not _vz_annotators:
-                camera_map = await run.io_bound(dp.get_camera_assignment_map, project_id)
-                if not any(a is not None for a in camera_map.values()):
-                    ui.notify(t("video_zip_no_assignments"), type="warning")
-                    return
+                ui.notify(t("video_zip_no_assignments"), type="warning")
+                return
             elif not _vz_selected:
                 ui.notify(t("video_zip_no_assignments"), type="warning")
                 return
 
             output_dir = (video_zip_output_input.value or "").strip() or None
-            annotators = list(_vz_selected) if _vz_annotators else None
+            annotators = list(_vz_selected)
 
             progress_dialog = ui.dialog().props("persistent")
             with progress_dialog, ui.card().classes("q-pa-lg").style("min-width: 420px"):
