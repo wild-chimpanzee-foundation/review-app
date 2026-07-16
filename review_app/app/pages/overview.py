@@ -127,12 +127,22 @@ async def setup_overview():
                         .classes("full-width q-mb-lg text-warning")
                         .props("header-class='text-warning'")
                     ):
+                        # Cap the list: an unplugged drive can mean tens of thousands of
+                        # missing videos, and one DOM element each hangs the browser.
+                        _MAX_MISSING_SHOWN = 200
                         with ui.scroll_area().style("max-height: 300px"):
                             with ui.column().classes("q-pa-sm gap-xs"):
-                                for _, mv in missing_videos_df.iterrows():
+                                for _, mv in missing_videos_df.head(_MAX_MISSING_SHOWN).iterrows():
                                     ui.label(mv["video_path"]).classes(
                                         "text-body2 text-mono text-grey-8"
                                     )
+                                if missing_count > _MAX_MISSING_SHOWN:
+                                    ui.label(
+                                        t(
+                                            "missing_videos_more",
+                                            n=missing_count - _MAX_MISSING_SHOWN,
+                                        )
+                                    ).classes("text-body2 text-grey-6 text-italic")
 
         # Annotation progress bar
         blank = int(lb.get("blank", 0))
