@@ -12,9 +12,15 @@ from review_app.backend.utils import DEFAULT_REVIEW_THRESHOLD
 class QueueMixin(ProviderBase):
     """Video queue building and filter options. Requires self.engine."""
 
-    def has_model_annotations(self) -> bool:
+    def has_model_annotations(self, video_id: str | None = None) -> bool:
         with self.engine.connect() as conn:
-            row = conn.execute(text("SELECT 1 FROM model_annotations LIMIT 1")).fetchone()
+            if video_id is not None:
+                row = conn.execute(
+                    text("SELECT 1 FROM model_annotations WHERE video_id = :vid LIMIT 1"),
+                    {"vid": video_id},
+                ).fetchone()
+            else:
+                row = conn.execute(text("SELECT 1 FROM model_annotations LIMIT 1")).fetchone()
         return row is not None
 
     def get_queue_filter_options(self, active_project_id: str | None) -> dict[str, list[str]]:
