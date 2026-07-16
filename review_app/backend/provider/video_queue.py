@@ -167,17 +167,22 @@ class QueueMixin(ProviderBase):
             params["pid"] = active_project_id
             where.append("v.project_id = :pid")
 
+        # Scope model_annotations CTEs to the active project: the table spans all
+        # projects, and aggregating the others' rows multiplies queue latency.
+        ma_project_filter = "AND project_id = :pid" if active_project_id else ""
+        v_project_filter = "WHERE v.project_id = :pid" if active_project_id else ""
+
         need_needs_review_filter = selected_needs_review != "All"
         if need_needs_review_filter:
             params["blank_thr"] = blank_threshold
             params["species_thr"] = species_threshold
-            ctes.append("""
+            ctes.append(f"""
             nr_blank AS (
                 SELECT video_id,
                     MAX(CASE WHEN LOWER(TRIM(value_text)) = 'blank'
                              THEN COALESCE(probability, 0.0) ELSE 0.0 END) AS blank_prob
                 FROM model_annotations
-                WHERE annotation_type = 'blank_non_blank'
+                WHERE annotation_type = 'blank_non_blank' {ma_project_filter}
                 GROUP BY video_id
             ),
             nr_species AS (
@@ -186,7 +191,7 @@ class QueueMixin(ProviderBase):
                     COUNT(DISTINCT value_text)         AS distinct_species,
                     AVG(COALESCE(probability, 0.0))    AS avg_sp
                 FROM model_annotations
-                WHERE annotation_type = 'species'
+                WHERE annotation_type = 'species' {ma_project_filter}
                 GROUP BY video_id
             ),
             needs_review AS (
@@ -200,13 +205,14 @@ class QueueMixin(ProviderBase):
                 FROM videos v
                 LEFT JOIN nr_blank nb ON nb.video_id = v.video_id
                 LEFT JOIN nr_species ns ON ns.video_id = v.video_id
+                {v_project_filter}
             )""")
 
         need_model_blank_filter = selected_model_blank != "All"
         if need_model_blank_filter:
             if "blank_thr" not in params:
                 params["blank_thr"] = blank_threshold
-            ctes.append("""
+            ctes.append(f"""
             model_blank AS (
                 SELECT video_id,
                     CASE
@@ -221,7 +227,7 @@ class QueueMixin(ProviderBase):
                             ORDER BY COALESCE(probability, -1.0) DESC, updated_at DESC
                         ) AS rn
                     FROM model_annotations
-                    WHERE annotation_type = 'blank_non_blank'
+                    WHERE annotation_type = 'blank_non_blank' {ma_project_filter}
                 ) mb WHERE rn = 1
             )""")
 
@@ -412,22 +418,22 @@ class QueueMixin(ProviderBase):
             )
             if species_sort_filter is not None:
                 params["species_sort_val"] = species_sort_filter
-                ctes.append("""
+                ctes.append(f"""
             species_max_prob AS (
                 SELECT video_id, SUM(COALESCE(probability, 0)) AS max_species_prob
                 FROM model_annotations
                 WHERE annotation_type IN ('species', 'object_detection')
-                AND value_text = :species_sort_val
+                AND value_text = :species_sort_val {ma_project_filter}
                 GROUP BY video_id
             )""")
             else:
-                ctes.append("""
+                ctes.append(f"""
             species_max_prob AS (
                 SELECT video_id, MAX(prob_sum) AS max_species_prob
                 FROM (
                     SELECT video_id, SUM(COALESCE(probability, 0)) AS prob_sum
                     FROM model_annotations
-                    WHERE annotation_type IN ('species', 'object_detection')
+                    WHERE annotation_type IN ('species', 'object_detection') {ma_project_filter}
                     GROUP BY video_id, value_text
                 ) _sp
                 GROUP BY video_id
