@@ -591,7 +591,15 @@ class AssignmentMixin(ProviderBase):
             exports_root = Path(output_dir)
         else:
             exports_root = project_root / "annotator_exports"
-        exports_root.mkdir(parents=True, exist_ok=True)
+
+        try:
+            exports_root.mkdir(parents=True, exist_ok=True)
+            # Test directory writability up front
+            test_file = exports_root / ".write_test"
+            test_file.touch()
+            test_file.unlink()
+        except Exception as exc:
+            raise PermissionError(f"Output directory '{exports_root}' is not writable: {exc}")
 
         with self.engine.connect() as conn:
             rows = conn.execute(
@@ -620,13 +628,16 @@ class AssignmentMixin(ProviderBase):
         # Build dest dirs and (src, dest) copy list up front
         results = []
         copy_tasks: list[tuple[Path, Path]] = []
+        missing_count = 0
         for annotator, paths in by_annotator.items():
             safe_name = _safe_dirname(annotator)
             dest_dir = exports_root / safe_name
             dest_dir.mkdir(exist_ok=True)
+            copied_in_annotator = 0
             for video_path in paths:
                 src = Path(video_path)
                 if not src.exists():
+                    missing_count += 1
                     continue
                 try:
                     rel = src.relative_to(project_root)
@@ -635,9 +646,23 @@ class AssignmentMixin(ProviderBase):
                 dest = dest_dir / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 copy_tasks.append((src, dest))
-            results.append(
-                {"annotator": annotator, "path": str(dest_dir), "video_count": len(paths)}
-            )
+                copied_in_annotator += 1
+            if copied_in_annotator > 0:
+                results.append(
+                    {
+                        "annotator": annotator,
+                        "path": str(dest_dir),
+                        "video_count": copied_in_annotator,
+                    }
+                )
+
+        if not copy_tasks:
+            if missing_count > 0:
+                raise FileNotFoundError(
+                    f"Failed to copy: All {missing_count} assigned video files are missing on disk."
+                )
+            else:
+                raise ValueError("No videos found to export for the selected annotators.")
 
         total = len(copy_tasks)
         done = 0

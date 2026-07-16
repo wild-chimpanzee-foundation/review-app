@@ -355,3 +355,69 @@ def test_bundle_roundtrip_restores_assignments(two_camera_provider):
     cam_map = dp2.get_camera_assignment_map(project2.id)
     assert cam_map.get("cam_a") == "alice", "assignment should survive export → import"
     assert cam_map.get("cam_b") is None, "cam_b was not in alice's bundle"
+
+
+def test_export_annotator_videos_success(two_camera_provider, tmp_path):
+    dp, project = two_camera_provider
+    dp.apply_distribution(project.id, {"alice": ["cam_a"], "bob": ["cam_b"]})
+
+    output_dir = tmp_path / "exports"
+    results = dp.export_annotator_videos(
+        project.id,
+        output_dir=str(output_dir),
+        annotators=["alice"],
+    )
+
+    assert len(results) == 1
+    assert results[0]["annotator"] == "alice"
+    assert results[0]["video_count"] == 2
+
+    alice_export_dir = output_dir / "alice"
+    assert alice_export_dir.exists()
+    assert (alice_export_dir / "cam_a" / "a1.mp4").exists()
+    assert (alice_export_dir / "cam_a" / "a2.mp4").exists()
+
+
+def test_export_annotator_videos_missing_files_raises_error(two_camera_provider, tmp_path):
+    dp, project = two_camera_provider
+    dp.apply_distribution(project.id, {"alice": ["cam_a"]})
+
+    # Delete the source video files to simulate missing files
+    video_dir = Path(dp.get_project_dirs(project.id)[0].path)
+    import shutil
+
+    shutil.rmtree(video_dir / "cam_a")
+
+    output_dir = tmp_path / "exports"
+    with pytest.raises(FileNotFoundError) as exc_info:
+        dp.export_annotator_videos(
+            project.id,
+            output_dir=str(output_dir),
+            annotators=["alice"],
+        )
+    assert "missing on disk" in str(exc_info.value)
+
+
+def test_export_annotator_videos_no_assignments_raises_error(two_camera_provider, tmp_path):
+    dp, project = two_camera_provider
+    output_dir = tmp_path / "exports"
+    with pytest.raises(ValueError) as exc_info:
+        dp.export_annotator_videos(
+            project.id,
+            output_dir=str(output_dir),
+            annotators=["alice"],
+        )
+    assert "No videos found to export" in str(exc_info.value)
+
+
+def test_export_annotator_videos_non_writable_dir_raises_error(two_camera_provider):
+    dp, project = two_camera_provider
+    dp.apply_distribution(project.id, {"alice": ["cam_a"]})
+
+    with pytest.raises(PermissionError) as exc_info:
+        dp.export_annotator_videos(
+            project.id,
+            output_dir="/sys/class/nonexistent_xyz",
+            annotators=["alice"],
+        )
+    assert "not writable" in str(exc_info.value)

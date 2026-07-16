@@ -133,8 +133,6 @@ class DistributionSection:
             if self.on_change:
                 self.on_change()
 
-        has_pending = any(v is not None for v in self._pending.values())
-
         async def reset_assignments():
             with ui.dialog() as confirm_dialog, ui.card():
                 ui.label(t("distribution_reset_confirm")).classes("text-body1 q-mb-md")
@@ -157,14 +155,32 @@ class DistributionSection:
                     ).props("unelevated color=negative size=sm")
             confirm_dialog.open()
 
+        # Check if pending distribution differs from database (applied) distribution
+        has_unsaved_changes = False
+        for chunk_id, saved_ann in chunk_assignment.items():
+            if self._pending.get(chunk_id) != saved_ann:
+                has_unsaved_changes = True
+                break
+
         with ui.row().classes("gap-sm q-mb-sm items-center"):
             ui.button(
                 t("distribution_auto_btn"), icon="auto_fix_high", on_click=auto_distribute
             ).props("outline color=secondary size=sm").tooltip(t("distribution_auto_tooltip"))
-            if has_pending:
+            if has_unsaved_changes:
                 ui.button(
                     t("distribution_apply_btn"), icon="check", on_click=apply_distribution
                 ).props("unelevated color=primary size=sm")
+                with ui.row().classes("items-center gap-xs text-warning q-ml-sm"):
+                    ui.icon("warning", size="xs")
+                    ui.label(t("distribution_status_unsaved")).classes(
+                        "text-caption font-weight-medium"
+                    )
+            else:
+                with ui.row().classes("items-center gap-xs text-positive q-ml-sm"):
+                    ui.icon("check_circle", size="xs")
+                    ui.label(t("distribution_status_saved")).classes(
+                        "text-caption font-weight-medium"
+                    )
             ui.button(
                 t("distribution_reset_btn"), icon="delete_sweep", on_click=reset_assignments
             ).props("flat color=negative size=sm")
@@ -251,15 +267,13 @@ def render_distribution_section(dp, project_id: str) -> None:
 
     def reload_vz_annotators():
         nonlocal _vz_annotators, _vz_selected
-        _vz_annotators = dp.get_assigned_annotators(project_id)
-        _vz_selected = _vz_selected.intersection(_vz_annotators)
-        if not _vz_selected and _vz_annotators:
-            _vz_selected = set(_vz_annotators)
+        _vz_annotators = dp.get_all_annotators()
+        _vz_selected = set(dp.get_assigned_annotators(project_id))
         render_vz_chips.refresh()
 
     # Initial load of annotators
-    _vz_annotators = dp.get_assigned_annotators(project_id)
-    _vz_selected = set(_vz_annotators)
+    _vz_annotators = dp.get_all_annotators()
+    _vz_selected = set(dp.get_assigned_annotators(project_id))
 
     # ── Work Distribution ─────────────────────────────────────────────────
     with ui.card().classes("full-width q-mb-lg"):
