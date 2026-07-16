@@ -228,6 +228,7 @@ class BundleMixin(ImportSharedMixin):
             video_ids_by_annotator.setdefault(assigned_to, []).append(video_id)
 
         outer_buf = io.BytesIO()
+        written = 0
         with zipfile.ZipFile(outer_buf, "w", compression=zipfile.ZIP_DEFLATED) as outer:
             for annotator in annotators:
                 video_ids = video_ids_by_annotator.get(annotator, [])
@@ -236,4 +237,7 @@ class BundleMixin(ImportSharedMixin):
                 bundle_bytes = self.export_project_bundle(project_id, include, video_ids=video_ids)
                 safe_name = annotator.replace(" ", "_")
                 outer.writestr(f"bundle_{safe_name}_{today}.zip", bundle_bytes)
+                written += 1
+        if not written:
+            return b""
         return outer_buf.getvalue()

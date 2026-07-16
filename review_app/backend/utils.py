@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -19,6 +20,16 @@ _MIME_BY_EXT = {
 
 # Extensions browsers can never play natively — transcode even when is_web_safe is NULL
 _BROWSER_UNSAFE_EXTS = {".avi", ".mkv", ".wmv", ".flv", ".m4v"}
+
+
+def bind_id_list(params: dict, key: str, values: list) -> str:
+    """Bind a list of ids as a single JSON parameter and return a subquery usable in `IN`.
+
+    SQLite caps bound variables at 32766; one `?` per id breaks on large projects
+    ("too many SQL variables"), so the whole list is passed as one JSON string.
+    """
+    params[key] = json.dumps(values)
+    return f"(SELECT value FROM json_each(:{key}))"
 
 
 def get_video_mime(url: str) -> str:

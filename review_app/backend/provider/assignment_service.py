@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 
 from review_app.backend.provider.base import ProviderBase
+from review_app.backend.utils import bind_id_list
 
 logger = logging.getLogger(__name__)
 
@@ -319,13 +320,13 @@ class AssignmentMixin(ProviderBase):
                 if not vids:
                     result[chunk["chunk_id"]] = None
                     continue
-                placeholders = ",".join(f":v{i}" for i in range(len(vids)))
-                params = {f"v{i}": v for i, v in enumerate(vids)}
+                params: dict = {}
+                id_list = bind_id_list(params, "vids", vids)
                 rows = conn.execute(
                     text(f"""
                         SELECT assigned_to, COUNT(*) AS cnt
                         FROM video_assignments
-                        WHERE video_id IN ({placeholders})
+                        WHERE video_id IN {id_list}
                         GROUP BY assigned_to
                     """),
                     params,
@@ -363,10 +364,10 @@ class AssignmentMixin(ProviderBase):
         total = 0
         with self.engine.begin() as conn:
             if all_video_ids:
-                placeholders = ",".join(f":v{i}" for i in range(len(all_video_ids)))
-                params = {f"v{i}": v for i, v in enumerate(all_video_ids)}
+                params: dict = {}
+                id_list = bind_id_list(params, "vids", all_video_ids)
                 conn.execute(
-                    text(f"DELETE FROM video_assignments WHERE video_id IN ({placeholders})"),
+                    text(f"DELETE FROM video_assignments WHERE video_id IN {id_list}"),
                     params,
                 )
             for annotator, chunk_ids in chunk_assignment.items():
@@ -375,18 +376,14 @@ class AssignmentMixin(ProviderBase):
                     video_ids.extend(chunk_map[cid]["video_ids"])
                 if not video_ids:
                     continue
-                placeholders = ",".join(f":v{i}" for i in range(len(video_ids)))
-                params = {f"v{i}": v for i, v in enumerate(video_ids)}
-                params["annotator"] = annotator
-                params["now"] = now
-                rows = conn.execute(
-                    text(f"""
+                conn.execute(
+                    text("""
                         INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at)
-                        VALUES {", ".join(f"(:v{i}, :annotator, :now)" for i in range(len(video_ids)))}
+                        VALUES (:vid, :annotator, :now)
                     """),
-                    params,
+                    [{"vid": v, "annotator": annotator, "now": now} for v in video_ids],
                 )
-                total += rows.rowcount
+                total += len(video_ids)
         return total
 
     def apply_distribution(
@@ -409,15 +406,14 @@ class AssignmentMixin(ProviderBase):
         )
         with self.engine.begin() as conn:
             if all_cameras:
-                placeholders = ",".join(f":c{i}" for i in range(len(all_cameras)))
-                params = {f"c{i}": c for i, c in enumerate(all_cameras)}
-                params["pid"] = project_id
+                params: dict = {"pid": project_id}
+                cam_list = bind_id_list(params, "cams", all_cameras)
                 conn.execute(
                     text(f"""
                         DELETE FROM video_assignments
                         WHERE video_id IN (
                             SELECT video_id FROM videos
-                            WHERE project_id = :pid AND camera_id IN ({placeholders})
+                            WHERE project_id = :pid AND camera_id IN {cam_list}
                         )
                     """),
                     params,
@@ -425,17 +421,14 @@ class AssignmentMixin(ProviderBase):
             for annotator_name, camera_ids in assignment.items():
                 if not camera_ids:
                     continue
-                placeholders = ",".join(f":c{i}" for i in range(len(camera_ids)))
-                params = {f"c{i}": c for i, c in enumerate(camera_ids)}
-                params["pid"] = project_id
-                params["annotator"] = annotator_name
-                params["now"] = now
+                params = {"pid": project_id, "annotator": annotator_name, "now": now}
+                cam_list = bind_id_list(params, "cams", camera_ids)
                 rows = conn.execute(
                     text(f"""
                         INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at)
                         SELECT video_id, :annotator, :now
                         FROM videos
-                        WHERE project_id = :pid AND camera_id IN ({placeholders})
+                        WHERE project_id = :pid AND camera_id IN {cam_list}
                     """),
                     params,
                 )

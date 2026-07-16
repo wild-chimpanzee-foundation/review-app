@@ -10,9 +10,20 @@ from sqlalchemy import text
 from review_app.backend.db.models import IndividualObservation, ObservationTag, VideoLabel
 from review_app.backend.errors import SpeciesError
 from review_app.backend.provider.base import ProviderBase
-from review_app.backend.utils import DEFAULT_REVIEW_THRESHOLD, needs_browser_transcode
+from review_app.backend.utils import (
+    DEFAULT_REVIEW_THRESHOLD,
+    needs_browser_transcode,
+)
 
 logger = logging.getLogger(__name__)
+
+# How SQLAlchemy's SQLite DATETIME type renders datetimes. Raw-SQL writes must use the
+# same format so timestamps stay comparable/sortable next to ORM-written rows.
+_SQLITE_DT_FMT = "%Y-%m-%d %H:%M:%S.%f"
+
+
+def _dt_str(value) -> str | None:
+    return None if value is None else value.strftime(_SQLITE_DT_FMT)
 
 
 class AnnotationMixin(ProviderBase):

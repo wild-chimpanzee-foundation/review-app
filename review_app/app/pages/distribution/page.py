@@ -244,6 +244,9 @@ def render_distribution_section(dp, project_id: str) -> None:
                 return
             try:
                 zip_bytes = await run.io_bound(dp.export_all_bundles, project_id, _all_include)
+                if not zip_bytes:
+                    ui.notify(t("bundle_export_empty"), type="warning")
+                    return
                 filename = f"all_bundles_{date.today()}.zip"
                 ui.download(zip_bytes, filename)
             except Exception as exc:

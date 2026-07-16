@@ -16,6 +16,7 @@ from review_app.backend.path_matching import (
     resolve_video_path,
 )
 from review_app.backend.provider.base import ProviderBase
+from review_app.backend.utils import bind_id_list
 
 logger = logging.getLogger(__name__)
 
@@ -167,15 +168,9 @@ class ImportSharedMixin(ProviderBase):
         if video_ids is not None:
             if not video_ids:
                 return "AND 1=0"
-            placeholders = ", ".join(f":v{i}" for i in range(len(video_ids)))
-            for i, v in enumerate(video_ids):
-                params[f"v{i}"] = v
-            return f"AND v.video_id IN ({placeholders})"
+            return f"AND v.video_id IN {bind_id_list(params, 'filter_vids', video_ids)}"
         if camera_ids is None:
             return ""
         if not camera_ids:
             return "AND 1=0"
-        placeholders = ", ".join(f":c{i}" for i in range(len(camera_ids)))
-        for i, c in enumerate(camera_ids):
-            params[f"c{i}"] = c
-        return f"AND v.camera_id IN ({placeholders})"
+        return f"AND v.camera_id IN {bind_id_list(params, 'filter_cams', camera_ids)}"
