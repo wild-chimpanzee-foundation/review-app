@@ -12,6 +12,7 @@ from review_app.backend.errors import SpeciesError
 from review_app.backend.provider.base import ProviderBase
 from review_app.backend.utils import (
     DEFAULT_REVIEW_THRESHOLD,
+    bind_id_list,
     needs_browser_transcode,
 )
 
@@ -395,43 +396,11 @@ class AnnotationMixin(ProviderBase):
         model_df["created_at"] = pd.to_datetime(model_df["created_at"], errors="coerce")
         return model_df
 
-    def update_manual_review(
-        self,
-        video_id: str,
-        selections: list[dict] | None,
-        is_blank: bool | None = None,
-        labeled_by: str | None = None,
-        active_project_id: str | None = None,
-        append: bool = False,
-    ) -> None:
-        if selections is None:
-            selections = []
-
-        # Special case: Clearing all annotations (only if not appending)
-        if not append and not selections and is_blank is None:
-            logger.info("Clearing annotations for video %s", video_id)
-            with self.Session() as session:
-                if session.get(VideoLabel, video_id) is not None:
-                    session.query(VideoLabel).filter(VideoLabel.video_id == video_id).update(
-                        {
-                            "is_blank": None,
-                            "labeled_by": None,
-                            "labeled_at": None,
-                            "review_later": False,
-                        }
-                    )
-                    session.query(ObservationTag).filter(
-                        ObservationTag.video_id == video_id
-                    ).delete(synchronize_session=False)
-                    session.query(IndividualObservation).filter(
-                        IndividualObservation.video_id == video_id
-                    ).delete(synchronize_session=False)
-                    session.commit()
-            return
-
-        now = self._utcnow_dt().replace(microsecond=0)
+    def _load_manual_review_maps(
+        self, active_project_id: str | None
+    ) -> tuple[set[str], dict[str, str], dict[str, str]]:
+        """(valid species names, scientific_name → species id, behavior key → id)."""
         valid_species = set(self.get_valid_species(active_project_id))
-
         with self.engine.connect() as conn:
             species_id_map = {
                 r[0]: r[1]
@@ -440,6 +409,20 @@ class AnnotationMixin(ProviderBase):
             behavior_id_map = {
                 r[0]: r[1] for r in conn.execute(text("SELECT key, id FROM behaviors")).fetchall()
             }
+        return valid_species, species_id_map, behavior_id_map
+
+    @staticmethod
+    def _normalize_manual_selections(
+        selections: list[dict],
+        valid_species: set[str],
+        species_id_map: dict[str, str],
+        behavior_id_map: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        """Validate and normalize raw selection dicts into DB-shaped rows.
+
+        Raises SpeciesError for a species outside valid_species. Pure — no DB access,
+        so bulk imports can reuse it with maps loaded once instead of per video.
+        """
 
         def _parse_tag_ids(selection: dict) -> list[str]:
             raw = selection.get("tags")
@@ -498,6 +481,332 @@ class AnnotationMixin(ProviderBase):
                     "labeled_at": selection.get("labeled_at"),
                 }
             )
+        return normalized
+
+    def apply_manual_reviews(
+        self,
+        reviews: list[dict],
+        active_project_id: str | None = None,
+        append: bool = False,
+        review_later: dict[str, bool] | None = None,
+        assignments: dict[str, str] | None = None,
+        video_tags: dict[str, list[str]] | None = None,
+    ) -> None:
+        """Batch counterpart of update_manual_review for CSV imports.
+
+        reviews: one dict per video — {"video_id", "selections", "is_blank", "labeled_by"} —
+        applied with exactly update_manual_review's per-video semantics (observation-id
+        reuse, append behaviour, blank handling, labeled_at/-by update rules).
+        review_later, assignments and video_tags mirror set_review_later, the
+        video-assignment restore, and set_video_tags for the same videos.
+
+        Everything is written in one transaction with a handful of executemany
+        statements: at 50k videos this replaces ~6 queries + 2-3 transactions per video,
+        and a crash mid-import rolls back to the pre-import state instead of leaving a
+        half-written database.
+        """
+        review_later = review_later or {}
+        assignments = assignments or {}
+        video_tags = video_tags or {}
+        now = self._utcnow_dt().replace(microsecond=0)
+        now_str = _dt_str(now)
+
+        valid_species, species_id_map, behavior_id_map = self._load_manual_review_maps(
+            active_project_id
+        )
+
+        review_ids = [str(r["video_id"]) for r in reviews]
+        label_ids = list(dict.fromkeys(review_ids + list(review_later)))
+
+        with self.engine.begin() as conn:
+            # ── Preload current state for every affected video ──────────────────
+            existing_obs: dict[str, dict[int, Any]] = {}
+            existing_obs_tags: dict[str, dict[int, set[str]]] = {}
+            if review_ids:
+                params: dict[str, Any] = {}
+                id_list = bind_id_list(params, "vids", review_ids)
+                for vid, oid, sp, cnt, start, end, lby in conn.execute(
+                    text(
+                        "SELECT video_id, id, species_id, count, start_sec, end_sec, labeled_by"
+                        f" FROM individual_observations WHERE video_id IN {id_list}"
+                    ),
+                    params,
+                ):
+                    existing_obs.setdefault(vid, {})[oid] = (sp, cnt, start, end, lby)
+                params = {}
+                id_list = bind_id_list(params, "vids", review_ids)
+                for vid, oid, bid in conn.execute(
+                    text(
+                        "SELECT video_id, observation_id, behavior_id"
+                        f" FROM observation_tags WHERE video_id IN {id_list}"
+                    ),
+                    params,
+                ):
+                    existing_obs_tags.setdefault(vid, {}).setdefault(oid, set()).add(bid)
+
+            _no_label = {
+                "is_blank": None,
+                "labeled_by": None,
+                "labeled_at": None,
+                "review_later": False,
+            }
+            labels: dict[str, dict[str, Any]] = {}
+            if label_ids:
+                params = {}
+                id_list = bind_id_list(params, "vids", label_ids)
+                for vid, blank, lby, lat, rl in conn.execute(
+                    text(
+                        "SELECT video_id, is_blank, labeled_by, labeled_at, review_later"
+                        f" FROM video_labels WHERE video_id IN {id_list}"
+                    ),
+                    params,
+                ):
+                    labels[vid] = {
+                        "is_blank": blank,
+                        "labeled_by": lby,
+                        "labeled_at": lat,
+                        "review_later": rl,
+                    }
+
+            # ── Plan all row changes in memory ──────────────────────────────────
+            obs_inserts: list[dict] = []
+            obs_updates: list[dict] = []
+            obs_deletes: list[dict] = []
+            tag_deletes: list[dict] = []
+            tag_inserts: list[dict] = []
+            label_rows: dict[str, dict[str, Any]] = {}
+
+            for review in reviews:
+                video_id = str(review["video_id"])
+                selections = review.get("selections") or []
+                is_blank = review.get("is_blank")
+                labeled_by = review.get("labeled_by")
+                existing_map = existing_obs.get(video_id, {})
+                obs_tags = existing_obs_tags.get(video_id, {})
+
+                # Special case: clearing all annotations (only if not appending)
+                if not append and not selections and is_blank is None:
+                    if video_id in labels:
+                        label_rows[video_id] = dict(_no_label)
+                        obs_deletes.extend({"vid": video_id, "oid": o} for o in existing_map)
+                        tag_deletes.extend({"vid": video_id, "oid": o} for o in obs_tags)
+                    continue
+
+                normalized = self._normalize_manual_selections(
+                    selections, valid_species, species_id_map, behavior_id_map
+                )
+                if is_blank is None and normalized:
+                    is_blank = False
+
+                to_delete = set(existing_map) if not append else set()
+                max_id = max(existing_map) if existing_map else 0
+                newly_added = 0
+                obs_tags_to_sync: dict[int, list[str]] = {}
+
+                for row in normalized:
+                    obs_id = row.get("id")
+                    if obs_id and obs_id in existing_map:
+                        ex_sp, ex_cnt, ex_start, ex_end, ex_lby = existing_map[obs_id]
+                        end_sec_changed = (ex_end is None) != (row["end_sec"] is None) or (
+                            ex_end is not None
+                            and row["end_sec"] is not None
+                            and abs(ex_end - row["end_sec"]) > 0.001
+                        )
+                        tags_changed = set(row["tag_ids"]) != obs_tags.get(obs_id, set())
+                        changed = (
+                            ex_sp != row["species_id"]
+                            or ex_cnt != row["count"]
+                            or abs((ex_start or 0.0) - row["start_sec"]) > 0.001
+                            or end_sec_changed
+                            or tags_changed
+                        )
+                        if changed:
+                            # The UI echoes back the stored name; if it hasn't changed,
+                            # use the caller's name instead.
+                            echoed_name = row.get("labeled_by")
+                            obs_updates.append(
+                                {
+                                    "vid": video_id,
+                                    "oid": obs_id,
+                                    "species_id": row["species_id"],
+                                    "count": row["count"],
+                                    "start_sec": row["start_sec"],
+                                    "end_sec": row["end_sec"],
+                                    "labeled_by": (
+                                        labeled_by if echoed_name == ex_lby else echoed_name
+                                    )
+                                    or labeled_by,
+                                    "labeled_at": now_str,
+                                    "updated_at": now_str,
+                                }
+                            )
+                        to_delete.discard(obs_id)
+                        obs_tags_to_sync[obs_id] = row["tag_ids"]
+                    else:
+                        # New record — honour caller-supplied id so re-imports stay stable
+                        new_id = obs_id if (obs_id and obs_id not in existing_map) else max_id + 1
+                        max_id = max(max_id, new_id)
+                        newly_added += 1
+                        obs_inserts.append(
+                            {
+                                "vid": video_id,
+                                "oid": new_id,
+                                "pid": active_project_id,
+                                "species_id": row["species_id"],
+                                "count": row["count"],
+                                "start_sec": row["start_sec"],
+                                "end_sec": row["end_sec"],
+                                "labeled_by": row["labeled_by"] or labeled_by,
+                                "labeled_at": _dt_str(row.get("labeled_at")) or now_str,
+                                "updated_at": now_str,
+                            }
+                        )
+                        obs_tags_to_sync[new_id] = row["tag_ids"]
+
+                obs_deletes.extend({"vid": video_id, "oid": o} for o in to_delete)
+
+                # Determine if any observations exist after this operation
+                if (len(existing_map) - len(to_delete) + newly_added) > 0:
+                    is_blank = False
+
+                vals = dict(labels.get(video_id, _no_label))
+                # Update labeled_at only if it wasn't labeled before or if blank status changed
+                if is_blank is not None and (
+                    vals["is_blank"] != is_blank or not vals["labeled_at"]
+                ):
+                    vals["labeled_at"] = now_str
+                    vals["labeled_by"] = labeled_by
+                vals["is_blank"] = is_blank
+                label_rows[video_id] = vals
+
+                stale_ids = to_delete | set(obs_tags_to_sync)
+                tag_deletes.extend({"vid": video_id, "oid": o} for o in stale_ids)
+                tag_inserts.extend(
+                    {"vid": video_id, "oid": o, "bid": bid}
+                    for o, tag_ids in obs_tags_to_sync.items()
+                    for bid in tag_ids
+                )
+
+            for vid, value in review_later.items():
+                vals = label_rows.get(vid)
+                if vals is None:
+                    vals = dict(labels.get(vid, _no_label))
+                    label_rows[vid] = vals
+                vals["review_later"] = value
+
+            # ── Execute: a handful of executemany statements ────────────────────
+            if obs_deletes:
+                conn.execute(
+                    text(
+                        "DELETE FROM individual_observations WHERE video_id = :vid AND id = :oid"
+                    ),
+                    obs_deletes,
+                )
+            if obs_updates:
+                conn.execute(
+                    text(
+                        "UPDATE individual_observations SET species_id = :species_id,"
+                        " count = :count, start_sec = :start_sec, end_sec = :end_sec,"
+                        " labeled_by = :labeled_by, labeled_at = :labeled_at,"
+                        " updated_at = :updated_at WHERE video_id = :vid AND id = :oid"
+                    ),
+                    obs_updates,
+                )
+            if obs_inserts:
+                conn.execute(
+                    text(
+                        "INSERT INTO individual_observations (video_id, id, project_id,"
+                        " species_id, count, start_sec, end_sec, labeled_by, labeled_at,"
+                        " updated_at) VALUES (:vid, :oid, :pid, :species_id, :count,"
+                        " :start_sec, :end_sec, :labeled_by, :labeled_at, :updated_at)"
+                    ),
+                    obs_inserts,
+                )
+            if tag_deletes:
+                conn.execute(
+                    text(
+                        "DELETE FROM observation_tags"
+                        " WHERE video_id = :vid AND observation_id = :oid"
+                    ),
+                    tag_deletes,
+                )
+            if tag_inserts:
+                conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO observation_tags"
+                        " (video_id, observation_id, behavior_id) VALUES (:vid, :oid, :bid)"
+                    ),
+                    tag_inserts,
+                )
+            if label_rows:
+                conn.execute(
+                    text(
+                        "INSERT INTO video_labels (video_id, is_blank, labeled_by,"
+                        " labeled_at, review_later) VALUES (:vid, :is_blank, :labeled_by,"
+                        " :labeled_at, :review_later) ON CONFLICT(video_id) DO UPDATE SET"
+                        " is_blank = excluded.is_blank, labeled_by = excluded.labeled_by,"
+                        " labeled_at = excluded.labeled_at, review_later = excluded.review_later"
+                    ),
+                    [{"vid": vid, **vals} for vid, vals in label_rows.items()],
+                )
+
+            if assignments:
+                self.set_assignments_bulk(conn, assignments)
+            if video_tags:
+                self.set_video_tags_bulk(conn, video_tags, append=append)
+
+        logger.info(
+            "Bulk manual review write: %d videos (%d obs inserted, %d updated, %d deleted,"
+            " %d assignments, %d tagged videos)",
+            len(reviews),
+            len(obs_inserts),
+            len(obs_updates),
+            len(obs_deletes),
+            len(assignments),
+            len(video_tags),
+        )
+
+    def update_manual_review(
+        self,
+        video_id: str,
+        selections: list[dict] | None,
+        is_blank: bool | None = None,
+        labeled_by: str | None = None,
+        active_project_id: str | None = None,
+        append: bool = False,
+    ) -> None:
+        if selections is None:
+            selections = []
+
+        # Special case: Clearing all annotations (only if not appending)
+        if not append and not selections and is_blank is None:
+            logger.info("Clearing annotations for video %s", video_id)
+            with self.Session() as session:
+                if session.get(VideoLabel, video_id) is not None:
+                    session.query(VideoLabel).filter(VideoLabel.video_id == video_id).update(
+                        {
+                            "is_blank": None,
+                            "labeled_by": None,
+                            "labeled_at": None,
+                            "review_later": False,
+                        }
+                    )
+                    session.query(ObservationTag).filter(
+                        ObservationTag.video_id == video_id
+                    ).delete(synchronize_session=False)
+                    session.query(IndividualObservation).filter(
+                        IndividualObservation.video_id == video_id
+                    ).delete(synchronize_session=False)
+                    session.commit()
+            return
+
+        now = self._utcnow_dt().replace(microsecond=0)
+        valid_species, species_id_map, behavior_id_map = self._load_manual_review_maps(
+            active_project_id
+        )
+        normalized = self._normalize_manual_selections(
+            selections, valid_species, species_id_map, behavior_id_map
+        )
 
         if is_blank is None and normalized:
             is_blank = False

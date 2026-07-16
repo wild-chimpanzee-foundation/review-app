@@ -32,6 +32,38 @@ class AssignmentMixin(ProviderBase):
                 {"name": name, "now": now},
             )
 
+    def add_annotators_bulk(self, conn, names) -> None:
+        """Register several annotators inside the caller's transaction."""
+        rows = [{"name": n} for n in sorted({n for n in names if n})]
+        if not rows:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            text(
+                "INSERT INTO annotators (name, created_at) VALUES (:name, :now) "
+                "ON CONFLICT(name) DO NOTHING"
+            ),
+            [{**r, "now": now} for r in rows],
+        )
+
+    def set_assignments_bulk(self, conn, assignments: dict[str, str]) -> None:
+        """Upsert one assignment row per video inside the caller's transaction.
+
+        assignments: {video_id: annotator}. Annotators are registered first so the
+        assigned_to foreign key always resolves.
+        """
+        if not assignments:
+            return
+        self.add_annotators_bulk(conn, assignments.values())
+        now = self._utcnow_dt().isoformat()
+        conn.execute(
+            text(
+                "INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at) "
+                "VALUES (:vid, :annotator, :now)"
+            ),
+            [{"vid": v, "annotator": a, "now": now} for v, a in assignments.items()],
+        )
+
     def remove_annotator(self, name: str) -> None:
         with self.engine.begin() as conn:
             conn.execute(

@@ -164,7 +164,14 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         append = mode == "append"
         observations_by_annotator: Counter[str] = Counter()
         all_custom_keys: set[str] = set()
-        now_str = self._utcnow_dt().isoformat()
+
+        # Pure collection pass: no DB writes until every video's rows are planned, then
+        # apply_manual_reviews commits the whole import in one transaction.
+        reviews: list[dict[str, Any]] = []
+        assignments: dict[str, str] = {}
+        review_later_map: dict[str, bool] = {}
+        tags_map: dict[str, list[str]] = {}
+        custom_key_cache: dict[str, str] = {}
 
         for video_id, group in df.groupby("video_id", sort=False, dropna=False):
             if pd.isna(video_id) or video_id not in known_ids:
@@ -180,15 +187,7 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                     str(first["assigned_to"]).strip() if pd.notna(first["assigned_to"]) else None
                 )
                 if annotator:
-                    self.add_annotator(annotator)
-                    with self.engine.begin() as conn:
-                        conn.execute(
-                            text("""
-                                INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at)
-                                VALUES (:video_id, :annotator, :now)
-                            """),
-                            {"video_id": video_id, "annotator": annotator, "now": now_str},
-                        )
+                    assignments[str(video_id)] = annotator
 
             is_blank_raw = first["is_blank"]
             is_blank = bool(int(is_blank_raw)) if pd.notna(is_blank_raw) else None
@@ -199,13 +198,13 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             )
 
             if is_blank:
-                self.update_manual_review(
-                    str(video_id),
-                    [],
-                    is_blank=True,
-                    labeled_by=blank_labeled_by,
-                    active_project_id=active_project_id,
-                    append=append,
+                reviews.append(
+                    {
+                        "video_id": str(video_id),
+                        "selections": [],
+                        "is_blank": True,
+                        "labeled_by": blank_labeled_by,
+                    }
                 )
                 observations_by_annotator[blank_labeled_by or ""] += 1
             else:
@@ -260,11 +259,13 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                         }
                     )
                 if selections:
-                    self.update_manual_review(
-                        str(video_id),
-                        selections,
-                        active_project_id=active_project_id,
-                        append=append,
+                    reviews.append(
+                        {
+                            "video_id": str(video_id),
+                            "selections": selections,
+                            "is_blank": None,
+                            "labeled_by": None,
+                        }
                     )
                     for sel in selections:
                         observations_by_annotator[sel.get("labeled_by") or ""] += 1
@@ -272,23 +273,23 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                     # Every species this video named means "nothing was there", so the
                     # video itself is blank. Only when nothing else survived: one real
                     # observation outvotes the blank rows.
-                    self.update_manual_review(
-                        str(video_id),
-                        [],
-                        is_blank=True,
-                        labeled_by=blank_labeled_by,
-                        active_project_id=active_project_id,
-                        append=append,
+                    reviews.append(
+                        {
+                            "video_id": str(video_id),
+                            "selections": [],
+                            "is_blank": True,
+                            "labeled_by": blank_labeled_by,
+                        }
                     )
                     observations_by_annotator[blank_labeled_by or ""] += 1
 
             # Restore review_later — reset to False too so override is complete
             rl_raw = first.get("review_later") if "review_later" in group.columns else None
             if pd.notna(rl_raw):
-                self.set_review_later(str(video_id), bool(int(rl_raw)))
+                review_later_map[str(video_id)] = bool(int(rl_raw))
 
             # Auto-create missing custom tags and collect their normalized keys so
-            # set_video_tags receives keys that actually exist in the DB.
+            # the tag write receives keys that actually exist in the DB.
             normalized_custom_keys: list[str] = []
             if "custom_tags" in df.columns:
                 raw = first.get("custom_tags")
@@ -296,17 +297,24 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                     for k in str(raw).split(","):
                         k = k.strip()
                         if k:
-                            normalized_custom_keys.append(self.create_custom_tag(name_en=k))
+                            if k not in custom_key_cache:
+                                custom_key_cache[k] = self.create_custom_tag(name_en=k)
+                            normalized_custom_keys.append(custom_key_cache[k])
             builtin_tag_keys = _extract_builtin_tag_keys(first, df.columns)
             if builtin_tag_keys is not None or normalized_custom_keys:
-                self.set_video_tags(
-                    str(video_id),
-                    (builtin_tag_keys or []) + normalized_custom_keys,
-                    append=append,
-                )
+                tags_map[str(video_id)] = (builtin_tag_keys or []) + normalized_custom_keys
             all_custom_keys.update(normalized_custom_keys)
 
             imported += 1
+
+        self.apply_manual_reviews(
+            reviews,
+            active_project_id=active_project_id,
+            append=append,
+            review_later=review_later_map,
+            assignments=assignments,
+            video_tags=tags_map,
+        )
 
         if skipped:
             logger.warning(

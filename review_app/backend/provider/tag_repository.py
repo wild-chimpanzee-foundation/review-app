@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 
 from review_app.backend.provider.base import ProviderBase
+from review_app.backend.utils import bind_id_list
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,62 @@ class TagMixin(ProviderBase):
                             ),
                             {"vid": video_id, "tid": tag_id, "at": now},
                         )
+
+    def set_video_tags_bulk(
+        self, conn, tags_by_video: dict[str, list[str]], append: bool = False
+    ) -> None:
+        """Batch set_video_tags inside the caller's transaction — same per-video semantics.
+
+        override mode (append=False): clears each listed video's tags first.
+        append mode: adds only tags not already present; never removes existing tags.
+        Unknown keys (not in DB) are skipped with a warning. Videos not listed in
+        tags_by_video are never touched.
+        """
+        if not tags_by_video:
+            return
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        known = {r[0]: r[1] for r in conn.execute(text("SELECT key, id FROM tags")).fetchall()}
+        valid_by_video: dict[str, list[str]] = {}
+        for video_id, keys in tags_by_video.items():
+            valid_ids = []
+            for key in keys:
+                if key in known:
+                    valid_ids.append(known[key])
+                else:
+                    logger.warning("set_video_tags: unknown tag key %r — skipped", key)
+            valid_by_video[video_id] = valid_ids
+
+        params: dict = {}
+        id_list = bind_id_list(params, "vids", list(valid_by_video))
+        if not append:
+            conn.execute(text(f"DELETE FROM video_tags WHERE video_id IN {id_list}"), params)
+            rows = [
+                {"vid": vid, "tid": tid, "at": now}
+                for vid, tag_ids in valid_by_video.items()
+                for tid in tag_ids
+            ]
+        else:
+            existing = {
+                (vid, tid)
+                for vid, tid in conn.execute(
+                    text(f"SELECT video_id, tag_id FROM video_tags WHERE video_id IN {id_list}"),
+                    params,
+                )
+            }
+            rows = [
+                {"vid": vid, "tid": tid, "at": now}
+                for vid, tag_ids in valid_by_video.items()
+                for tid in tag_ids
+                if (vid, tid) not in existing
+            ]
+        if rows:
+            conn.execute(
+                text(
+                    "INSERT INTO video_tags (video_id, tag_id, tagged_by, tagged_at) "
+                    "VALUES (:vid, :tid, NULL, :at)"
+                ),
+                rows,
+            )
 
     def export_tags_csv(self) -> str:
         """Export all custom tags as a CSV string (key, name_en, name_fr, color, icon)."""

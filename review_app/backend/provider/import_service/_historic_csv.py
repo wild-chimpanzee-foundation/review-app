@@ -18,20 +18,6 @@ from review_app.backend.provider.import_service._shared import (
 logger = logging.getLogger(__name__)
 
 
-def _apply_historic_tags(
-    provider, video_id: str, row: dict, tag_cols: list[str], append: bool
-) -> None:
-    """Create missing custom tags for truthy tag_cols values, then apply them to video_id."""
-    if not tag_cols:
-        return
-    active_cols = [col for col in tag_cols if str(row.get(col, "")).strip() not in FALSY_STRINGS]
-    if not active_cols:
-        return
-    # create_custom_tag is idempotent and returns the normalised key
-    tag_keys = [provider.create_custom_tag(name_en=col) for col in active_cols]
-    provider.set_video_tags(video_id, tag_keys, append=append)
-
-
 class HistoricCsvMixin(ImportSharedMixin):
     """Validation and import of historic annotation spreadsheets."""
 
@@ -227,6 +213,31 @@ class HistoricCsvMixin(ImportSharedMixin):
         imported = 0
         skipped_observations: list[dict[str, Any]] = []
 
+        # Pure collection pass: no DB writes until every video's rows are planned, then
+        # apply_manual_reviews commits the whole import in one transaction.
+        reviews: list[dict[str, Any]] = []
+        tags_map: dict[str, list[str]] = {}
+        tag_key_cache: dict[str, str] = {}
+        fuzzy_cache: dict[str, tuple[bool, str | None]] = {}
+
+        def _fuzzy(sp: str) -> tuple[bool, str | None]:
+            if sp not in fuzzy_cache:
+                fuzzy_cache[sp] = self._validate_species_fuzzy(sp, variant_map)
+            return fuzzy_cache[sp]
+
+        def _collect_tags(video_id: str, row: dict) -> None:
+            """Create missing custom tags for truthy tag_cols values, queue them for video_id."""
+            active_cols = [
+                col for col in tag_cols if str(row.get(col, "")).strip() not in FALSY_STRINGS
+            ]
+            if not active_cols:
+                return
+            # create_custom_tag is idempotent and returns the normalised key
+            for col in active_cols:
+                if col not in tag_key_cache:
+                    tag_key_cache[col] = self.create_custom_tag(name_en=col)
+            tags_map[video_id] = [tag_key_cache[col] for col in active_cols]
+
         for video_id, rows in groups.items():
             first = rows[0]
             labeled_by: str | None = str(first.get(observer_col, "")).strip() or None
@@ -258,20 +269,20 @@ class HistoricCsvMixin(ImportSharedMixin):
 
             if not non_blank and not force_blank and not kept_rows:
                 # Every row was ignored — leave the video's annotations alone.
-                _apply_historic_tags(self, video_id, first, tag_cols, append)
+                _collect_tags(video_id, first)
                 imported += 1
                 continue
 
             if not non_blank:
-                self.update_manual_review(
-                    video_id,
-                    [],
-                    is_blank=True,
-                    labeled_by=labeled_by,
-                    active_project_id=active_project_id,
-                    append=append,
+                reviews.append(
+                    {
+                        "video_id": video_id,
+                        "selections": [],
+                        "is_blank": True,
+                        "labeled_by": labeled_by,
+                    }
                 )
-                _apply_historic_tags(self, video_id, first, tag_cols, append)
+                _collect_tags(video_id, first)
                 imported += 1
                 continue
 
@@ -279,7 +290,7 @@ class HistoricCsvMixin(ImportSharedMixin):
             for r in non_blank:
                 sp = str(r.get(species_col, "")).strip()
                 sp = species_mappings.get(sp, sp)
-                is_valid, best_match = self._validate_species_fuzzy(sp, variant_map)
+                is_valid, best_match = _fuzzy(sp)
                 if not is_valid:
                     skipped_observations.append({"video_id": video_id, "species": sp})
                     continue
@@ -318,14 +329,23 @@ class HistoricCsvMixin(ImportSharedMixin):
                 )
 
             if selections:
-                self.update_manual_review(
-                    video_id,
-                    selections,
-                    active_project_id=active_project_id,
-                    append=append,
+                reviews.append(
+                    {
+                        "video_id": video_id,
+                        "selections": selections,
+                        "is_blank": None,
+                        "labeled_by": None,
+                    }
                 )
-            _apply_historic_tags(self, video_id, first, tag_cols, append)
+            _collect_tags(video_id, first)
             imported += 1
+
+        self.apply_manual_reviews(
+            reviews,
+            active_project_id=active_project_id,
+            append=append,
+            video_tags=tags_map,
+        )
 
         logger.info(
             "Historic CSV import complete: imported=%d skipped=%d skipped_obs=%d",

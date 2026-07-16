@@ -80,3 +80,21 @@ class ProviderBase:
         active_project_id: str | None = None,
         append: bool = False,
     ) -> None: ...
+
+    def apply_manual_reviews(
+        self,
+        reviews: list[dict],
+        active_project_id: str | None = None,
+        append: bool = False,
+        review_later: dict[str, bool] | None = None,
+        assignments: dict[str, str] | None = None,
+        video_tags: dict[str, list[str]] | None = None,
+    ) -> None: ...
+
+    def add_annotators_bulk(self, conn, names) -> None: ...
+
+    def set_assignments_bulk(self, conn, assignments: dict[str, str]) -> None: ...
+
+    def set_video_tags_bulk(
+        self, conn, tags_by_video: dict[str, list[str]], append: bool = False
+    ) -> None: ...

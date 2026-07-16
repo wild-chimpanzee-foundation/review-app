@@ -114,6 +114,59 @@ def test_apply_species_mappings_is_fast_enough_for_interactive_use(tmp_db, mock_
 
 
 @pytest.mark.slow
+def test_import_annotations_csv_scales_by_rows_not_transactions(tmp_db, mock_probe, capsys):
+    """Annotations re-import at annotator-bundle scale must stay in bulk territory.
+
+    The old path paid ~6 queries and 2-3 transactions per video; at tens of thousands
+    of videos that is minutes of dead "please wait" and a force-kill risk mid-write.
+    The bulk path reads the maps once and commits one transaction, like
+    import_model_csv. The bound is generous (slow laptops), but a regression back to
+    per-video transactions costs minutes and fails it loudly.
+    """
+    n_videos = 20_000
+    from review_app.backend.provider.local_data_provider import LocalDataProvider
+
+    video_dir = tmp_db["video_dir"]
+    (video_dir / "cam_a").mkdir()
+    for i in range(n_videos):
+        (video_dir / "cam_a" / f"v{i}.mp4").touch()
+
+    dp = LocalDataProvider()
+    dp.sync_videos(progress_callback=None, video_dir=video_dir)
+    with dp.engine.connect() as conn:
+        from sqlalchemy import text
+
+        paths = [r[0] for r in conn.execute(text("SELECT video_path FROM videos")).fetchall()]
+
+    df = pd.DataFrame(
+        {
+            "video_path": paths,
+            "is_blank": [1 if i % 3 == 0 else 0 for i in range(n_videos)],
+            "species": [None if i % 3 == 0 else SPECIES[i % 2] for i in range(n_videos)],
+            "attributes": [None if i % 3 == 0 else "grazing" for i in range(n_videos)],
+            "count": [None if i % 3 == 0 else 1 + i % 4 for i in range(n_videos)],
+            "start_sec": 0.0,
+            "annotator": [f"annotator_{i % 5}" for i in range(n_videos)],
+            "assigned_to": [f"annotator_{i % 5}" for i in range(n_videos)],
+            "review_later": 0,
+        }
+    )
+
+    t0 = time.monotonic()
+    result = dp.import_annotations_csv(df, None, mode="override")
+    elapsed = time.monotonic() - t0
+
+    with capsys.disabled():
+        print(f"\nimport_annotations_csv: {n_videos} videos in {elapsed:.1f}s")
+
+    assert result["imported"] == n_videos
+    assert elapsed < 60.0, (
+        f"importing {n_videos} annotation rows took {elapsed:.1f}s; "
+        "this smells like a regression to per-video queries/transactions"
+    )
+
+
+@pytest.mark.slow
 def test_validate_does_not_starve_event_loop(tmp_db, mock_probe, capsys):
     """Validation on a worker thread must not stall the loop past the socket budget.
 
