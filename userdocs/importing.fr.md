@@ -30,6 +30,10 @@ Pour réimporter des feuilles de calcul d'annotations exportées précédemment 
 
 ## Annotations au format de l'application
 
+Les exportations de l'application incluent un `observation_uuid` stable. En mode ajout, une observation dont l'UUID existe déjà dans la base de données est mise à jour plutôt qu'insérée à nouveau. Les anciens fichiers CSV sans cette colonne restent pris en charge, mais leur importation répétée en mode ajout peut créer des doublons.
+
+La correspondance des UUID est limitée à la vidéo de destination, ce qui permet aussi de copier les annotations dans un autre projet. Un UUID fourni est prioritaire sur l'identifiant numérique `observation_id`. Les lignes identiques partageant un UUID pour une même vidéo sont importées une seule fois ; les doublons contradictoires et les UUID mal formés sont rejetés avec les numéros des lignes CSV (en comptant l'en-tête). Importer une ancienne exportation peut écraser des modifications plus récentes des observations correspondantes.
+
 Si votre CSV est au format d'export propre à l'application (détecté via les colonnes `video_path`/`video_id` + `is_blank`), l'application affiche un résumé à blanc des vidéos trouvées/ignorées et des observations à insérer/mettre à jour/supprimer avant que vous ne confirmiez l'import.
 
 ## Import groupé et par bundle

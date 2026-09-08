@@ -15,6 +15,11 @@ from review_app.backend.provider.import_service._shared import (
     IGNORE_SENTINEL,
     ImportSharedMixin,
 )
+from review_app.backend.provider.observation_identity import (
+    match_observation_id,
+    normalize_observation_uuid,
+    prepare_observation_csv,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +68,7 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                         COALESCE(io.labeled_by, vl.labeled_by) AS annotator,
                         COALESCE(io.labeled_at, vl.labeled_at) AS labeled_at,
                         io.id                     AS observation_id,
+                        io.observation_uuid       AS observation_uuid,
                         s.scientific_name         AS species,
                         (
                             SELECT GROUP_CONCAT(b2.key)
@@ -154,6 +160,7 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             time.monotonic() - _t0,
         )
         df, has_path, known_ids = self._resolve_annotation_video_ids(df, active_project_id)
+        df = prepare_observation_csv(df, known_ids)
         map_species = self._build_annotation_species_mapper(
             df, active_project_id, species_mappings
         )
@@ -240,15 +247,18 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                     )
                     if labeled_at is pd.NaT:
                         labeled_at = None
-                    # Ignore observation_id in append mode to ensure we never override existing records.
+                    # Numeric IDs are local to one database. UUIDs are portable and are
+                    # therefore retained in every mode so repeated merges are idempotent.
                     obs_id_raw = row.get("observation_id")
                     obs_id = int(obs_id_raw) if pd.notna(obs_id_raw) and mode != "append" else None
+                    obs_uuid = normalize_observation_uuid(row.get("observation_uuid"))
                     count_raw = row.get("count")
                     count_val = int(count_raw) if pd.notna(count_raw) else None
 
                     selections.append(
                         {
                             "id": obs_id,
+                            "observation_uuid": obs_uuid,
                             "species": sp,
                             "tags": tags_list,
                             "count": count_val,
@@ -411,6 +421,7 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         """Dry-run of import_annotations_csv: resolves paths and diffs observations without writing."""
         _t0 = time.monotonic()
         df, has_path, known_ids = self._resolve_annotation_video_ids(df, active_project_id)
+        df = prepare_observation_csv(df, known_ids)
         mappings = species_mappings or {}
 
         matched = 0
@@ -426,10 +437,10 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         with self.engine.connect() as conn:
             existing_obs_rows = conn.execute(
                 text(
-                    "SELECT video_id, id, species_id, count, start_sec, end_sec"
+                    "SELECT video_id, id, observation_uuid, species_id, count, start_sec, end_sec"
                     " FROM individual_observations WHERE project_id = :pid"
                     if active_project_id
-                    else "SELECT video_id, id, species_id, count, start_sec, end_sec"
+                    else "SELECT video_id, id, observation_uuid, species_id, count, start_sec, end_sec"
                     " FROM individual_observations"
                 ),
                 {"pid": active_project_id} if active_project_id else {},
@@ -448,9 +459,12 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         # (video_id, obs_id) -> (species_id, count, start_sec, end_sec)
         existing_obs_data: dict[tuple[str, int], tuple] = {}
         existing_obs_by_video: dict[str, set[int]] = {}
-        for vid, oid, sp_id, cnt, start, end in existing_obs_rows:
+        existing_uuid_ids: dict[str, dict[str, int]] = {}
+        for vid, oid, obs_uuid, sp_id, cnt, start, end in existing_obs_rows:
             existing_obs_by_video.setdefault(vid, set()).add(oid)
             existing_obs_data[(vid, oid)] = (sp_id, cnt, start, end)
+            if obs_uuid:
+                existing_uuid_ids.setdefault(vid, {})[obs_uuid] = oid
 
         # Classify each incoming species against the project: configured species
         # import directly; non-configured ones either map to a configured species,
@@ -518,7 +532,12 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                 resolved_any = True
                 obs_id_raw = row.get("observation_id")
                 obs_id = int(obs_id_raw) if pd.notna(obs_id_raw) and not append else None
-                if obs_id and obs_id in existing_ids:
+                obs_uuid = normalize_observation_uuid(row.get("observation_uuid"))
+                existing_id = match_observation_id(
+                    obs_uuid, obs_id, existing_ids, existing_uuid_ids.get(str(video_id), {})
+                )
+                if existing_id is not None:
+                    obs_id = existing_id
                     incoming_ids.add(obs_id)
                     existing = existing_obs_data.get((str(video_id), obs_id))
                     if existing is not None:

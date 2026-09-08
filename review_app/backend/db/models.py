@@ -157,9 +157,13 @@ class SpeciesCollectionMember(Base):
 
 class IndividualObservation(Base):
     __tablename__ = "individual_observations"
+    __table_args__ = (UniqueConstraint("video_id", "observation_uuid"),)
 
     video_id: Mapped[str] = mapped_column(String, ForeignKey("videos.video_id"), primary_key=True)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    observation_uuid: Mapped[str] = mapped_column(
+        String, nullable=False, default=lambda: str(uuid.uuid4())
+    )
     project_id: Mapped[str | None] = mapped_column(String, ForeignKey("projects.id"), index=True)
     species_id: Mapped[str | None] = mapped_column(String, ForeignKey("species.id"), index=True)
     count: Mapped[int | None] = mapped_column(Integer)

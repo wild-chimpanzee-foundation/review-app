@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from typing import Any
 
 import pandas as pd
@@ -10,6 +11,10 @@ from sqlalchemy import text
 from review_app.backend.db.models import IndividualObservation, ObservationTag, VideoLabel
 from review_app.backend.errors import SpeciesError
 from review_app.backend.provider.base import ProviderBase
+from review_app.backend.provider.observation_identity import (
+    match_observation_id,
+    normalize_observation_uuid,
+)
 from review_app.backend.utils import (
     DEFAULT_REVIEW_THRESHOLD,
     bind_id_list,
@@ -190,7 +195,7 @@ class AnnotationMixin(ProviderBase):
             manual_rows = pd.read_sql(
                 text(
                     """
-                    SELECT io.id, s.scientific_name AS species,
+                    SELECT io.id, io.observation_uuid, s.scientific_name AS species,
                            GROUP_CONCAT(b.key) AS tags,
                            io.count, io.start_sec, io.end_sec, io.labeled_by, io.labeled_at
                     FROM individual_observations io
@@ -198,7 +203,7 @@ class AnnotationMixin(ProviderBase):
                     LEFT JOIN observation_tags ot ON ot.video_id = io.video_id AND ot.observation_id = io.id
                     LEFT JOIN behaviors b ON b.id = ot.behavior_id
                     WHERE io.video_id = :video_id
-                    GROUP BY io.id, s.scientific_name, io.count, io.start_sec, io.end_sec, io.labeled_by, io.labeled_at
+                    GROUP BY io.id, io.observation_uuid, s.scientific_name, io.count, io.start_sec, io.end_sec, io.labeled_by, io.labeled_at
                     ORDER BY COALESCE(io.start_sec, 0.0), s.scientific_name
                     """
                 ),
@@ -298,6 +303,7 @@ class AnnotationMixin(ProviderBase):
             selections.append(
                 {
                     "id": int(manual.get("id")) if pd.notna(manual.get("id")) else None,
+                    "observation_uuid": manual.get("observation_uuid"),
                     "species": str(manual.get("species")),
                     "tags": _parse_tags(manual.get("tags")),
                     "count": int(manual.get("count")) if pd.notna(manual.get("count")) else None,
@@ -466,12 +472,15 @@ class AnnotationMixin(ProviderBase):
                 except (ValueError, TypeError):
                     obs_id = None
 
+            observation_uuid = normalize_observation_uuid(selection.get("observation_uuid"))
+
             count_raw = selection.get("count")
             count_val: int | None = int(count_raw) if count_raw is not None else None
 
             normalized.append(
                 {
                     "id": obs_id,
+                    "observation_uuid": observation_uuid,
                     "species_id": species_id_map.get(species),
                     "tag_ids": _parse_tag_ids(selection),
                     "count": count_val,
@@ -525,14 +534,15 @@ class AnnotationMixin(ProviderBase):
             if review_ids:
                 params: dict[str, Any] = {}
                 id_list = bind_id_list(params, "vids", review_ids)
-                for vid, oid, sp, cnt, start, end, lby in conn.execute(
+                for vid, oid, obs_uuid, sp, cnt, start, end, lby in conn.execute(
                     text(
-                        "SELECT video_id, id, species_id, count, start_sec, end_sec, labeled_by"
+                        "SELECT video_id, id, observation_uuid, species_id, count, start_sec,"
+                        " end_sec, labeled_by"
                         f" FROM individual_observations WHERE video_id IN {id_list}"
                     ),
                     params,
                 ):
-                    existing_obs.setdefault(vid, {})[oid] = (sp, cnt, start, end, lby)
+                    existing_obs.setdefault(vid, {})[oid] = (obs_uuid, sp, cnt, start, end, lby)
                 params = {}
                 id_list = bind_id_list(params, "vids", review_ids)
                 for vid, oid, bid in conn.execute(
@@ -582,6 +592,9 @@ class AnnotationMixin(ProviderBase):
                 is_blank = review.get("is_blank")
                 labeled_by = review.get("labeled_by")
                 existing_map = existing_obs.get(video_id, {})
+                existing_uuid_map = {
+                    values[0]: oid for oid, values in existing_map.items() if values[0]
+                }
                 obs_tags = existing_obs_tags.get(video_id, {})
 
                 # Special case: clearing all annotations (only if not appending)
@@ -600,13 +613,19 @@ class AnnotationMixin(ProviderBase):
 
                 to_delete = set(existing_map) if not append else set()
                 max_id = max(existing_map) if existing_map else 0
+                used_ids = set(existing_map)
                 newly_added = 0
                 obs_tags_to_sync: dict[int, list[str]] = {}
 
                 for row in normalized:
                     obs_id = row.get("id")
-                    if obs_id and obs_id in existing_map:
-                        ex_sp, ex_cnt, ex_start, ex_end, ex_lby = existing_map[obs_id]
+                    observation_uuid = row.get("observation_uuid")
+                    matched_id = match_observation_id(
+                        observation_uuid, obs_id, existing_map, existing_uuid_map
+                    )
+                    if matched_id is not None:
+                        obs_id = matched_id
+                        _ex_uuid, ex_sp, ex_cnt, ex_start, ex_end, ex_lby = existing_map[obs_id]
                         end_sec_changed = (ex_end is None) != (row["end_sec"] is None) or (
                             ex_end is not None
                             and row["end_sec"] is not None
@@ -644,13 +663,16 @@ class AnnotationMixin(ProviderBase):
                         obs_tags_to_sync[obs_id] = row["tag_ids"]
                     else:
                         # New record — honour caller-supplied id so re-imports stay stable
-                        new_id = obs_id if (obs_id and obs_id not in existing_map) else max_id + 1
+                        new_id = obs_id if (obs_id and obs_id not in used_ids) else max_id + 1
+                        used_ids.add(new_id)
                         max_id = max(max_id, new_id)
+                        new_uuid = observation_uuid or str(uuid.uuid4())
                         newly_added += 1
                         obs_inserts.append(
                             {
                                 "vid": video_id,
                                 "oid": new_id,
+                                "observation_uuid": new_uuid,
                                 "pid": active_project_id,
                                 "species_id": row["species_id"],
                                 "count": row["count"],
@@ -715,9 +737,9 @@ class AnnotationMixin(ProviderBase):
             if obs_inserts:
                 conn.execute(
                     text(
-                        "INSERT INTO individual_observations (video_id, id, project_id,"
+                        "INSERT INTO individual_observations (video_id, id, observation_uuid, project_id,"
                         " species_id, count, start_sec, end_sec, labeled_by, labeled_at,"
-                        " updated_at) VALUES (:vid, :oid, :pid, :species_id, :count,"
+                        " updated_at) VALUES (:vid, :oid, :observation_uuid, :pid, :species_id, :count,"
                         " :start_sec, :end_sec, :labeled_by, :labeled_at, :updated_at)"
                     ),
                     obs_inserts,
@@ -833,16 +855,26 @@ class AnnotationMixin(ProviderBase):
                 .all()
             )
             existing_map = {obs.id: obs for obs in existing}
+            existing_uuid_map = {
+                obs.observation_uuid: obs.id for obs in existing if obs.observation_uuid
+            }
             to_delete = set(existing_map.keys()) if not append else set()
 
             max_id = max(existing_map.keys()) if existing_map else 0
+            used_ids = set(existing_map)
             newly_added_count = 0
 
             for row in normalized:
                 obs_id = row.get("id")
-                if obs_id and obs_id in existing_map:
+                observation_uuid = row.get("observation_uuid")
+                matched_id = match_observation_id(
+                    observation_uuid, obs_id, existing_map, existing_uuid_map
+                )
+                matched_obs = existing_map.get(matched_id)
+                if matched_obs is not None:
                     # Update existing record
-                    obs = existing_map[obs_id]
+                    obs = matched_obs
+                    obs_id = obs.id
                     end_sec_changed = (obs.end_sec is None) != (row["end_sec"] is None) or (
                         obs.end_sec is not None
                         and row["end_sec"] is not None
@@ -873,13 +905,15 @@ class AnnotationMixin(ProviderBase):
                     obs_tags_to_sync[obs_id] = row["tag_ids"]
                 else:
                     # New record — honour caller-supplied id so re-imports stay stable
-                    new_id = obs_id if (obs_id and obs_id not in existing_map) else max_id + 1
+                    new_id = obs_id if (obs_id and obs_id not in used_ids) else max_id + 1
+                    used_ids.add(new_id)
                     max_id = max(max_id, new_id)
                     newly_added_count += 1
                     session.add(
                         IndividualObservation(
                             video_id=video_id,
                             id=new_id,
+                            observation_uuid=observation_uuid or str(uuid.uuid4()),
                             project_id=active_project_id,
                             species_id=row["species_id"],
                             count=row["count"],

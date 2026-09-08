@@ -7,10 +7,12 @@ runner we create a real engine, build the current schema with create_all(),
 then wind the version stamp back to simulate an older database.
 """
 
+import pytest
 from review_app.backend.db.migrations import (
     MIGRATIONS,
     _add_column_if_missing,
     _migration_v4,
+    _migration_v22,
     run_migrations,
 )
 from review_app.backend.db.models import Base
@@ -417,3 +419,59 @@ def test_migration_v21_leaves_forward_slash_paths_unchanged(tmp_path):
             text("SELECT video_path FROM videos WHERE video_id = 'v1'")
         ).scalar()
     assert video_path == "/mnt/videos/cam1/file.mp4"
+
+
+def test_migration_v22_backfills_unique_observation_uuids(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE individual_observations ("
+                "video_id TEXT NOT NULL, id INTEGER NOT NULL, project_id TEXT, "
+                "species_id TEXT, count INTEGER, start_sec REAL NOT NULL DEFAULT 0.0, "
+                "end_sec REAL, labeled_by TEXT, labeled_at TEXT, updated_at TEXT NOT NULL, "
+                "PRIMARY KEY (video_id, id))"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO individual_observations (video_id, id, updated_at) "
+                "VALUES (:video_id, :id, '2026-01-01')"
+            ),
+            [{"video_id": "v1", "id": 1}, {"video_id": "v1", "id": 2}],
+        )
+
+        _migration_v22(conn)
+        rows = conn.execute(
+            text("SELECT observation_uuid FROM individual_observations ORDER BY id")
+        ).fetchall()
+
+    assert len({row[0] for row in rows}) == 2
+    assert all(len(row[0]) == 36 for row in rows)
+    with engine.connect() as conn:
+        uuid_column = next(
+            row
+            for row in conn.execute(text("PRAGMA table_info(individual_observations)"))
+            if row[1] == "observation_uuid"
+        )
+    assert uuid_column[3] == 1
+    # A portable observation may be copied into another project's video, but
+    # duplicates within one video must remain impossible after an upgrade.
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO individual_observations "
+                "(video_id, id, observation_uuid, updated_at) VALUES ('v2', 1, :uuid, '2026-01-01')"
+            ),
+            {"uuid": rows[0][0]},
+        )
+    from sqlalchemy.exc import IntegrityError
+
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO individual_observations "
+                "(video_id, id, observation_uuid, updated_at) VALUES ('v1', 3, :uuid, '2026-01-01')"
+            ),
+            {"uuid": rows[0][0]},
+        )

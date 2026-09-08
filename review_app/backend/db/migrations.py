@@ -536,6 +536,74 @@ def _migration_v18(conn) -> None:
     conn.execute(text("DELETE FROM behaviors WHERE key = 'does_not_react' AND is_custom = 0"))
 
 
+def _migration_v22(conn) -> None:
+    """Add and backfill the durable cross-database identity for observations."""
+    import uuid as _uuid
+
+    _add_column_if_missing(conn, "individual_observations", "observation_uuid", "TEXT")
+    missing = conn.execute(
+        text(
+            "SELECT video_id, id FROM individual_observations "
+            "WHERE observation_uuid IS NULL OR TRIM(observation_uuid) = ''"
+        )
+    ).fetchall()
+    if missing:
+        conn.execute(
+            text(
+                "UPDATE individual_observations SET observation_uuid = :observation_uuid "
+                "WHERE video_id = :video_id AND id = :id"
+            ),
+            [
+                {
+                    "video_id": video_id,
+                    "id": observation_id,
+                    "observation_uuid": str(_uuid.uuid4()),
+                }
+                for video_id, observation_id in missing
+            ],
+        )
+    # SQLite cannot make an added column NOT NULL after the fact. Recreate the
+    # table so upgraded databases have the same invariant as fresh databases.
+    conn.execute(
+        text("""
+            CREATE TABLE individual_observations_new (
+                video_id TEXT NOT NULL REFERENCES videos(video_id),
+                id INTEGER NOT NULL,
+                observation_uuid TEXT NOT NULL,
+                project_id TEXT REFERENCES projects(id),
+                species_id TEXT REFERENCES species(id),
+                count INTEGER,
+                start_sec REAL NOT NULL DEFAULT 0.0,
+                end_sec REAL,
+                labeled_by TEXT,
+                labeled_at TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (video_id, id),
+                UNIQUE (video_id, observation_uuid)
+            )
+        """)
+    )
+    conn.execute(
+        text("""
+            INSERT INTO individual_observations_new
+                (video_id, id, observation_uuid, project_id, species_id, count,
+                 start_sec, end_sec, labeled_by, labeled_at, updated_at)
+            SELECT video_id, id, observation_uuid, project_id, species_id, count,
+                   start_sec, end_sec, labeled_by, labeled_at, updated_at
+            FROM individual_observations
+        """)
+    )
+    conn.execute(text("DROP TABLE individual_observations"))
+    conn.execute(text("ALTER TABLE individual_observations_new RENAME TO individual_observations"))
+    for idx_sql in [
+        "CREATE INDEX idx_individual_video_species ON individual_observations(video_id, species_id)",
+        "CREATE INDEX idx_individual_video_time ON individual_observations(video_id, start_sec)",
+        "CREATE INDEX ix_individual_observations_project_id ON individual_observations(project_id)",
+        "CREATE INDEX ix_individual_observations_species_id ON individual_observations(species_id)",
+    ]:
+        conn.execute(text(idx_sql))
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -674,6 +742,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
             "UPDATE project_dirs SET path = REPLACE(path, '\\', '/') WHERE path LIKE '%\\%'",
         ],
     ),
+    (22, _migration_v22),
 ]
 
 

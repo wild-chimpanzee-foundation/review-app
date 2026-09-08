@@ -8,7 +8,7 @@ Exporte les annotations revues manuellement (humaines) au format CSV.
 
 - Nom de fichier : `annotations_{project_name}_{annotator_name}_{YYYY-MM-DD_HH-MM-SS}.csv`
 - Une ligne par observation d'espèce ; les vidéos vides obtiennent une seule ligne avec des champs d'espèce vides.
-- Colonnes : `project_name`, `video_path`, `camera_id`, `recorded_at`, `latitude`, `longitude`, `duration_sec`, `assigned_to`, `is_blank`, `review_later`, `is_annotated`, `annotator`, `labeled_at`, `observation_id`, `species` (nom scientifique), `attributes` (clés de comportement/étiquette séparées par des virgules), `count`, `start_sec`, `end_sec`, ainsi qu'une colonne `tag_<key>` (0/1) par étiquette intégrée et une colonne `custom_tags` (clés d'étiquettes personnalisées séparées par des virgules).
+- Colonnes : `project_name`, `video_path`, `camera_id`, `recorded_at`, `latitude`, `longitude`, `duration_sec`, `assigned_to`, `is_blank`, `review_later`, `is_annotated`, `annotator`, `labeled_at`, `observation_id`, `observation_uuid`, `species` (nom scientifique), `attributes` (clés de comportement/étiquette séparées par des virgules), `count`, `start_sec`, `end_sec`, ainsi qu'une colonne `tag_<key>` (0/1) par étiquette intégrée et une colonne `custom_tags` (clés d'étiquettes personnalisées séparées par des virgules). `observation_uuid` est conservé lors des exportations et permet aux importations répétées en mode ajout de mettre à jour la même observation au lieu de la dupliquer.
 
 ## Exporter les annotations IA
 

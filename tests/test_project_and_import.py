@@ -2,6 +2,8 @@
 Tests for delete_project, import_annotations_csv, and get_overview_stats.
 """
 
+import uuid
+
 import pandas as pd
 import pytest
 from conftest import seed_builtin_tags
@@ -262,6 +264,202 @@ def test_export_import_round_trip(populated_provider):
 
     detail = dp.get_video_detail(ids["v1"])
     assert detail["manual_selections"][0]["species"] == "deer"
+
+
+def test_observation_uuid_is_exported_and_stable(clean_provider):
+    dp = clean_provider
+    paths = _video_paths(dp)
+    v1_id = paths[next(p for p in paths if p.endswith("v1.mp4"))]
+
+    dp.update_manual_review(v1_id, [{"species": "deer", "count": 1}])
+    first = dp.get_video_detail(v1_id)["manual_selections"][0]
+    observation_uuid = first["observation_uuid"]
+
+    assert str(uuid.UUID(observation_uuid)) == observation_uuid
+    exported = dp.export_annotations_csv(active_project_id=None)
+    row = exported[exported["video_path"].str.endswith("v1.mp4")].iloc[0]
+    assert row["observation_uuid"] == observation_uuid
+
+    first["count"] = 2
+    dp.update_manual_review(v1_id, [first])
+    updated = dp.get_video_detail(v1_id)["manual_selections"][0]
+    assert updated["observation_uuid"] == observation_uuid
+
+
+def test_repeated_append_import_with_uuid_is_idempotent(clean_provider):
+    dp = clean_provider
+    paths = _video_paths(dp)
+    v1_id = paths[next(p for p in paths if p.endswith("v1.mp4"))]
+
+    dp.update_manual_review(v1_id, [{"species": "deer", "count": 1}])
+    exported = dp.export_annotations_csv(active_project_id=None)
+
+    dp.import_annotations_csv(exported, active_project_id=None, mode="append")
+    dp.import_annotations_csv(exported, active_project_id=None, mode="append")
+
+    selections = dp.get_video_detail(v1_id)["manual_selections"]
+    assert len(selections) == 1
+    assert (
+        selections[0]["observation_uuid"]
+        == exported.loc[exported["video_path"].str.endswith("v1.mp4"), "observation_uuid"].iloc[0]
+    )
+
+
+def test_append_import_updates_matching_observation_uuid(clean_provider):
+    dp = clean_provider
+    paths = _video_paths(dp)
+    v1_id = paths[next(p for p in paths if p.endswith("v1.mp4"))]
+
+    dp.update_manual_review(v1_id, [{"species": "deer", "count": 1}])
+    exported = dp.export_annotations_csv(active_project_id=None)
+    mask = exported["video_path"].str.endswith("v1.mp4")
+    exported.loc[mask, "species"] = "fox"
+    exported.loc[mask, "count"] = 3
+
+    validation = dp.validate_annotations_csv(exported, None, mode="append")
+    assert validation["obs_to_change"] == 1
+    assert validation["obs_to_insert"] == 0
+
+    dp.import_annotations_csv(exported, active_project_id=None, mode="append")
+    selections = dp.get_video_detail(v1_id)["manual_selections"]
+    assert len(selections) == 1
+    assert selections[0]["species"] == "fox"
+    assert selections[0]["count"] == 3
+
+
+def test_uuid_override_preview_reports_replacement(clean_provider):
+    dp = clean_provider
+    vid = dp.get_video_queue({}, active_project_id=None)[0]
+    dp.update_manual_review(vid, [{"species": "deer", "count": 1}])
+    before = dp.get_video_detail(vid)["manual_selections"][0]
+    df = dp.export_annotations_csv(None).dropna(subset=["species"]).copy()
+    incoming_uuid = str(uuid.uuid4())
+    df["observation_uuid"] = incoming_uuid
+    preview = dp.validate_annotations_csv(df, None)
+    assert preview["obs_unchanged"] == 0
+    assert preview["obs_to_insert"] == preview["obs_to_delete"] == 1
+    dp.import_annotations_csv(df, None)
+    after = dp.get_video_detail(vid)["manual_selections"][0]
+    assert after["observation_uuid"] == incoming_uuid
+    assert after["id"] != before["id"]
+
+
+@pytest.mark.parametrize("mode", ["append", "override"])
+def test_duplicate_uuid_rows_are_collapsed(clean_provider, mode):
+    dp = clean_provider
+    vid = dp.get_video_queue({}, active_project_id=None)[0]
+    row = {
+        "video_id": vid,
+        "is_blank": 0,
+        "species": "deer",
+        "count": 1,
+        "observation_uuid": str(uuid.uuid4()),
+    }
+    df = pd.DataFrame([row, {**row, "observation_uuid": row["observation_uuid"].upper()}])
+    assert dp.validate_annotations_csv(df, None, mode=mode)["obs_to_insert"] == 1
+    dp.import_annotations_csv(df, None, mode=mode)
+    assert len(dp.get_video_detail(vid)["manual_selections"]) == 1
+    assert dp.validate_annotations_csv(df, None, mode=mode)["obs_unchanged"] == 1
+    dp.import_annotations_csv(df, None, mode=mode)
+    assert len(dp.get_video_detail(vid)["manual_selections"]) == 1
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+def test_invalid_uuid_input_is_rejected_before_writes(clean_provider, invalid):
+    dp = clean_provider
+    vid = dp.get_video_queue({}, active_project_id=None)[0]
+    dp.update_manual_review(vid, [{"species": "fox", "count": 4}])
+    before = dp.get_video_detail(vid)["manual_selections"]
+    row = {
+        "video_id": vid,
+        "is_blank": 0,
+        "species": "deer",
+        "count": 1,
+        "observation_uuid": "invalid" if invalid else str(uuid.uuid4()),
+    }
+    df = pd.DataFrame([row] if invalid else [row, {**row, "count": 2}])
+    for operation in [dp.validate_annotations_csv, dp.import_annotations_csv]:
+        with pytest.raises(DataImportError) as error:
+            operation(df, None)
+        assert error.value.rows == ("2" if invalid else "2, 3")
+    assert dp.get_video_detail(vid)["manual_selections"] == before
+
+
+def test_distinct_uuids_can_share_incoming_numeric_id(clean_provider):
+    dp = clean_provider
+    vid = dp.get_video_queue({}, active_project_id=None)[0]
+    df = pd.DataFrame(
+        [
+            {
+                "video_id": vid,
+                "is_blank": 0,
+                "species": "deer",
+                "observation_id": 1,
+                "observation_uuid": str(uuid.uuid4()),
+            }
+            for _ in range(2)
+        ]
+    )
+    assert dp.validate_annotations_csv(df, None)["obs_to_insert"] == 2
+    dp.import_annotations_csv(df, None)
+    observations = dp.get_video_detail(vid)["manual_selections"]
+    assert len({row["id"] for row in observations}) == 2
+    assert {row["observation_uuid"] for row in observations} == set(df["observation_uuid"])
+
+
+def test_uuid_can_be_imported_into_another_project(clean_provider, tmp_db):
+    dp = clean_provider
+    video_dir = tmp_db["video_dir"]
+    projects = [dp.create_project(name, str(video_dir)) for name in ["First", "Second"]]
+    for project in projects:
+        dp.sync_videos(progress_callback=None, video_dir=video_dir, active_project_id=project.id)
+    first, second = projects
+    vid = dp.get_video_queue({}, active_project_id=first.id)[0]
+    dp.update_manual_review(vid, [{"species": "deer", "count": 1}], active_project_id=first.id)
+    df = dp.export_annotations_csv(first.id).dropna(subset=["species"])
+    assert dp.validate_annotations_csv(df, second.id, mode="append")["obs_to_insert"] == 1
+    dp.import_annotations_csv(df, second.id, mode="append")
+    assert dp.validate_annotations_csv(df, second.id, mode="append")["obs_unchanged"] == 1
+    copied = dp.export_annotations_csv(second.id).dropna(subset=["species"])
+    assert copied.iloc[0]["observation_uuid"] == df.iloc[0]["observation_uuid"]
+
+
+def test_uuid_cross_database_round_trip_with_different_numeric_ids(
+    clean_provider, tmp_db, monkeypatch
+):
+    source = clean_provider
+    vid = source.get_video_queue({}, active_project_id=None)[0]
+    source.update_manual_review(vid, [{"species": "deer", "count": 1}])
+    exported = source.export_annotations_csv(None).dropna(subset=["species"])
+    source_observation = source.get_video_detail(vid)["manual_selections"][0]
+    destination_dir = tmp_db["root"] / "destination"
+    monkeypatch.setattr(
+        "review_app.backend.provider.local_data_provider.get_user_data_dir",
+        lambda: destination_dir,
+    )
+    destination = LocalDataProvider()
+    destination.sync_videos(progress_callback=None, video_dir=tmp_db["video_dir"])
+    dest_vid = _video_paths(destination)[source.get_video_detail(vid)["video_path"]]
+    destination.update_manual_review(dest_vid, [{"species": "fox", "count": 2}])
+    destination.import_annotations_csv(exported, None, mode="append")
+    observations = destination.get_video_detail(dest_vid)["manual_selections"]
+    copied = next(row for row in observations if row["species"] == "deer")
+    assert copied["id"] != source_observation["id"]
+    assert copied["observation_uuid"] == source_observation["observation_uuid"]
+    copied["count"] = 3
+    destination.update_manual_review(dest_vid, observations)
+    returned = destination.export_annotations_csv(None)
+    returned = returned[returned["species"] == "deer"].copy()
+    returned["observation_uuid"] = returned["observation_uuid"].str.upper()
+    preview = source.validate_annotations_csv(returned, None)
+    assert preview["obs_to_change"] == 1
+    assert preview["obs_to_insert"] == preview["obs_to_delete"] == 0
+    source.import_annotations_csv(returned, None)
+    updated = source.get_video_detail(vid)["manual_selections"]
+    assert len(updated) == 1
+    assert updated[0]["count"] == 3
+    assert updated[0]["id"] == source_observation["id"]
+    assert updated[0]["observation_uuid"] == source_observation["observation_uuid"]
 
 
 # ---------------------------------------------------------------------------

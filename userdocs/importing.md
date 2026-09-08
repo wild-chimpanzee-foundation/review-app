@@ -30,6 +30,10 @@ For re-importing previously exported or external annotation spreadsheets. Suppor
 
 ## App-format annotations
 
+App exports include a stable `observation_uuid`. In append mode, an observation with a UUID already present in the database is updated rather than inserted again. Older CSV files without this column remain supported, but repeated append imports of those legacy files can create duplicates.
+
+UUID matching is scoped to the destination video, so annotations can also be copied into another project. When a UUID is supplied, it takes precedence over the numeric `observation_id`. Identical rows with the same UUID for one video are imported once; conflicting duplicates and malformed UUIDs are rejected with CSV row numbers (including the header). Importing an older export can overwrite newer edits to matching observations.
+
 If your CSV is the app's own exported format (detected via `video_path`/`video_id` + `is_blank` columns), the app shows a dry-run summary of matched/skipped videos and observations to insert/update/delete before you confirm the import.
 
 ## Batch and bundle import
