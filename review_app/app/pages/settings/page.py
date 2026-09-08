@@ -28,6 +28,7 @@ from .database import render_database_section
 from .species import render_species_section
 from .tags import TagsSection
 from .users import render_users_section
+from .video_export import render_species_video_export
 
 
 def _build_settings_content(container: ui.column):
@@ -329,6 +330,11 @@ def _build_settings_content(container: ui.column):
                 if active_project_id:
                     with ui.expansion(t("nav_distribution"), icon="group").classes("full-width"):
                         render_distribution_section(_dp, active_project_id)
+
+                    with ui.expansion(
+                        t("species_video_export_title"), icon="video_library"
+                    ).classes("full-width"):
+                        render_species_video_export(_dp, active_project_id, lang)
 
                 with ui.expansion(t("users_section_title"), icon="manage_accounts").classes(
                     "full-width"

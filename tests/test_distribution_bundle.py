@@ -421,3 +421,43 @@ def test_export_annotator_videos_non_writable_dir_raises_error(two_camera_provid
             annotators=["alice"],
         )
     assert "not writable" in str(exc_info.value)
+
+
+def test_export_videos_by_species_creates_species_and_camera_folders(
+    two_camera_provider, tmp_path
+):
+    dp, project = two_camera_provider
+    project_id = project.id
+    video_ids = dp.get_video_queue({}, active_project_id=project_id)
+    by_name = {Path(dp.get_video_detail(vid)["video_path"]).name: vid for vid in video_ids}
+    dp.update_manual_review(
+        by_name["a1.mp4"],
+        [
+            {"species": "deer", "tags": [], "start_sec": 0, "end_sec": 1},
+            {"species": "fox", "tags": [], "start_sec": 0, "end_sec": 1},
+        ],
+        is_blank=False,
+    )
+    dp.update_manual_review(
+        by_name["b1.mp4"],
+        [{"species": "fox", "tags": [], "start_sec": 0, "end_sec": 1}],
+        is_blank=False,
+    )
+    result = dp.export_videos_by_species(
+        project_id,
+        ["deer", "fox"],
+        {"deer": "Chimpanzee", "fox": "Elephant"},
+        output_dir=str(tmp_path / "species"),
+    )
+
+    export_dir = Path(result["path"])
+    assert result["video_count"] == 3
+    assert (export_dir / "Chimpanzee" / "cam_a" / "a1.mp4").exists()
+    assert (export_dir / "Elephant" / "cam_a" / "a1.mp4").exists()
+    assert (export_dir / "Elephant" / "cam_b" / "b1.mp4").exists()
+
+
+def test_export_videos_by_species_requires_selection(two_camera_provider, tmp_path):
+    dp, project = two_camera_provider
+    with pytest.raises(ValueError, match="Select at least one species"):
+        dp.export_videos_by_species(project.id, [], output_dir=str(tmp_path))

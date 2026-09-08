@@ -681,3 +681,103 @@ class AssignmentMixin(ProviderBase):
             "Exported %d files across %d annotators → %s", total, len(results), exports_root
         )
         return results
+
+    def export_videos_by_species(
+        self,
+        project_id: str,
+        species_names: list[str],
+        species_folder_names: dict[str, str] | None = None,
+        progress_callback=None,
+        max_workers: int = 4,
+        output_dir: str | None = None,
+    ) -> dict:
+        """Copy manually annotated videos into one folder per selected species."""
+        import re
+        import shutil
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from pathlib import Path
+
+        selected_species = list(dict.fromkeys(str(name) for name in species_names if name))
+        if not selected_species:
+            raise ValueError("Select at least one species to export.")
+
+        dirs = self.get_project_dirs(project_id)
+        if not dirs:
+            raise RuntimeError("Project has no video directory configured.")
+        project_roots = [Path(normalize_path_str(directory.path)) for directory in dirs]
+        exports_root = Path(output_dir) if output_dir else project_roots[0] / "species_exports"
+        export_dir = exports_root / datetime.now().strftime("species_export_%Y-%m-%d_%H-%M-%S_%f")
+
+        params: dict = {"pid": project_id}
+        species_filter = bind_id_list(params, "species_names", selected_species)
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(f"""
+                    SELECT DISTINCT s.scientific_name, v.video_id, v.video_path
+                    FROM individual_observations io
+                    JOIN species s ON s.id = io.species_id
+                    JOIN videos v ON v.video_id = io.video_id
+                    WHERE v.project_id = :pid AND v.is_missing = 0
+                      AND s.scientific_name IN {species_filter}
+                    ORDER BY s.scientific_name, v.video_path
+                """),
+                params,
+            ).fetchall()
+
+        def safe_folder(name: str) -> str:
+            return re.sub(r'[<>:"/\\|?*\s]+', "_", name).strip("_") or "unknown"
+
+        folder_names = species_folder_names or {}
+        copy_tasks: list[tuple[Path, Path]] = []
+        species_counts = {name: 0 for name in selected_species}
+        missing_count = 0
+        for species_name, _video_id, video_path in rows:
+            src = Path(normalize_path_str(video_path))
+            if not src.is_file():
+                missing_count += 1
+                continue
+            rel = None
+            for root in project_roots:
+                try:
+                    rel = src.relative_to(root)
+                    break
+                except ValueError:
+                    continue
+            if rel is None:
+                rel = Path(src.name)
+            species_dir = safe_folder(folder_names.get(species_name, species_name))
+            copy_tasks.append((src, export_dir / species_dir / rel))
+            species_counts[species_name] += 1
+
+        if not copy_tasks:
+            if missing_count:
+                raise FileNotFoundError(
+                    f"Failed to copy: All {missing_count} matching video files are missing on disk."
+                )
+            raise ValueError("No manually annotated videos match the selected species.")
+
+        try:
+            export_dir.mkdir(parents=True, exist_ok=False)
+        except Exception as exc:
+            raise PermissionError(f"Output directory '{exports_root}' is not writable: {exc}")
+
+        total = len(copy_tasks)
+        done = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {}
+            for src, dest in copy_tasks:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                futures[pool.submit(shutil.copy2, src, dest)] = (src, dest)
+            for future in as_completed(futures):
+                future.result()
+                done += 1
+                if progress_callback:
+                    progress_callback(done, total)
+
+        logger.info("Exported %d species video copies to %s", total, export_dir)
+        return {
+            "path": str(export_dir),
+            "video_count": total,
+            "missing_count": missing_count,
+            "species_counts": species_counts,
+        }
