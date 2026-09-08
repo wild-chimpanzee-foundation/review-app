@@ -705,7 +705,10 @@ class AssignmentMixin(ProviderBase):
         if not dirs:
             raise RuntimeError("Project has no video directory configured.")
         project_roots = [Path(normalize_path_str(directory.path)) for directory in dirs]
-        exports_root = Path(output_dir) if output_dir else project_roots[0] / "species_exports"
+        # Keep generated copies outside the recursively scanned video tree;
+        # otherwise the next project sync would add them as new videos.
+        default_exports_root = project_roots[0].parent / f"{project_roots[0].name}_species_exports"
+        exports_root = Path(output_dir) if output_dir else default_exports_root
         export_dir = exports_root / datetime.now().strftime("species_export_%Y-%m-%d_%H-%M-%S_%f")
 
         params: dict = {"pid": project_id}

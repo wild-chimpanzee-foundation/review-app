@@ -27,11 +27,18 @@ def render_species_video_export(dp, project_id: str, lang: str) -> None:
         .props("outlined dense use-chips clearable")
         .classes("full-width q-mb-sm")
     )
+    with ui.row().classes("w-full justify-end q-mb-sm"):
+        ui.button(
+            t("select_all"),
+            icon="select_all",
+            on_click=lambda: species_select.set_value(list(options)),
+        ).props("flat dense")
     output_input = (
         ui.input(placeholder=t("species_video_export_placeholder"))
         .props("outlined dense clearable")
         .classes("full-width q-mb-sm")
     )
+    ui.label(t("species_video_export_default_hint")).classes("text-caption text-grey-6 q-mb-sm")
 
     async def export():
         selected = list(species_select.value or [])

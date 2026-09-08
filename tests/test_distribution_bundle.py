@@ -461,3 +461,20 @@ def test_export_videos_by_species_requires_selection(two_camera_provider, tmp_pa
     dp, project = two_camera_provider
     with pytest.raises(ValueError, match="Select at least one species"):
         dp.export_videos_by_species(project.id, [], output_dir=str(tmp_path))
+
+
+def test_species_export_default_is_outside_scanned_project_dir(two_camera_provider):
+    dp, project = two_camera_provider
+    video_id = dp.get_video_queue({}, active_project_id=project.id)[0]
+    dp.update_manual_review(
+        video_id,
+        [{"species": "deer", "tags": [], "start_sec": 0, "end_sec": 1}],
+        is_blank=False,
+    )
+
+    result = dp.export_videos_by_species(project.id, ["deer"])
+
+    project_root = Path(dp.get_project_dirs(project.id)[0].path)
+    export_dir = Path(result["path"])
+    assert export_dir.parent == project_root.parent / f"{project_root.name}_species_exports"
+    assert not export_dir.is_relative_to(project_root)
