@@ -159,6 +159,27 @@ class TestCreateBackup:
         assert backup_if_stale(reason="test") is False, "fresh backup exists — must skip"
         assert backup_if_stale(max_age_seconds=0, reason="test") is True
 
+    def test_backup_if_stale_forwards_compression_mode(self, workspace):
+        from review_app.backend.db.backup import backup_if_stale
+
+        with patch("review_app.backend.db.backup.create_backup") as create:
+            assert backup_if_stale(reason="pre_update", compress="sync") is True
+
+        create.assert_called_once_with(reason="pre_update", compress="sync")
+
+    def test_backup_if_stale_can_propagate_backup_errors(self, workspace):
+        from review_app.backend.db.backup import backup_if_stale
+
+        error = BackupVacuumError("failed")
+        with patch("review_app.backend.db.backup.create_backup", side_effect=error):
+            assert backup_if_stale(reason="test") is False
+
+        with (
+            patch("review_app.backend.db.backup.create_backup", side_effect=error),
+            pytest.raises(BackupVacuumError, match="failed"),
+        ):
+            backup_if_stale(reason="test", raise_on_error=True)
+
     def test_backup_filename_includes_schema_version(self, workspace):
         result = create_backup(reason="test")
         assert "_v3" in result.name

@@ -46,6 +46,47 @@ def ignore_deleted_client(context: str = ""):
         )
 
 
+async def run_backup_with_progress(backup_func, *, reason: str, **kwargs):
+    """Run a database backup while showing a persistent progress dialog.
+
+    Backup creation can take long enough that a button click otherwise looks like it
+    did nothing. Keeping the dialog here means every UI-triggered backup gets the same
+    blocking feedback and, importantly, is closed even when the backup fails.
+    """
+    from nicegui import run, ui
+
+    loading_dialog = ui.dialog().props("persistent")
+    with loading_dialog, ui.card().classes("q-pa-lg row items-center gap-md no-wrap"):
+        ui.spinner(size="md")
+        ui.label(t("backup_in_progress"))
+    loading_dialog.open()
+    try:
+        return await run.io_bound(backup_func, reason=reason, **kwargs)
+    finally:
+        with ignore_deleted_client("close backup progress dialog"):
+            loading_dialog.close()
+
+
+async def backup_before_update_with_progress() -> bool:
+    """Create a synchronous safety backup before opening an app update."""
+    from nicegui import ui
+
+    from review_app.backend.db.backup import BackupError, backup_if_stale
+
+    try:
+        await run_backup_with_progress(
+            backup_if_stale,
+            reason="pre_update",
+            compress="sync",
+            raise_on_error=True,
+        )
+        return True
+    except BackupError as exc:
+        with ignore_deleted_client("show update backup failure"):
+            ui.notify(t("backup_failed", error=t(exc.user_message_key)), type="negative")
+        return False
+
+
 def require_login() -> bool:
     from nicegui import app, ui
 

@@ -19,6 +19,7 @@ from review_app.app.translations import t
 from review_app.app.utils import (
     format_utc_timestamp,
     ignore_deleted_client,
+    run_backup_with_progress,
     user_error_message,
 )
 from review_app.backend.db.backup import (
@@ -57,27 +58,18 @@ def render_database_section(
         async def do_backup_download():
             if _busy():
                 return
-            loading_dialog = ui.dialog().props("persistent")
-            with loading_dialog, ui.card().classes("q-pa-lg row items-center gap-md no-wrap"):
-                ui.spinner(size="md")
-                ui.label(t("backup_in_progress"))
-            loading_dialog.open()
-            try:
-                async with _db_op_lock:
-                    try:
-                        backup_path = await run.io_bound(create_backup, reason="manual")
-                    except BackupError as exc:
-                        with ignore_deleted_client():
-                            ui.notify(
-                                t("backup_failed", error=t(exc.user_message_key)), type="negative"
-                            )
-                        return
-                with ignore_deleted_client():
-                    ui.download(backup_path)
-                    ui.notify(t("backup_created"), type="positive")
-            finally:
-                with ignore_deleted_client():
-                    loading_dialog.close()
+            async with _db_op_lock:
+                try:
+                    backup_path = await run_backup_with_progress(create_backup, reason="manual")
+                except BackupError as exc:
+                    with ignore_deleted_client():
+                        ui.notify(
+                            t("backup_failed", error=t(exc.user_message_key)), type="negative"
+                        )
+                    return
+            with ignore_deleted_client():
+                ui.download(backup_path)
+                ui.notify(t("backup_created"), type="positive")
 
         ui.button(
             t("backup_download_btn"), icon="download", color="primary", on_click=do_backup_download
@@ -288,7 +280,7 @@ def render_database_section(
                 old_dp = _get_dp()
                 if current_db_path and current_db_path.exists():
                     try:
-                        await run.io_bound(create_backup, reason="reset_database")
+                        await run_backup_with_progress(create_backup, reason="reset_database")
                     except BackupError as exc:
                         with ignore_deleted_client():
                             ui.notify(

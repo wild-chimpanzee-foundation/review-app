@@ -12,7 +12,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from review_app.app.config import DEFAULT_DB_FILENAME, get_user_data_dir
 from review_app.backend.errors import AppError
@@ -30,6 +30,7 @@ BACKUP_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 # Level 1 is ~5-10x faster than the gzip default (9) at ~15% larger files. Backups
 # on multi-GB databases block imports, so speed wins over size here.
 BACKUP_GZIP_LEVEL = 1
+BackupCompression = Literal["sync", "background"]
 
 
 class BackupError(AppError):
@@ -171,7 +172,9 @@ def _compress_backup(raw_db: Path, backup_path: Path, auto_prune: bool, atomic: 
     return result
 
 
-def create_backup(reason: str = "auto", auto_prune: bool = True, compress: str = "sync") -> Path:
+def create_backup(
+    reason: str = "auto", auto_prune: bool = True, compress: BackupCompression = "sync"
+) -> Path:
     """Create a VACUUM INTO backup of the live DB. Raises on any failure.
 
     compress:
@@ -337,20 +340,32 @@ def prune_backups() -> int:
     return count
 
 
-def backup_if_stale(max_age_seconds: int = 1800, reason: str = "auto") -> bool:
-    """Create a backup only if no backup exists within max_age_seconds. Returns True if one was created.
+def backup_if_stale(
+    max_age_seconds: int = 1800,
+    reason: str = "auto",
+    compress: BackupCompression = "background",
+    raise_on_error: bool = False,
+) -> bool:
+    """Create a backup only if no backup exists within max_age_seconds.
+
+    Returns True if one was created. Safety-net callers use background compression by
+    default. UI callers can request synchronous compression so the progress dialog stays
+    open until the final backup file is ready, and can opt into seeing backup failures.
 
     Safety-net path (pre-import, pre-update, shutdown): compression runs in the
-    background so the caller only waits for the VACUUM INTO."""
+    background so the caller only waits for the VACUUM INTO unless ``compress`` is
+    explicitly set to ``"sync"``."""
     backups = list_backups()
     if backups:
         age = (datetime.now(timezone.utc) - backups[0]["timestamp"]).total_seconds()
         if age < max_age_seconds:
             return False
     try:
-        create_backup(reason=reason, compress="background")
+        create_backup(reason=reason, compress=compress)
         return True
     except BackupError:
+        if raise_on_error:
+            raise
         return False
 
 

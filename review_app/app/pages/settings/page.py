@@ -21,7 +21,11 @@ from review_app.app.state import (
     set_species_threshold,
 )
 from review_app.app.translations import t
-from review_app.app.utils import get_or_create_data_provider, sync_with_progress
+from review_app.app.utils import (
+    backup_before_update_with_progress,
+    get_or_create_data_provider,
+    sync_with_progress,
+)
 from review_app.backend.path_matching import normalize_path_str
 
 from .database import render_database_section
@@ -393,9 +397,8 @@ def _build_settings_content(container: ui.column):
                             download_btn.set_text(t("update_tooltip", version=tag.lstrip("v")))
 
                             async def _open_release(u=url):
-                                from review_app.backend.db.backup import backup_if_stale
-
-                                await run.io_bound(backup_if_stale, reason="pre_update")
+                                if not await backup_before_update_with_progress():
+                                    return
                                 ui.run_javascript(f"window.open('{u}', '_blank')")
 
                             download_btn.on("click", _open_release)

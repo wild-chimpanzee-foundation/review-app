@@ -24,6 +24,7 @@ from review_app.app.state import (
 )
 from review_app.app.theme import apply_theme
 from review_app.app.translations import t
+from review_app.app.utils import backup_before_update_with_progress, ignore_deleted_client
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 
@@ -248,10 +249,10 @@ def shared_header(show_drawer: bool = False):
                             _update_btn.tooltip(t("update_tooltip", version=tag.lstrip("v")))
 
                             async def _open_release(u=url):
-                                from review_app.backend.db.backup import backup_if_stale
-
-                                await run.io_bound(backup_if_stale, reason="pre_update")
-                                ui.run_javascript(f"window.open('{u}', '_blank')")
+                                if not await backup_before_update_with_progress():
+                                    return
+                                with ignore_deleted_client("open update release"):
+                                    ui.run_javascript(f"window.open('{u}', '_blank')")
 
                             _update_btn.on("click", _open_release)
                             _update_btn.classes(remove="hidden")
