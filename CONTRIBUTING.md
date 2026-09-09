@@ -25,12 +25,11 @@ git config core.hooksPath .githooks
 ## Running the app
 
 ```bash
-make run
-# or
-uv run python -m review_app.app.entry_point --dev
+make dev
 ```
 
-`--dev` enables hot reload and logs to the console in addition to the log file.
+Development mode enables hot reload and logs to the console in addition to the log file. Use
+`make run` to start the app without development mode.
 
 ## Common tasks
 
@@ -38,12 +37,18 @@ uv run python -m review_app.app.entry_point --dev
 |---------|-------------|
 | `make test` | Run the test suite |
 | `make coverage` | Tests with line coverage report (backend only) |
-| `make lint` | Ruff lint check |
+| `make lint` | Run Ruff lint and apply automatic fixes |
 | `make format` | Auto-format with ruff |
 | `make ci` | Lint + format check + tests (mirrors CI) |
+| `make run` | Run the app without development mode |
+| `make dev` | Run the app with hot reload and console logging |
 | `make build` | Build standalone executable via PyInstaller |
+| `make changelog` | Preview the changelog for unreleased commits |
 | `make bump` | Bump version based on conventional commits since last tag |
 | `make release` | Bump version, commit, and tag — ready to push |
+| `make docs` | Serve the user documentation locally |
+| `make docs-build` | Build the user documentation with strict checks |
+| `make docs-screenshots` | Regenerate documentation screenshots |
 
 ## Tests
 
@@ -95,14 +100,15 @@ review_app/
 
 ## Linting and formatting
 
-Ruff is configured in `pyproject.toml` (line length 99, isort enabled). The pre-commit hook auto-fixes and formats on commit. To check manually:
+Ruff is configured in `pyproject.toml` (line length 99, isort enabled). The pre-commit hook auto-fixes and formats on commit. To apply the same fixes manually:
 
 ```bash
-make lint      # check only
+make lint      # lint and apply automatic fixes
 make format    # fix in place
 ```
 
-Pre-commit hooks enforce both on every commit. Run `make ci` before pushing to catch anything the hooks missed.
+Pre-commit hooks enforce both on every commit. Run `make ci` for non-modifying checks before
+pushing.
 
 ## Building a release
 

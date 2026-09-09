@@ -1,4 +1,4 @@
-.PHONY: test coverage lint format run build ci changelog bump release docs docs-build docs-screenshots
+.PHONY: test coverage lint format run dev build ci changelog bump release docs docs-build docs-screenshots
 
 ci:
 	uv run ruff check review_app/ tests/
@@ -24,7 +24,7 @@ dev:
 	uv run python -m review_app.app.entry_point --dev
 
 build:
-	uv run pyinstaller video_annotation.spec --clean
+	uv run pyinstaller video_annotation.spec --clean --noconfirm
 
 changelog:
 	uvx git-cliff --unreleased

@@ -23,19 +23,15 @@ Supports multiple projects, English/French UI, dark mode, and configurable confi
 ## Run from source
 
 ```bash
-uv run python review_app/app/entry_point.py --dev
+make dev
 ```
 
-`--dev` enables hot reload. Omit it to run in native window mode (non-Linux).
+This enables hot reload. Use `make run` to run in native window mode (non-Linux).
 
 ## Build standalone executable
 
 ```bash
-# Clean previous builds
-rm -rf dist build
-
-# Build
-uv run pyinstaller video_annotation.spec
+make build
 ```
 
 Executable: `dist/VideoAnnotation/VideoAnnotation`
