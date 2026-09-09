@@ -417,10 +417,16 @@ class QueueMixin(ProviderBase):
         elif selected_sort == "blank_prob":
             ctes.append(f"""
             blank_max_prob AS (
-                SELECT video_id, MAX(probability) AS max_blank_prob
+                SELECT video_id,
+                    MAX(CASE
+                        WHEN LOWER(TRIM(value_text)) = 'blank' THEN probability
+                        WHEN LOWER(TRIM(value_text)) = 'non_blank' THEN 1.0 - probability
+                        WHEN value_text IS NULL OR TRIM(value_text) = '' THEN probability
+                        ELSE NULL
+                    END) AS max_blank_prob
                 FROM model_annotations
                 WHERE annotation_type = 'blank_non_blank'
-                AND LOWER(TRIM(value_text)) = 'blank' {ma_project_filter}
+                {ma_project_filter}
                 GROUP BY video_id
             )""")
             joins.append("LEFT JOIN blank_max_prob bmp ON bmp.video_id = v.video_id")

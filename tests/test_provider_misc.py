@@ -228,9 +228,9 @@ def test_queue_sort_blank_prob(populated_provider):
         {"selected_sort": "blank_prob", "selected_sort_direction": "asc"},
         active_project_id=None,
     )
-    assert descending[:2] == [ids["v2"], ids["v3"]]
-    assert ascending[:2] == [ids["v3"], ids["v2"]]
-    assert set(descending[2:]) == set(ascending[2:]) == {ids["v1"], ids["v4"]}
+    assert descending[:3] == [ids["v2"], ids["v3"], ids["v1"]]
+    assert ascending[:3] == [ids["v1"], ids["v3"], ids["v2"]]
+    assert descending[3:] == ascending[3:] == [ids["v4"]]
 
 
 def test_queue_sort_random(populated_provider):

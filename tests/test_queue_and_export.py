@@ -234,6 +234,47 @@ def test_queue_sort_direction_does_not_crash(populated_provider):
     assert asc != desc  # order differs
 
 
+def test_queue_sorts_by_effective_blank_probability(populated_provider):
+    import uuid
+    from datetime import datetime, timezone
+
+    from review_app.backend.db.models import ModelAnnotation
+
+    dp, ids = populated_provider
+
+    # Legacy imports in real databases store a direct blank probability with
+    # no value_text label.
+    with dp.Session() as s:
+        s.add(
+            ModelAnnotation(
+                id=str(uuid.uuid4()),
+                video_id=ids["v3"],
+                project_id=None,
+                annotation_type="blank_non_blank",
+                model_name="legacy_blank_model",
+                value_text=None,
+                probability=0.70,
+                updated_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+        s.commit()
+
+    desc = dp.get_video_queue(
+        {"selected_sort": "blank_prob", "selected_sort_direction": "desc"},
+        active_project_id=None,
+    )
+    asc = dp.get_video_queue(
+        {"selected_sort": "blank_prob", "selected_sort_direction": "asc"},
+        active_project_id=None,
+    )
+
+    # v2 predicts blank at 0.95; v3 has a legacy direct blank probability of
+    # 0.70; v1 predicts non-blank at 0.80, making P(blank) 0.20. Videos with
+    # no blank prediction sort last in either direction.
+    assert desc[:3] == [ids["v2"], ids["v3"], ids["v1"]]
+    assert asc[:3] == [ids["v1"], ids["v3"], ids["v2"]]
+
+
 # ---------------------------------------------------------------------------
 # get_queue_filter_options
 # ---------------------------------------------------------------------------
