@@ -365,6 +365,7 @@ async def render_filter_drawer_body(page):
                     options={
                         "camera": t("sort_camera"),
                         "unreviewed_first": t("sort_unreviewed"),
+                        "blank_prob": t("sort_blank_prob"),
                         "species_prob": t("sort_species_prob"),
                         "random": t("sort_random"),
                     },

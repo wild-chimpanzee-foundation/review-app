@@ -4,7 +4,11 @@ settings, project management, model annotations, sort modes,
 _normalize_annotation_type, get_csv_templates.
 """
 
+import uuid
+from datetime import datetime, timezone
+
 import pytest
+from review_app.backend.db.models import ModelAnnotation
 from review_app.backend.errors import DataImportError
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 
@@ -197,6 +201,36 @@ def test_queue_sort_species_prob(populated_provider):
         active_project_id=None,
     )
     assert set(result) == set(ids.values())
+
+
+def test_queue_sort_blank_prob(populated_provider):
+    dp, ids = populated_provider
+    with dp.Session() as session:
+        session.add(
+            ModelAnnotation(
+                id=str(uuid.uuid4()),
+                video_id=ids["v3"],
+                project_id=None,
+                annotation_type="blank_non_blank",
+                model_name="model_b",
+                value_text="blank",
+                probability=0.4,
+                updated_at=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            )
+        )
+        session.commit()
+
+    descending = dp.get_video_queue(
+        {"selected_sort": "blank_prob", "selected_sort_direction": "desc"},
+        active_project_id=None,
+    )
+    ascending = dp.get_video_queue(
+        {"selected_sort": "blank_prob", "selected_sort_direction": "asc"},
+        active_project_id=None,
+    )
+    assert descending[:2] == [ids["v2"], ids["v3"]]
+    assert ascending[:2] == [ids["v3"], ids["v2"]]
+    assert set(descending[2:]) == set(ascending[2:]) == {ids["v1"], ids["v4"]}
 
 
 def test_queue_sort_random(populated_provider):

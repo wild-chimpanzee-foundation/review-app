@@ -414,6 +414,17 @@ class QueueMixin(ProviderBase):
                     WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
                 ) THEN 1 ELSE 0 END {sort_dir_inv},
                 v.video_path ASC"""
+        elif selected_sort == "blank_prob":
+            ctes.append(f"""
+            blank_max_prob AS (
+                SELECT video_id, MAX(probability) AS max_blank_prob
+                FROM model_annotations
+                WHERE annotation_type = 'blank_non_blank'
+                AND LOWER(TRIM(value_text)) = 'blank' {ma_project_filter}
+                GROUP BY video_id
+            )""")
+            joins.append("LEFT JOIN blank_max_prob bmp ON bmp.video_id = v.video_id")
+            order_by = f"ORDER BY bmp.max_blank_prob {sort_dir} NULLS LAST, v.video_path ASC"
         elif selected_sort == "species_prob":
             species_sort_filter = (
                 selected_possible_species[0]
