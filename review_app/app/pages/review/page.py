@@ -381,22 +381,21 @@ async def _render_video_section_body(page: ReviewPage):
     page.render_annotation_sidebar.refresh()
 
     with ui.column().classes("w-full q-mb-xs gap-0 tour-target-queue"):
-        with ui.row().classes("w-full items-center"):
-            with ui.element("div").classes("col"):
+        with ui.element("div").classes("review-queue-header"):
+            with ui.element("div").classes("review-queue-camera"):
                 if video.get("camera_id"):
-                    ui.label(video["camera_id"]).classes("text-caption")
-            with ui.element("div").classes("col text-center"):
-                with ui.row().classes("items-center justify-center no-wrap"):
+                    ui.label(video["camera_id"]).classes("text-caption review-queue-text")
+            with ui.element("div").classes("review-queue-video text-center"):
+                with ui.column().classes("items-center gap-0"):
                     ui.label(Path(normalize_path_str(video.get("video_path", ""))).name).classes(
-                        "text-caption"
-                    ).style("white-space: nowrap; overflow: hidden; text-overflow: ellipsis;")
+                        "text-caption review-queue-text"
+                    )
                     _assign = video.get("assigned_to")
                     if _assign:
-                        ui.label("·").classes("text-caption text-grey-6 q-mx-xs")
                         ui.label(f"{t('assigned_to')}: {_assign}").classes(
-                            "text-caption text-grey-6"
+                            "text-caption text-grey-6 review-queue-text"
                         )
-            with ui.row().classes("col justify-end items-center gap-xs no-wrap"):
+            with ui.row().classes("review-queue-controls justify-end items-center gap-xs no-wrap"):
                 queue_input = (
                     ui.number(min=1, max=len(queue), value=current_idx + 1, step=1)
                     .props(
@@ -693,6 +692,32 @@ async def setup_review():
         """
         <style>
             .review-sidebar { background: transparent; }
+            .review-queue-header {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+                grid-template-areas: "camera video controls";
+                align-items: center;
+                width: 100%;
+                column-gap: 8px;
+            }
+            .review-queue-camera { grid-area: camera; min-width: 0; }
+            .review-queue-video { grid-area: video; min-width: 0; }
+            .review-queue-controls { grid-area: controls; }
+            .review-queue-text {
+                max-width: 100%;
+                white-space: normal;
+                overflow-wrap: anywhere;
+                word-break: break-word;
+            }
+            @media (max-width: 599px) {
+                .review-queue-header {
+                    grid-template-columns: minmax(0, 1fr) auto;
+                    grid-template-areas:
+                        "camera controls"
+                        "video video";
+                    row-gap: 2px;
+                }
+            }
             .vp-fs-active {
                 position: fixed !important;
                 top: 0 !important; left: 0 !important;
