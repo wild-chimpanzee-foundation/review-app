@@ -35,7 +35,7 @@ def test_df_to_records():
     assert len(records_limit) == 1
 
 
-def test_needs_browser_transcode():
+def test_needs_browser_transcode(tmp_path):
     # web_safe is True
     assert needs_browser_transcode({"is_web_safe": True}) is False
 
@@ -51,3 +51,14 @@ def test_needs_browser_transcode():
 
     # web_safe is None, extension is unsafe
     assert needs_browser_transcode({"is_web_safe": None, "video_path": "test.avi"}) is True
+
+    current_cache = tmp_path / "video-id.v2.mp4"
+    current_cache.touch()
+    assert needs_browser_transcode({"transcoded_path": str(current_cache)}) is False
+
+    legacy_cache = tmp_path / "video-id.mp4"
+    legacy_cache.touch()
+    assert (
+        needs_browser_transcode({"is_web_safe": True, "transcoded_path": str(legacy_cache)})
+        is True
+    )

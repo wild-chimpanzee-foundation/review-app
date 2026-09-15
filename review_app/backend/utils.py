@@ -4,6 +4,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from review_app.backend.transcoding import inspect_transcoded_cache
+from review_app.backend.video_tools import find_video_tool, video_tool_env
+
 # Default confidence cutoff for model-prediction review aids (blank / species /
 # object detection). Used as the fallback wherever a stored threshold is absent.
 DEFAULT_REVIEW_THRESHOLD = 0.75
@@ -59,9 +62,13 @@ def generate_thumbnail(video_path: Path, output_path: Path) -> bool:
     """Extract a single frame from the middle of video_path and save as JPEG. Returns True on success."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
+        ffprobe = find_video_tool("ffprobe")
+        ffmpeg = find_video_tool("ffmpeg")
+        if ffprobe is None or ffmpeg is None:
+            return False
         probe = subprocess.run(
             [
-                "ffprobe",
+                ffprobe,
                 "-v",
                 "error",
                 "-show_entries",
@@ -73,12 +80,13 @@ def generate_thumbnail(video_path: Path, output_path: Path) -> bool:
             capture_output=True,
             text=True,
             timeout=10,
+            env=video_tool_env(),
         )
         duration = float(probe.stdout.strip() or 0)
         seek = max(duration / 2, 0)
         subprocess.run(
             [
-                "ffmpeg",
+                ffmpeg,
                 "-y",
                 "-ss",
                 str(seek),
@@ -94,6 +102,7 @@ def generate_thumbnail(video_path: Path, output_path: Path) -> bool:
             ],
             capture_output=True,
             timeout=30,
+            env=video_tool_env(),
         )
         return output_path.exists()
     except Exception:
@@ -102,11 +111,13 @@ def generate_thumbnail(video_path: Path, output_path: Path) -> bool:
 
 def needs_browser_transcode(video_row: dict) -> bool:
     """Check if a video needs to be transcoded for browser playback."""
+    cache_status = inspect_transcoded_cache(
+        video_row.get("transcoded_path"), validate_contents=False
+    )
+    if cache_status.exists:
+        return not cache_status.current
     ws = video_row.get("is_web_safe")
     if ws is True:
-        return False
-    transcoded = video_row.get("transcoded_path")
-    if transcoded and Path(transcoded).exists():
         return False
     if ws is False:
         return True

@@ -4,9 +4,7 @@ import json
 import logging
 import os
 import re
-import shutil
 import subprocess
-import sys
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,6 +20,13 @@ from review_app.backend.db.models import ProjectDir, Video
 from review_app.backend.errors import VideoError
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
+from review_app.backend.transcoding import (
+    TranscodeResult,
+    inspect_transcoded_cache,
+    transcoded_cache_filename,
+    validate_transcoded_video,
+)
+from review_app.backend.video_tools import find_video_tool, video_tool_env
 
 logger = logging.getLogger(__name__)
 
@@ -41,36 +46,6 @@ class ProbeResult(NamedTuple):
     longitude: float | None
 
 
-def _subprocess_env() -> dict[str, str]:
-    """Return an environment safe for subprocesses when running frozen.
-
-    PyInstaller prepends _internal/ to LD_LIBRARY_PATH so its bundled libs
-    are found by Python. Subprocesses (ffprobe, ffmpeg) inherit this and can
-    crash when the bundled libs conflict with system libs they link against.
-    Restoring the original value fixes that.
-    """
-    env = os.environ.copy()
-    if getattr(sys, "frozen", False):
-        if sys.platform.startswith("linux"):
-            orig = env.get("LD_LIBRARY_PATH_ORIG", "")
-            if orig:
-                env["LD_LIBRARY_PATH"] = orig
-            else:
-                env.pop("LD_LIBRARY_PATH", None)
-        elif sys.platform == "darwin":
-            # Homebrew directories are stripped from PATH in frozen bundles
-            path_parts = env.get("PATH", "").split(":")
-            for brew_bin in ("/opt/homebrew/bin", "/usr/local/bin"):
-                if brew_bin not in path_parts:
-                    path_parts.insert(0, brew_bin)
-            env["PATH"] = ":".join(path_parts)
-    return env
-
-
-def _find_ffprobe() -> str | None:
-    return shutil.which("ffprobe")
-
-
 def _parse_iso6709(s: str) -> tuple[float, float] | None:
     """Parse an ISO 6709 location string like '+37.4060-122.0782/' into (lat, lon)."""
     m = re.match(r"^([+-]\d+\.?\d*)([+-]\d+\.?\d*)", s)
@@ -81,7 +56,7 @@ def _parse_iso6709(s: str) -> tuple[float, float] | None:
 
 def _probe_video(path: Path) -> ProbeResult:
     """Run ffprobe on *path* and return a :class:`ProbeResult`."""
-    ffprobe = _find_ffprobe()
+    ffprobe = find_video_tool("ffprobe")
     if ffprobe is None:
         logger.error("ffprobe not found on PATH — video probing unavailable")
         return ProbeResult(None, False, False, "ffprobe executable not found", None, None, None)
@@ -103,7 +78,7 @@ def _probe_video(path: Path) -> ProbeResult:
             capture_output=True,
             text=True,
             timeout=_FFPROBE_TIMEOUT_SEC,
-            env=_subprocess_env(),
+            env=video_tool_env(),
         )
     except subprocess.TimeoutExpired:
         logger.warning("ffprobe timed out after %ds on %s", _FFPROBE_TIMEOUT_SEC, path)
@@ -444,7 +419,7 @@ class VideoMixin(ProviderBase):
             "still_invalid": still_invalid,
         }
 
-    def transcode_video(self, video_id: str) -> dict[str, Any]:
+    def transcode_video(self, video_id: str) -> TranscodeResult:
         with self.Session() as session:
             video = session.get(Video, video_id)
             if video is None:
@@ -457,23 +432,36 @@ class VideoMixin(ProviderBase):
             if not input_path.exists():
                 video.is_missing = True
                 session.commit()
-                return {"success": False, "error": f"File not found on disk: {input_path}"}
+                return TranscodeResult(False, error=f"File not found on disk: {input_path}")
 
             from review_app.app.config import get_user_data_dir
 
             tmp_dir = get_user_data_dir() / "transcoded_cache"
             tmp_dir.mkdir(parents=True, exist_ok=True)
-            safe_name = video_id.replace("/", "_").replace("\\", "_").replace(":", "_")
-            sidecar_path = tmp_dir / f"{safe_name}.mp4"
+            sidecar_path = tmp_dir / transcoded_cache_filename(video_id)
 
-            if sidecar_path.exists():
-                video.transcoded_path = str(sidecar_path)
-                session.commit()
-                return {"success": True, "new_path": str(sidecar_path)}
+            cache_status = inspect_transcoded_cache(sidecar_path)
+            if cache_status.exists:
+                if cache_status.usable:
+                    video.transcoded_path = str(sidecar_path)
+                    session.commit()
+                    return TranscodeResult(True, new_path=str(sidecar_path))
+                logger.warning(
+                    "Replacing invalid or unverifiable transcode cache for video %s: %s",
+                    video_id,
+                    cache_status.validation.error if cache_status.validation else "outdated cache",
+                )
 
+            ffmpeg = find_video_tool("ffmpeg")
+            if ffmpeg is None:
+                logger.error("Cannot transcode video %s: ffmpeg executable not found", video_id)
+                return TranscodeResult(False, error="ffmpeg executable not found")
+
+            work_path = tmp_dir / f".{sidecar_path.stem}.{uuid.uuid4().hex}.part.mp4"
             cmd = [
-                "ffmpeg",
+                ffmpeg,
                 "-y",
+                "-nostdin",
                 "-i",
                 str(input_path),
                 "-c:v",
@@ -482,32 +470,57 @@ class VideoMixin(ProviderBase):
                 "fast",
                 "-crf",
                 "23",
+                "-vf",
+                "pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p",
+                "-pix_fmt",
+                "yuv420p",
                 "-c:a",
                 "aac",
+                "-profile:a",
+                "aac_low",
+                "-ac",
+                "2",
+                "-ar",
+                "48000",
                 "-b:a",
                 "128k",
                 "-movflags",
                 "+faststart",
-                str(sidecar_path),
+                str(work_path),
             ]
 
             logger.info("Transcoding %s -> %s", input_path, sidecar_path)
             try:
                 subprocess.run(
-                    cmd, capture_output=True, text=True, check=True, env=_subprocess_env()
+                    cmd, capture_output=True, text=True, check=True, env=video_tool_env()
                 )
-            except subprocess.CalledProcessError as exc:
-                if sidecar_path.exists():
-                    sidecar_path.unlink()
-                logger.error("ffmpeg failed for %s: %s", input_path, exc.stderr[:500])
-                return {"success": False, "error": f"ffmpeg failed: {exc.stderr}"}
+            except (OSError, subprocess.CalledProcessError) as exc:
+                work_path.unlink(missing_ok=True)
+                detail = (
+                    exc.stderr[:500]
+                    if isinstance(exc, subprocess.CalledProcessError)
+                    else str(exc)
+                )
+                logger.error("ffmpeg failed for %s: %s", input_path, detail)
+                return TranscodeResult(False, error=f"ffmpeg failed: {detail}")
+
+            validation = validate_transcoded_video(work_path)
+            if not validation.valid:
+                work_path.unlink(missing_ok=True)
+                logger.error(
+                    "Transcoded output validation failed for video %s: %s",
+                    video_id,
+                    validation.error,
+                )
+                return TranscodeResult(False, error=validation.error)
+
+            work_path.replace(sidecar_path)
 
             video.transcoded_path = str(sidecar_path)
-            video.is_web_safe = True
             session.commit()
 
             logger.info("Transcode complete: %s", sidecar_path)
-            return {"success": True, "new_path": str(sidecar_path)}
+            return TranscodeResult(True, new_path=str(sidecar_path))
 
     def count_missing_videos(self, project_id: str) -> int:
         with self.engine.connect() as conn:

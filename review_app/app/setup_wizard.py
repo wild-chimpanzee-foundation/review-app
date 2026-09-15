@@ -1,23 +1,19 @@
 import io
 import json
-import platform
-import shutil
 import sqlite3
-import subprocess
 import zipfile
 from pathlib import Path
 
 from nicegui import app, run, ui
 
+from review_app.app.components.video_tools import VideoToolsWarning
 from review_app.app.config import get_default_db_path
 from review_app.app.state import get_language, set_language
 from review_app.app.translations import t
 from review_app.app.utils import format_utc_timestamp, sync_with_progress, user_error_message
-
-FFMPEG_INSTALL_MAC = "brew install ffmpeg"
-FFMPEG_INSTALL_WINDOWS = "winget install ffmpeg OR download from https://ffmpeg.org/download.html"
-FFMPEG_INSTALL_LINUX = "sudo apt install ffmpeg"
-FFMPEG_DOCS_URL = "https://wild-chimpanzee-foundation.github.io/review-app/getting-started/#ffmpeg"
+from review_app.backend.video_tools import (
+    check_video_tools,
+)
 
 
 def validate_video_dir(path: str) -> tuple[str, dict] | None:
@@ -39,42 +35,6 @@ def validate_video_dir(path: str) -> tuple[str, dict] | None:
     return ("video_dir_no_videos", {"exts": ", ".join(sorted(VIDEO_EXTENSIONS))})
 
 
-_HOMEBREW_PATHS = ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg")
-
-
-def find_ffmpeg() -> str | None:
-    """Return the ffmpeg executable path, checking Homebrew locations as fallback."""
-    found = shutil.which("ffmpeg")
-    if found:
-        return found
-    # PyInstaller strips PATH on macOS; check known Homebrew install locations
-    for candidate in _HOMEBREW_PATHS:
-        if Path(candidate).is_file():
-            return candidate
-    return None
-
-
-def check_ffmpeg() -> bool:
-    path = find_ffmpeg()
-    if not path:
-        return False
-    try:
-        result = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=5)
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-def get_ffmpeg_install_cmd() -> str:
-    system = platform.system()
-    if system == "Darwin":
-        return FFMPEG_INSTALL_MAC
-    elif system == "Windows":
-        return FFMPEG_INSTALL_WINDOWS
-    else:
-        return FFMPEG_INSTALL_LINUX
-
-
 def _db_has_projects(db_path: Path) -> bool:
     try:
         con = sqlite3.connect(str(db_path))
@@ -88,7 +48,7 @@ def _db_has_projects(db_path: Path) -> bool:
 class SetupWizard:
     def __init__(self, on_complete_callback):
         self.on_complete_callback = on_complete_callback
-        self.ffmpeg_ok = False
+        self.video_tools_ok = False
         self.inputs = {}
 
     def build(self):
@@ -107,13 +67,14 @@ class SetupWizard:
         def update_continue_button():
             btn = continue_btn_holder[0]
             if btn is not None:
-                btn.set_enabled(self.ffmpeg_ok)
+                btn.set_enabled(self.video_tools_ok)
 
         def update_project_button():
             btn = project_btn_holder[0]
             if btn is not None:
                 btn.set_enabled(
-                    bool(
+                    self.video_tools_ok
+                    and bool(
                         self.inputs.get("video_dir")
                         and self.inputs["video_dir"].value.strip()
                         and self.inputs.get("project_name")
@@ -129,7 +90,7 @@ class SetupWizard:
                     self.inputs.get("bundle_video_dir")
                     and self.inputs["bundle_video_dir"].value.strip()
                 )
-                btn.set_enabled(has_bundle and has_dir)
+                btn.set_enabled(self.video_tools_ok and has_bundle and has_dir)
 
         def on_video_dir_change(e):
             update_project_button()
@@ -145,17 +106,33 @@ class SetupWizard:
                 if path:
                     self.inputs["bundle_project_name"].set_value(Path(path).name)
 
-        async def do_check_ffmpeg():
-            ok = await run.io_bound(check_ffmpeg)
-            self.ffmpeg_ok = ok
-            if ok:
-                ffmpeg_status_label.text = t("installed")
-                ffmpeg_status_label.classes("text-positive", remove="text-negative text-grey-6")
-            else:
-                ffmpeg_status_label.text = t("not_installed")
-                ffmpeg_status_label.classes("text-negative", remove="text-positive text-grey-6")
-                ffmpeg_install_card.visible = True
-            update_continue_button()
+        def render_video_tools_check():
+            with ui.card().classes("full-width q-mb-md"):
+                with ui.row().classes("items-center gap-sm"):
+                    ui.label(t("video_tools_label")).classes("text-subtitle1 font-weight-medium")
+                    status_label = ui.label(t("ffmpeg_checking")).classes(
+                        "text-caption text-grey-6"
+                    )
+                ui.label(t("video_tools_desc")).classes("text-caption text-grey-6 q-mt-xs")
+
+            warning = VideoToolsWarning()
+
+            async def do_check():
+                status = await run.io_bound(check_video_tools)
+                self.video_tools_ok = status.available
+                if status.available:
+                    status_label.text = t("installed")
+                    status_label.classes("text-positive", remove="text-negative text-grey-6")
+                else:
+                    missing = ", ".join(status.missing)
+                    status_label.text = t("video_tools_missing", tools=missing)
+                    status_label.classes("text-negative", remove="text-positive text-grey-6")
+                    warning.show(status.missing)
+                update_continue_button()
+                update_project_button()
+                update_bundle_button()
+
+            ui.timer(0, do_check, once=True)
 
         async def handle_bundle_upload(e):
             raw = await e.file.read()
@@ -592,29 +569,7 @@ class SetupWizard:
                                 on_change=change_language,
                             ).props("dense outlined").classes("q-mt-xs")
 
-                    with ui.card().classes("full-width q-mb-md"):
-                        with ui.row().classes("items-center gap-sm"):
-                            ui.label(t("ffmpeg_label")).classes(
-                                "text-subtitle1 font-weight-medium"
-                            )
-                            ffmpeg_status_label = ui.label(t("ffmpeg_checking")).classes(
-                                "text-caption text-grey-6"
-                            )
-                        ui.label(t("ffmpeg_desc")).classes("text-caption text-grey-6 q-mt-xs")
-
-                    ffmpeg_install_card = ui.card().classes(
-                        "full-width q-mb-md bg-negative text-white"
-                    )
-                    ffmpeg_install_card.visible = False
-                    with ffmpeg_install_card:
-                        ui.label(t("ffmpeg_not_found_title")).classes(
-                            "text-subtitle1 font-weight-bold q-mb-xs"
-                        )
-                        ui.label(t("ffmpeg_install_instructions")).classes("text-caption q-mb-sm")
-                        ui.code(get_ffmpeg_install_cmd()).classes("full-width")
-                        ui.link(t("ffmpeg_docs_link"), FFMPEG_DOCS_URL, new_tab=True).classes(
-                            "text-white text-caption q-mt-sm"
-                        )
+                    render_video_tools_check()
 
                     continue_btn_holder[0] = (
                         ui.button(t("tour_next"), icon="arrow_forward", color="primary")
@@ -622,8 +577,6 @@ class SetupWizard:
                         .classes("full-width")
                     )
                     continue_btn_holder[0].set_enabled(False)
-
-                ui.timer(0, do_check_ffmpeg, once=True)
 
                 # ── Step 1.5: fresh start vs restore choice ───────────────────
                 with ui.column().classes("w-full gap-0") as step_choice:
@@ -841,6 +794,7 @@ class SetupWizard:
                 with ui.card().classes("full-width q-mb-lg"):
                     ui.label(t("new_project")).classes("text-h5 text-primary font-weight-bold")
 
+                render_video_tools_check()
                 render_project_tabs()
 
 

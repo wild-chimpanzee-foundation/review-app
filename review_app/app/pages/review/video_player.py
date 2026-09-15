@@ -1,3 +1,5 @@
+import logging
+
 from nicegui import ui
 
 from review_app.app.state import (
@@ -30,6 +32,8 @@ SPEED_OPTIONS = [
     25.0,
 ]
 
+logger = logging.getLogger(__name__)
+
 
 def render_custom_video_player(video_url, duration, vid_key):
     """Render a video component with mouse-wheel zoom, drag-to-pan, and custom controls."""
@@ -51,7 +55,7 @@ def render_custom_video_player(video_url, duration, vid_key):
             v = (
                 ui.video(video_url, autoplay=autoplay, muted=muted, controls=False)
                 .classes("w-full")
-                .props('preload="auto"')
+                .props('preload="auto" playsinline')
             )
 
         def _fmt(s):
@@ -130,6 +134,18 @@ def render_custom_video_player(video_url, duration, vid_key):
             set_muted(bool(e.args))
 
         ui.on(f"vp_mute_change_{vid_key}", _persist_mute)
+        ui.on(
+            f"vp_autoplay_fallback_{vid_key}",
+            lambda e: logger.info(
+                "Unmuted autoplay was blocked; retrying muted for player %s: %s",
+                vid_key,
+                e.args,
+            ),
+        )
+        ui.on(
+            f"vp_autoplay_failed_{vid_key}",
+            lambda e: logger.warning("Autoplay failed for player %s: %s", vid_key, e.args),
+        )
 
         ui.run_javascript(f"""
             (function setup() {{
@@ -214,13 +230,45 @@ def render_custom_video_player(video_url, duration, vid_key):
                 }}
 
                 // --- MUTE LOGIC ---
+                function syncMuteUi() {{
+                    if (mutedIcon) mutedIcon.style.display = videoEl.muted ? '' : 'none';
+                    if (unmutedIcon) unmutedIcon.style.display = videoEl.muted ? 'none' : '';
+                }}
+
                 if (muteBtn) {{
                     muteBtn.addEventListener('click', () => {{
                         videoEl.muted = !videoEl.muted;
-                        if (mutedIcon) mutedIcon.style.display = videoEl.muted ? '' : 'none';
-                        if (unmutedIcon) unmutedIcon.style.display = videoEl.muted ? 'none' : '';
+                        syncMuteUi();
                         emitEvent('vp_mute_change_{vid_key}', videoEl.muted);
                     }});
+                }}
+
+                async function startAutoplay() {{
+                    try {{
+                        await videoEl.play();
+                    }} catch (error) {{
+                        if (error.name === 'NotAllowedError' && !videoEl.muted) {{
+                            emitEvent('vp_autoplay_fallback_{vid_key}', error.message);
+                            videoEl.muted = true;
+                            syncMuteUi();
+                            emitEvent('vp_mute_change_{vid_key}', true);
+                            try {{
+                                await videoEl.play();
+                            }} catch (retryError) {{
+                                emitEvent('vp_autoplay_failed_{vid_key}', retryError.message);
+                            }}
+                        }} else {{
+                            emitEvent('vp_autoplay_failed_{vid_key}', error.message);
+                        }}
+                    }}
+                }}
+
+                if ({str(autoplay).lower()}) {{
+                    if (videoEl.readyState >= 3) {{
+                        startAutoplay();
+                    }} else {{
+                        videoEl.addEventListener('canplay', startAutoplay, {{ once: true }});
+                    }}
                 }}
 
                 // --- ZOOM LOGIC (Mouse Wheel) ---

@@ -7,6 +7,7 @@ from urllib.parse import quote
 from nicegui import run, ui
 
 from review_app.app.components.inat_logo import inat_logo_svg
+from review_app.app.components.video_tools import VideoToolsWarning
 from review_app.app.onboarding import show_info_dialog, show_tour_if_needed
 from review_app.app.pages.review.annotations import _shortcut_badge, render_annotation_section_body
 from review_app.app.pages.review.filters import render_filter_drawer_body
@@ -40,7 +41,12 @@ from review_app.app.utils import (
 )
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.species import SpeciesCatalog
+from review_app.backend.transcoding import (
+    TranscodeResult,
+    inspect_transcoded_cache,
+)
 from review_app.backend.utils import df_to_records
+from review_app.backend.video_tools import check_video_tools
 
 logger = logging.getLogger(__name__)
 
@@ -53,14 +59,27 @@ class ReviewPage:
         self._model_ann = None
         self._default_species = None
         self._default_tags: list[str] = []
+        self._is_transcoding = False
+        self._navigation_controls: list = []
+
+    def set_transcoding(self, active: bool) -> None:
+        self._is_transcoding = active
+        for control in self._navigation_controls:
+            control.set_enabled(not active)
 
     def navigate(self, direction: int):
+        if self._is_transcoding:
+            logger.info("Navigation blocked while transcoding")
+            return
         queue = get_queue()
         new_idx = get_current_idx() + direction
         if 0 <= new_idx < len(queue):
             self.navigate_to(new_idx)
 
     def navigate_to(self, idx: int):
+        if self._is_transcoding:
+            logger.info("Navigation blocked while transcoding")
+            return
         from nicegui import context as ui_context
 
         queue = get_queue()
@@ -432,47 +451,109 @@ async def _render_video_section_body(page: ReviewPage):
                     ui.badge("N").props("color=grey-9").classes("text-caption")
                     ui.icon("chevron_right")
             next_btn._props["data-shortcut"] = "next"
+            page._navigation_controls = [prev_btn, slider, queue_input, next_btn]
+            if page._is_transcoding:
+                page.set_transcoding(True)
 
     with ui.column().classes("w-full").style("max-width: 1280px"):
         with ui.card().classes("full-width q-mb-md"):
-            if video.get("needs_transcode"):
-                attempted = set(get_state_val("transcode_attempted_ids", []))
-                if selected_video_id not in attempted and is_auto_transcode():
-                    attempted.add(selected_video_id)
-                    set_state_val("transcode_attempted_ids", list(attempted))
-                    ui.label(t("transcoding_video")).classes("text-body2 q-mb-sm")
-                    result = await run.io_bound(dp.transcode_video, selected_video_id)
-                    if result.get("success"):
-                        ui.notify(t("video_transcoded"), type="positive")
-                        page.render_video_section.refresh()
-                        return
-                    ui.label(
-                        t("transcode_failed", error=result.get("error", "unknown error"))
-                    ).classes("text-negative text-caption q-mb-sm")
-
-                async def retry_transcode():
-                    result = await run.io_bound(dp.transcode_video, selected_video_id)
-                    if result.get("success"):
-                        ui.notify(t("video_transcoded"), type="positive")
-                        page.render_video_section.refresh()
-                    else:
-                        ui.notify(
-                            t("transcode_failed", error=result.get("error", "unknown error")),
-                            type="negative",
-                        )
-
-                ui.button(
-                    t("transcode_for_playback"),
-                    icon="movie",
-                    color="primary",
-                    on_click=retry_transcode,
+            transcoded_str = video.get("transcoded_path")
+            transcoded_path = Path(transcoded_str) if transcoded_str else None
+            cache_status = await run.io_bound(inspect_transcoded_cache, transcoded_path)
+            cached_transcode_invalid = cache_status.exists and not cache_status.usable
+            if cached_transcode_invalid:
+                cache_error = (
+                    cache_status.validation.error
+                    if cache_status.validation
+                    else "outdated transcode cache"
                 )
+                if cache_error:
+                    logger.warning(
+                        "Cached transcode is invalid for video %s: %s",
+                        selected_video_id,
+                        cache_error,
+                    )
+
+            if video.get("needs_transcode") or cached_transcode_invalid:
+                tools_status = await run.io_bound(check_video_tools)
+                logger.info(
+                    "Video %s requires transcoding; auto_transcode=%s, tools_available=%s",
+                    selected_video_id,
+                    is_auto_transcode(),
+                    tools_status.available,
+                )
+
+                if not tools_status.available:
+                    VideoToolsWarning().show(tools_status.missing)
+                else:
+
+                    async def transcode():
+                        if page._is_transcoding:
+                            logger.info(
+                                "Duplicate transcode request ignored for video %s",
+                                selected_video_id,
+                            )
+                            return TranscodeResult(False, error="transcode already in progress")
+                        logger.info(
+                            "Starting review-page transcode for video %s", selected_video_id
+                        )
+                        page.set_transcoding(True)
+                        try:
+                            result = await run.io_bound(dp.transcode_video, selected_video_id)
+                        finally:
+                            page.set_transcoding(False)
+                        if result.success:
+                            logger.info(
+                                "Review-page transcode succeeded for video %s", selected_video_id
+                            )
+                        else:
+                            logger.warning(
+                                "Review-page transcode failed for video %s: %s",
+                                selected_video_id,
+                                result.error or "unknown error",
+                            )
+                        return result
+
+                    attempted = set(get_state_val("transcode_attempted_ids", []))
+                    if selected_video_id not in attempted and is_auto_transcode():
+                        attempted.add(selected_video_id)
+                        set_state_val("transcode_attempted_ids", list(attempted))
+                        ui.label(t("transcoding_video")).classes("text-body2 q-mb-sm")
+                        result = await transcode()
+                        if result.success:
+                            ui.notify(t("video_transcoded"), type="positive")
+                            page.render_video_section.refresh()
+                            return
+                        ui.label(
+                            t("transcode_failed", error=result.error or "unknown error")
+                        ).classes("text-negative text-caption q-mb-sm")
+
+                    async def retry_transcode():
+                        retry_btn.set_enabled(False)
+                        try:
+                            result = await transcode()
+                        except Exception:
+                            retry_btn.set_enabled(True)
+                            raise
+                        if result.success:
+                            ui.notify(t("video_transcoded"), type="positive")
+                            page.render_video_section.refresh()
+                        else:
+                            retry_btn.set_enabled(True)
+                            ui.notify(
+                                t("transcode_failed", error=result.error or "unknown error"),
+                                type="negative",
+                            )
+
+                    retry_btn = ui.button(
+                        t("transcode_for_playback"),
+                        icon="movie",
+                        color="primary",
+                        on_click=retry_transcode,
+                    )
             elif video.get("video_path"):
                 # Transcoded sidecars live in the system temp dir, served via /transcoded
-                transcoded_str = video.get("transcoded_path")
-                transcoded_path = Path(transcoded_str) if transcoded_str else None
-
-                if transcoded_path and transcoded_path.exists():
+                if cache_status.usable and transcoded_path:
                     video_url = f"/transcoded/{quote(transcoded_path.name)}"
                 else:
                     serve_path = Path(normalize_path_str(video["video_path"]))
