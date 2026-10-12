@@ -1,10 +1,17 @@
 # Distance Annotation via Depth Estimation
 
-**Blocker: Validate Depth Anything output against reference videos.**
+**Status:** Superseded for now as of 2026-10-12 by
+[Reference-Based Distance Annotation](./reference-based-distance-annotation.md).
+Use that document for the current workflow. This proposal is retained for possible
+future reconsideration.
+
+**Blocker if revisited:** Validate Depth Anything output against reference videos.
 
 ## Context
 
-Wildlife camera trap videos are reviewed and annotated for species and behavior. A future need is to also record the **distance of the animal from the camera** at the time of observation. This document captures the planned approach.
+Wildlife camera trap videos are reviewed and annotated for species and behavior.
+Distance annotation records the **distance of the animal from the camera** at the
+time of observation. This document captures the earlier depth-estimation proposal.
 
 ## Approach
 
@@ -54,7 +61,12 @@ Auto-pausing the video every 2 seconds; the user can also step manually using ex
 5. **UI shows result immediately:** labeled dot at the click location with depth in meters, appended to a list of distance observations for that video.
 6. Do we allow the user to manually correct annotations?
 
-## Data Model
+## Data Model (Superseded Proposal)
+
+The current reference workflow defines separate distance individuals and samples
+in its [database schema](./reference-based-distance-annotation.md#database-schema).
+The table and optional ordinary-observation link below belong to this earlier
+proposal.
 
 New table `distance_observations`:
 
