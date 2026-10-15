@@ -1,2 +1,11 @@
 scientific_name;key;name_en;name_fr
 *;reacts_to_camera;Reacts to camera;Réagit à la caméra
+*;inspection;Inspection;Inspection
+*;staring_at_camera;Staring at camera;Regarde la caméra
+*;run_away;Run away;Fuite
+*;getting_closer;Getting closer;Se rapproche
+*;stop;Stop;Arrêt
+*;rest;Rest;Repos
+*;play;Play;Jeu
+*;feed;Feed;Alimentation
+*;groom;Groom;Toilettage

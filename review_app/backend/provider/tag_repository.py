@@ -16,11 +16,30 @@ logger = logging.getLogger(__name__)
 class TagMixin(ProviderBase):
     """Tag management. Requires self.engine."""
 
+    def _ensure_reference_video_tag(self) -> None:
+        """Fresh databases skip data migrations; ensure the existing built-in is available."""
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO tags (id, key, name_en, name_fr, color, icon, is_custom) "
+                    "VALUES (:id, 'reference_video', 'Reference Video', 'Vidéo de référence', "
+                    "'indigo', 'bookmark', 0)"
+                ),
+                {"id": str(uuid.uuid4())},
+            )
+            conn.execute(
+                text(
+                    "UPDATE tags SET individual_eligible = 1 "
+                    "WHERE is_custom = 0 AND key IN ('injured', 'disease')"
+                )
+            )
+
     def get_all_tags(self) -> list[dict]:
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text(
-                    "SELECT id, key, name_en, name_fr, color, icon, is_custom FROM tags ORDER BY is_custom, key"
+                    "SELECT id, key, name_en, name_fr, color, icon, is_custom, "
+                    "individual_eligible FROM tags ORDER BY is_custom, key"
                 )
             ).fetchall()
         return [
@@ -32,6 +51,7 @@ class TagMixin(ProviderBase):
                 "color": r[4],
                 "icon": r[5],
                 "is_custom": bool(r[6]),
+                "individual_eligible": bool(r[7]),
             }
             for r in rows
         ]
@@ -97,8 +117,8 @@ class TagMixin(ProviderBase):
                 return key
             conn.execute(
                 text(
-                    "INSERT INTO tags (id, key, name_en, name_fr, color, is_custom) "
-                    "VALUES (:id, :key, :name_en, :name_fr, :color, 1)"
+                    "INSERT INTO tags (id, key, name_en, name_fr, color, is_custom, individual_eligible) "
+                    "VALUES (:id, :key, :name_en, :name_fr, :color, 1, 0)"
                 ),
                 {
                     "id": str(uuid.uuid4()),
@@ -128,6 +148,19 @@ class TagMixin(ProviderBase):
                 text("UPDATE tags SET color = :color WHERE key = :key AND is_custom = 1"),
                 {"color": color, "key": key},
             )
+
+    def set_tag_individual_eligibility(self, key: str, eligible: bool) -> None:
+        """Manage whether a custom tag is available for new individual assignments."""
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                text(
+                    "UPDATE tags SET individual_eligible = :eligible "
+                    "WHERE key = :key AND is_custom = 1"
+                ),
+                {"eligible": bool(eligible), "key": key},
+            )
+            if not result.rowcount:
+                raise ValueError("Custom tag not found")
 
     def set_video_tags(self, video_id: str, tag_keys: list[str], append: bool = False) -> None:
         """Apply tag_keys to video_id.
@@ -233,14 +266,14 @@ class TagMixin(ProviderBase):
             )
 
     def export_tags_csv(self) -> str:
-        """Export all custom tags as a CSV string (key, name_en, name_fr, color, icon)."""
+        """Export custom tags, including individual-vocabulary eligibility."""
         import csv
         import io
 
         tags = [t for t in self.get_all_tags() if t["is_custom"]]
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["key", "name_en", "name_fr", "color", "icon"])
+        writer.writerow(["key", "name_en", "name_fr", "color", "icon", "individual_eligible"])
         for tag in tags:
             writer.writerow(
                 [
@@ -249,6 +282,7 @@ class TagMixin(ProviderBase):
                     tag.get("name_fr") or "",
                     tag.get("color") or "",
                     tag.get("icon") or "",
+                    "true" if tag["individual_eligible"] else "false",
                 ]
             )
         return buf.getvalue()
@@ -260,6 +294,7 @@ class TagMixin(ProviderBase):
         import io
 
         reader = csv.DictReader(io.StringIO(content))
+        has_eligibility_column = "individual_eligible" in (reader.fieldnames or [])
         count = 0
         for row in reader:
             key = (row.get("key") or "").strip()
@@ -267,17 +302,27 @@ class TagMixin(ProviderBase):
             name_fr = (row.get("name_fr") or "").strip() or None
             color = (row.get("color") or "").strip() or None
             icon = (row.get("icon") or "").strip() or None
+            eligibility_value = (row.get("individual_eligible") or "").strip().lower()
+            individual_eligible = None
+            if has_eligibility_column and eligibility_value:
+                if eligibility_value not in {"true", "false", "1", "0"}:
+                    raise ValueError(
+                        f"Invalid individual_eligible value on CSV row {reader.line_num}: "
+                        f"{eligibility_value!r} (expected true/false or 1/0)"
+                    )
+                individual_eligible = eligibility_value in {"true", "1"}
             if not key or not name_en:
                 continue
             with self.engine.begin() as conn:
                 existing = conn.execute(
-                    text("SELECT id FROM tags WHERE key = :k"), {"k": key}
+                    text("SELECT id, is_custom FROM tags WHERE key = :k"), {"k": key}
                 ).fetchone()
                 if existing is None:
                     conn.execute(
                         text(
-                            "INSERT INTO tags (id, key, name_en, name_fr, color, icon, is_custom) "
-                            "VALUES (:id, :key, :name_en, :name_fr, :color, :icon, 1)"
+                            "INSERT INTO tags (id, key, name_en, name_fr, color, icon, is_custom, "
+                            "individual_eligible) VALUES (:id, :key, :name_en, :name_fr, :color, "
+                            ":icon, 1, :individual_eligible)"
                         ),
                         {
                             "id": str(uuid.uuid4()),
@@ -286,13 +331,20 @@ class TagMixin(ProviderBase):
                             "name_fr": name_fr,
                             "color": color,
                             "icon": icon,
+                            "individual_eligible": bool(individual_eligible),
                         },
                     )
                 else:
+                    eligibility_sql = (
+                        ", individual_eligible = :individual_eligible"
+                        if individual_eligible is not None
+                        else ""
+                    )
                     conn.execute(
                         text(
                             "UPDATE tags SET name_en = :name_en, name_fr = :name_fr, "
-                            "color = :color, icon = :icon WHERE key = :key AND is_custom = 1"
+                            "color = :color, icon = :icon"
+                            f"{eligibility_sql} WHERE key = :key AND is_custom = 1"
                         ),
                         {
                             "key": key,
@@ -300,6 +352,7 @@ class TagMixin(ProviderBase):
                             "name_fr": name_fr,
                             "color": color,
                             "icon": icon,
+                            "individual_eligible": individual_eligible,
                         },
                     )
             count += 1

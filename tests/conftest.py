@@ -239,3 +239,35 @@ def mock_nicegui_user_storage():
     patcher.start()
     yield mock_dict
     patcher.stop()
+
+
+@pytest.fixture
+def distance_data(provider_with_project):
+    dp, project, directory = provider_with_project
+    videos = dp.get_video_queue({}, active_project_id=project.id)
+    with dp.engine.connect() as conn:
+        species_id = conn.execute(
+            text("SELECT id FROM species WHERE scientific_name='deer'")
+        ).scalar()
+        behavior_id = conn.execute(text("SELECT id FROM behaviors WHERE key='grazing'")).scalar()
+    reference = dp.register_reference_video(project.id, "cam_x", "references/patrol.mp4")
+    frame = dp.add_reference_frame(reference["id"], 3500, 5.0)
+    individual = dp.create_distance_individual(
+        videos[0],
+        species_id,
+        500,
+        labeled_by="alice",
+        anchor={"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4},
+    )
+    return {
+        "dp": dp,
+        "project": project,
+        "directory": directory,
+        "videos": videos,
+        "species_id": species_id,
+        "behavior_id": behavior_id,
+        "reference": reference,
+        "frame": frame,
+        "individual": individual,
+        "anchor": {"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4},
+    }

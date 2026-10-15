@@ -11,10 +11,11 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 from review_app.app.config import DEFAULT_DB_FILENAME, get_user_data_dir
-from review_app.backend.db.migrations import run_migrations
+from review_app.backend.db.migrations import check_schema_version, run_migrations
 from review_app.backend.db.models import Base
 from review_app.backend.provider.annotation_repository import AnnotationMixin
 from review_app.backend.provider.assignment_service import AssignmentMixin
+from review_app.backend.provider.distance_repository import DistanceMixin
 from review_app.backend.provider.import_service import ImportMixin
 from review_app.backend.provider.project_repository import ProjectMixin
 from review_app.backend.provider.species import SpeciesMixin
@@ -40,6 +41,7 @@ class LocalDataProvider(
     StatsMixin,
     TagMixin,
     AssignmentMixin,
+    DistanceMixin,
 ):
     """SQLite-backed local data provider for manual review + constrained model imports."""
 
@@ -58,6 +60,14 @@ class LocalDataProvider(
             max_overflow=0,
         )
 
+        # Check before changing journal mode, creating tables, or seeding data.
+        # Discard this connection so normal connections receive all pragmas below.
+        try:
+            with self.engine.connect() as conn:
+                check_schema_version(conn)
+        finally:
+            self.engine.dispose()
+
         @event.listens_for(self.engine, "connect")
         def set_sqlite_pragma(conn, _):
             conn.execute("PRAGMA journal_mode=WAL")
@@ -75,6 +85,7 @@ class LocalDataProvider(
 
         self._load_species_data()
         self._load_species_behaviors()
+        self._ensure_reference_video_tag()
 
     # ── Shared helpers ────────────────────────────────────────────────────────
 

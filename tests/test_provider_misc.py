@@ -11,10 +11,69 @@ import pytest
 from review_app.backend.db.models import ModelAnnotation
 from review_app.backend.errors import DataImportError
 from review_app.backend.provider.local_data_provider import LocalDataProvider
+from sqlalchemy import text
 
 # ---------------------------------------------------------------------------
 # App settings (key-value store)
 # ---------------------------------------------------------------------------
+
+
+def test_custom_tag_csv_roundtrip_preserves_individual_eligibility(tmp_db):
+    dp = LocalDataProvider()
+    key = dp.create_custom_tag("Distance concern")
+    dp.set_tag_individual_eligibility(key, True)
+
+    exported = dp.export_tags_csv()
+    assert "individual_eligible" in exported.splitlines()[0]
+    dp.delete_custom_tag(key)
+    assert dp.import_tags_from_csv(exported) == 1
+
+    restored = next(tag for tag in dp.get_all_tags() if tag["key"] == key)
+    assert restored["individual_eligible"] is True
+
+
+def test_legacy_tag_csv_preserves_existing_eligibility_and_defaults_new_tags_false(tmp_db):
+    dp = LocalDataProvider()
+    existing_key = dp.create_custom_tag("Existing individual tag")
+    dp.set_tag_individual_eligibility(existing_key, True)
+    legacy_csv = (
+        "key,name_en,name_fr,color,icon\n"
+        "existing_individual_tag,Renamed,,,label\n"
+        "legacy_video_tag,Legacy video tag,,,label\n"
+    )
+
+    assert dp.import_tags_from_csv(legacy_csv) == 2
+    tags = {tag["key"]: tag for tag in dp.get_all_tags()}
+    assert tags[existing_key]["name_en"] == "Renamed"
+    assert tags[existing_key]["individual_eligible"] is True
+    assert tags["legacy_video_tag"]["individual_eligible"] is False
+
+
+def test_tag_csv_rejects_malformed_individual_eligibility_and_keeps_builtin(tmp_db):
+    dp = LocalDataProvider()
+    key = dp.create_custom_tag("Eligible tag")
+    dp.set_tag_individual_eligibility(key, True)
+    with dp.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO tags (id,key,name_en,is_custom,individual_eligible) "
+                "VALUES ('builtin-tag','builtin_tag','Builtin',0,1)"
+            )
+        )
+
+    malformed = (
+        "key,name_en,name_fr,color,icon,individual_eligible\neligible_tag,Changed,,,label,maybe\n"
+    )
+    with pytest.raises(ValueError, match="Invalid individual_eligible"):
+        dp.import_tags_from_csv(malformed)
+    builtin_csv = (
+        "key,name_en,name_fr,color,icon,individual_eligible\n"
+        "builtin_tag,Attempted change,,,label,false\n"
+    )
+    dp.import_tags_from_csv(builtin_csv)
+    tags = {tag["key"]: tag for tag in dp.get_all_tags()}
+    assert tags[key]["individual_eligible"] is True
+    assert tags["builtin_tag"]["individual_eligible"] is True
 
 
 def test_get_setting_returns_default_when_missing(tmp_db):

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from review_app.backend import transcoding, video_tools
+from review_app.backend.provider import video as video_provider
 
 
 def test_check_video_tools_requires_ffmpeg_and_ffprobe(monkeypatch, caplog):
@@ -58,6 +59,44 @@ def test_check_video_tools_reports_complete_installation(monkeypatch, caplog):
 def test_find_video_tool_rejects_unknown_tool():
     with pytest.raises(ValueError, match="Unsupported video tool"):
         video_tools.find_video_tool("convert")
+
+
+@pytest.mark.parametrize(
+    "stream,expected",
+    [
+        ({"avg_frame_rate": "25/1"}, 25),
+        ({"avg_frame_rate": "30000/1001"}, 30000 / 1001),
+        ({"avg_frame_rate": "0/0", "r_frame_rate": "24/1"}, 24),
+        ({"avg_frame_rate": "invalid", "r_frame_rate": "0/1"}, None),
+        ({"avg_frame_rate": "-25/1"}, None),
+    ],
+)
+def test_reference_frame_rate_uses_valid_stream_metadata(monkeypatch, tmp_path, stream, expected):
+    monkeypatch.setattr(video_provider, "find_video_tool", lambda _: "/bin/ffprobe")
+    monkeypatch.setattr(
+        video_provider.subprocess,
+        "run",
+        lambda *a, **kw: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"streams": [stream]}),
+        ),
+    )
+    assert video_provider._probe_frame_rate(tmp_path / "reference.mp4") == expected
+
+
+def test_distance_frame_rate_reads_only_metadata_with_a_short_timeout(monkeypatch, tmp_path):
+    monkeypatch.setattr(video_provider, "find_video_tool", lambda _: "/bin/ffprobe")
+
+    def run(command, **kwargs):
+        assert kwargs["timeout"] == 2
+        assert command[command.index("-show_entries") + 1] == "stream=avg_frame_rate,r_frame_rate"
+        assert "-show_frames" not in command and "-show_packets" not in command
+        return SimpleNamespace(
+            returncode=0, stdout=json.dumps({"streams": [{"avg_frame_rate": "25/1"}]})
+        )
+
+    monkeypatch.setattr(video_provider.subprocess, "run", run)
+    assert video_provider._probe_frame_rate(tmp_path / "animal.mp4", timeout_sec=2) == 25
 
 
 def test_video_tool_env_restores_linux_library_path_in_frozen_build(monkeypatch):

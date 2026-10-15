@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 
 # Each entry is (version: int, sql: str | list[str] | Callable[[conn], None]).
 # Use a callable for migrations that need conditional logic (e.g. idempotent DDL).
-# Versions must be contiguous starting at 1. Never modify or remove existing entries.
+# Versions must be contiguous starting at 1. Never modify or remove published entries.
+# Distance's private development migrations were consolidated into v23 before release.
 
 
 def _add_column_if_missing(conn, table: str, column: str, decl: str) -> None:
@@ -604,6 +605,19 @@ def _migration_v22(conn) -> None:
         conn.execute(text(idx_sql))
 
 
+def _migration_v23(conn) -> None:
+    """Add the final Distance schema to a published v22 database."""
+    for sql in DISTANCE_SCHEMA_V23:
+        conn.execute(text(sql))
+    _add_column_if_missing(conn, "tags", "individual_eligible", "BOOLEAN NOT NULL DEFAULT 0")
+    conn.execute(
+        text(
+            "UPDATE tags SET individual_eligible = 1 "
+            "WHERE is_custom = 1 OR key IN ('injured', 'disease')"
+        )
+    )
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -743,31 +757,219 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
         ],
     ),
     (22, _migration_v22),
+    (23, _migration_v23),
+]
+
+# Frozen upgrade DDL. Keep independent of evolving ORM metadata.
+DISTANCE_SCHEMA_V23 = [
+    """
+            CREATE TABLE IF NOT EXISTS reference_videos (
+                id VARCHAR NOT NULL,
+                project_id VARCHAR NOT NULL,
+                camera_id VARCHAR NOT NULL,
+                video_path VARCHAR NOT NULL,
+                PRIMARY KEY (id),
+                CONSTRAINT uq_reference_video_path_project UNIQUE (project_id, video_path),
+                CONSTRAINT ck_reference_camera CHECK (length(trim(camera_id)) > 0),
+                CONSTRAINT ck_reference_path CHECK (length(trim(video_path)) > 0),
+                FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE
+            )
+            """,
+    """
+            CREATE INDEX IF NOT EXISTS idx_reference_deployment
+                ON reference_videos (project_id, camera_id)
+            """,
+    """
+            CREATE TABLE IF NOT EXISTS reference_frames (
+                id VARCHAR NOT NULL,
+                reference_video_id VARCHAR NOT NULL,
+                offset_ms INTEGER NOT NULL,
+                playback_offset_ms FLOAT,
+                distance_m FLOAT NOT NULL,
+                PRIMARY KEY (id),
+                CONSTRAINT ck_reference_frame_playback CHECK (playback_offset_ms >= 0),
+                CONSTRAINT uq_reference_frame_offset UNIQUE (reference_video_id, offset_ms),
+                CONSTRAINT ck_reference_frame_offset CHECK (offset_ms >= 0),
+                CONSTRAINT ck_reference_frame_distance CHECK (distance_m > 0),
+                FOREIGN KEY(reference_video_id) REFERENCES reference_videos (id) ON DELETE CASCADE
+            )
+            """,
+    """
+            CREATE TABLE IF NOT EXISTS distance_individuals (
+                id VARCHAR NOT NULL,
+                video_id VARCHAR NOT NULL,
+                individual_number INTEGER NOT NULL,
+                species_id VARCHAR NOT NULL,
+                age VARCHAR,
+                sex VARCHAR,
+                first_seen_offset_ms INTEGER NOT NULL,
+                anchor_x FLOAT,
+                anchor_y FLOAT,
+                anchor_width FLOAT,
+                anchor_height FLOAT,
+                labeled_by VARCHAR,
+                labeled_at DATETIME,
+                updated_at DATETIME NOT NULL,
+                review_status VARCHAR DEFAULT 'not_started' NOT NULL,
+                completed_by VARCHAR,
+                completed_at DATETIME,
+                PRIMARY KEY (id),
+                CONSTRAINT uq_distance_individual_number UNIQUE (video_id, individual_number),
+                CONSTRAINT ck_distance_individual_number CHECK (individual_number > 0),
+                CONSTRAINT ck_distance_first_seen CHECK (first_seen_offset_ms >= 0),
+                CONSTRAINT ck_distance_age CHECK (
+                    age IS NULL OR age IN ('Adult', 'Adolescent', 'Juvenile', 'Infant')),
+                CONSTRAINT ck_distance_sex CHECK (
+                    sex IS NULL OR sex IN ('Male', 'Female', 'Unknown')),
+                CONSTRAINT ck_distance_anchor CHECK (
+                    (anchor_x IS NULL AND anchor_y IS NULL
+                    AND anchor_width IS NULL AND anchor_height IS NULL) OR
+                    (anchor_x IS NOT NULL AND anchor_y IS NOT NULL
+                    AND anchor_x BETWEEN 0 AND 1 AND anchor_y BETWEEN 0 AND 1 AND
+                    anchor_width IS NOT NULL AND anchor_height IS NOT NULL
+                    AND anchor_width > 0 AND anchor_height > 0
+                    AND anchor_x + anchor_width <= 1 AND anchor_y + anchor_height <= 1)),
+                FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE,
+                FOREIGN KEY(species_id) REFERENCES species (id)
+            )
+            """,
+    """
+            CREATE TABLE IF NOT EXISTS distance_samples (
+                id VARCHAR NOT NULL,
+                individual_id VARCHAR NOT NULL,
+                offset_ms INTEGER NOT NULL,
+                status VARCHAR NOT NULL,
+                skip_reason VARCHAR,
+                reference_frame_id VARCHAR,
+                distance_m FLOAT,
+                carried_by_individual_id VARCHAR,
+                labeled_by VARCHAR,
+                labeled_at DATETIME,
+                updated_at DATETIME NOT NULL,
+                PRIMARY KEY (id),
+                CONSTRAINT uq_distance_sample_offset UNIQUE (individual_id, offset_ms),
+                CONSTRAINT ck_distance_sample_offset CHECK (offset_ms >= 0),
+                CONSTRAINT ck_distance_sample_state CHECK (
+                    (status = 'annotated' AND reference_frame_id IS NOT NULL
+                    AND distance_m IS NOT NULL AND distance_m > 0
+                    AND skip_reason IS NULL) OR
+                    (status = 'skipped' AND skip_reason IS NOT NULL
+                    AND skip_reason IN ('individual absent', 'midpoint not visible')
+                    AND reference_frame_id IS NULL AND distance_m IS NULL)),
+                CONSTRAINT ck_distance_carrier CHECK (
+                    carried_by_individual_id IS NULL OR carried_by_individual_id != individual_id),
+                FOREIGN KEY(individual_id) REFERENCES distance_individuals (id) ON DELETE CASCADE,
+                FOREIGN KEY(reference_frame_id) REFERENCES reference_frames (id),
+                FOREIGN KEY(carried_by_individual_id) REFERENCES distance_individuals (id)
+            )
+            """,
+    """
+            CREATE TABLE IF NOT EXISTS distance_individual_tags (
+                individual_id VARCHAR NOT NULL,
+                tag_id VARCHAR NOT NULL,
+                tagged_by VARCHAR,
+                tagged_at DATETIME NOT NULL,
+                PRIMARY KEY (individual_id, tag_id),
+                FOREIGN KEY(individual_id) REFERENCES distance_individuals (id) ON DELETE CASCADE,
+                FOREIGN KEY(tag_id) REFERENCES tags (id) ON DELETE CASCADE
+            )
+            """,
+    """
+            CREATE TABLE IF NOT EXISTS distance_sample_behaviors (
+                sample_id VARCHAR NOT NULL,
+                behavior_id VARCHAR NOT NULL,
+                PRIMARY KEY (sample_id, behavior_id),
+                FOREIGN KEY(sample_id) REFERENCES distance_samples (id) ON DELETE CASCADE,
+                FOREIGN KEY(behavior_id) REFERENCES behaviors (id)
+            )
+            """,
+    """
+    CREATE TABLE IF NOT EXISTS distance_video_reviews (
+        video_id VARCHAR NOT NULL PRIMARY KEY,
+        recorded_start DATETIME NOT NULL,
+        clock_anchor_offset_ms INTEGER,
+        clock_anchor_playback_ms FLOAT,
+        opening_even_second BOOLEAN NOT NULL DEFAULT 0,
+        verified_by VARCHAR NOT NULL,
+        verified_at DATETIME NOT NULL,
+        completed_by VARCHAR,
+        completed_at DATETIME,
+        FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS distance_review_progress (
+        video_id VARCHAR NOT NULL,
+        annotator_name VARCHAR NOT NULL,
+        active_individual_id VARCHAR NOT NULL,
+        updated_at DATETIME NOT NULL,
+        PRIMARY KEY (video_id, annotator_name),
+        FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE,
+        FOREIGN KEY(active_individual_id) REFERENCES distance_individuals (id) ON DELETE CASCADE
+    )
+    """,
 ]
 
 
-def run_migrations(engine) -> None:
-    with engine.begin() as conn:
-        conn.execute(text("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER)"))
-        row = conn.execute(text("SELECT version FROM _schema_version")).fetchone()
-        if row is None:
-            logger.info("Fresh database — stamping schema version %d", len(MIGRATIONS))
-            conn.execute(text("INSERT INTO _schema_version VALUES (:v)"), {"v": len(MIGRATIONS)})
-            return
-        current = row[0]
-        pending = [v for v, _ in MIGRATIONS if v > current]
-        if pending:
-            logger.info(
-                "Running %d migration(s): v%d → v%d", len(pending), current, len(MIGRATIONS)
-            )
-        for version, migration in MIGRATIONS:
-            if version > current:
-                logger.debug("Applying migration v%d", version)
-                if callable(migration):
-                    migration(conn)
-                else:
-                    stmts = migration if isinstance(migration, list) else [migration]
-                    for stmt in stmts:
-                        conn.execute(text(stmt))
-        conn.execute(text("DELETE FROM _schema_version"))
+def check_schema_version(conn) -> None:
+    """Reject newer databases without writing anything, including startup DDL."""
+    if not conn.exec_driver_sql(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='_schema_version'"
+    ).first():
+        return
+    row = conn.exec_driver_sql("SELECT version FROM _schema_version").first()
+    if row and row[0] > len(MIGRATIONS):
+        raise ValueError(
+            f"Database schema v{row[0]} is newer than this application's v{len(MIGRATIONS)}. "
+            "Open it with the original application or rebuild a backup with "
+            "scripts/rebuild_distance_dev_db.py; do not change its version stamp."
+        )
+
+
+def _apply_migrations(conn) -> bool:
+    check_schema_version(conn)
+    conn.execute(text("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER)"))
+    row = conn.execute(text("SELECT version FROM _schema_version")).fetchone()
+    if row is None:
+        logger.info("Fresh database — stamping schema version %d", len(MIGRATIONS))
         conn.execute(text("INSERT INTO _schema_version VALUES (:v)"), {"v": len(MIGRATIONS)})
+        return False
+    current = row[0]
+    pending = [v for v, _ in MIGRATIONS if v > current]
+    if pending:
+        logger.info("Running %d migration(s): v%d → v%d", len(pending), current, len(MIGRATIONS))
+    for version, migration in MIGRATIONS:
+        if version > current:
+            logger.debug("Applying migration v%d", version)
+            if callable(migration):
+                migration(conn)
+            else:
+                stmts = migration if isinstance(migration, list) else [migration]
+                for stmt in stmts:
+                    conn.execute(text(stmt))
+    conn.execute(text("DELETE FROM _schema_version"))
+    conn.execute(text("INSERT INTO _schema_version VALUES (:v)"), {"v": len(MIGRATIONS)})
+    return bool(pending)
+
+
+def run_migrations(engine) -> None:
+    with engine.connect() as conn:
+        # Rebuilding a referenced SQLite table with foreign keys enabled would
+        # cascade-delete its children. Disable enforcement before the transaction,
+        # check the resulting relationships before commit, then restore it.
+        foreign_keys = conn.exec_driver_sql("PRAGMA foreign_keys").scalar()
+        conn.commit()
+        conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        conn.commit()
+        try:
+            with conn.begin():
+                # sqlite3's legacy transaction mode does not begin on DDL.
+                # Explicitly begin so table rebuilds roll back as a whole.
+                conn.exec_driver_sql("BEGIN")
+                if _apply_migrations(conn) and foreign_keys:
+                    violations = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+                    if violations:
+                        raise ValueError("Database migration would leave invalid foreign keys")
+        finally:
+            conn.exec_driver_sql(f"PRAGMA foreign_keys={int(foreign_keys)}")
+            conn.commit()

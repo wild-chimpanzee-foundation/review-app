@@ -6,6 +6,8 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from review_app.backend.db.models import (
+    DistanceIndividual,
+    DistanceSample,
     IndividualObservation,
     ModelAnnotation,
     ObservationTag,
@@ -53,17 +55,33 @@ class ProviderBase:
         observation_tags, and bulk ``.delete()`` triggers no cascade at all.
         """
         v_sub = session.query(Video.video_id).filter(video_filter).scalar_subquery()
+        individuals = (
+            session.query(DistanceIndividual.id)
+            .filter(DistanceIndividual.video_id.in_(v_sub))
+            .scalar_subquery()
+        )
+        # Delete all samples first: an infant's sample can reference another individual.
+        session.query(DistanceSample).filter(DistanceSample.individual_id.in_(individuals)).delete(
+            synchronize_session=False
+        )
+        session.query(DistanceIndividual).filter(DistanceIndividual.video_id.in_(v_sub)).delete(
+            synchronize_session=False
+        )
         for model in _VIDEO_CHILD_MODELS:
             session.query(model).filter(model.video_id.in_(v_sub)).delete(
                 synchronize_session=False
             )
         session.query(Video).filter(video_filter).delete(synchronize_session=False)
 
+    def _reconcile_distance_video_completion(self, session: Session, video_id: str) -> None: ...
+
     # ── Cross-mixin stubs ─────────────────────────────────────────────────────
     # Declared here so mixins that call methods from other mixins satisfy pyright.
     # Each stub is overridden by the mixin that actually implements it.
 
     def get_valid_species(self, project_id: str | None) -> list[str]: ...
+
+    def get_species_catalog(self, lang: str = "en", project_id: str | None = None): ...
 
     def _validate_species_fuzzy(
         self, value_text: str, variant_map: dict[str, str] | None

@@ -10,6 +10,7 @@ from review_app.backend.db.models import (
     Project,
     ProjectDir,
     ProjectSpecies,
+    ReferenceVideo,
     Video,
 )
 from review_app.backend.path_matching import normalize_path_str
@@ -111,9 +112,11 @@ class ProjectMixin(ProviderBase):
         return d
 
     def update_project_dir(self, dir_id: str, new_path: str) -> ProjectDir | None:
-        """Repoint a project directory to `new_path`, rewriting the stored absolute
-        video_path prefix of every video under it so existing rows (and their
-        annotations) survive the move. A re-sync afterwards picks up added/removed files."""
+        """Relocate videos and references together, retaining IDs and saved evidence.
+
+        Path collisions fail the transaction rather than merging reference identities.
+        A re-sync afterwards picks up added/removed files.
+        """
         with self.Session() as s:
             d = s.query(ProjectDir).filter_by(id=dir_id).first()
             if not d:
@@ -121,21 +124,37 @@ class ProjectMixin(ProviderBase):
             old_prefix = normalize_path_str(d.path).rstrip("/") + "/"
             new_prefix = normalize_path_str(str(new_path)).rstrip("/") + "/"
             if old_prefix != new_prefix:
-                s.execute(
-                    text("""
-                        UPDATE videos
-                        SET video_path = :new_prefix || substr(REPLACE(video_path, '\\', '/'), :remainder_at)
-                        WHERE project_id IS :pid
-                          AND substr(REPLACE(video_path, '\\', '/'), 1, :prefix_len) = :old_prefix
-                    """),
-                    {
-                        "new_prefix": new_prefix,
-                        "remainder_at": len(old_prefix) + 1,
-                        "prefix_len": len(old_prefix),
-                        "old_prefix": old_prefix,
-                        "pid": d.project_id,
-                    },
+                old_root, new_root = Path(old_prefix), Path(new_prefix)
+                paired_root = any(
+                    (root / "videos").is_dir() and (root / "references").is_dir()
+                    for root in (old_root, new_root)
                 )
+                for model in (Video, ReferenceVideo):
+                    s.execute(
+                        text(f"""
+                            UPDATE {model.__tablename__}
+                            SET video_path = :new_prefix || substr(REPLACE(video_path, '\\', '/'), :remainder_at)
+                            WHERE project_id IS :pid
+                              AND substr(REPLACE(video_path, '\\', '/'), 1, :prefix_len) = :old_prefix
+                        """),
+                        {
+                            "new_prefix": new_prefix,
+                            "remainder_at": len(old_prefix) + 1,
+                            "prefix_len": len(old_prefix),
+                            "old_prefix": old_prefix,
+                            "pid": d.project_id,
+                        },
+                    )
+                    # Paired folders imported as the root use its name as camera ID.
+                    # Keep references in step with the next sync; leave explicit IDs
+                    # and nested deployments alone.
+                    if paired_root and old_root.name != new_root.name:
+                        for row in s.query(model).filter_by(
+                            project_id=d.project_id, camera_id=old_root.name
+                        ):
+                            parent = Path(normalize_path_str(row.video_path)).parent
+                            if parent in (new_root / "videos", new_root / "references"):
+                                row.camera_id = new_root.name
             d.path = normalize_path_str(str(new_path))
             s.commit()
             s.refresh(d)

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -210,6 +211,7 @@ class Tag(Base):
     color: Mapped[str | None] = mapped_column(String)
     icon: Mapped[str | None] = mapped_column(String)
     is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
+    individual_eligible: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
 
 class VideoTag(Base):
@@ -241,6 +243,180 @@ class VideoAssignment(Base):
     video_id: Mapped[str] = mapped_column(String, ForeignKey("videos.video_id"), primary_key=True)
     assigned_to: Mapped[str] = mapped_column(String, ForeignKey("annotators.name"), index=True)
     assigned_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class ReferenceVideo(Base):
+    __tablename__ = "reference_videos"
+    __table_args__ = (
+        UniqueConstraint("project_id", "video_path", name="uq_reference_video_path_project"),
+        CheckConstraint("length(trim(camera_id)) > 0", name="ck_reference_camera"),
+        CheckConstraint("length(trim(video_path)) > 0", name="ck_reference_path"),
+        Index("idx_reference_deployment", "project_id", "camera_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"))
+    camera_id: Mapped[str] = mapped_column(String)
+    video_path: Mapped[str] = mapped_column(String)
+
+
+class ReferenceFrame(Base):
+    __tablename__ = "reference_frames"
+    __table_args__ = (
+        UniqueConstraint("reference_video_id", "offset_ms", name="uq_reference_frame_offset"),
+        CheckConstraint("offset_ms >= 0", name="ck_reference_frame_offset"),
+        CheckConstraint("playback_offset_ms >= 0", name="ck_reference_frame_playback"),
+        CheckConstraint("distance_m > 0", name="ck_reference_frame_distance"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    reference_video_id: Mapped[str] = mapped_column(
+        String, ForeignKey("reference_videos.id", ondelete="CASCADE")
+    )
+    offset_ms: Mapped[int] = mapped_column(Integer)
+    # Keep the precise seek position: rounding can land in the preceding frame.
+    playback_offset_ms: Mapped[float | None] = mapped_column(Float)
+    distance_m: Mapped[float] = mapped_column(Float)
+
+
+class DistanceIndividual(Base):
+    __tablename__ = "distance_individuals"
+    __table_args__ = (
+        UniqueConstraint("video_id", "individual_number", name="uq_distance_individual_number"),
+        CheckConstraint("individual_number > 0", name="ck_distance_individual_number"),
+        CheckConstraint("first_seen_offset_ms >= 0", name="ck_distance_first_seen"),
+        CheckConstraint(
+            "age IS NULL OR age IN ('Adult', 'Adolescent', 'Juvenile', 'Infant')",
+            name="ck_distance_age",
+        ),
+        CheckConstraint(
+            "sex IS NULL OR sex IN ('Male', 'Female', 'Unknown')", name="ck_distance_sex"
+        ),
+        CheckConstraint(
+            "(anchor_x IS NULL AND anchor_y IS NULL "
+            "AND anchor_width IS NULL AND anchor_height IS NULL) OR "
+            "(anchor_x IS NOT NULL AND anchor_y IS NOT NULL "
+            "AND anchor_x BETWEEN 0 AND 1 AND anchor_y BETWEEN 0 AND 1 AND "
+            "anchor_width IS NOT NULL AND anchor_height IS NOT NULL "
+            "AND anchor_width > 0 AND anchor_height > 0 "
+            "AND anchor_x + anchor_width <= 1 AND anchor_y + anchor_height <= 1)",
+            name="ck_distance_anchor",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    video_id: Mapped[str] = mapped_column(
+        String, ForeignKey("videos.video_id", ondelete="CASCADE")
+    )
+    individual_number: Mapped[int] = mapped_column(Integer)
+    species_id: Mapped[str] = mapped_column(String, ForeignKey("species.id"))
+    age: Mapped[str | None] = mapped_column(String)
+    sex: Mapped[str | None] = mapped_column(String)
+    first_seen_offset_ms: Mapped[int] = mapped_column(Integer)
+    anchor_x: Mapped[float | None] = mapped_column(Float)
+    anchor_y: Mapped[float | None] = mapped_column(Float)
+    anchor_width: Mapped[float | None] = mapped_column(Float)
+    anchor_height: Mapped[float | None] = mapped_column(Float)
+    labeled_by: Mapped[str | None] = mapped_column(String)
+    labeled_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    review_status: Mapped[str] = mapped_column(
+        String, default="not_started", server_default="not_started"
+    )
+    completed_by: Mapped[str | None] = mapped_column(String)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class DistanceVideoReview(Base):
+    __tablename__ = "distance_video_reviews"
+
+    video_id: Mapped[str] = mapped_column(
+        String, ForeignKey("videos.video_id", ondelete="CASCADE"), primary_key=True
+    )
+    # Camera wall-clock time, deliberately independent of file creation metadata.
+    recorded_start: Mapped[datetime] = mapped_column(DateTime)
+    clock_anchor_offset_ms: Mapped[int | None] = mapped_column(Integer)
+    clock_anchor_playback_ms: Mapped[float | None] = mapped_column(Float)
+    opening_even_second: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    verified_by: Mapped[str] = mapped_column(String)
+    verified_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    completed_by: Mapped[str | None] = mapped_column(String)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class DistanceReviewProgress(Base):
+    __tablename__ = "distance_review_progress"
+
+    video_id: Mapped[str] = mapped_column(
+        String, ForeignKey("videos.video_id", ondelete="CASCADE"), primary_key=True
+    )
+    annotator_name: Mapped[str] = mapped_column(String, primary_key=True)
+    active_individual_id: Mapped[str] = mapped_column(
+        String, ForeignKey("distance_individuals.id", ondelete="CASCADE")
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class DistanceSample(Base):
+    __tablename__ = "distance_samples"
+    __table_args__ = (
+        UniqueConstraint("individual_id", "offset_ms", name="uq_distance_sample_offset"),
+        CheckConstraint("offset_ms >= 0", name="ck_distance_sample_offset"),
+        CheckConstraint(
+            "(status = 'annotated' AND reference_frame_id IS NOT NULL "
+            "AND distance_m IS NOT NULL AND distance_m > 0 "
+            "AND skip_reason IS NULL) OR "
+            "(status = 'skipped' AND skip_reason IS NOT NULL "
+            "AND skip_reason IN ('individual absent', 'midpoint not visible') "
+            "AND reference_frame_id IS NULL AND distance_m IS NULL)",
+            name="ck_distance_sample_state",
+        ),
+        CheckConstraint(
+            "carried_by_individual_id IS NULL OR carried_by_individual_id != individual_id",
+            name="ck_distance_carrier",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    individual_id: Mapped[str] = mapped_column(
+        String, ForeignKey("distance_individuals.id", ondelete="CASCADE")
+    )
+    offset_ms: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String)
+    skip_reason: Mapped[str | None] = mapped_column(String)
+    # Restrict deletion of selected frames so existing annotation evidence survives.
+    reference_frame_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("reference_frames.id")
+    )
+    distance_m: Mapped[float | None] = mapped_column(Float)
+    carried_by_individual_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("distance_individuals.id")
+    )
+    labeled_by: Mapped[str | None] = mapped_column(String)
+    labeled_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class DistanceIndividualTag(Base):
+    __tablename__ = "distance_individual_tags"
+
+    individual_id: Mapped[str] = mapped_column(
+        String, ForeignKey("distance_individuals.id", ondelete="CASCADE"), primary_key=True
+    )
+    tag_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
+    )
+    tagged_by: Mapped[str | None] = mapped_column(String)
+    tagged_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class DistanceSampleBehavior(Base):
+    __tablename__ = "distance_sample_behaviors"
+
+    sample_id: Mapped[str] = mapped_column(
+        String, ForeignKey("distance_samples.id", ondelete="CASCADE"), primary_key=True
+    )
+    behavior_id: Mapped[str] = mapped_column(String, ForeignKey("behaviors.id"), primary_key=True)
 
 
 Index(

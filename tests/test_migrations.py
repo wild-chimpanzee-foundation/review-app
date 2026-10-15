@@ -13,6 +13,7 @@ from review_app.backend.db.migrations import (
     _add_column_if_missing,
     _migration_v4,
     _migration_v22,
+    _migration_v23,
     run_migrations,
 )
 from review_app.backend.db.models import Base
@@ -68,6 +69,58 @@ def test_fresh_db_is_stamped_at_latest_version(tmp_path):
     engine = _make_engine(tmp_path / "test.db")
     run_migrations(engine)
     assert _get_version(engine) == len(MIGRATIONS)
+
+
+@pytest.mark.parametrize("entry_point", ["runner", "provider"])
+def test_newer_database_is_rejected_without_mutation(tmp_db, entry_point):
+    from review_app.backend.provider.local_data_provider import LocalDataProvider
+
+    path = tmp_db["root"] / "db" / "review_data.db"
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql("CREATE TABLE _schema_version (version INTEGER)")
+        conn.exec_driver_sql("INSERT INTO _schema_version VALUES (29)")
+        conn.exec_driver_sql("CREATE TABLE private_evidence (value TEXT)")
+        conn.exec_driver_sql("INSERT INTO private_evidence VALUES ('keep me')")
+    before = path.read_bytes()
+    try:
+        with pytest.raises(ValueError, match="schema v29 is newer.*v23"):
+            if entry_point == "runner":
+                run_migrations(engine)
+            else:
+                LocalDataProvider()
+        assert path.read_bytes() == before
+        assert not path.with_name(path.name + "-wal").exists()
+        assert not path.with_name(path.name + "-shm").exists()
+    finally:
+        engine.dispose()
+
+
+def test_individual_tag_eligibility_migration_and_fresh_schema(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'tag-eligibility.db'}")
+    with engine.begin() as conn:
+        conn.execute(
+            text("CREATE TABLE tags (id TEXT PRIMARY KEY, key TEXT, is_custom BOOLEAN NOT NULL)")
+        )
+        conn.execute(
+            text(
+                "INSERT INTO tags (id, key, is_custom) VALUES "
+                "('injury', 'injured', 0), ('disease', 'disease', 0), "
+                "('ref', 'reference_video', 0), ('old-custom', 'old_custom', 1)"
+            )
+        )
+        _migration_v23(conn)
+        values = dict(conn.execute(text("SELECT key, individual_eligible FROM tags")).all())
+    assert values == {
+        "injured": 1,
+        "disease": 1,
+        "reference_video": 0,
+        "old_custom": 1,
+    }
+    assert "individual_eligible" in {
+        column.name for column in Base.metadata.tables["tags"].columns
+    }
+    engine.dispose()
 
 
 def test_fresh_db_runs_no_migrations(tmp_path):

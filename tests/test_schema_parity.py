@@ -18,9 +18,10 @@ import re
 import sqlite3
 from pathlib import Path
 
+import pytest
 from review_app.backend.db.migrations import run_migrations
 from review_app.backend.db.models import Base
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 
 SNAPSHOT = Path(__file__).parent / "fixtures" / "schema_snapshot.sql"
 
@@ -66,7 +67,8 @@ def _table_schema(con: sqlite3.Connection, table: str) -> dict:
             "pk": pk,
         }
     fks = {
-        (row[3], row[2], row[4])  # (from_column, referenced_table, referenced_column)
+        # Include update/delete actions: matching FK targets alone is insufficient.
+        (row[3], row[2], row[4], row[5], row[6])
         for row in con.execute(f"PRAGMA foreign_key_list({table})")
     }
     indexes = set()
@@ -132,6 +134,33 @@ def test_snapshot_plus_migrations_matches_create_all(tmp_path):
     assert sorted(fresh.keys()) == sorted(migrated.keys()), REGEN_HINT
     for table in fresh:
         assert fresh[table] == migrated[table], f"Schema mismatch in {table!r}. {REGEN_HINT}"
+
+
+@pytest.mark.parametrize(
+    "table",
+    ["reference_videos", "reference_frames", "distance_individuals", "distance_samples"],
+)
+def test_distance_checks_match_create_all(tmp_path, table):
+    """The supported upgrade and fresh schemas must enforce the same invariants."""
+    fresh_db = tmp_path / "fresh.db"
+    migrated_db = tmp_path / "migrated.db"
+    _build_fresh(fresh_db)
+    _build_from_snapshot(migrated_db)
+
+    checks = []
+    for db_path in (fresh_db, migrated_db):
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            checks.append(
+                {
+                    constraint["name"]: _norm_sql(constraint["sqltext"])
+                    for constraint in inspect(engine).get_check_constraints(table)
+                }
+            )
+        finally:
+            engine.dispose()
+    assert checks[0] == checks[1], REGEN_HINT
+    assert checks[0], f"Missing CHECK constraints for {table}"
 
 
 def test_snapshot_version_is_not_ahead_of_migrations(tmp_path):

@@ -11,6 +11,21 @@ from review_app.backend.utils import bind_id_list
 
 logger = logging.getLogger(__name__)
 
+# Saved attribution across both review workflows, including setup/completion work.
+_ANNOTATOR_WORK_SOURCES = (
+    ("video_labels", "labeled_by"),
+    ("individual_observations", "labeled_by"),
+    ("distance_individuals", "labeled_by"),
+    ("distance_individuals", "completed_by"),
+    ("distance_samples", "labeled_by"),
+    ("distance_individual_tags", "tagged_by"),
+    ("distance_video_reviews", "verified_by"),
+    ("distance_video_reviews", "completed_by"),
+)
+_ANNOTATOR_WORK_SQL = " UNION ALL ".join(
+    f"SELECT {column} AS name FROM {table}" for table, column in _ANNOTATOR_WORK_SOURCES
+)
+
 
 class AssignmentMixin(ProviderBase):
     """Work distribution: annotator registry and camera-based video assignment."""
@@ -67,30 +82,34 @@ class AssignmentMixin(ProviderBase):
 
     def remove_annotator(self, name: str) -> None:
         with self.engine.begin() as conn:
+            # Lock before checking so another writer cannot add work between the
+            # eligibility check and deletion (sqlite3 does not begin on SELECT).
+            conn.exec_driver_sql("BEGIN IMMEDIATE")
+            if conn.execute(
+                text(f"SELECT 1 FROM ({_ANNOTATOR_WORK_SQL}) WHERE name = :name LIMIT 1"),
+                {"name": name},
+            ).first():
+                raise ValueError("Annotators with saved work cannot be removed")
+            conn.execute(
+                text("DELETE FROM distance_review_progress WHERE annotator_name = :name"),
+                {"name": name},
+            )
             conn.execute(
                 text("DELETE FROM video_assignments WHERE assigned_to = :name"), {"name": name}
             )
             conn.execute(text("DELETE FROM annotators WHERE name = :name"), {"name": name})
 
     def get_annotator_annotation_counts(self) -> dict[str, int]:
-        """Map each annotator name to their total saved annotation count across
-        all projects (manual video labels plus individual observations).
+        """Count saved attribution in ordinary and Distance review across projects.
 
-        Used to decide whether an annotator may be safely deleted: a name that
-        is absent from the result has no annotations anywhere.
+        Includes verification, tagging, and completion credits so users who only
+        performed those tasks are also protected from deletion. Selection-only
+        progress is not saved annotation work.
         """
-        sql = text("""
-            SELECT name, SUM(cnt) AS total FROM (
-                SELECT labeled_by AS name, COUNT(*) AS cnt
-                FROM video_labels
-                WHERE labeled_by IS NOT NULL AND labeled_by != ''
-                GROUP BY labeled_by
-                UNION ALL
-                SELECT labeled_by AS name, COUNT(*) AS cnt
-                FROM individual_observations
-                WHERE labeled_by IS NOT NULL AND labeled_by != ''
-                GROUP BY labeled_by
-            ) GROUP BY name
+        sql = text(f"""
+            SELECT name, COUNT(*) AS total FROM ({_ANNOTATOR_WORK_SQL})
+            WHERE name IS NOT NULL AND name != ''
+            GROUP BY name
         """)
         with self.engine.connect() as conn:
             rows = conn.execute(sql).fetchall()

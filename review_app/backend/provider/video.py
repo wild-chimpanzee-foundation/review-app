@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import subprocess
@@ -9,6 +10,7 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -16,6 +18,7 @@ import pandas as pd
 from sqlalchemy import select, text
 
 from review_app.app.config import VIDEO_EXTENSIONS
+from review_app.backend.camera_layout import camera_id_for_path
 from review_app.backend.db.models import ProjectDir, Video
 from review_app.backend.errors import VideoError
 from review_app.backend.path_matching import normalize_path_str
@@ -164,6 +167,45 @@ def _probe_video(path: Path) -> ProbeResult:
     return ProbeResult(raw_duration, True, is_web_safe, None, created_at, latitude, longitude)
 
 
+def _probe_frame_rate(path: Path, *, timeout_sec: float | None = None) -> float | None:
+    """Read the video stream's frame rate for frame-by-frame preparation controls."""
+    ffprobe = find_video_tool("ffprobe")
+    if ffprobe is None:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=avg_frame_rate,r_frame_rate",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_FFPROBE_TIMEOUT_SEC if timeout_sec is None else timeout_sec,
+            env=video_tool_env(),
+        )
+        if result.returncode:
+            return None
+        stream = next(iter(json.loads(result.stdout).get("streams", [])), {})
+        for key in ("avg_frame_rate", "r_frame_rate"):
+            try:
+                rate = float(Fraction(stream.get(key, "0/1")))
+            except (ValueError, TypeError, ZeroDivisionError):
+                continue
+            if math.isfinite(rate) and rate > 0:
+                return rate
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError):
+        logger.warning("Could not read reference frame rate for %s", path)
+    return None
+
+
 def _probe_many(
     paths: list[Path],
     max_workers: int = _FFPROBE_MAX_WORKERS,
@@ -220,8 +262,7 @@ class VideoMixin(ProviderBase):
                 # Skip hidden files/dirs (e.g. macOS ._* resource forks, .Trashes)
                 if any(part.startswith(".") for part in p.relative_to(scan_dir).parts):
                     continue
-                rel = p.parent.relative_to(scan_dir)
-                camera_id = normalize_path_str(str(rel)) if str(rel) != "." else "default"
+                camera_id = camera_id_for_path(p, scan_dir)
                 rows.append({"video_path": normalize_path_str(str(p)), "camera_id": camera_id})
 
         if not rows:
@@ -383,6 +424,7 @@ class VideoMixin(ProviderBase):
             self._apply_probe_result(
                 video, _probe_video(Path(normalize_path_str(video.video_path)))
             )
+            self._reconcile_distance_video_completion(session, video_id)
             session.commit()
 
     def reprobe_invalid_videos(self) -> dict[str, Any]:
@@ -407,6 +449,7 @@ class VideoMixin(ProviderBase):
                 if video is None:
                     continue
                 self._apply_probe_result(video, probe)
+                self._reconcile_distance_video_completion(session, video.video_id)
                 if video.is_valid:
                     now_valid += 1
                 else:
