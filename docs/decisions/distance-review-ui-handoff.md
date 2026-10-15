@@ -2,7 +2,7 @@
 
 This historical handoff has been superseded by the implemented
 [Reference-Based Distance Annotation](./reference-based-distance-annotation.md)
-workflow. Use that document for layout, timing, navigation, drafts, infant
+workflow. Use that document for layout, timing, navigation, confirmation, infant
 relationships, and completion semantics; do not implement the earlier proposals
 or treat their historical test counts as current validation.
 

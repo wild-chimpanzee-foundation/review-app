@@ -48,13 +48,11 @@ def bulk_page(distance_data, monkeypatch):
         page.selected_frame_id = frame["id"]
         page.animal_player = SimpleNamespace(id=999)
         page.behavior_options = dp.get_distance_behavior_options()
-        page.sample_drafts[(individual_id, 3000)] = {
+        page.sample_values = {
             "behavior_ids": [data["behavior_id"]],
             "carries": False,
             "infant_id": "_new",
         }
-        page.sample_drafts[(individual_id, 5000)] = {"stale": True}
-        page.sample_drafts[(individual_id, 1000)] = {"earlier": True}
         page.render_sample_actions()
         holder["page"] = page
 
@@ -109,9 +107,7 @@ async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sampl
     assert page.sample_offset == 9000
     assert page.individual_id == data["individual"]["id"]
     assert page.selected_frame_id == (data["bulk_frame"]["id"] if choice == "distance" else choice)
-    assert page.sample_drafts[(page.individual_id, 1000)] == {"earlier": True}
-    assert (page.individual_id, 5000) not in page.sample_drafts
-    assert page.current_sample_draft()["behavior_ids"] == [data["behavior_id"]]
+    assert page.sample_values["behavior_ids"] == [data["behavior_id"]]
     assert action_button(page).enabled  # Reviewed samples can always be overwritten again.
     page_module.seek_paused.assert_called_once_with(
         page.animal_player, page.sample_seek_offset(9000)
@@ -128,11 +124,11 @@ async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sampl
         )
 
 
-async def test_cancelling_does_not_save_or_discard_drafts(user: User, bulk_page):
+async def test_cancelling_does_not_save_or_change_current_form(user: User, bulk_page):
     holder, _ = bulk_page
     await user.open("/distance-apply-to-end-test")
     page = holder["page"]
-    before, drafts = list(page.samples), dict(page.sample_drafts)
+    before, values = list(page.samples), dict(page.sample_values)
     user.find("Apply to end").click()
     await user.should_see("Apply and overwrite")
     dialog = next(
@@ -141,7 +137,7 @@ async def test_cancelling_does_not_save_or_discard_drafts(user: User, bulk_page)
     user.find("Cancel").click()
     await wait_until(lambda: not dialog.value)
     assert page.samples == before
-    assert page.sample_drafts == drafts
+    assert page.sample_values == values
     assert page.sample_offset == 3000
     page_module.seek_paused.assert_not_called()
 
@@ -167,9 +163,9 @@ async def test_stale_dialog_cannot_save_changed_selection(user: User, bulk_page,
     elif changed == "choice":
         page.selected_frame_id = "individual absent"
     elif changed == "behaviors":
-        page.current_sample_draft()["behavior_ids"].clear()
+        page.sample_values["behavior_ids"].clear()
     else:
-        page.current_sample_draft()["carries"] = True
+        page.sample_values["carries"] = True
     user.find("Apply and overwrite").click()
     await asyncio.sleep(0.05)
     assert data["dp"].get_distance_review_state(data["videos"][0], "alice")["samples"] == before
@@ -215,7 +211,7 @@ async def test_final_sample_can_be_overwritten_and_corrected(user: User, bulk_pa
 
 @pytest.mark.parametrize("choice", ["distance", "individual absent", "midpoint not visible"])
 @pytest.mark.parametrize("new_infant", [False, True])
-async def test_carrying_bulk_choice_uses_one_infant_and_invalidates_affected_drafts(
+async def test_carrying_bulk_choice_uses_one_infant_and_restores_saved_metadata(
     user: User, bulk_page, choice, new_infant
 ):
     holder, data = bulk_page
@@ -230,11 +226,7 @@ async def test_carrying_bulk_choice_uses_one_infant_and_invalidates_affected_dra
         anchor=data["anchor"],
     )
     page.individuals = dp.list_distance_individuals(data["videos"][0])
-    page.sample_drafts[(infant["id"], 5000)] = {"infant-draft": True}
-    page.sample_drafts[(infant["id"], 1000)] = {"keep": True}
-    page.sample_defaults[infant["id"]] = {"stale": True}
-    draft = page.current_sample_draft()
-    draft.update(carries=True, infant_id="_new" if new_infant else infant["id"])
+    page.sample_values.update(carries=True, infant_id="_new" if new_infant else infant["id"])
     if choice != "distance":
         page.selected_frame_id = choice
     user.find("Apply to end").click()
@@ -253,24 +245,17 @@ async def test_carrying_bulk_choice_uses_one_infant_and_invalidates_affected_dra
     for row in children:
         assert row["behavior_ids"] == [data["behavior_id"]]
         assert row["skip_reason"] == (None if choice == "distance" else choice)
-    assert page.current_sample_draft()["infant_id"] == infant_id
-    assert page.current_sample_draft()["carries"]
-    assert page.sample_drafts[(infant["id"], 1000)] == {"keep": True}
-    if new_infant:
-        assert page.sample_drafts[(infant["id"], 5000)] == {"infant-draft": True}
-        assert infant["id"] in page.sample_defaults
-    else:
-        assert (infant["id"], 5000) not in page.sample_drafts
-        assert infant["id"] not in page.sample_defaults
+    assert page.sample_values["infant_id"] == infant_id
+    assert page.sample_values["carries"]
 
 
-async def test_failed_write_preserves_drafts_position_and_dialog(
+async def test_failed_write_preserves_current_form_position_and_dialog(
     user: User, bulk_page, monkeypatch
 ):
     holder, data = bulk_page
     await user.open("/distance-apply-to-end-test")
     page = holder["page"]
-    before, drafts = list(page.samples), dict(page.sample_drafts)
+    before, values = list(page.samples), dict(page.sample_values)
     monkeypatch.setattr(
         data["dp"], "apply_distance_to_end", Mock(side_effect=ValueError("Cannot apply"))
     )
@@ -281,12 +266,12 @@ async def test_failed_write_preserves_drafts_position_and_dialog(
     await wait_until(lambda: not page.busy)
     assert page.sample_offset == 3000
     assert page.samples == before
-    assert page.sample_drafts == drafts
+    assert page.sample_values == values
     page_module.seek_paused.assert_not_called()
     await user.should_see("Apply and overwrite")
 
 
-async def test_carry_off_invalidates_only_formerly_linked_infant_drafts(user: User, bulk_page):
+async def test_carry_off_preserves_independent_infant_samples(user: User, bulk_page):
     holder, data = bulk_page
     await user.open("/distance-apply-to-end-test")
     page, dp = holder["page"], data["dp"]
@@ -305,15 +290,11 @@ async def test_carry_off_invalidates_only_formerly_linked_infant_drafts(user: Us
         labeled_by="alice",
     )
     await page.reload_individuals()
-    page.sample_drafts[(infant_id, 5000)] = {"linked": True}
-    page.sample_drafts[(infant_id, 7000)] = {"independent": True}
-    assert not page.current_sample_draft()["carries"]
+    assert not page.sample_values["carries"]
     user.find("Apply to end").click()
     await user.should_see("Apply and overwrite")
     user.find("Apply and overwrite").click()
     await user.should_see("Applied selection to 4 samples.")
     await wait_until(lambda: not page.busy)
-    assert (infant_id, 5000) not in page.sample_drafts
-    assert page.sample_drafts[(infant_id, 7000)] == {"independent": True}
     infant_samples = [row for row in page.samples if row["individual_id"] == infant_id]
     assert [row["offset_ms"] for row in infant_samples] == [1000, 3000, 7000]

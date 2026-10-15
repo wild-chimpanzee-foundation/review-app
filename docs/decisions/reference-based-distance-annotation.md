@@ -41,8 +41,8 @@ they do not create or synchronize Distance observations automatically.
    individual automatically. Use **Finish video** explicitly after all animals
    have been added and all individuals are complete.
 
-Selecting a reference is only a draft choice, not a write. Existing samples remain
-editable; a missing sample row means unreviewed, not absent.
+Selecting a reference only changes the current form, not saved evidence. Existing
+samples remain editable; a missing sample row means unreviewed, not absent.
 
 ### Camera clock and sampling
 
@@ -69,7 +69,7 @@ editable; a missing sample row means unreviewed, not absent.
   tolerance. Irregular/dropped frames may still show a neighboring frame; stored
   sample identities and camera timestamps do not change.
 
-### Navigation, inspection, and drafts
+### Navigation and inspection
 
 - Manual annotation pauses snap to the most recent scheduled sample at/before
   the pause position. Automatic stops seek the intended next scheduled frame to
@@ -83,16 +83,19 @@ editable; a missing sample row means unreviewed, not absent.
 - Opening a saved session instead restores the annotator's active individual and
   next unreviewed sample. Creating an individual keeps its chosen identifying
   frame. These paths deliberately have different navigation rules.
-- Revisited samples restore their own unsaved draft or saved evidence. New stops
-  can prefill the last confirmed choice, behaviors, and infant selection. Neither
-  navigation nor prefilling writes or overwrites evidence. Individual metadata
-  drafts survive selection changes and saves on other cards.
+- There are no per-frame or per-individual draft caches. Leaving a sample or
+  switching individuals discards unconfirmed distance, visibility, behavior, and
+  infant edits. Revisited samples restore saved evidence; new stops prefill the
+  preceding confirmed choice and metadata for that individual. Without preceding
+  evidence, select the smallest available distance and empty metadata. Neither
+  navigation nor prefilling writes or overwrites evidence. Individual attributes
+  save immediately and are rendered directly from their saved values.
 - Reference browsing retains sample behaviors, infant choices, visibility choice,
   brightness/contrast, and the animal player. Reuse the reference player on clip
   switches; keep its prior image until the next source has loaded and sought.
   Pages own independent media URLs, released when their client is deleted.
 - **Absent** and **Not visible** dim the reference image, including restored
-  drafts/saved choices. Browsing clips preserves dimming; selecting a distance
+  saved choices. Browsing clips preserves dimming; selecting a distance
   restores the image without recreating the player or changing image settings.
 
 ### Apply to end

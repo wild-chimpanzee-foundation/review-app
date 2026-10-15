@@ -103,15 +103,11 @@ async def test_individual_shortcut_targets_keep_card_selection_and_busy_guards(
     await user.open("/distance-drawer-test")
     page = holder["page"]
     page.sample_offset = 3000
-    draft = {
-        "behavior_ids": ["draft-behavior"],
+    page.sample_values = {
+        "behavior_ids": ["unconfirmed-behavior"],
         "carries": False,
-        "infant_id": None,
-        "reference_frame_id": None,
-        "skip_reason": None,
-        "reference_video_id": None,
+        "infant_id": "_new",
     }
-    page.sample_drafts[(data["individual"]["id"], 3000)] = draft.copy()
 
     def selection_button(individual_id):
         card = next(
@@ -143,7 +139,7 @@ async def test_individual_shortcut_targets_keep_card_selection_and_busy_guards(
     await wait_for_button(True)
     user.find("#2").click()
     await wait_for_saved(page, lambda: page.individual_id == second["id"])
-    assert page.sample_drafts[(data["individual"]["id"], 3000)] == draft
+    assert page.sample_values["behavior_ids"] == []
 
 
 async def test_sample_timing_is_below_video_and_progress_is_in_selected_card(
@@ -262,8 +258,8 @@ async def test_fixed_frame_anchor_dialog_setup_guards_and_actions(
     page.queue[0]["duration_sec"] = 10
     page.review = {"verified_by": "alice"}
     page.sample_offset = 3000
-    sample_draft = {"behavior_ids": ["draft-behavior"], "carries": False, "infant_id": None}
-    page.sample_drafts[(individual_id, 3000)] = sample_draft.copy()
+    sample_values = {"behavior_ids": ["unconfirmed-behavior"], "carries": False, "infant_id": None}
+    page.sample_values = sample_values.copy()
     page.reload_individuals = AsyncMock()
     page.refresh_sample_ui = Mock()
     page.create_individual = AsyncMock(return_value=True)
@@ -363,10 +359,10 @@ async def test_fixed_frame_anchor_dialog_setup_guards_and_actions(
         assert saved["first_seen_offset_ms"] == offset_ms
         assert (saved["anchor_x"], saved["anchor_y"]) == (geometry["x"], geometry["y"])
     assert page.animal_player is main_player and page.sample_offset == 3000
-    assert page.sample_drafts[(individual_id, 3000)] == sample_draft
+    assert page.sample_values == sample_values
 
 
-async def test_redraw_dialog_save_and_cancel_preserve_identity_player_and_sample_draft(
+async def test_redraw_dialog_save_and_cancel_preserve_identity_player_and_current_form(
     user: User, drawer_page, monkeypatch
 ):
     holder, data, _ = drawer_page
@@ -379,8 +375,8 @@ async def test_redraw_dialog_save_and_cancel_preserve_identity_player_and_sample
     page.animal_player = SimpleNamespace(id=999, source="/main-video", on=Mock())
     page.queue[0].update(duration_sec=10, video_path="/isolated/animal.mp4")
     page.sample_offset = 3000
-    page.sample_drafts[(individual_id, 3000)] = {
-        "behavior_ids": ["draft-behavior"],
+    page.sample_values = {
+        "behavior_ids": ["unconfirmed-behavior"],
         "carries": True,
         "infant_id": "infant-id",
     }
@@ -432,7 +428,7 @@ async def test_redraw_dialog_save_and_cancel_preserve_identity_player_and_sample
     assert after_cancel["first_seen_offset_ms"] == original["first_seen_offset_ms"]
     assert after_cancel["anchor_width"] is None
     assert page.animal_player is main_player and page.sample_offset == 3000
-    assert page.sample_drafts[(individual_id, 3000)]["infant_id"] == "infant-id"
+    assert page.sample_values["infant_id"] == "infant-id"
 
     await open_redraw()
     payload = {
@@ -457,7 +453,7 @@ async def test_redraw_dialog_save_and_cancel_preserve_identity_player_and_sample
     assert after_save["first_seen_offset_ms"] == original["first_seen_offset_ms"]
     assert (after_save["anchor_x"], after_save["anchor_y"]) == (0.2, 0.25)
     assert page.animal_player is main_player and page.sample_offset == 3000
-    assert page.sample_drafts[(individual_id, 3000)]["infant_id"] == "infant-id"
+    assert page.sample_values["infant_id"] == "infant-id"
 
 
 async def test_redraw_draw_and_save_ignore_stale_video_or_identity(
@@ -893,9 +889,9 @@ async def test_accepting_reference_plays_to_next_frame_with_distance_preselected
     page.seek_sample.assert_not_called()
     assert page.selected_frame_id == frame["id"]
     await user.should_see("Selected reference: 7.25 m")
-    draft = page.current_sample_draft()
-    assert draft["behavior_ids"] == [data["behavior_id"]] and draft["carries"]
-    assert draft["infant_id"] != "_new"
+    assert page.sample_values["behavior_ids"] == [data["behavior_id"]]
+    assert page.sample_values["carries"]
+    assert page.sample_values["infant_id"] != "_new"
 
 
 async def test_sample_details_and_skip_actions_render_with_reference_distances(
@@ -977,8 +973,9 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
     [(1, "Not visible", "midpoint not visible"), (2, "Absent", "individual absent")],
 )
 @pytest.mark.parametrize("annotated", [False, True])
+@pytest.mark.parametrize("browsed", [False, True])
 async def test_visibility_confirmation_restores_saved_distance_or_prefills_unannotated_sample(
-    user: User, drawer_page, monkeypatch, steps, label, reason, annotated
+    user: User, drawer_page, monkeypatch, steps, label, reason, annotated, browsed
 ):
     holder, data, _ = drawer_page
     dp = data["dp"]
@@ -1015,6 +1012,14 @@ async def test_visibility_confirmation_restores_saved_distance_or_prefills_unann
         page.render_samples()
         page.render_sample_actions()
 
+    if browsed:
+        before = list(page.samples)
+        for offset in page.offsets[1:]:
+            await page.choose_sample(offset)
+        await page.choose_sample(1000)
+        assert page.samples == before
+        assert dp.get_distance_review_state(data["videos"][0], "alice")["samples"] == before
+
     def click_action(action):
         interaction = user.find(ui.button)
         interaction.elements = {
@@ -1049,7 +1054,7 @@ async def test_visibility_confirmation_restores_saved_distance_or_prefills_unann
         await user.should_not_see("Saved distance: 5 m")
     assert page.sample == next_saved
 
-    # Manual navigation preserves the frame's own saved evidence or draft.
+    # Manual navigation restores the frame's own saved evidence.
     await page.move_sample(-1)
     assert page.selected_skip_reason == reason
     await page.move_sample(1)

@@ -67,7 +67,7 @@ from review_app.app.pages.distance_review.sample_controls import (
 from review_app.app.pages.distance_review.sample_controls import (
     render_sample_actions as render_sample_actions_view,
 )
-from review_app.app.pages.distance_review.session import DraftState, SampleSelection
+from review_app.app.pages.distance_review.session import SampleSelection
 from review_app.app.pages.distance_review.tracks import track_options
 from review_app.app.pages.review.annotations import _shortcut_badge
 from review_app.app.pages.review.video_player import render_custom_video_player
@@ -150,7 +150,6 @@ class DistanceReviewPage:
         self.right_drawer = None
         self.individuals: list[dict] = []
         self.saved_species_options: dict[str, str] = {}
-        self.individual_drafts: dict[str, dict] = {}
         self.individual_attributes_lock = asyncio.Lock()
         self.individual_id: str | None = None
         self.references: list[dict] = []
@@ -165,7 +164,7 @@ class DistanceReviewPage:
         self.samples: list[dict] = []
         self.sample_offset: int | None = None
         self.behavior_options: dict[str, str] = {}
-        self._draft_state = DraftState()
+        self.sample_values = {"behavior_ids": [], "carries": False, "infant_id": "_new"}
 
     @property
     def selected_frame_id(self) -> str | None:
@@ -176,26 +175,6 @@ class DistanceReviewPage:
     def selected_frame_id(self, value: str | None) -> None:
         visibility_ids = {choice["id"] for choice in SKIP_CHOICES}
         self._selection = SampleSelection.from_legacy_id(value, visibility_ids)
-
-    @property
-    def sample_drafts(self) -> dict[tuple[str, int], dict]:
-        return self._draft_state.drafts
-
-    @sample_drafts.setter
-    def sample_drafts(self, value: dict[tuple[str, int], dict]) -> None:
-        if not hasattr(self, "_draft_state"):
-            self._draft_state = DraftState()
-        self._draft_state.drafts = value
-
-    @property
-    def sample_defaults(self) -> dict[str, dict]:
-        return self._draft_state.defaults
-
-    @sample_defaults.setter
-    def sample_defaults(self, value: dict[str, dict]) -> None:
-        if not hasattr(self, "_draft_state"):
-            self._draft_state = DraftState()
-        self._draft_state.defaults = value
 
     def media_url(self, path: Path) -> str:
         """Keep media routes alive across player refreshes and independent of other tabs."""
@@ -230,48 +209,30 @@ class DistanceReviewPage:
         self.render_individual_progress.refresh()
         self.render_tracks.refresh()
 
-    def remember_sample_choices(self) -> None:
-        draft = self.sample_drafts.get((self.individual_id, self.sample_offset))
-        if draft is None:
-            return
-        draft["reference_frame_id"] = None if self.selected_skip_reason else self.selected_frame_id
-        draft["skip_reason"] = self.selected_skip_reason
-        draft["reference_video_id"] = self.reference["id"] if self.reference else None
-        self._draft_state.remember(self.individual_id, draft)
-
-    def current_sample_draft(self) -> dict:
-        defaults = self.sample_defaults.get(self.individual_id)
-        if self.sample or defaults is None:
-            source = self.sample or self.reference_sample
-            children = [
-                row
-                for row in self.samples
-                if source
-                and row["carried_by_individual_id"] == self.individual_id
-                and row["offset_ms"] == source["offset_ms"]
-            ]
-            defaults = {
-                "behavior_ids": list(source["behavior_ids"]) if source else [],
-                "carries": bool(children),
-                "infant_id": children[0]["individual_id"] if children else "_new",
-            }
-        draft = self._draft_state.draft(
-            key=(self.individual_id, self.sample_offset),
-            default=defaults,
-            selection_id=self.selected_frame_id,
-            skip_reason=self.selected_skip_reason,
-            reference_video_id=self.reference["id"] if self.reference else None,
-        )
-        if draft["infant_id"] != "_new" and not any(
-            row["id"] == draft["infant_id"]
+    def reset_sample_values(self) -> None:
+        """Populate the current form from saved evidence, never from navigation history."""
+        source = self.sample or self.reference_sample
+        children = [
+            row
+            for row in self.samples
+            if source
+            and row.get("carried_by_individual_id") == self.individual_id
+            and row["offset_ms"] == source["offset_ms"]
+        ]
+        self.sample_values = {
+            "behavior_ids": list(source.get("behavior_ids", [])) if source else [],
+            "carries": bool(children),
+            "infant_id": children[0]["individual_id"] if children else "_new",
+        }
+        if self.sample_values["infant_id"] != "_new" and not any(
+            row["id"] == self.sample_values["infant_id"]
             and row["age"] == "Infant"
             and row["species_id"] == self.individual["species_id"]
             for row in self.individuals
         ):
-            draft["carries"], draft["infant_id"] = False, "_new"
-        if self.individual["age"] == "Infant":
-            draft["carries"] = False
-        return draft
+            self.sample_values.update(carries=False, infant_id="_new")
+        if self.individual and self.individual["age"] == "Infant":
+            self.sample_values["carries"] = False
 
     @property
     def selected_skip_reason(self) -> str | None:
@@ -412,7 +373,6 @@ class DistanceReviewPage:
         stop_player(self.reference_player)
         self.individuals = []
         self.saved_species_options = {}
-        self.individual_drafts.clear()
         self.reviewed_species = []
         self.reviewed_species_counts = []
         self.individual_id = None
@@ -424,8 +384,7 @@ class DistanceReviewPage:
         self.offsets, self.samples = [], []
         self.sample_offset = None
         self.animal_frame_rate = None
-        self.sample_drafts.clear()
-        self.sample_defaults.clear()
+        self.reset_sample_values()
         self.animal_player = self.reference_player = None
         if self.video:
             self.reviewed_species_counts = await run.io_bound(
@@ -480,6 +439,7 @@ class DistanceReviewPage:
                             self.dp.list_reference_frames, reference["id"]
                         )
             self.ensure_reference_selection()
+            self.reset_sample_values()
 
     def remember_queue(self) -> None:
         set_distance_queue_state(
@@ -542,17 +502,10 @@ class DistanceReviewPage:
 
     @stable_client
     async def reload_individuals(self) -> None:
-        previous = {row["id"]: row for row in self.individuals}
         self.individuals = await run.io_bound(
             self.dp.list_distance_individuals, self.video["video_id"]
         )
         await self.load_saved_species_options()
-        for row in self.individuals:
-            draft, old = self.individual_drafts.get(row["id"]), previous.get(row["id"])
-            if draft is not None and old is not None:
-                for key in ("species_id", "age", "sex", "tag_ids"):
-                    if draft[key] == old[key]:
-                        draft[key] = list(row[key]) if key == "tag_ids" else row[key]
         if self.animal_player:
             configure_anchor(self.animal_player, self.individual, individuals=self.individuals)
         self.render_individuals.refresh()
@@ -866,7 +819,6 @@ class DistanceReviewPage:
             species_options=self.species_options,
             individuals=self.individuals,
             individual_id=self.individual_id,
-            drafts=self.individual_drafts,
             tag_options=self.tag_options,
             all_tag_options=self.all_tag_options,
             samples=self.samples,
@@ -909,10 +861,8 @@ class DistanceReviewPage:
                     **attributes,
                     labeled_by=get_annotator_name(),
                 )
-                self.individual_drafts.pop(individual_id, None)
                 await self.reload_individuals()
             except ValueError as exc:
-                self.individual_drafts.pop(individual_id, None)
                 self.render_individuals.refresh()
                 ui.notify(str(exc), type="negative")
             finally:
@@ -930,10 +880,6 @@ class DistanceReviewPage:
                 i for i, row in enumerate(self.individuals) if row["id"] == individual_id
             )
             await run.io_bound(self.dp.delete_distance_individual, individual_id)
-            self.individual_drafts.pop(individual_id, None)
-            self.sample_defaults.pop(individual_id, None)
-            # Deletion can also invalidate samples linked to a carrier or infant.
-            self.sample_drafts.clear()
             await self.reload_individuals()
             if self.individual_id == individual_id:
                 if self.individuals:
@@ -989,7 +935,6 @@ class DistanceReviewPage:
         self, individual_id: str, *, first_seen_offset_ms: int | None = None
     ) -> None:
         """Inspect first seen; creation keeps its already displayed identifying frame."""
-        self.remember_sample_choices()
         await run.io_bound(
             self.dp.set_distance_active_individual,
             self.video["video_id"],
@@ -1311,7 +1256,7 @@ class DistanceReviewPage:
         )
         return t(key)
 
-    def _sample_controls_context(self, *, include_draft: bool) -> SampleControlsContext:
+    def _sample_controls_context(self) -> SampleControlsContext:
         sample = self.sample
         carrier = next(
             (
@@ -1321,11 +1266,6 @@ class DistanceReviewPage:
             ),
             None,
         )
-        draft = (
-            self.current_sample_draft()
-            if include_draft and self.individual and self.sample_offset is not None
-            else None
-        )
         return SampleControlsContext(
             review_active=bool(self.review),
             individual=self.individual,
@@ -1333,7 +1273,7 @@ class DistanceReviewPage:
             sample_offset=self.sample_offset,
             sample=sample,
             carrier=carrier,
-            draft=draft,
+            values=self.sample_values,
             behavior_options=self.behavior_options,
             individuals=self.individuals,
             individual_label=self.individual_label,
@@ -1355,11 +1295,11 @@ class DistanceReviewPage:
 
     @ui.refreshable
     def render_samples(self) -> None:
-        render_sample_controls(self._sample_controls_context(include_draft=True))
+        render_sample_controls(self._sample_controls_context())
 
     @ui.refreshable
     def render_sample_actions(self) -> None:
-        render_sample_actions_view(self._sample_controls_context(include_draft=False))
+        render_sample_actions_view(self._sample_controls_context())
 
     def remaining_sample_offsets(self) -> list[int]:
         if not self.individual or self.sample_offset not in self.offsets:
@@ -1373,15 +1313,15 @@ class DistanceReviewPage:
             frame["id"] == self.selected_frame_id for frame in self.frames
         ):
             return None
-        draft = self.current_sample_draft()
+        values = self.sample_values
         return {
             "reference_frame_id": None if reason else self.selected_frame_id,
             "skip_reason": reason,
-            "behavior_ids": list(draft["behavior_ids"]),
-            "infant_id": draft["infant_id"]
-            if draft["carries"] and draft["infant_id"] != "_new"
+            "behavior_ids": list(values["behavior_ids"]),
+            "infant_id": values["infant_id"]
+            if values["carries"] and values["infant_id"] != "_new"
             else None,
-            "create_infant": bool(draft["carries"] and draft["infant_id"] == "_new"),
+            "create_infant": bool(values["carries"] and values["infant_id"] == "_new"),
         }
 
     @stable_client
@@ -1421,12 +1361,6 @@ class DistanceReviewPage:
                 return False
             self.busy = True
             try:
-                affected_keys = {(individual_id, offset) for offset in offsets} | {
-                    (row["individual_id"], row["offset_ms"])
-                    for row in self.samples
-                    if row["carried_by_individual_id"] == individual_id
-                    and row["offset_ms"] in offsets
-                }
                 saved = await run.io_bound(
                     self.dp.apply_distance_to_end,
                     individual_id,
@@ -1434,12 +1368,6 @@ class DistanceReviewPage:
                     **assignment,
                     labeled_by=get_annotator_name(),
                 )
-                if saved["infant_id"]:
-                    affected_keys.update((saved["infant_id"], offset) for offset in offsets)
-                for key in affected_keys:
-                    self.sample_drafts.pop(key, None)
-                for affected_id in {key[0] for key in affected_keys}:
-                    self.sample_defaults.pop(affected_id, None)
                 await self.reload_individuals()
                 self.sample_offset = max(offsets)
                 await self.restore_sample()
@@ -1484,7 +1412,7 @@ class DistanceReviewPage:
         ):
             return
         individual_id, offset_ms = self.individual_id, self.sample_offset
-        draft = self.sample_drafts[(individual_id, offset_ms)]
+        values = self.sample_values
         reference_frame_id = self.selected_frame_id
         self.busy = True
         self.refresh_sample_ui()
@@ -1496,25 +1424,21 @@ class DistanceReviewPage:
                 self.seek_sample()
                 ui.notify(t("distance_review_restored_sample"), type="warning")
                 return
-            saved = await run.io_bound(
+            await run.io_bound(
                 self.dp.save_distance_sample,
                 individual_id,
                 offset_ms,
                 reference_frame_id=reference_frame_id if reason is None else None,
                 skip_reason=reason,
-                behavior_ids=list(draft["behavior_ids"]),
-                infant_id=draft["infant_id"]
-                if draft["carries"] and draft["infant_id"] != "_new"
+                behavior_ids=list(values["behavior_ids"]),
+                infant_id=values["infant_id"]
+                if values["carries"] and values["infant_id"] != "_new"
                 else None,
-                create_infant=bool(draft["carries"] and draft["infant_id"] == "_new"),
+                create_infant=bool(values["carries"] and values["infant_id"] == "_new"),
                 creation_offset_ms=actual_offset,
                 labeled_by=get_annotator_name(),
             )
             self.selected_frame_id = reason or reference_frame_id
-            self.remember_sample_choices()
-            if isinstance(saved, dict) and saved.get("infant_id"):
-                self.sample_defaults[individual_id]["infant_id"] = saved["infant_id"]
-            self.sample_drafts.pop((individual_id, offset_ms), None)
             # The originating confirm button is deleted by refresh. Async player
             # commands must continue in the page's stable client slot.
             with self.client:
@@ -1533,9 +1457,7 @@ class DistanceReviewPage:
                     )
                 else:
                     self.seek_sample()
-                # Delayed UI refreshes must still refer to the frame being left
-                # during playback, so they cannot create a draft for the next
-                # frame using the previous frame's reference selection.
+                # Keep the frame being left selected until playback has finished.
                 self.sample_offset = next_offset
                 # Rebuilding a reference player adds global event listeners and
                 # may remount other videos. Switch evidence only after playback
@@ -1577,7 +1499,6 @@ class DistanceReviewPage:
             return
         self.busy = True
         try:
-            self.remember_sample_choices()
             self.sample_offset = offset_ms
             await self.restore_sample()
         finally:
@@ -1589,19 +1510,11 @@ class DistanceReviewPage:
     async def restore_sample(self, *, seek: bool = True) -> None:
         if seek:
             self.seek_sample()
-        sample = self.sample
-        # Restore this frame's saved evidence or draft. New frames carry forward
-        # the current choice; resuming a session falls back to preceding evidence.
-        draft = self.sample_drafts.get((self.individual_id, self.sample_offset))
-        reference_sample = (
-            draft
-            if draft and (draft.get("reference_frame_id") or draft.get("skip_reason"))
-            else (
-                sample
-                if sample and (sample.get("reference_frame_id") or sample.get("skip_reason"))
-                else (self.reference_sample if self.selected_frame_id is None else None)
-            )
-        )
+        # Saved evidence is the only source of per-frame choices. Navigation
+        # discards unconfirmed edits; new stops inherit preceding saved evidence.
+        reference_sample = self.reference_sample
+        self.selected_frame_id = None
+        self.reset_sample_values()
         if reference_sample and reference_sample["reference_video_id"]:
             if (
                 not self.reference

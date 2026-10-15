@@ -99,14 +99,29 @@ def distance_page(monkeypatch):
     page.reference_player = None
     page.reference = None
     page.references = []
-    page.sample_drafts = {
-        ("adult", 1000): {"behavior_ids": ["walking"], "carries": False, "infant_id": "_new"}
-    }
-    page.sample_defaults = {}
+    page.sample_values = {"behavior_ids": ["walking"], "carries": False, "infant_id": "_new"}
     page.animal_player = object()
     page.dp = SimpleNamespace(
         save_distance_sample=Mock(), get_distance_species_options=Mock(return_value={})
     )
+
+    def save_sample(individual_id, offset_ms, **values):
+        page.samples = [
+            row
+            for row in page.samples
+            if (row["individual_id"], row["offset_ms"]) != (individual_id, offset_ms)
+        ]
+        page.samples.append(
+            {
+                "individual_id": individual_id,
+                "offset_ms": offset_ms,
+                "reference_video_id": page.reference["id"] if page.reference else None,
+                "carried_by_individual_id": None,
+                **values,
+            }
+        )
+
+    page.dp.save_distance_sample.side_effect = save_sample
     page.reload_individuals = AsyncMock()
     page.restore_sample = AsyncMock()
     page.seek_sample = Mock()
@@ -157,7 +172,7 @@ async def test_save_plays_to_consecutive_even_camera_second(distance_page, reaso
     page_module.play_to_sample.assert_awaited_once_with(page.animal_player, 1000.01, 3000.01)
     page.restore_sample.assert_awaited_once_with(seek=False)
     page.seek_sample.assert_not_called()
-    assert ("adult", 1000) not in page.sample_drafts
+    assert not hasattr(page, "sample_drafts")
     page_module.ui.notify.assert_called_once_with(
         page_module.t("distance_sample_saved"), type="positive"
     )
@@ -180,7 +195,6 @@ async def test_final_sample_toasts_end_without_switching_or_filling_gaps(
     page = distance_page
     page.offsets = offsets
     page.sample_offset = 7000
-    page.sample_drafts[("adult", 7000)] = page.sample_drafts.pop(("adult", 1000))
     page_module.capture_offset.return_value = 7000
     page.individuals.append({"id": "other", "age": "Adult", "species_id": "deer"})
     page.samples = [{"individual_id": "adult", "offset_ms": 5000}]
@@ -200,7 +214,6 @@ async def test_final_sample_toasts_end_without_switching_or_filling_gaps(
 async def test_failed_final_sample_does_not_toast_end_of_video(distance_page):
     page = distance_page
     page.sample_offset = 7000
-    page.sample_drafts[("adult", 7000)] = page.sample_drafts.pop(("adult", 1000))
     page_module.capture_offset.return_value = 7000
     page.dp.save_distance_sample.side_effect = ValueError("Save failed")
 
@@ -208,7 +221,7 @@ async def test_failed_final_sample_does_not_toast_end_of_video(distance_page):
 
     page_module.ui.notify.assert_called_once_with("Save failed", type="warning")
     assert page.sample_offset == 7000
-    assert ("adult", 7000) in page.sample_drafts
+    assert page.sample_values["behavior_ids"] == ["walking"]
     assert not page.busy
 
 
@@ -222,7 +235,7 @@ async def test_save_restores_sample_after_manual_inspection_without_writing(
     page.dp.save_distance_sample.assert_not_called()
     page.seek_sample.assert_called_once()
     page_module.play_to_sample.assert_not_awaited()
-    assert ("adult", 1000) in page.sample_drafts
+    assert page.sample_values["behavior_ids"] == ["walking"]
     assert not page.busy
 
 
@@ -271,7 +284,6 @@ async def test_opening_sample_still_restores_the_first_frame(distance_page):
     page = distance_page
     page.offsets = [0, 2000]
     page.sample_offset = 0
-    page.sample_drafts[("adult", 0)] = page.sample_drafts.pop(("adult", 1000))
     page_module.capture_offset.return_value = 40
     await page.commit_sample()
     page.dp.save_distance_sample.assert_not_called()
@@ -282,7 +294,6 @@ async def test_even_start_requires_opening_still_before_advancing(distance_page)
     page = distance_page
     page.offsets = [0, 2000, 4000]
     page.sample_offset = 0
-    page.sample_drafts[("adult", 0)] = page.sample_drafts.pop(("adult", 1000))
     page_module.capture_offset.return_value = 0
     await page.commit_sample()
     assert page.dp.save_distance_sample.call_args.args == ("adult", 0)
@@ -459,12 +470,11 @@ async def test_arrow_selected_skip_is_confirmed_and_plays_to_next_sample(distanc
     assert saved["reference_frame_id"] is None
     assert saved["behavior_ids"] == ["walking"]
     assert saved["infant_id"] is None and not saved["create_infant"]
-    assert page.sample_defaults["adult"]["skip_reason"] == reason
+    assert page.samples[0]["skip_reason"] == reason
     page_module.play_to_sample.assert_awaited_once_with(page.animal_player, 1000.01, 3000.01)
 
 
-@pytest.mark.parametrize("saved", [False, True])
-async def test_returning_to_skipped_sample_restores_choice_without_reference(distance_page, saved):
+async def test_returning_to_skipped_sample_restores_choice_without_reference(distance_page):
     page = distance_page
     page.animal_player = None
     page.frames = []
@@ -474,10 +484,7 @@ async def test_returning_to_skipped_sample_restores_choice_without_reference(dis
         "reference_video_id": None,
         "skip_reason": "individual absent",
     }
-    if saved:
-        page.samples = [{"individual_id": "adult", "offset_ms": 1000, **selection}]
-    else:
-        page.sample_drafts[("adult", 1000)].update(selection)
+    page.samples = [{"individual_id": "adult", "offset_ms": 1000, **selection}]
     await DistanceReviewPage.restore_sample(page, seek=False)
     assert page.selected_skip_reason == "individual absent"
     page.move_distance(-1)
@@ -485,15 +492,15 @@ async def test_returning_to_skipped_sample_restores_choice_without_reference(dis
     page.dp.save_distance_sample.assert_not_called()
 
 
-async def test_unsaved_skip_choice_survives_frame_navigation(distance_page):
+async def test_unsaved_skip_choice_is_discarded_by_frame_navigation(distance_page):
     page = distance_page
     del page.restore_sample
     page.selected_frame_id = "midpoint not visible"
     await page.choose_sample(3000)
-    assert page.selected_skip_reason == "midpoint not visible"
+    assert page.selected_frame_id == "frame"
     page.selected_frame_id = "frame"
     await page.choose_sample(1000)
-    assert page.selected_skip_reason == "midpoint not visible"
+    assert page.selected_frame_id == "frame"
     page.dp.save_distance_sample.assert_not_called()
 
 
@@ -549,7 +556,9 @@ async def test_auto_advance_restores_saved_choice_and_prefills_unannotated_frame
     assert page.selected_frame_id == expected
 
 
-async def test_auto_advance_preserves_unsaved_correction_to_annotated_frame(distance_page):
+async def test_auto_advance_restores_saved_choice_after_discarding_unconfirmed_correction(
+    distance_page,
+):
     page = distance_page
     del page.restore_sample
     page.samples = [
@@ -561,17 +570,72 @@ async def test_auto_advance_preserves_unsaved_correction_to_annotated_frame(dist
             "skip_reason": None,
         }
     ]
-    page.sample_drafts[("adult", 3000)] = {
-        **page.sample_drafts[("adult", 1000)],
-        "reference_frame_id": None,
-        "reference_video_id": None,
-        "skip_reason": "individual absent",
-    }
+    await page.choose_sample(3000)
+    page.selected_frame_id = "individual absent"
+    await page.choose_sample(1000)
     await page.commit_sample()
     assert page.sample_offset == 3000
-    assert page.selected_skip_reason == "individual absent"
+    assert page.selected_frame_id == "frame"
     assert page.sample["reference_frame_id"] == "frame"
     page.dp.save_distance_sample.assert_called_once()
+
+
+@pytest.mark.parametrize("individual_id", ["adult", "other"])
+@pytest.mark.parametrize("choice", ["other-frame", "individual absent", "midpoint not visible"])
+async def test_arrow_browsing_does_not_pin_inherited_choices_on_auto_advance(
+    distance_page, individual_id, choice
+):
+    page = distance_page
+    del page.restore_sample
+    page.individuals.append({"id": "other", "age": "Adult", "species_id": "deer"})
+    page.frames.append({"id": "other-frame", "distance_m": 12, "offset_ms": 700})
+    # Browsing every stop must not retain any per-frame choices.
+    for animal in ("adult", "other"):
+        page.individual_id = animal
+        page.sample_offset = 1000
+        page.selected_frame_id = "frame"
+        for _ in range(3):
+            await page.move_sample(1)
+    page.dp.save_distance_sample.assert_not_called()
+    assert page.samples == []
+
+    page.individual_id = individual_id
+    await page.choose_sample(1000)
+    page.selected_frame_id = choice
+    for offset in (1000, 3000, 5000):
+        page_module.capture_offset.return_value = offset
+        await page.commit_sample()
+        assert page.sample_offset == offset + 2000
+        assert page.selected_frame_id == choice
+    assert page.dp.save_distance_sample.call_count == 3
+    assert all(
+        call.args[0] == individual_id for call in page.dp.save_distance_sample.call_args_list
+    )
+
+
+async def test_auto_advance_discards_unconfirmed_choice_on_previously_visited_frame(distance_page):
+    page = distance_page
+    del page.restore_sample
+    await page.move_sample(1)
+    page.selected_frame_id = "individual absent"
+    await page.move_sample(-1)
+    await page.commit_sample()
+    assert page.sample_offset == 3000
+    assert page.selected_frame_id == "frame"
+    page.dp.save_distance_sample.assert_called_once()
+
+
+async def test_unconfirmed_behavior_edit_is_discarded_on_navigation(distance_page):
+    page = distance_page
+    del page.restore_sample
+    await page.move_sample(1)
+    page.sample_values["behavior_ids"].append("resting")
+    await page.move_sample(-1)
+    page.selected_frame_id = "midpoint not visible"
+    await page.commit_sample()
+    assert page.sample_offset == 3000
+    assert page.selected_skip_reason == "midpoint not visible"
+    assert page.sample_values["behavior_ids"] == []
 
 
 async def test_reference_cycle_wraps_and_respects_busy_state(distance_page):
@@ -612,33 +676,25 @@ def test_first_review_frame_preselects_smallest_distance(distance_page):
     assert page.selected_frame_id == "close"
 
 
-async def test_switching_new_frames_preselects_choices_and_restores_existing_drafts(distance_page):
+async def test_switching_frames_discards_unconfirmed_metadata(distance_page):
     page = distance_page
     del page.restore_sample
     page.individuals.append({"id": "infant", "age": "Infant", "species_id": "deer"})
-    original = page.current_sample_draft()
-    original.update(carries=True, infant_id="infant")
+    page.sample_values.update(carries=True, infant_id="infant")
     await page.choose_sample(3000)
-    next_draft = page.current_sample_draft()
-    assert next_draft["behavior_ids"] == ["walking"]
-    assert next_draft["carries"] and next_draft["infant_id"] == "infant"
-    next_draft["behavior_ids"].append("running")
-    next_draft["carries"] = False
+    assert page.sample_values == {"behavior_ids": [], "carries": False, "infant_id": "_new"}
+    page.sample_values["behavior_ids"].append("running")
     await page.choose_sample(1000)
-    restored = page.current_sample_draft()
-    assert restored is original and restored["behavior_ids"] == ["walking"]
-    assert restored["carries"] and restored["infant_id"] == "infant"
+    assert page.sample_values == {"behavior_ids": [], "carries": False, "infant_id": "_new"}
     await page.choose_sample(3000)
-    assert page.current_sample_draft() is next_draft
-    assert page.current_sample_draft()["behavior_ids"] == ["walking", "running"]
+    assert page.sample_values["behavior_ids"] == []
     page.dp.save_distance_sample.assert_not_called()
 
 
-def test_saved_frame_choices_override_inherited_defaults_and_stay_individual_specific(
+def test_saved_frame_metadata_stays_individual_specific(
     distance_page,
 ):
     page = distance_page
-    page.remember_sample_choices()
     page.sample_offset = 3000
     page.samples = [
         {
@@ -649,20 +705,39 @@ def test_saved_frame_choices_override_inherited_defaults_and_stay_individual_spe
             "carried_by_individual_id": None,
         }
     ]
-    saved_draft = page.current_sample_draft()
-    assert saved_draft["behavior_ids"] == ["resting"] and not saved_draft["carries"]
+    page.reset_sample_values()
+    assert page.sample_values["behavior_ids"] == ["resting"] and not page.sample_values["carries"]
     page.individuals.append({"id": "other", "age": "Adult", "species_id": "deer"})
     page.individual_id = "other"
-    assert page.current_sample_draft()["behavior_ids"] == []
+    page.reset_sample_values()
+    assert page.sample_values["behavior_ids"] == []
 
 
-async def test_saving_new_infant_preselects_created_identity_for_next_sample(distance_page):
-    page = distance_page
-    page.sample_drafts[("adult", 1000)].update(carries=True)
-    page.dp.save_distance_sample.return_value = {"infant_id": "new-infant"}
+async def test_saving_new_infant_preselects_created_identity_for_next_sample(
+    distance_page, distance_data
+):
+    page, data = distance_page, distance_data
+    del page.restore_sample
+    page.dp = data["dp"]
+    page.dp.verify_distance_recording_time(
+        data["videos"][0], datetime(2026, 10, 12, 16, 2, 49), "alice"
+    )
+    page.queue = [{"video_id": data["videos"][0], "duration_sec": 10}]
+    page.individual_id = data["individual"]["id"]
+    page.individuals = page.dp.list_distance_individuals(data["videos"][0])
+    page.frames = [data["frame"]]
+    page.selected_frame_id = data["frame"]["id"]
+    page.sample_values.update(carries=True, behavior_ids=[data["behavior_id"]])
+
+    async def reload():
+        page.individuals = page.dp.list_distance_individuals(data["videos"][0])
+        await page.reload_review()
+
+    page.reload_individuals.side_effect = reload
     await page.commit_sample()
-    assert page.sample_defaults["adult"]["carries"]
-    assert page.sample_defaults["adult"]["infant_id"] == "new-infant"
+    assert page.sample_values["carries"]
+    assert page.sample_values["infant_id"] != "_new"
+    assert page.sample_values["behavior_ids"] == [data["behavior_id"]]
 
 
 async def test_failed_playback_does_not_seek_to_next_stop(distance_page):
@@ -713,7 +788,7 @@ async def test_first_seen_control_does_not_seek_another_identity_when_busy(
     seek.assert_not_called()
 
 
-async def test_reloading_cards_preserves_edits_and_updates_unchanged_linked_species(
+async def test_reloading_cards_uses_saved_attributes_and_linked_species(
     distance_page, monkeypatch
 ):
     page = distance_page
@@ -722,10 +797,6 @@ async def test_reloading_cards_preserves_edits_and_updates_unchanged_linked_spec
         {"id": "adult", "species_id": "deer", "age": "Adult", "sex": "Female", "tag_ids": []},
         {"id": "infant", "species_id": "deer", "age": "Infant", "sex": "Unknown", "tag_ids": []},
     ]
-    page.individual_drafts = {
-        "adult": {"species_id": "antelope", "age": "Adult", "sex": "Male", "tag_ids": []},
-        "infant": {"species_id": "deer", "age": "Infant", "sex": "Female", "tag_ids": []},
-    }
     page.dp.list_distance_individuals = Mock(
         return_value=[
             {**page.individuals[0], "species_id": "fox", "tag_ids": ["injured"]},
@@ -738,18 +809,9 @@ async def test_reloading_cards_preserves_edits_and_updates_unchanged_linked_spec
     monkeypatch.setattr(page_module, "configure_anchor", Mock())
     await DistanceReviewPage.reload_individuals(page)
     assert page.individual_id == "adult"
-    assert page.individual_drafts["adult"] == {
-        "species_id": "antelope",
-        "age": "Adult",
-        "sex": "Male",
-        "tag_ids": ["injured"],
-    }
-    assert page.individual_drafts["infant"] == {
-        "species_id": "fox",
-        "age": "Infant",
-        "sex": "Female",
-        "tag_ids": [],
-    }
+    assert all(row["species_id"] == "fox" for row in page.individuals)
+    assert page.individuals[0]["tag_ids"] == ["injured"]
+    assert not hasattr(page, "individual_drafts")
 
 
 @pytest.mark.parametrize("review", [None, {"completed_at": None}, {"completed_at": "today"}])
@@ -786,7 +848,6 @@ async def test_creating_individual_preserves_playback_and_skips_prior_samples(
     page.index = 0
     page.individuals = page.dp.list_distance_individuals(data["videos"][0])
     page.individual_id = data["individual"]["id"]
-    page.individual_drafts = {}
     page.render_individuals = SimpleNamespace(refresh=Mock())
     page.render_timing = SimpleNamespace(refresh=Mock())
     del page.reload_individuals  # Exercise the actual reload/selection path.
@@ -958,14 +1019,13 @@ async def test_advance_finishes_playback_before_restoring_another_reference(dist
 
     async def play(*args):
         assert page.sample_offset == 1000
-        # NiceGUI refreshes run in background tasks. A refresh during playback
-        # must not create a next-frame draft with the old reference evidence.
-        page.current_sample_draft()
+        # UI refreshes during playback still refer to the frame being left.
+        page.refresh_sample_ui()
         events.append("playback")
 
     async def restore(**kwargs):
         assert page.sample_offset == 3000
-        assert (page.individual_id, 3000) not in page.sample_drafts
+        assert not hasattr(page, "sample_drafts")
         events.append("reference-switch")
 
     page_module.play_to_sample.side_effect = play
@@ -1086,7 +1146,6 @@ async def test_saved_reference_switch_loads_the_saved_frame_before_revealing_pla
             "reference_frame_id": "saved",
         }
     ]
-    page.sample_drafts.clear()
     monkeypatch.setattr(
         page_module,
         "_probe_video",

@@ -20,7 +20,6 @@ class IndividualViewsContext:
     species_options: dict[str, str]
     individuals: list[dict]
     individual_id: str | None
-    drafts: dict[str, dict]
     tag_options: dict[str, str]
     all_tag_options: dict[str, str]
     samples: list[dict]
@@ -68,15 +67,6 @@ def render_individuals(context: IndividualViewsContext) -> None:
 
 def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
     active = row["id"] == context.individual_id
-    draft = context.drafts.setdefault(
-        row["id"],
-        {
-            "species_id": row["species_id"],
-            "age": row["age"],
-            "sex": row["sex"],
-            "tag_ids": list(row["tag_ids"]),
-        },
-    )
     card = (
         ui.card()
         .classes("full-width q-pa-sm q-mb-sm distance-individual-card")
@@ -108,7 +98,7 @@ def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
             )
             ui.select(
                 context.species_choices(row),
-                value=draft["species_id"],
+                value=row["species_id"],
                 label=t("species_label"),
                 with_input=True,
                 on_change=lambda e: context.on_attribute(row["id"], "species_id", e.value),
@@ -142,7 +132,7 @@ def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
                     value: t(f"distance_{value.lower()}")
                     for value in ("Adult", "Adolescent", "Juvenile", "Infant")
                 },
-                value=draft["age"],
+                value=row["age"],
                 label=t("distance_age"),
                 clearable=True,
                 on_change=lambda e: context.on_attribute(row["id"], "age", e.value),
@@ -151,7 +141,7 @@ def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
             )
             ui.select(
                 {value: t(f"distance_{value.lower()}") for value in ("Male", "Female", "Unknown")},
-                value=draft["sex"],
+                value=row["sex"],
                 label=t("distance_sex"),
                 clearable=True,
                 on_change=lambda e: context.on_attribute(row["id"], "sex", e.value),
@@ -162,13 +152,13 @@ def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
             **context.tag_options,
             **{
                 tag_id: context.all_tag_options[tag_id]
-                for tag_id in draft["tag_ids"]
+                for tag_id in row["tag_ids"]
                 if tag_id in context.all_tag_options
             },
         }
         ui.select(
             tag_options,
-            value=draft["tag_ids"],
+            value=row["tag_ids"],
             label=t("distance_tags"),
             multiple=True,
             with_input=True,

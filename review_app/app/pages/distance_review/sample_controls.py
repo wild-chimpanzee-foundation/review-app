@@ -19,7 +19,7 @@ class SampleControlsContext:
     sample_offset: int | None
     sample: dict | None
     carrier: dict | None
-    draft: dict | None
+    values: dict
     behavior_options: dict[str, str]
     individuals: list[dict]
     individual_label: Callable[[dict], str]
@@ -83,20 +83,18 @@ def render_sample_controls(context: SampleControlsContext) -> None:
                     ui.label(
                         t("distance_carried_by", number=context.carrier["individual_number"])
                     ).classes("text-caption")
-        draft = context.draft
-        if draft is None:
-            return
+        values = context.values
         ui.select(
             context.behavior_options,
-            value=draft["behavior_ids"],
+            value=values["behavior_ids"],
             multiple=True,
             label=t("distance_behaviors"),
-            on_change=lambda e: draft.update(behavior_ids=list(e.value or [])),
+            on_change=lambda e: values.update(behavior_ids=list(e.value or [])),
         ).classes("w-full").props("dense outlined use-chips")
         carries = ui.checkbox(
             t("distance_carries_infant"),
-            value=draft["carries"],
-            on_change=lambda e: draft.update(carries=e.value),
+            value=values["carries"],
+            on_change=lambda e: values.update(carries=e.value),
         )
         infant_options = {
             row["id"]: context.individual_label(row)
@@ -109,9 +107,9 @@ def render_sample_controls(context: SampleControlsContext) -> None:
         infant = (
             ui.select(
                 infant_options,
-                value=draft["infant_id"],
+                value=values["infant_id"],
                 label=t("distance_infant_identity"),
-                on_change=lambda e: draft.update(infant_id=e.value),
+                on_change=lambda e: values.update(infant_id=e.value),
             )
             .classes("w-full")
             .props("dense outlined")

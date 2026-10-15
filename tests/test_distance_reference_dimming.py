@@ -75,6 +75,13 @@ def reference_page(monkeypatch, tmp_path, request):
         page.reference_thumbnail_path = Mock(return_value=None)
         page.load_reference_thumbnail = AsyncMock()
         page.reload_individuals = AsyncMock()
+
+        def save_sample(individual_id, offset_ms, **values):
+            page.samples = [row for row in page.samples if row["offset_ms"] != offset_ms]
+            choice = values.get("skip_reason") or values["reference_frame_id"]
+            page.samples.append(sample(offset_ms, choice, reference=page.reference["id"]))
+
+        dp.save_distance_sample.side_effect = save_sample
         if saved_choice:
             # Visibility rows need not retain a reference source; load_video must
             # preserve their status while falling back to the available clip.
@@ -169,7 +176,7 @@ async def test_initial_saved_visibility_choice_renders_dimmed(user: User, refere
 
 
 @pytest.mark.parametrize("choice", ["individual absent", "midpoint not visible"])
-async def test_saved_samples_and_unsaved_drafts_restore_reference_dimming(
+async def test_saved_samples_restore_reference_dimming_and_discard_unconfirmed_edits(
     user: User, reference_page, choice
 ):
     await user.open("/distance-reference-dimming-test")
@@ -182,14 +189,13 @@ async def test_saved_samples_and_unsaved_drafts_restore_reference_dimming(
     assert page.selected_skip_reason == choice
 
     with page.client:
-        page.current_sample_draft()
         page.preview_frame(reference_page["frames"][0])
     await assert_dimmed(page, False)
     await page.choose_sample(1000)
     await assert_dimmed(page, False)
     await page.choose_sample(3000)
-    await assert_dimmed(page, False)
-    assert page.selected_frame_id == "frame"  # Draft wins over saved visibility.
+    await assert_dimmed(page, True)
+    assert page.selected_skip_reason == choice  # Saved visibility wins over unconfirmed edits.
 
     with page.client:
         page.preview_frame(next(row for row in SKIP_CHOICES if row["id"] == choice))
@@ -238,8 +244,6 @@ async def test_auto_advance_restores_or_carries_visibility_after_playback(
     player = page.reference_player
     user.find(page_module.t(choice["label"])).click()
     await assert_dimmed(page, True)
-    with page.client:
-        page.current_sample_draft()
     if saved_next_distance:
         page.samples = [sample(3000)]
 

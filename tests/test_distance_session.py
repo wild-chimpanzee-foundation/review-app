@@ -1,4 +1,4 @@
-from review_app.app.pages.distance_review.session import DraftState, SampleSelection
+from review_app.app.pages.distance_review.session import SampleSelection
 
 
 def test_selection_distinguishes_visibility_from_frame_ids():
@@ -11,14 +11,3 @@ def test_selection_distinguishes_visibility_from_frame_ids():
         "visibility", "individual absent"
     )
     assert SampleSelection.from_legacy_id(None, visibility_ids) is None
-
-
-def test_draft_state_keeps_unsaved_draft_separate_from_carried_default():
-    state = DraftState()
-    state.drafts[("individual", 1000)] = {"behavior_ids": ["saved-choice"]}
-    draft = {"behavior_ids": ["draft-choice"]}
-    state.remember("individual", draft)
-    draft["behavior_ids"].append("later-edit")
-
-    assert state.drafts[("individual", 1000)] == {"behavior_ids": ["saved-choice"]}
-    assert state.defaults["individual"] == {"behavior_ids": ["draft-choice"]}

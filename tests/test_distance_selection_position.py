@@ -81,7 +81,7 @@ def selection_page(distance_data, monkeypatch):
     page.frames = [data["frame"]]
     page.selected_frame_id = data["frame"]["id"]
     page.sample_offset = 7000
-    page.sample_drafts, page.sample_defaults = {}, {}
+    page.sample_values = {"behavior_ids": [], "carries": False, "infant_id": "_new"}
     for name in (
         "render_individuals",
         "render_samples",
@@ -154,7 +154,7 @@ async def test_card_and_jk_always_inspect_first_seen(
 
 
 @pytest.mark.parametrize("active", [False, True])
-async def test_explicit_first_seen_repositions_sample_and_preserves_both_drafts(
+async def test_explicit_first_seen_repositions_sample_and_discards_unconfirmed_edits(
     selection_page, active
 ):
     page, data = selection_page
@@ -164,38 +164,26 @@ async def test_explicit_first_seen_repositions_sample_and_preserves_both_drafts(
     page.individuals = page.dp.list_distance_individuals(data["videos"][0])
     if active:
         page.individual_id = target["id"]
-    old_key = (page.individual_id, 7000)
-    old_draft = {
+    page.sample_values = {
         "behavior_ids": [data["behavior_id"]],
         "carries": True,
         "infant_id": "_new",
-        "reference_frame_id": None,
-        "skip_reason": "midpoint not visible",
-        "reference_video_id": None,
     }
-    target_draft = {
-        **old_draft,
-        "behavior_ids": [],
-        "carries": False,
-        "skip_reason": "individual absent",
-    }
-    page.sample_drafts[old_key] = old_draft.copy()
-    page.sample_drafts[(target["id"], 3000)] = target_draft.copy()
     page.selected_frame_id = "midpoint not visible"
 
     await page.go_to_first_seen(target["id"])
 
     assert page.individual_id == target["id"]
     assert page.sample_offset == 3000
+    # The saved automatic absence before first seen is the preceding evidence.
     assert page.selected_skip_reason == "individual absent"
-    assert page.sample_drafts[old_key] == old_draft
-    assert page.sample_drafts[(target["id"], 3000)] == target_draft
+    assert page.sample_values == {"behavior_ids": [], "carries": False, "infant_id": "_new"}
     page_module.seek_paused.assert_called_once_with(page.animal_player, 1040)
     assert not page.busy
 
 
 @pytest.mark.parametrize("entry", ["card", "j", "k"])
-async def test_normal_switches_preserve_and_restore_unsaved_sample_choices(selection_page, entry):
+async def test_normal_switches_discard_unconfirmed_sample_choices(selection_page, entry):
     page, data = selection_page
     target = page.dp.create_distance_individual(
         data["videos"][0], data["species_id"], 1040, anchor=data["anchor"]
@@ -204,17 +192,11 @@ async def test_normal_switches_preserve_and_restore_unsaved_sample_choices(selec
     first_id = page.individual_id
     page.sample_offset = 1000
     page.selected_frame_id = "midpoint not visible"
-    original = {
+    page.sample_values = {
         "behavior_ids": [data["behavior_id"]],
         "carries": True,
         "infant_id": "_new",
-        "reference_frame_id": None,
-        "skip_reason": "midpoint not visible",
-        "reference_video_id": None,
     }
-    page.sample_drafts[(first_id, 1000)] = original.copy()
-    target_draft = {**original, "behavior_ids": [], "skip_reason": "individual absent"}
-    page.sample_drafts[(target["id"], 3000)] = target_draft.copy()
 
     for expected in (target["id"], first_id):
         selected = expected if entry == "card" else keyboard_target(page, entry)
@@ -222,9 +204,8 @@ async def test_normal_switches_preserve_and_restore_unsaved_sample_choices(selec
 
     assert page.individual_id == first_id
     assert page.sample_offset == 1000
-    assert page.selected_skip_reason == "midpoint not visible"
-    assert page.sample_drafts[(first_id, 1000)] == original
-    assert page.sample_drafts[(target["id"], 3000)] == target_draft
+    assert page.selected_frame_id == data["frame"]["id"]
+    assert page.sample_values == {"behavior_ids": [], "carries": False, "infant_id": "_new"}
 
 
 async def test_session_resume_retains_first_unreviewed_sample_contract(selection_page):
