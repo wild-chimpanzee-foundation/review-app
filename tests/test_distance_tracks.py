@@ -3,6 +3,7 @@
 import json
 import shutil
 import subprocess
+from math import ceil
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,11 @@ def test_tracks_keep_measured_distances_and_review_states_in_separate_coordinate
     assert not active["connectNulls"] and not other["connectNulls"]
     assert active["lineStyle"]["color"] == "#f59e0b"
     assert other["lineStyle"]["color"] == "#94a3b8"
+    assert [active["id"], active_intervals["id"], active_unreviewed["id"]] == [
+        "one",
+        "one-intervals",
+        "one-unreviewed",
+    ]
     assert active["markLine"]["data"] == [{"xAxis": 3}]
 
     # Skip intervals occupy a separate, proportional status band, not meter values.
@@ -80,29 +86,30 @@ def test_status_band_pixel_geometry_stays_readable_for_large_and_fractional_dist
             "top": GRID_TOP,
             "bottom": GRID_BOTTOM,
         }
-        assert lane_pixel_gap >= 18
+        assert lane_pixel_gap >= 12
         assert all(
             b - a == pytest.approx(lane_pixel_gap)
             for a, b in zip(lane_label_tops, lane_label_tops[1:])
         )
-        assert options["yAxis"]["max"] == pytest.approx(max_distance * 1.1)
+        assert options["yAxis"]["max"] == ceil(max_distance * 1.1)
         assert options["yAxis"]["min"] == pytest.approx(
             -options["yAxis"]["max"] * STATUS_BAND_FRACTION / (1 - STATUS_BAND_FRACTION)
         )
         assert options["yAxis"]["axisLabel"][":formatter"] == (
-            "value => value < 0 ? '' : `${value} m`"
+            "value => value < 0 ? '' : `${Math.round(value)} m`"
         )
         assert ":formatter" not in options["yAxis"]
         assert "interval" not in options["yAxis"]
         assert options["series"][1]["data"] == []
         assert "height = Math.abs(api.size([0, " in options["series"][1][":renderItem"]
+        assert "* 0.2;" in options["series"][1][":renderItem"]
 
     # The page's height scaling also keeps 20 rows apart at a usable pixel scale.
     many = [{"id": f"id-{i}", "individual_number": i + 1} for i in range(20)]
     tall = chart_height(len(many))
     many_options = track_options(many, [], [], 2, None, chart_height=tall)
     many_gap = (tall - GRID_TOP - GRID_BOTTOM) * STATUS_BAND_FRACTION / len(many)
-    assert many_gap > 14
+    assert many_gap > 10
     assert len(many_options["graphic"]["elements"]) == 20
 
 
@@ -219,7 +226,8 @@ def test_installed_nicegui_dynamic_property_conversion_installs_axis_formatter()
         assert.equal(format(-100), '');
         assert.equal(format(-0.1), '');
         assert.equal(format(0), '0 m');
-        assert.equal(format(12.5), '12.5 m');
+        assert.equal(format(6.6), '7 m');
+        assert.equal(format(12.5), '13 m');
     """
     result = subprocess.run(
         [node, "--input-type=module", "-e", script, str(converter)],

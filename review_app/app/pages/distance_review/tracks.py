@@ -1,10 +1,12 @@
 """Distance samples and review states in one elapsed-time graph."""
 
+from math import ceil
+
 from review_app.app.translations import t
 
 GRID_TOP = 42
 GRID_BOTTOM = 52
-STATUS_BAND_FRACTION = 0.35
+STATUS_BAND_FRACTION = 0.25
 
 
 def track_options(
@@ -19,7 +21,7 @@ def track_options(
         (row["distance_m"] for row in samples if row.get("distance_m") is not None),
         default=0,
     )
-    y_max = max(1, max_distance * 1.1)
+    y_max = max(1, ceil(max_distance * 1.1))
     band_bottom = y_max * STATUS_BAND_FRACTION / (1 - STATUS_BAND_FRACTION)
     lane_span = band_bottom / count if count else 0
     clip_duration = max(0, duration)
@@ -59,6 +61,7 @@ def track_options(
                 intervals.append(
                     {
                         "value": [start, lane_y, end, int(midpoint_hidden)],
+                        "sampleOffset": offset,
                         "statusLabel": t(
                             "distance_midpoint_hidden" if midpoint_hidden else "distance_absent"
                         ),
@@ -85,12 +88,13 @@ def track_options(
             }
         )
         line = {
+            "id": str(individual_id),
             "name": labels[lane],
             "type": "line",
             "data": data,
             "connectNulls": False,
             "symbol": "circle",
-            "symbolSize": 7 if active else 5,
+            "symbolSize": 9 if active else 7,
             "lineStyle": {"color": color, "width": 3 if active else 1.5},
             "itemStyle": {"color": color},
             "z": 5 if active else 2,
@@ -106,6 +110,7 @@ def track_options(
         series.append(line)
         series.append(
             {
+                "id": f"{individual_id}-intervals",
                 "name": labels[lane],
                 "type": "custom",
                 "data": intervals,
@@ -115,7 +120,7 @@ def track_options(
                 ":renderItem": """(params, api) => {
                     const start = api.coord([api.value(0), api.value(1)]);
                     const end = api.coord([api.value(2), api.value(1)]);
-                    const height = Math.abs(api.size([0, __LANE_SPAN__])[1]) * 0.7;
+                    const height = Math.abs(api.size([0, __LANE_SPAN__])[1]) * 0.2;
                     const hidden = Boolean(api.value(3));
                     return {type: 'rect', shape: {x: start[0], y: start[1] - height / 2,
                         width: Math.max(1, end[0] - start[0]), height},
@@ -129,11 +134,12 @@ def track_options(
         )
         series.append(
             {
+                "id": f"{individual_id}-unreviewed",
                 "name": labels[lane],
                 "type": "scatter",
                 "data": unreviewed,
                 "symbol": "emptyCircle",
-                "symbolSize": min(9, lane_pixel_height * 0.6),
+                "symbolSize": min(11, lane_pixel_height * 0.85),
                 "itemStyle": {"color": "#94a3b8", "borderColor": "#94a3b8"},
                 "z": 4,
             }
@@ -163,7 +169,7 @@ def track_options(
             "nameTextStyle": {"color": "#94a3b8"},
             "axisLabel": {
                 "color": "#94a3b8",
-                ":formatter": "value => value < 0 ? '' : `${value} m`",
+                ":formatter": "value => value < 0 ? '' : `${Math.round(value)} m`",
             },
             "splitLine": {"lineStyle": {"color": "rgba(128,128,128,.15)"}},
             "axisLine": {"show": True},

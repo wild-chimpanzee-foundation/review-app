@@ -792,7 +792,45 @@ class DistanceReviewPage:
                 self.sample_offset,
                 chart_height,
             )
-            ui.echart(options, renderer="svg").classes("w-full").style(f"height:{chart_height}px")
+            ui.echart(options, renderer="svg", on_point_click=self.on_track_click).classes(
+                "w-full"
+            ).style(f"height:{chart_height}px")
+
+    @stable_client
+    async def on_track_click(self, event) -> None:
+        if self.busy or not self.animal_player or not self.offsets:
+            return
+        # Each animal contributes its distance, interval, and unreviewed series.
+        individual_index = event.series_index // 3
+        if not 0 <= individual_index < len(self.individuals):
+            return
+        individual_id = self.individuals[individual_index]["id"]
+        value = event.value
+        data = event.data
+        if event.series_index % 3 == 0:
+            # Distance-line points correspond one-to-one with scheduled offsets.
+            if not 0 <= event.data_index < len(self.offsets):
+                return
+            offset = self.offsets[event.data_index]
+        else:
+            if isinstance(data, dict) and "sampleOffset" in data:
+                clicked_ms = float(data["sampleOffset"])
+            elif isinstance(value, (list, tuple)) and value:
+                clicked_ms = float(value[0]) * 1000
+            else:
+                return
+            offset = min(self.offsets, key=lambda candidate: abs(candidate - clicked_ms))
+        self.busy = True
+        try:
+            if individual_id != self.individual_id:
+                await self.activate_individual(individual_id)
+            self.sample_offset = offset
+            await self.restore_sample()
+        finally:
+            self.busy = False
+            self.refresh_sample_ui()
+            self.render_sample_navigation.refresh()
+            self.render_tracks.refresh()
 
     @ui.refreshable
     def render_reviewed_species(self) -> None:
