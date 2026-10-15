@@ -377,6 +377,133 @@ async def test_fixed_frame_anchor_dialog_setup_guards_and_actions(
     assert page.sample_values == sample_values
 
 
+@pytest.mark.parametrize("skip_reason", [None, "individual absent", "midpoint not visible"])
+async def test_carried_infant_locks_distance_but_allows_behavior_corrections(
+    user: User, drawer_page, monkeypatch, skip_reason
+):
+    holder, data, _ = drawer_page
+    dp, video_id = data["dp"], data["videos"][0]
+    dp.verify_distance_recording_time(video_id, datetime(2026, 10, 12, 16, 2, 49), "alice")
+    pair = dp.save_distance_sample(
+        data["individual"]["id"],
+        1000,
+        reference_frame_id=None if skip_reason else data["frame"]["id"],
+        skip_reason=skip_reason,
+        create_infant=True,
+        labeled_by="alice",
+    )
+    # The very next infant sample is independent, despite the earlier carrying.
+    dp.save_distance_sample(
+        pair["infant_id"], 3000, reference_frame_id=data["frame"]["id"], labeled_by="alice"
+    )
+    monkeypatch.setattr(page_module, "capture_offset", AsyncMock(return_value=1000))
+    monkeypatch.setattr(page_module, "play_to_sample", AsyncMock())
+    monkeypatch.setattr(page_module, "configure_anchor", Mock())
+    monkeypatch.setattr(page_module, "anchor_mode", Mock())
+    await user.open("/distance-drawer-test")
+    page = holder["page"]
+    page.individual_id = pair["infant_id"]
+    await page.reload_individuals()
+    await page.reload_review()
+    page.sample_offset = 1000
+    page.frames = [data["frame"]]
+    page.animal_player = object()
+    await page.restore_sample(seek=False)
+    del page.render_samples
+    del page.render_sample_actions
+    with user:
+        page.render_frames()
+        page.render_samples()
+        page.render_sample_actions()
+    await user.should_see("Carried by individual #1")
+
+    def distance_buttons():
+        return [
+            element
+            for element in page.client.elements.values()
+            if isinstance(element, ui.button)
+            and (
+                element.text in {"5 m", "Not visible", "Absent"}
+                or element.props.get("data-distance-action") in {"distance-down", "distance-up"}
+            )
+        ]
+
+    assert len(distance_buttons()) == 5
+    assert all(not button.enabled for button in distance_buttons())
+    selection = page.selected_frame_id
+    page.preview_frame({"id": "midpoint not visible"})
+    page.move_distance(1)
+    assert page.selected_frame_id == selection
+    assert page.apply_to_end_assignment() is None
+    bulk = next(
+        element
+        for element in page.client.elements.values()
+        if element.props.get("data-distance-action") == "apply-to-end"
+    )
+    assert not bulk.enabled
+
+    # Confirm may update behaviors but must retain the exact carrier evidence.
+    page.sample_values["behavior_ids"] = [data["behavior_id"]]
+    await page.commit_sample()
+    saved = next(
+        row
+        for row in dp.get_distance_review_state(video_id, "alice")["samples"]
+        if row["individual_id"] == pair["infant_id"] and row["offset_ms"] == 1000
+    )
+    assert saved["carried_by_individual_id"] == data["individual"]["id"]
+    assert saved["behavior_ids"] == [data["behavior_id"]]
+    assert saved["reference_frame_id"] == pair["reference_frame_id"]
+    assert saved["skip_reason"] == skip_reason
+    assert page.sample_offset == 3000
+    assert not page.distance_locked
+    await wait_for_saved(page, lambda: any(button.enabled for button in distance_buttons()))
+    assert any(button.enabled for button in distance_buttons())
+    await user.should_not_see("Carried by individual #1")
+
+
+async def test_carrier_button_selects_adult_at_the_same_sample(user: User, drawer_page):
+    holder, data, _ = drawer_page
+    dp, video_id = data["dp"], data["videos"][0]
+    dp.verify_distance_recording_time(video_id, datetime(2026, 10, 12, 16, 2, 49), "alice")
+    pair = dp.save_distance_sample(
+        data["individual"]["id"],
+        5000,
+        reference_frame_id=data["frame"]["id"],
+        create_infant=True,
+        labeled_by="alice",
+    )
+    await user.open("/distance-drawer-test")
+    page = holder["page"]
+    page.individual_id = pair["infant_id"]
+    await page.reload_individuals()
+    await page.reload_review()
+    page.sample_offset = 5000
+    page.frames = [data["frame"]]
+    await page.restore_sample(seek=False)
+    del page.render_samples
+    with user:
+        page.render_samples()
+    button = next(
+        element
+        for element in user.find("Carried by individual #1").elements
+        if isinstance(element, ui.button)
+    )
+    assert button.props["icon"] == "link"
+    page.busy = True
+    await page.select_carrier(data["individual"]["id"], 5000)
+    assert page.individual_id == pair["infant_id"]
+    page.busy = False
+    user.find("Carried by individual #1").click()
+    await wait_for_saved(page, lambda: page.individual_id == data["individual"]["id"])
+    assert page.sample_offset == 5000
+    assert page.selected_frame_id == data["frame"]["id"]
+    assert not page.distance_locked
+    assert (
+        dp.get_distance_review_state(video_id, "alice")["active_individual_id"]
+        == page.individual_id
+    )
+
+
 async def test_creation_carrying_survives_restore_and_reload_until_saved_choice(
     user: User, drawer_page
 ):

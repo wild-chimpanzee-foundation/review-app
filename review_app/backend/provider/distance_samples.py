@@ -234,16 +234,19 @@ def save_distance_sample(
         target.updated_at = now
         return row
 
-    # Behavior corrections to a carried sample keep its relationship when
-    # the selected evidence still matches its carrier's annotation.
+    # Behavior corrections retain carrying for annotated and skipped evidence.
     carrier_id = None
-    if current and current.carried_by_individual_id and frame:
+    if current and current.carried_by_individual_id:
         carrier_sample = (
             session.query(DistanceSample)
             .filter_by(individual_id=current.carried_by_individual_id, offset_ms=offset_ms)
             .first()
         )
-        if carrier_sample and carrier_sample.reference_frame_id == frame.id:
+        if (
+            carrier_sample
+            and carrier_sample.reference_frame_id == (frame.id if frame else None)
+            and carrier_sample.skip_reason == skip_reason
+        ):
             carrier_id = current.carried_by_individual_id
     row = write(individual, carrier_id, behaviors)
     if infant:

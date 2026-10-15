@@ -277,6 +277,11 @@ class DistanceReviewPage:
         }
 
     @property
+    def distance_locked(self) -> bool:
+        """Only this sample's saved carrying link locks infant distance evidence."""
+        return bool(self.sample and self.sample.get("carried_by_individual_id"))
+
+    @property
     def reference_sample(self) -> dict | None:
         """Restore saved evidence, or the last known distance when resuming a new stop."""
         if self.sample and (
@@ -945,6 +950,26 @@ class DistanceReviewPage:
             self.refresh_sample_ui()
             self.render_sample_navigation.refresh()
 
+    @stable_client
+    async def select_carrier(self, carrier_id: str, offset_ms: int) -> None:
+        if (
+            self.busy
+            or not self.video
+            or self.sample_offset != offset_ms
+            or not self.sample
+            or self.sample.get("carried_by_individual_id") != carrier_id
+            or not any(row["id"] == carrier_id for row in self.individuals)
+        ):
+            return
+        self.busy = True
+        try:
+            # Keep the displayed sample, rather than jumping to the carrier's first appearance.
+            await self.activate_individual(carrier_id, first_seen_offset_ms=offset_ms)
+        finally:
+            self.busy = False
+            self.refresh_sample_ui()
+            self.render_sample_navigation.refresh()
+
     async def activate_individual(
         self, individual_id: str, *, first_seen_offset_ms: int | None = None
     ) -> None:
@@ -1320,6 +1345,7 @@ class DistanceReviewPage:
                 and all(row["review_status"] == "completed" for row in self.individuals)
             ),
             on_confirm=self.commit_sample,
+            on_select_carrier=self.select_carrier,
             on_apply_to_end=self.apply_to_end_dialog,
             on_finish_video=self.finish_video,
         )
@@ -1339,6 +1365,8 @@ class DistanceReviewPage:
 
     def apply_to_end_assignment(self) -> dict | None:
         """Snapshot the unsaved choice, including sample metadata for visibility choices."""
+        if self.distance_locked:
+            return None
         reason = self.selected_skip_reason
         if reason is None and not any(
             frame["id"] == self.selected_frame_id for frame in self.frames
@@ -1437,14 +1465,21 @@ class DistanceReviewPage:
     async def commit_sample(self, reason: str | None = None) -> None:
         if self.busy or not self.individual or self.sample_offset is None:
             return
-        reason = reason or self.selected_skip_reason
-        if reason is None and not any(
-            frame["id"] == self.selected_frame_id for frame in self.frames
-        ):
-            return
+        if self.distance_locked:
+            # Behaviors remain editable, but never replace inherited evidence.
+            if reason is not None and reason != self.sample.get("skip_reason"):
+                return
+            reason = self.sample.get("skip_reason")
+            reference_frame_id = self.sample.get("reference_frame_id")
+        else:
+            reason = reason or self.selected_skip_reason
+            if reason is None and not any(
+                frame["id"] == self.selected_frame_id for frame in self.frames
+            ):
+                return
+            reference_frame_id = self.selected_frame_id
         individual_id, offset_ms = self.individual_id, self.sample_offset
         values = self.sample_values
-        reference_frame_id = self.selected_frame_id
         self.busy = True
         self.refresh_sample_ui()
         try:
@@ -1699,6 +1734,7 @@ class DistanceReviewPage:
             skip_choices=SKIP_CHOICES,
             busy=self.busy,
             busy_state=self,
+            distance_locked=self.distance_locked,
             reference_player=self.reference_player,
             render_player=self._render_reference_player,
             reference_name=lambda row: Path(normalize_path_str(row["video_path"])).name,
@@ -1793,7 +1829,7 @@ class DistanceReviewPage:
         return [choices[meters] for meters in sorted(choices)] + list(SKIP_CHOICES)
 
     def move_distance(self, delta: int) -> None:
-        if self.busy:
+        if self.busy or self.distance_locked:
             return
         choices = self.distance_choices()
         if not choices:
@@ -1954,7 +1990,7 @@ class DistanceReviewPage:
             seek_paused(self.reference_player, reference_frame_offset(frame))
 
     def preview_frame(self, frame: dict) -> None:
-        if self.busy:
+        if self.busy or self.distance_locked:
             return
         self.selected_frame_id = frame["id"]
         if self.animal_player:

@@ -32,6 +32,7 @@ class SampleControlsContext:
     remaining_offsets: list[int]
     all_individuals_completed: bool
     on_confirm: Callable
+    on_select_carrier: Callable[[str, int], object]
     on_apply_to_end: Callable
     on_finish_video: Callable
 
@@ -62,6 +63,19 @@ def render_sample_controls(context: SampleControlsContext) -> None:
         if not context.individual or context.sample_offset is None:
             return
         ui.separator()
+        if context.carrier:
+            ui.button(
+                t("distance_carried_by", number=context.carrier["individual_number"]),
+                icon="link",
+                on_click=lambda: context.on_select_carrier(
+                    context.carrier["id"], context.sample_offset
+                ),
+            ).props(
+                'unelevated no-caps icon-right=arrow_forward data-distance-action="select-carrier"'
+            ).classes("w-full text-subtitle1 text-weight-bold q-py-sm").set_enabled(
+                not context.busy
+            )
+            ui.label(t("distance_carried_distance_help")).classes("text-caption text-grey-6")
         sample = context.sample
         if sample:
             if sample["status"] == "skipped":
@@ -79,10 +93,6 @@ def render_sample_controls(context: SampleControlsContext) -> None:
                 ui.label(t("distance_saved_annotation", meters=sample["distance_m"])).classes(
                     "text-positive"
                 )
-                if sample["carried_by_individual_id"] and context.carrier:
-                    ui.label(
-                        t("distance_carried_by", number=context.carrier["individual_number"])
-                    ).classes("text-caption")
         values = context.values
         ui.select(
             context.behavior_options,
@@ -117,6 +127,8 @@ def render_sample_controls(context: SampleControlsContext) -> None:
         infant.bind_visibility_from(carries, "value")
         if context.individual["age"] == "Infant":
             carries.set_enabled(False)
+        if context.carrier:
+            return
         frame = _selected_frame(context)
         skip_reason = _selected_skip(context)
         if skip_reason:
@@ -138,7 +150,7 @@ def render_sample_actions(context: SampleControlsContext) -> None:
     if not context.review_active or not context.individual or context.sample_offset is None:
         return
     frame = _selected_frame(context)
-    valid_choice = bool(frame or _selected_skip(context))
+    valid_choice = bool(context.carrier or frame or _selected_skip(context))
     with ui.column().classes("distance-actions"):
         with (
             ui.button(on_click=context.on_confirm, color="warning")
@@ -155,7 +167,12 @@ def render_sample_actions(context: SampleControlsContext) -> None:
                 icon="playlist_add_check",
                 on_click=context.on_apply_to_end,
             ).props('outline dense data-distance-action="apply-to-end"').set_enabled(
-                bool(context.remaining_offsets and valid_choice and not context.busy)
+                bool(
+                    context.remaining_offsets
+                    and valid_choice
+                    and not context.busy
+                    and not context.carrier
+                )
             )
         with ui.row().classes("w-full items-center justify-between gap-xs"):
             if context.individual["review_status"] == "completed":

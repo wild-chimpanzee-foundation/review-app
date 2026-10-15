@@ -22,6 +22,7 @@ class ReferenceViewsContext:
     skip_choices: tuple[dict, ...]
     busy: bool
     busy_state: object
+    distance_locked: bool
     reference_player: object | None
     render_player: Callable[[dict, float, object], object]
     reference_name: Callable[[dict], str]
@@ -155,14 +156,21 @@ def render_frames(context: ReferenceViewsContext) -> None:
         ).tooltip(t("distance_decrease")).bind_enabled_from(
             context.busy_state,
             "busy",
-            backward=lambda busy: bool(choices and position > 0 and not busy),
+            backward=lambda busy: bool(
+                choices and position > 0 and not busy and not context.distance_locked
+            ),
         )
         ui.button(icon="keyboard_arrow_up", on_click=lambda: context.move_distance(1)).props(
             'flat round dense data-distance-action="distance-up"'
         ).tooltip(t("distance_increase")).bind_enabled_from(
             context.busy_state,
             "busy",
-            backward=lambda busy: bool(choices and position < len(choices) - 1 and not busy),
+            backward=lambda busy: bool(
+                choices
+                and position < len(choices) - 1
+                and not busy
+                and not context.distance_locked
+            ),
         )
         ui.label(t("distance_arrow_help")).classes("text-caption text-grey-6")
     with ui.row().classes("distance-frames"):
@@ -172,7 +180,11 @@ def render_frames(context: ReferenceViewsContext) -> None:
                 on_click=lambda _e, frame=frame: context.preview_frame(frame),
             ).props(
                 "dense unelevated" if frame["id"] == context.selection_id else "dense outline"
-            ).tooltip(frame_time(frame["offset_ms"]))
+            ).tooltip(frame_time(frame["offset_ms"])).bind_enabled_from(
+                context.busy_state,
+                "busy",
+                backward=lambda busy: not busy and not context.distance_locked,
+            )
     with ui.row().classes("distance-visibility-choices w-full gap-1"):
         for choice in context.skip_choices:
             ui.button(
@@ -181,4 +193,8 @@ def render_frames(context: ReferenceViewsContext) -> None:
                 on_click=lambda _e, choice=choice: context.preview_frame(choice),
             ).props(
                 "dense unelevated" if choice["id"] == context.selection_id else "dense outline"
-            ).bind_enabled_from(context.busy_state, "busy", backward=lambda busy: not busy)
+            ).bind_enabled_from(
+                context.busy_state,
+                "busy",
+                backward=lambda busy: not busy and not context.distance_locked,
+            )

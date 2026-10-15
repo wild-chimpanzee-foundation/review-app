@@ -152,6 +152,9 @@ available; there is no separate bulk-absence or bulk-undo API.
   visibility choices, and behaviors to that same infant, for manual and suffix
   writes. Both individuals must belong to the same video/species; self-carrying,
   nested carrying, and simultaneous different carriers are rejected.
+- Viewing a carried infant shows its carrier and locks distance/visibility choices for
+  that sample; behaviors remain editable. Change carrying on the adult's sample.
+  Independent and unreviewed infant samples retain their distance controls.
 - Untoggling for later samples does not erase earlier carried evidence. Correcting
   a carrier's earlier sample without its infant removes that linked infant sample
   at that offset, making it unreviewed. Independent infant evidence elsewhere
