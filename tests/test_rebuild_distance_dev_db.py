@@ -111,7 +111,9 @@ def test_rebuild_preserves_every_ordinary_value_and_resets_distance(original_dat
     assert all(expected.values()), "The fixture should exercise every retained table"
     assert _ordinary_contents(output) == expected
     with closing(sqlite3.connect(output)) as conn:
-        assert conn.execute("SELECT version FROM _schema_version").fetchall() == [(23,)]
+        assert conn.execute("SELECT version FROM _schema_version").fetchall() == [
+            (len(rebuild.MIGRATIONS),)
+        ]
         assert conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         for name in rebuild.DISTANCE_TABLES:

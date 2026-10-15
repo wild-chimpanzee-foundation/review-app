@@ -22,10 +22,11 @@ class AnchorDialogContext:
     frame_rate: float | None
     filters: dict
     species_options: dict[str, str]
+    tag_options: dict[str, str]
     default_species: str | None
     guard: Callable
     is_current: Callable[[ui.dialog], bool]
-    create_individual: Callable[[str, int, dict[str, float]], object]
+    create_individual: Callable[..., object]
     save_anchor: Callable[[dict[str, float]], object]
 
 
@@ -103,6 +104,47 @@ async def open_create_individual_dialog(context: AnchorDialogContext) -> None:
             label=t("species_label"),
             with_input=True,
         ).classes("w-full")
+        with ui.row().classes("w-full no-wrap gap-2"):
+            age = (
+                ui.select(
+                    {
+                        value: t(f"distance_{value.lower()}")
+                        for value in ("Adult", "Adolescent", "Juvenile", "Infant")
+                    },
+                    label=t("distance_age"),
+                    clearable=True,
+                )
+                .classes("flex-1 min-w-0")
+                .props("dense outlined")
+            )
+            sex = (
+                ui.select(
+                    {
+                        value: t(f"distance_{value.lower()}")
+                        for value in ("Male", "Female", "Unknown")
+                    },
+                    label=t("distance_sex"),
+                    clearable=True,
+                )
+                .classes("flex-1 min-w-0")
+                .props("dense outlined")
+            )
+        tags = (
+            ui.select(
+                context.tag_options,
+                value=[],
+                label=t("distance_tags"),
+                multiple=True,
+                with_input=True,
+            )
+            .classes("w-full")
+            .props("dense outlined use-chips")
+        )
+        carries_infant = ui.checkbox(t("distance_carries_infant"))
+        carries_infant.bind_enabled_from(age, "value", backward=lambda value: value != "Infant")
+        age.on_value_change(
+            lambda event: carries_infant.set_value(False) if event.value == "Infant" else None
+        )
         ui.label(t("distance_first_seen_at", time=frame_time(offset_ms)))
         ui.label(t("distance_creation_box_help")).classes("text-caption text-grey-6")
 
@@ -125,7 +167,15 @@ async def open_create_individual_dialog(context: AnchorDialogContext) -> None:
                 return
             create_button.set_enabled(False)
             try:
-                if await context.create_individual(species.value, offset_ms, anchor):
+                if await context.create_individual(
+                    species.value,
+                    offset_ms,
+                    anchor,
+                    create_infant=carries_infant.value,
+                    age=age.value,
+                    sex=sex.value,
+                    tag_ids=list(tags.value or []),
+                ):
                     dialog.close()
             except (ValueError, IntegrityError) as exc:
                 ui.notify(

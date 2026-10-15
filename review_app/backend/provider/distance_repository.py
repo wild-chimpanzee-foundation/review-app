@@ -157,6 +157,8 @@ class DistanceMixin(ProviderBase):
         sex: str | None = None,
         anchor: dict[str, float] | None = None,
         labeled_by: str | None = None,
+        create_infant: bool = False,
+        tag_ids: list[str] | None = None,
     ) -> dict:
         with self.Session.begin() as session:
             return create_distance_individual(
@@ -169,6 +171,8 @@ class DistanceMixin(ProviderBase):
                 sex=sex,
                 anchor=anchor,
                 labeled_by=labeled_by,
+                create_infant=create_infant,
+                tag_ids=tag_ids,
             )
 
     def list_distance_individuals(self, video_id: str) -> list[dict]:

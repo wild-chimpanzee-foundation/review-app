@@ -1,4 +1,4 @@
-"""Rebuild a private v29 development DB as v23, preserving ordinary Review exactly.
+"""Rebuild a private v29 development DB as v24, preserving ordinary Review exactly.
 
 Stop the app and back up the source first. This command never installs the result
 or changes the source. Run from the repository root:
@@ -25,7 +25,7 @@ from review_app.backend.db.models import Base
 from sqlalchemy import create_engine
 
 SOURCE_VERSION = 29
-TARGET_VERSION = 23
+TARGET_VERSION = 24
 DISTANCE_TABLES = frozenset(
     {
         "reference_videos",
@@ -54,7 +54,7 @@ def _check_integrity(conn: sqlite3.Connection) -> None:
 def _validate_source(conn: sqlite3.Connection) -> None:
     # This is intentionally a one-off converter, not a second migration framework.
     if len(MIGRATIONS) != TARGET_VERSION:
-        raise ValueError("This converter requires the consolidated v23 application")
+        raise ValueError(f"This converter requires the v{TARGET_VERSION} application")
     tables = {
         name
         for (name,) in conn.execute(
@@ -176,7 +176,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path, help="Original v29 backup")
     parser.add_argument(
-        "--output", required=True, type=Path, help="New v23 database (must not exist)"
+        "--output", required=True, type=Path, help="New v24 database (must not exist)"
     )
     parser.add_argument("--execute", action="store_true", help="Create output; default is dry run")
     args = parser.parse_args()

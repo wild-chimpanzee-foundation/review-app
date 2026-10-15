@@ -838,8 +838,15 @@ async def test_video_navigation_allows_any_review_status(distance_page, review, 
 @pytest.mark.parametrize("verified", [False, True])
 @pytest.mark.parametrize("selected_offset", [1000, 5000, 9000])
 @pytest.mark.parametrize("frame_delta", [0, 40])
+@pytest.mark.parametrize("create_infant", [False, True])
 async def test_creating_individual_preserves_playback_and_skips_prior_samples(
-    distance_page, distance_data, monkeypatch, verified, selected_offset, frame_delta
+    distance_page,
+    distance_data,
+    monkeypatch,
+    verified,
+    selected_offset,
+    frame_delta,
+    create_infant,
 ):
     page, data = distance_page, distance_data
     page.dp = data["dp"]
@@ -881,9 +888,17 @@ async def test_creating_individual_preserves_playback_and_skips_prior_samples(
         data["species_id"],
         first_seen_offset,
         {"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4},
+        create_infant=create_infant,
     )
     assert not page.busy
     assert page.individual_id != old_id
+    assert page.sample_values["carries"] == create_infant
+    if create_infant:
+        infant = next(
+            row for row in page.individuals if row["id"] == page.sample_values["infant_id"]
+        )
+        assert infant["age"] == "Infant"
+        assert infant["first_seen_offset_ms"] == first_seen_offset
     assert (
         page.dp.get_distance_review_state(data["videos"][0], "alice")["active_individual_id"]
         == page.individual_id

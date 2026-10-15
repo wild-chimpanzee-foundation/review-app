@@ -313,6 +313,10 @@ class DistanceIndividual(Base):
     age: Mapped[str | None] = mapped_column(String)
     sex: Mapped[str | None] = mapped_column(String)
     first_seen_offset_ms: Mapped[int] = mapped_column(Integer)
+    # Creation-time default only; actual carrying remains sample-specific.
+    initial_carrier_individual_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("distance_individuals.id", ondelete="SET NULL")
+    )
     anchor_x: Mapped[float | None] = mapped_column(Float)
     anchor_y: Mapped[float | None] = mapped_column(Float)
     anchor_width: Mapped[float | None] = mapped_column(Float)

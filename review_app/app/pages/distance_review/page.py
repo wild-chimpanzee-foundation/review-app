@@ -210,7 +210,7 @@ class DistanceReviewPage:
         self.render_tracks.refresh()
 
     def reset_sample_values(self) -> None:
-        """Populate the current form from saved evidence, never from navigation history."""
+        """Restore evidence, falling back to the persisted creation-time carrying choice."""
         source = self.sample or self.reference_sample
         children = [
             row
@@ -219,10 +219,24 @@ class DistanceReviewPage:
             and row.get("carried_by_individual_id") == self.individual_id
             and row["offset_ms"] == source["offset_ms"]
         ]
+        infant_id = children[0]["individual_id"] if children else "_new"
+        if infant_id == "_new" and self.individual and self.sample_offset is not None:
+            infant_id = next(
+                (
+                    row["id"]
+                    for row in self.individuals
+                    if row.get("initial_carrier_individual_id") == self.individual_id
+                    and row["first_seen_offset_ms"] <= self.sample_offset
+                    # Prior automatic absence must not erase the creation choice.
+                    # Any saved carrier choice at/after creation takes precedence.
+                    and (source is None or source["offset_ms"] < row["first_seen_offset_ms"])
+                ),
+                "_new",
+            )
         self.sample_values = {
             "behavior_ids": list(source.get("behavior_ids", [])) if source else [],
-            "carries": bool(children),
-            "infant_id": children[0]["individual_id"] if children else "_new",
+            "carries": infant_id != "_new",
+            "infant_id": infant_id,
         }
         if self.sample_values["infant_id"] != "_new" and not any(
             row["id"] == self.sample_values["infant_id"]
@@ -990,7 +1004,16 @@ class DistanceReviewPage:
 
     @stable_client
     async def create_individual(
-        self, video_id: str, species_id: str, offset_ms: int, anchor: dict[str, float]
+        self,
+        video_id: str,
+        species_id: str,
+        offset_ms: int,
+        anchor: dict[str, float],
+        *,
+        create_infant: bool = False,
+        age: str | None = None,
+        sex: str | None = None,
+        tag_ids: list[str] | None = None,
     ) -> bool:
         if self.busy or not self.video or self.video["video_id"] != video_id:
             return False
@@ -1003,9 +1026,15 @@ class DistanceReviewPage:
                 offset_ms,
                 anchor=anchor,
                 labeled_by=get_annotator_name(),
+                create_infant=create_infant,
+                age=age,
+                sex=sex,
+                tag_ids=tag_ids,
             )
             await self.reload_individuals()
             await self.activate_individual(row["id"], first_seen_offset_ms=offset_ms)
+            if create_infant:
+                self.sample_values.update(carries=True, infant_id=row["infant_id"])
             return True
         finally:
             self.busy = False
@@ -1052,6 +1081,7 @@ class DistanceReviewPage:
                 filters=filters,
                 species_options=self.species_options,
                 default_species=None,
+                tag_options=self.tag_options,
                 guard=self.client_handler,
                 is_current=lambda dialog: bool(
                     self._anchor_dialog_is_current(dialog, video_id)
@@ -1060,7 +1090,7 @@ class DistanceReviewPage:
                         for item in self.individuals
                     )
                 ),
-                create_individual=lambda _species, _offset, _anchor: False,
+                create_individual=lambda *_args, **_kwargs: False,
                 save_anchor=save_anchor,
             )
         )
@@ -1089,10 +1119,11 @@ class DistanceReviewPage:
                 filters=filters,
                 species_options=self.species_options,
                 default_species=self.default_species(),
+                tag_options=self.tag_options,
                 guard=self.client_handler,
                 is_current=lambda dialog: self._anchor_dialog_is_current(dialog, video_id),
-                create_individual=lambda species_id, first_seen, anchor: self.create_individual(
-                    video_id, species_id, first_seen, anchor
+                create_individual=lambda species_id, first_seen, anchor, **choices: (
+                    self.create_individual(video_id, species_id, first_seen, anchor, **choices)
                 ),
                 save_anchor=lambda _anchor: False,
             )
@@ -1510,8 +1541,8 @@ class DistanceReviewPage:
     async def restore_sample(self, *, seek: bool = True) -> None:
         if seek:
             self.seek_sample()
-        # Saved evidence is the only source of per-frame choices. Navigation
-        # discards unconfirmed edits; new stops inherit preceding saved evidence.
+        # Navigation discards unconfirmed edits. Restore saved evidence or the
+        # initial carrying default; new stops inherit preceding saved evidence.
         reference_sample = self.reference_sample
         self.selected_frame_id = None
         self.reset_sample_values()

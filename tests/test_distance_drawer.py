@@ -241,8 +241,9 @@ async def wait_for_saved_timing_disabled(page):
 
 @pytest.mark.parametrize("dialog_kind", ["creation", "redraw"])
 @pytest.mark.parametrize("finish", ["cancel", "save"])
+@pytest.mark.parametrize("create_infant", [False, True])
 async def test_fixed_frame_anchor_dialog_setup_guards_and_actions(
-    user: User, drawer_page, monkeypatch, dialog_kind, finish
+    user: User, drawer_page, monkeypatch, dialog_kind, finish, create_infant
 ):
     holder, data, _ = drawer_page
     await user.open("/distance-drawer-test")
@@ -261,6 +262,7 @@ async def test_fixed_frame_anchor_dialog_setup_guards_and_actions(
     page.reload_individuals = AsyncMock()
     page.refresh_sample_ui = Mock()
     page.create_individual = AsyncMock(return_value=True)
+    page.tag_options = {"test-tag": "Identified"}
     filters = {"brightness": 1.4, "contrast": 0.7}
     monkeypatch.setattr(page_module, "capture_offset", AsyncMock(return_value=offset_ms))
     monkeypatch.setattr(page_module, "image_filters", AsyncMock(return_value=filters))
@@ -284,9 +286,17 @@ async def test_fixed_frame_anchor_dialog_setup_guards_and_actions(
     else:
         await page.add_individual_dialog()
         action_label = "Create individual"
+        await user.should_see("Carries an infant")
+        if create_infant:
+            user.find("Carries an infant").click()
     dialog = next(
         element for element in page.client.elements.values() if isinstance(element, ui.dialog)
     )
+    if dialog_kind == "creation" and create_infant:
+        values = {"Age": "Adult", "Sex": "Female", "Individual tags": ["test-tag"]}
+        for element in dialog.descendants():
+            if isinstance(element, ui.select) and element.props.get("label") in values:
+                element.set_value(values[element.props["label"]])
     render.assert_called_once()
     assert render.call_args.args[:2] == ("/main-video", 10)
     assert render.call_args.kwargs == {
@@ -350,7 +360,14 @@ async def test_fixed_frame_anchor_dialog_setup_guards_and_actions(
         page.create_individual.assert_not_awaited()
     elif dialog_kind == "creation":
         page.create_individual.assert_awaited_once_with(
-            video_id, data["species_id"], offset_ms, geometry
+            video_id,
+            data["species_id"],
+            offset_ms,
+            geometry,
+            create_infant=create_infant,
+            age="Adult" if create_infant else None,
+            sex="Female" if create_infant else None,
+            tag_ids=["test-tag"] if create_infant else [],
         )
     else:
         saved = next(item for item in after if item["id"] == individual_id)
@@ -358,6 +375,47 @@ async def test_fixed_frame_anchor_dialog_setup_guards_and_actions(
         assert (saved["anchor_x"], saved["anchor_y"]) == (geometry["x"], geometry["y"])
     assert page.animal_player is main_player and page.sample_offset == 3000
     assert page.sample_values == sample_values
+
+
+async def test_creation_carrying_survives_restore_and_reload_until_saved_choice(
+    user: User, drawer_page
+):
+    holder, data, _ = drawer_page
+    dp, video_id = data["dp"], data["videos"][0]
+    dp.verify_distance_recording_time(video_id, datetime(2026, 10, 12, 16, 2, 49), "alice")
+    carrier = dp.create_distance_individual(
+        video_id, data["species_id"], 3040, anchor=data["anchor"], create_infant=True
+    )
+    await user.open("/distance-drawer-test")
+    page = holder["page"]
+    page.individual_id = carrier["id"]
+    await page.reload_individuals()
+    await page.reload_review()
+    page.sample_offset = 5000
+    await page.restore_sample(seek=False)
+    assert page.sample_values["infant_id"] == carrier["infant_id"]
+    assert page.sample_values["carries"]
+    del page.render_samples
+    with user:
+        page.render_samples()
+    checkbox = next(
+        element
+        for element in user.find("Carries an infant").elements
+        if isinstance(element, ui.checkbox)
+    )
+    assert checkbox.value
+
+    # Earlier automatic absence is not carrying; an explicit later choice wins.
+    page.sample_offset = 3000
+    await page.restore_sample(seek=False)
+    assert not page.sample_values["carries"]
+    dp.save_distance_sample(
+        carrier["id"], 5000, reference_frame_id=data["frame"]["id"], labeled_by="alice"
+    )
+    await page.reload_individuals()
+    page.sample_offset = 7000
+    await page.restore_sample(seek=False)
+    assert not page.sample_values["carries"]
 
 
 async def test_redraw_dialog_save_and_cancel_preserve_identity_player_and_current_form(

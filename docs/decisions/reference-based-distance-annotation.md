@@ -137,6 +137,14 @@ available; there is no separate bulk-absence or bulk-undo API.
   adjacent unrelated frames. Tracking across later frames remains manual.
 - A newly carried infant inherits its parent's identifying frame **and box**,
   defaults to `Infant`/`Unknown`, and keeps its own UUID after becoming independent.
+  The creation dialog's **Carries an infant** checkbox creates both identities
+  atomically, without distance evidence, and preselects that infant for the
+  carrier's first sample.
+  The infant stores its initial carrier so that this default survives reloads and
+  form restoration. It applies from creation until saved carrier evidence takes
+  precedence; it is not a permanent carrying assignment for every sample.
+  Age, sex, and eligible individual tags are optional creation fields and apply
+  only to the carrier, not the automatically created infant.
   Scheduled samples strictly before infant **creation** are absent; this cutoff
   is not the inherited first-seen offset. Do not clone the parent's whole timeline
   or prefill later absence.

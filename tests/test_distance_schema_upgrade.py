@@ -62,7 +62,9 @@ def test_upgrade_preserves_ordinary_records_and_adds_final_schema(
         for table, rows in before.items():
             assert conn.exec_driver_sql(f'SELECT * FROM "{table}"').all() == rows
         assert conn.exec_driver_sql("SELECT individual_eligible FROM tags").scalar() == 1
-        assert conn.exec_driver_sql("SELECT version FROM _schema_version").scalar() == 23
+        assert conn.exec_driver_sql("SELECT version FROM _schema_version").scalar() == len(
+            migrations.MIGRATIONS
+        )
         assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
 
 

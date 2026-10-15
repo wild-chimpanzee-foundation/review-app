@@ -625,6 +625,16 @@ def _migration_v23(conn) -> None:
     )
 
 
+def _migration_v24(conn) -> None:
+    """Persist carrying selected at identity creation, before any distance sample."""
+    _add_column_if_missing(
+        conn,
+        "distance_individuals",
+        "initial_carrier_individual_id",
+        "VARCHAR REFERENCES distance_individuals(id) ON DELETE SET NULL",
+    )
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -765,6 +775,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     ),
     (22, _migration_v22),
     (23, _migration_v23),
+    (24, _migration_v24),
 ]
 
 # Frozen upgrade DDL. Keep independent of evolving ORM metadata.

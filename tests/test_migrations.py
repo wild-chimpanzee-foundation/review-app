@@ -84,7 +84,7 @@ def test_newer_database_is_rejected_without_mutation(tmp_db, entry_point):
         conn.exec_driver_sql("INSERT INTO private_evidence VALUES ('keep me')")
     before = path.read_bytes()
     try:
-        with pytest.raises(ValueError, match="schema v29 is newer.*v23"):
+        with pytest.raises(ValueError, match=rf"schema v29 is newer.*v{len(MIGRATIONS)}"):
             if entry_point == "runner":
                 run_migrations(engine)
             else:

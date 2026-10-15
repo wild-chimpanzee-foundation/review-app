@@ -82,8 +82,12 @@ def create_distance_individual(
     sex: str | None = None,
     anchor: dict[str, float] | None = None,
     labeled_by: str | None = None,
+    create_infant: bool = False,
+    tag_ids: list[str] | None = None,
 ) -> dict:
     _attributes(age, sex)
+    if create_infant and age == "Infant":
+        raise ValueError("A carried infant cannot also carry an infant")
     if anchor is None:
         raise ValueError("A bounding box is required to create a distance individual")
     geometry = _anchor_fields(anchor)
@@ -136,7 +140,33 @@ def create_distance_individual(
         session.flush()
         refresh_individual_completion(session, row)
         review.completed_by = review.completed_at = None
-    return _record(row)
+    if tag_ids:
+        set_distance_individual_attributes(
+            session,
+            utcnow,
+            row.id,
+            age=age,
+            sex=sex,
+            tag_ids=tag_ids,
+            labeled_by=labeled_by,
+        )
+    result = _record(row)
+    if create_infant:
+        infant = create_distance_individual(
+            session,
+            utcnow,
+            video_id,
+            species_id,
+            first_seen_offset_ms,
+            age="Infant",
+            sex="Unknown",
+            anchor=anchor,
+            labeled_by=labeled_by,
+        )
+        result["infant_id"] = infant["id"]
+        session.get(DistanceIndividual, infant["id"]).initial_carrier_individual_id = row.id
+        session.flush()
+    return result
 
 
 def delete_distance_individual(session, individual_id: str) -> None:
@@ -160,6 +190,12 @@ def delete_distance_individual(session, individual_id: str) -> None:
         for linked_id in (sample.individual_id, sample.carried_by_individual_id)
         if linked_id and linked_id != individual_id
     }
+    linked_ids.update(
+        child.id
+        for child in session.query(DistanceIndividual).filter_by(
+            initial_carrier_individual_id=individual_id
+        )
+    )
     for sample in linked_samples:
         session.delete(sample)
     session.flush()
@@ -185,18 +221,18 @@ def set_distance_individual_attributes(
     row = session.get(DistanceIndividual, individual_id)
     if row is None:
         raise ValueError("Distance individual not found")
-    if (
-        age != "Infant"
-        and session.query(DistanceSample.id)
+    if age != "Infant" and (
+        row.initial_carrier_individual_id
+        or session.query(DistanceSample.id)
         .filter_by(individual_id=individual_id)
         .filter(DistanceSample.carried_by_individual_id.is_not(None))
         .first()
     ):
         raise ValueError("An individual with carried samples must retain age Infant")
-    if (
-        age == "Infant"
-        and session.query(DistanceSample.id)
-        .filter_by(carried_by_individual_id=individual_id)
+    if age == "Infant" and (
+        session.query(DistanceSample.id).filter_by(carried_by_individual_id=individual_id).first()
+        or session.query(DistanceIndividual.id)
+        .filter_by(initial_carrier_individual_id=individual_id)
         .first()
     ):
         raise ValueError("An individual carrying an infant cannot have age Infant")
@@ -226,6 +262,10 @@ def set_distance_individual_attributes(
             for item in session.query(DistanceIndividual).filter_by(video_id=row.video_id)
         }
         links: dict[str, set[str]] = {}
+        for child in individuals.values():
+            if child.initial_carrier_individual_id:
+                links.setdefault(child.id, set()).add(child.initial_carrier_individual_id)
+                links.setdefault(child.initial_carrier_individual_id, set()).add(child.id)
         for child, parent in (
             session.query(DistanceSample.individual_id, DistanceSample.carried_by_individual_id)
             .filter(DistanceSample.individual_id.in_(individuals))
