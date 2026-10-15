@@ -556,12 +556,26 @@ def test_deleting_custom_tag_cascades_distance_tag_association_only(distance_dat
     tag_id = next(tag["id"] for tag in dp.get_all_tags() if tag["key"] == key)
     dp.set_distance_individual_attributes(individual_id, age=None, sex=None, tag_ids=[tag_id])
 
+    dp.verify_distance_recording_time(data["videos"][0], datetime(2026, 1, 1, 0, 0, 0), "alice")
+    for offset in dp.get_distance_review_state(data["videos"][0], "alice")["offsets"]:
+        dp.save_distance_sample(
+            individual_id, offset, skip_reason="individual absent", labeled_by="alice"
+        )
+    dp.finish_distance_video(data["videos"][0], "alice")
+
     dp.delete_custom_tag(key)
 
     assert dp.list_distance_individuals(data["videos"][0])[0]["id"] == individual_id
     assert dp.list_distance_individuals(data["videos"][0])[0]["tag_ids"] == []
     with dp.engine.connect() as conn:
         assert conn.execute(text("PRAGMA foreign_key_check")).fetchall() == []
+        assert (
+            conn.execute(
+                text("SELECT completed_at FROM distance_video_reviews WHERE video_id = :video_id"),
+                {"video_id": data["videos"][0]},
+            ).scalar_one()
+            is None
+        )
         assert (
             conn.execute(
                 text("SELECT COUNT(*) FROM distance_individual_tags WHERE tag_id = :tag_id"),
@@ -574,8 +588,6 @@ def test_deleting_custom_tag_cascades_distance_tag_association_only(distance_dat
 def test_individual_attributes_and_tags_are_atomic_and_preserve_tag_metadata(distance_data):
     data = distance_data
     dp, individual_id = data["dp"], data["individual"]["id"]
-    dp.create_custom_tag("Injured")
-    dp.set_tag_individual_eligibility("injured", True)
     with dp.engine.connect() as conn:
         tag_id = conn.execute(text("SELECT id FROM tags WHERE key='injured'")).scalar()
     dp.set_distance_individual_attributes(
@@ -961,8 +973,6 @@ def test_deleting_individual_cleans_links_and_reopens_reviews(distance_data, del
     other = dp.create_distance_individual(
         data["videos"][1], data["species_id"], 0, anchor=data["anchor"]
     )
-    dp.create_custom_tag("Injured")
-    dp.set_tag_individual_eligibility("injured", True)
     with dp.engine.connect() as conn:
         tag_id = conn.execute(text("SELECT id FROM tags WHERE key='injured'")).scalar()
     dp.set_distance_individual_attributes(
@@ -1066,8 +1076,6 @@ def test_current_schema_startup_preserves_individuals_and_all_linked_data(distan
         labeled_by="alice",
     )
     dp.set_distance_active_individual(video_id, "alice", individual_id)
-    dp.create_custom_tag("Injured")
-    dp.set_tag_individual_eligibility("injured", True)
     with dp.engine.connect() as conn:
         tag_id = conn.execute(text("SELECT id FROM tags WHERE key='injured'")).scalar()
     dp.set_distance_individual_attributes(

@@ -49,6 +49,27 @@ def test_legacy_tag_csv_preserves_existing_eligibility_and_defaults_new_tags_fal
     assert tags["legacy_video_tag"]["individual_eligible"] is False
 
 
+def test_fresh_database_seeds_animal_tags_but_excludes_import_metadata_tags(tmp_db):
+    dp = LocalDataProvider()
+    tags = {tag["key"]: tag for tag in dp.get_all_tags()}
+    assert tags["injured"]["individual_eligible"] is True
+    assert tags["disease"]["individual_eligible"] is True
+    assert tags["reference_video"]["individual_eligible"] is False
+
+    for key, name in (("comments", "Comments"), ("import_tags", "Import tags")):
+        dp.create_custom_tag(name)
+        with dp.engine.begin() as conn:
+            conn.execute(
+                text("UPDATE tags SET individual_eligible = 1 WHERE key = :key"), {"key": key}
+            )
+
+    # Startup repair handles existing databases as well as fresh installs.
+    dp._ensure_reference_video_tag()
+    tags = {tag["key"]: tag for tag in dp.get_all_tags()}
+    assert tags["comments"]["individual_eligible"] is False
+    assert tags["import_tags"]["individual_eligible"] is False
+
+
 def test_tag_csv_rejects_malformed_individual_eligibility_and_keeps_builtin(tmp_db):
     dp = LocalDataProvider()
     key = dp.create_custom_tag("Eligible tag")

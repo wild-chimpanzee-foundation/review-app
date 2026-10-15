@@ -17,20 +17,40 @@ class TagMixin(ProviderBase):
     """Tag management. Requires self.engine."""
 
     def _ensure_reference_video_tag(self) -> None:
-        """Fresh databases skip data migrations; ensure the existing built-in is available."""
+        """Ensure built-ins and individual-tag eligibility on fresh and upgraded databases."""
         with self.engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT OR IGNORE INTO tags (id, key, name_en, name_fr, color, icon, is_custom) "
-                    "VALUES (:id, 'reference_video', 'Reference Video', 'Vidéo de référence', "
-                    "'indigo', 'bookmark', 0)"
-                ),
-                {"id": str(uuid.uuid4())},
-            )
+            for key, name_en, name_fr, color, icon in (
+                ("reference_video", "Reference Video", "Vidéo de référence", "indigo", "bookmark"),
+                ("injured", "Injured", "Animal blessé", "red", "healing"),
+                ("disease", "Disease", "Animal malade", "deep-orange", "sick"),
+            ):
+                conn.execute(
+                    text(
+                        "INSERT OR IGNORE INTO tags "
+                        "(id, key, name_en, name_fr, color, icon, is_custom) "
+                        "VALUES (:id, :key, :name_en, :name_fr, :color, :icon, 0)"
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "key": key,
+                        "name_en": name_en,
+                        "name_fr": name_fr,
+                        "color": color,
+                        "icon": icon,
+                    },
+                )
             conn.execute(
                 text(
                     "UPDATE tags SET individual_eligible = 1 "
                     "WHERE is_custom = 0 AND key IN ('injured', 'disease')"
+                )
+            )
+            # These legacy custom tags describe video/import metadata, not animals.
+            # Older databases used to make every existing custom tag eligible.
+            conn.execute(
+                text(
+                    "UPDATE tags SET individual_eligible = 0 "
+                    "WHERE lower(trim(key)) IN ('comments', 'import_tags')"
                 )
             )
 
@@ -365,6 +385,18 @@ class TagMixin(ProviderBase):
             ).fetchone()
             if tag_row is None:
                 return
+            # Removing an individual attribute is a Distance review edit. Reopen
+            # explicit video completion in the same transaction as the deletion.
+            conn.execute(
+                text(
+                    "UPDATE distance_video_reviews SET completed_by = NULL, completed_at = NULL "
+                    "WHERE video_id IN ("
+                    "SELECT di.video_id FROM distance_individual_tags dit "
+                    "JOIN distance_individuals di ON di.id = dit.individual_id "
+                    "WHERE dit.tag_id = :tid)"
+                ),
+                {"tid": tag_row[0]},
+            )
             conn.execute(text("DELETE FROM video_tags WHERE tag_id = :tid"), {"tid": tag_row[0]})
             conn.execute(text("DELETE FROM tags WHERE id = :tid"), {"tid": tag_row[0]})
         logger.info("Deleted custom tag: key=%s", key)

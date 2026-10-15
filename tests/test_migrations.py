@@ -106,7 +106,8 @@ def test_individual_tag_eligibility_migration_and_fresh_schema(tmp_path):
             text(
                 "INSERT INTO tags (id, key, is_custom) VALUES "
                 "('injury', 'injured', 0), ('disease', 'disease', 0), "
-                "('ref', 'reference_video', 0), ('old-custom', 'old_custom', 1)"
+                "('ref', 'reference_video', 0), ('old-custom', 'old_custom', 1), "
+                "('comments', 'comments', 1), ('imports', 'import_tags', 1)"
             )
         )
         _migration_v23(conn)
@@ -116,6 +117,8 @@ def test_individual_tag_eligibility_migration_and_fresh_schema(tmp_path):
         "disease": 1,
         "reference_video": 0,
         "old_custom": 1,
+        "comments": 0,
+        "import_tags": 0,
     }
     assert "individual_eligible" in {
         column.name for column in Base.metadata.tables["tags"].columns

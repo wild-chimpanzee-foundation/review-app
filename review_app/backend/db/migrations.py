@@ -616,6 +616,13 @@ def _migration_v23(conn) -> None:
             "WHERE is_custom = 1 OR key IN ('injured', 'disease')"
         )
     )
+    # Legacy custom tags describing import/video metadata are not animal attributes.
+    conn.execute(
+        text(
+            "UPDATE tags SET individual_eligible = 0 "
+            "WHERE lower(trim(key)) IN ('comments', 'import_tags')"
+        )
+    )
 
 
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [

@@ -23,8 +23,6 @@ def drawer_page(distance_data, monkeypatch):
     second = dp.create_distance_individual(
         data["videos"][0], data["species_id"], 1000, anchor=data["anchor"]
     )
-    dp.create_custom_tag("Injured")
-    dp.set_tag_individual_eligibility("injured", True)
     tags = dp.get_all_tags()
     holder = {}
     monkeypatch.setattr(
