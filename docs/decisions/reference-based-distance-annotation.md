@@ -1,310 +1,298 @@
 # Reference-Based Distance Annotation
 
-**Status:** Current approach. As of 2026-10-12, this workflow replaces the
-[depth-estimation proposal](./distance-annotation.md) for now.
+**Status:** Implemented workflow at `/distance-review`. This is the authoritative
+workflow/design document; it replaces the earlier
+[depth-estimation proposal](./distance-annotation.md). Research export and transfer
+remain deferred. See the [cleanup plan](./distance-branch-cleanup-plan.md) for
+migration consolidation, development-database recovery, and validation status.
 
 ## Approach
 
-Annotators estimate an animal's distance from the camera by selecting the closest
-matching reference frame. Reference frames are preselected frames from videos in
-which a patrol team member holds a sign showing a known distance at the appropriate
-position. A camera may have multiple reference videos.
+Annotators estimate an animal's distance by selecting a prepared reference frame
+showing a patrol team member at a known distance. The chosen frame supplies the
+sample's exact distance in meters, including fractional distances. There is no
+free-form distance-entry field during animal annotation.
 
-Reference videos are assigned by `(project_id, camera_id)`, which uniquely identifies
-a deployment. All animal videos in that deployment share the same reference
-collection.
-
-Selecting a reference frame supplies the distance used to determine the exported
-distance bin. The annotation interaction is frame selection.
+Distance identities, samples, queue, and completion are independent of ordinary
+Review. Ordinary species/count annotations provide context and omission warnings;
+they do not create or synchronize Distance observations automatically.
 
 ![Distance annotation mockup](./images/distance-mockup.jpg)
 
-## Confirmed Decisions
-
-- Annotators select a reference frame to assign distance.
-- Sampling uses every even second of the camera's recorded timestamp, rather than
-  every two seconds from the start of playback.
-- Each individual, including an infant, has a persistent ID within the video.
-  An infant keeps its ID when it leaves its mother and is annotated separately.
-- Skipped samples are stored internally as reviewed, with a reason, and omitted
-  from the exported dataset. They remain distinguishable from unreviewed samples.
-- Distance individuals and samples are separate from `individual_observations`.
-  Distance annotation is performed for selected species, rather than every species
-  covered by ordinary review.
-- The existing `(project_id, camera_id)` identifies a deployment. Reference videos
-  are assigned using that pair; no separate deployment table is required.
-- Each annotated sample stores its selected reference frame, preserving which
-  reference video was used to confirm the distance.
-- Age, sex, and tags belong to the distance individual. Behavior belongs to the
-  sample. Tags are included; examples include injured and skin disease.
-- Each distance individual records `first_seen_offset_ms` and may have a point or
-  bounding box identifying the animal on that frame.
-
 ## Annotation Workflow
 
-1. Select the individual to follow through the video.
-2. Pause at the first eligible sample: the opening frame if its recorded second
-   is even, or the next even second otherwise.
-3. Compare the animal frame with the reference frames and select the closest match.
-4. Set or update the individual's age, sex, and tags; record behavior for the sample
-   and confirm the distance.
-5. Play from the annotated sample and pause at the next even second. Repeat until
-   the individual has been reviewed throughout the video.
-6. Adding a new individual assigns an incremental ID and restarts the video from
-   the beginning. Complete all individuals before moving to the next video.
+1. Tag imported reference clips **Reference Video** in ordinary Review. Open
+   **Distance** and prepare their known-distance frames for the deployment.
+2. Align the animal video's camera clock using the visible timestamp, not file
+   metadata. Confirm the displayed even-second transition frame and its camera
+   timestamp in the independent clock dialog.
+3. Add an individual on its identifying first-seen frame. Choose species and draw
+   a bounding box. Earlier scheduled samples are saved as **Absent**; samples at
+   or after first sighting remain unreviewed. Creation retains the identifying
+   frame while selecting the first scheduled sample at/after it, or the final
+   sample when first sighting is later than the last stop.
+4. At each scheduled sample, select a prepared reference, **Not visible**, or
+   **Absent**; set sample behaviors and any carried infant, then confirm.
+5. Saving plays the consecutive interval and pauses at the next scheduled sample,
+   even if that sample was already reviewed. Confirming/skipping the final sample
+   retains it and shows **End of video**; it never switches individuals, returns
+   to earlier gaps, or finishes/advances the video automatically.
+6. Review other individuals manually. Full sample coverage completes each
+   individual automatically. Use **Finish video** explicitly after all animals
+   have been added and all individuals are complete.
 
-For example, a video beginning at `16:02:49` is first sampled at `16:02:50`, one
-second into playback. A video beginning at `16:02:48` is sampled at its opening
-frame, then at `16:02:50`, `16:02:52`, and so on.
+Selecting a reference is only a draft choice, not a write. Existing samples remain
+editable; a missing sample row means unreviewed, not absent.
 
-Annotators can play, seek backward, or seek forward to inspect the animal between
-samples. Returning to reference selection restores the animal video to the sample
-currently being annotated.
+### Camera clock and sampling
 
-### Reference Browsing
+- Sample every even second of the camera's timestamp, not every two playback
+  seconds. A clip starting at `16:02:49` samples at camera `16:02:50`, `:52`, `:54`.
+- Select the first frame showing an odd-to-even transition and enter that even
+  whole-second camera time. Confirmation pauses/captures the displayed frame;
+  there is no additional frame-selection/verification action.
+- Mark whether the opening still already shows an even second. If so, that still
+  is also required, and alignment normally uses the next odd-to-even transition.
+  A short clip ending before a transition may use its even opening still.
+- Alignment is shared across individuals/annotators and locked after any sample
+  is saved. `videos.created_at` is only a suggested time. Store the verified
+  camera wall clock without timezone conversion, separately from file metadata.
+- Preserve precise playback anchors independently of integer-millisecond sample
+  identities. For example, a `16:02:50` anchor at playback `0.920 s` schedules the
+  next camera sample at `2.920 s`, not `3.000 s`.
+- Estimate the first frame at/after a sample boundary from reported FPS and anchor
+  phase. Probe metadata once per file with a two-second timeout; do not scan all
+  frames while loading. Without FPS, use a 40 ms margin shortened near clip end.
+  The opening sample remains the opening still.
+- Direct sample seeks pad ten microseconds inside the estimated frame to avoid
+  its predecessor. Saving verifies the displayed position using frame-based
+  tolerance. Irregular/dropped frames may still show a neighboring frame; stored
+  sample identities and camera timestamps do not change.
 
-- Show a panel containing thumbnails from the beginning of each reference video
-  associated with the animal video's `(project_id, camera_id)`. Support more than
-  ten reference videos.
-- Clicking a video thumbnail enlarges and plays that reference video.
-- Provide keyboard shortcuts to jump through a reference video; the proposed jump
-  interval is five seconds.
-- Allow selection of a preselected reference frame showing a known distance.
+### Navigation, inspection, and drafts
 
-### Individuals and Carried Infants
+- Manual annotation pauses snap to the most recent scheduled sample at/before
+  the pause position. Automatic stops seek the intended next scheduled frame to
+  correct callback delay. Programmatic pause events must not retrigger snapping.
+- Explicit inspection seeks/frame steps remain unsnapped. Clock and fixed-frame
+  box dialogs are exempt. Choosing a reference restores the animal to the
+  selected annotation sample without an explicit **Return to sample** button.
+- Card selection and **J/K** always pause at that individual's first-seen frame,
+  regardless of saved coverage or the previous playback position. The first-seen
+  button selects its own individual and works even when already active.
+- Opening a saved session instead restores the annotator's active individual and
+  next unreviewed sample. Creating an individual keeps its chosen identifying
+  frame. These paths deliberately have different navigation rules.
+- Revisited samples restore their own unsaved draft or saved evidence. New stops
+  can prefill the last confirmed choice, behaviors, and infant selection. Neither
+  navigation nor prefilling writes or overwrites evidence. Individual metadata
+  drafts survive selection changes and saves on other cards.
+- Reference browsing retains sample behaviors, infant choices, visibility choice,
+  brightness/contrast, and the animal player. Reuse the reference player on clip
+  switches; keep its prior image until the next source has loaded and sought.
+  Pages own independent media URLs, released when their client is deleted.
+- **Absent** and **Not visible** dim the reference image, including restored
+  drafts/saved choices. Browsing clips preserves dimming; selecting a distance
+  restores the image without recreating the player or changing image settings.
 
-Annotators create individuals during review and initially identify them by their
-incremental number. Age and sex may remain unset until entered. Record the frame
-where the individual is first seen; optionally click a point or draw a bounding
-box on that frame to distinguish it from other animals. Selecting the individual
-can return to that frame and show its identifying marker.
+### Apply to end
 
-A “carries an infant” checkbox creates two observations for the sample: one for
-the mother and one for the infant, using the same distance. The infant observation
-has age `Infant` and sex `Unknown` by default.
+**Apply to end** repeats the selected distance/reference or visibility choice,
+behaviors, and carried-infant assignment from the current sample through the final
+scheduled sample, inclusively, in one transaction. Confirmation names the choice,
+individual, starting offset, and affected count, and warns that **all existing
+annotations and skips are overwritten**. There is no preserve-only mode.
 
-Assign the infant its own persistent ID and reuse it at subsequent samples.
-When the infant leaves its mother, annotate it separately using that same ID.
-The carried-infant relationship applies to the relevant sample.
+A new infant is created once and reused across the interval. Other individuals
+and earlier samples are unchanged, except for linked infant evidence being
+corrected. Tags remain individual-wide. Success selects/pauses at the final sample
+for the current individual without finishing the video. Cancellation or failure
+retains the previous selection/playback. Ordinary sample corrections remain
+available; there is no separate bulk-absence or bulk-undo API.
 
-### Skipped Samples
+### Individuals and carried infants
 
-Provide a pass button when the selected individual is absent or its midpoint is
-not visible, such as when only an arm is visible. Store the skip against the video,
-individual, and sample timestamp, with the reason `individual absent` or
-`midpoint not visible`.
+- Each individual has a durable UUID and an incremental displayed number within
+  the video. Species, age, sex, and tags belong to the individual; behavior belongs
+  to each sample. Age/sex may remain unset. Allowed ages are `Adult`, `Adolescent`,
+  `Juvenile`, `Infant`; sexes are `Male`, `Female`, `Unknown`.
+- Species defaults, in order, to the active species filter, active individual,
+  then the clip's first reviewed species. The selector remains editable across
+  project vocabulary, with saved species still available outside that vocabulary.
+- Metadata saves immediately. Species corrections retain identity/evidence and
+  update linked carriers/infants together to preserve their same-species rule.
+  Edits reopen explicit video completion; ordinary Review is unaffected.
+- Creating an individual requires a complete normalized box on its first-seen
+  frame. Geometry is relative to original video dimensions, corrected for zoom,
+  pan, and letterboxing, with positive dimensions entirely inside 0–1.
+- Add/redraw dialogs start in box mode on an independent fixed-frame player and
+  inherit brightness/contrast. Zoom, pan, fullscreen, cancellation, and save
+  guards remain available. Redraw changes geometry, not the identifying frame.
+- Show all boxes matching the displayed first-seen frame: selected yellow,
+  inactive gray, with readable numbers even for coincident parent/infant boxes.
+  Outline spacing is display-only; never change saved geometry or show boxes on
+  adjacent unrelated frames. Tracking across later frames remains manual.
+- A newly carried infant inherits its parent's identifying frame **and box**,
+  defaults to `Infant`/`Unknown`, and keeps its own UUID after becoming independent.
+  Scheduled samples strictly before infant **creation** are absent; this cutoff
+  is not the inherited first-seen offset. Do not clone the parent's whole timeline
+  or prefill later absence.
+- While carrying is active, parent assignments atomically copy evidence,
+  visibility choices, and behaviors to that same infant, for manual and suffix
+  writes. Both individuals must belong to the same video/species; self-carrying,
+  nested carrying, and simultaneous different carriers are rejected.
+- Untoggling for later samples does not erase earlier carried evidence. Correcting
+  a carrier's earlier sample without its infant removes that linked infant sample
+  at that offset, making it unreviewed. Independent infant evidence elsewhere
+  survives. Correcting an infant's annotated behaviors keeps its carrier link
+  when its reference still matches; assigning different evidence is independent.
+- Deleting an individual removes its samples. Deleting a carrier also removes
+  infant samples linked to it, not the infant's identity or independent samples.
+  Reconcile affected completion in the same transaction.
 
-A skipped sample counts as reviewed and advances to the next even second. It
-produces no observation row in the exported dataset.
+### Completion and ordinary Review context
+
+Show ordinary Review's species and summed counts without synchronizing records.
+An individual completes automatically once every scheduled sample is annotated or
+explicitly skipped. Persist completion attribution; edits/reprobes reconcile
+coverage and reopen video completion when required. An empty individual list or
+incomplete coverage cannot finish a video.
+
+**Finish video** checks every reviewed species, independent of the Distance
+species filter. Warn if a species has no Distance individual or its reviewed
+count exceeds the number of Distance individuals. These are possible omissions,
+not proof of error. Offer **Return to annotation** or **Ignore and finish**;
+without discrepancies, finish directly. Only successful completion advances to
+the next video in the current queue. Cancellation/failure never advances. At queue
+end, retain the completed video and notify the annotator.
+
+## References and deployment identity
+
+Reference clips are imported videos with the video-level `reference_video` tag.
+They remain in ordinary Review for tagging/conversion and are excluded from the
+Distance animal queue. Missing sources or unresolved project/camera metadata do
+not become selectable references.
+
+Reference matching uses **project + registered import-root ID + camera label**.
+Separate roots both containing `cam_1` are distinct deployments. Prefer the most
+specific registered root for nested imports; root relocation preserves its ID.
+A single-root project may use explicitly assigned external/relative reference
+files. In multi-root projects, unresolved external paths are ambiguous and must
+not match by camera label alone. Apply this scope to both discovery and writes.
+No separate deployment table is needed.
+
+Paired `references/` and `videos/` folders share their deployment's camera label.
+At an imported deployment root, use the root's name; below it, use relative folder
+paths. Legacy folder-derived labels are repaired explicitly during Distance setup
+or **Refresh references**, not as a side effect of queue queries. Repair only old
+inferred labels, preserving explicit assignments, identities, and saved evidence.
+
+Discovery reuses durable reference records by project and normalized path,
+including previously registered files. Removing/reapplying a tag does not recreate
+prepared frames. Untagging hides unused clips, while references used by the
+current video's samples remain visible as saved evidence, labeled no longer
+tagged. Use available playback conversions for clips/thumbnails.
+
+Reference preparation uses an independent dialog player with ±1/5/20-frame
+controls and reported FPS. New clips start at playback zero and 1 m. Open existing
+clips at the latest prepared frame; show saved distances/timestamps and suggest
+the next whole meter, skipping used values. Saving preserves playback and advances
+the suggested meter; failure preserves both playback and entered distance.
+Reference distances must be finite/positive. Store precise playback offsets
+alongside rounded millisecond frame identities; never round saved meter values.
+
+## Desktop UI and shortcuts
+
+- Reuse Review's header and desktop drawers: 300 px filters on the left, 520 px
+  individual/sample controls on the right. Mobile compatibility is deferred.
+- Keep equally sized animal/reference frames, graph, and essential actions
+  visible at 1280×800. Reference clips/distance choices use bounded strips; long
+  individual lists scroll inside the right drawer. Allow hiding/restoring the
+  Distance header without changing ordinary Review.
+- Put camera time and interval replay directly below the animal video, and sample
+  progress in the selected individual's expanded card. Other cards show their
+  first row. Highlight the active identity; metadata/actions stay attached to
+  their own card. Keep **Finish video** prominent.
+- The graph shows all individuals over elapsed time, highlighting the active
+  track in orange. Use gaps for skipped/unreviewed distances, plus labeled status
+  lanes: dotted not-visible, blocked absent, hollow unreviewed. Never imply zero
+  meters for a visibility status.
+- Species, camera, and Distance-completion filters plus selected video ID persist
+  per browser/project, separately from ordinary Review. Clear stale filters and
+  fall back to an available video if the saved selection disappears.
+- **Left/Right:** scheduled samples. **Up/Down:** distance/visibility choices.
+  **Enter:** confirm. **J/K:** next/previous individual with wrapping. **A:** add.
+  **P/N:** previous/next video, respecting completion guards for forward moves.
+  **Tab:** cycle reference clips, retaining visibility or matching/nearest distance.
+- Focused playback supports **Space**, **Shift+Left/Right** five-second inspection,
+  **S/D** speed, **[/]** brightness, **{/}** contrast, **Z** reset zoom, **R** reset
+  filters, **F/Escape** fullscreen. Clock-dialog arrows step frames and Enter
+  confirms. Editable fields retain typing; dialog/busy guards prevent unrelated
+  navigation or writes. Preserve English/French UI and shortcut help.
 
 ## Database Schema
 
-This is the agreed schema direction; database models and migrations have not yet
-been implemented.
+Published migrations 1–22 remain unchanged. Consolidated migration 23 adds the
+final eight Distance tables and `tags.individual_eligible`; fresh installs and
+v22 upgrades enforce the same schema. Private development v23–29 databases use
+an explicit [backup/rebuild procedure](./distance-branch-cleanup-plan.md), not
+automatic compatibility migrations or a manually decremented version stamp.
 
-### Existing Tables
-
-- `videos` already provides `video_id`, `project_id`, and `camera_id`. The pair
-  `(project_id, camera_id)` identifies the deployment and determines available
-  references. It is shared by multiple videos and is not unique on `videos`.
-- `individual_observations` continues to serve ordinary review. Distance
-  individuals do not depend on or link to these rows.
-- Reuse `species`, `behaviors`, `tags`, and annotator metadata. Add separate
-  junction tables for distance behavior and tags; existing `observation_tags`
-  associates ordinary observations with behaviors, and `video_tags` applies to
-  whole videos.
-
-### New Tables
-
-| Table | Main fields | Purpose |
-|---|---|---|
-| `reference_videos` | `id` (UUID), `project_id`, `camera_id`, `video_path` | Reference video files assigned to a deployment. |
-| `reference_frames` | `id` (UUID), `reference_video_id`, `offset_ms`, `distance_m` | Prepared, selectable frames with known distances. |
-| `distance_individuals` | `id` (UUID), `video_id`, `individual_number`, `species_id`, `age`, `sex`, `first_seen_offset_ms`, optional anchor fields, annotation metadata | One animal followed within an animal video; includes infants. |
-| `distance_samples` | `id` (UUID), `individual_id`, `offset_ms`, `status`, `skip_reason`, `reference_frame_id`, `distance_bin`, `carried_by_individual_id`, annotation metadata | One individual's annotated or skipped result at a scheduled timestamp. |
-| `distance_individual_tags` | `individual_id`, `tag_id`, tagging metadata | Tags applying to the distance individual across its samples. |
-| `distance_sample_behaviors` | `sample_id`, `behavior_id` | Behavior labels at a particular sample, using the existing vocabulary. |
-
-Foreign keys link reference videos to projects, reference frames to reference
-videos, distance individuals to animal videos and species, and samples to distance
-individuals and selected reference frames. The tag and behavior junctions reference
-their respective existing vocabulary tables.
-
-The UUID is the durable identity; `individual_number` is the incremental number
-displayed and exported within a video. Annotation metadata includes `labeled_by`,
-`labeled_at`, and `updated_at`; tagging metadata includes `tagged_by` and
-`tagged_at`.
-
-### First-Seen Frame and Individual Anchor
-
-Store the identifying frame and optional geometry on `distance_individuals`:
-
-| Field | Meaning |
+| Table | Purpose and key fields |
 |---|---|
-| `first_seen_offset_ms` | Integer playback offset of the frame where the individual is first seen. |
-| `anchor_x`, `anchor_y` |  bounding box's top-left corner. |
-| `anchor_width`, `anchor_height` | Bounding box dimensions |
+| `reference_videos` | UUID, project, camera label, normalized path; unique project/path. |
+| `reference_frames` | UUID, source reference, integer offset, optional precise playback offset, known meters; unique source/offset. |
+| `distance_individuals` | UUID, video/number, species, age/sex, first-seen offset and optional complete box, attribution and derived completion; unique video/number. |
+| `distance_samples` | UUID, individual/offset, annotated/skipped state, reference and copied distance, skip reason, optional carrier, attribution; unique individual/offset. |
+| `distance_individual_tags` | Individual/tag pair with attribution/time. |
+| `distance_sample_behaviors` | Sample/behavior pair. |
+| `distance_video_reviews` | Verified wall-clock start, integer/precise clock anchor, opening-even flag, verification and explicit completion attribution. |
+| `distance_review_progress` | Active individual per video/annotator, with update time. |
 
-Coordinates are normalized to the original video's width and height, in the range
-0–1, with the origin at the top-left. Undo display zoom/pan and account for any
-letterboxing before storing them. This allows the marker to be displayed at
-different player sizes.
+`individual_observations` remains ordinary Review's independent store. Reuse
+species, behaviors, tags, and annotator vocabulary; retain separate junctions.
+The Injured/Disease built-ins and legacy custom tags become individually eligible
+on v22 upgrade. New custom tags default to video-only and can be enabled in
+Settings. Saved ineligible tags remain visible/removable but cannot be newly
+assigned. Vocabulary CSVs preserve eligibility; legacy CSV imports do not clear it.
 
-The anchor always refers to the frame at `first_seen_offset_ms`, which may occur
-after the opening frame and does not need to be an even-second distance sample.
-Changing that offset requires clearing or replacing the anchor for the new frame.
-The anchor helps annotators identify the individual and return to its first-seen
-frame; following it across later frames remains manual.
+Sample invariants:
 
-Require an offset within the video's duration. For a point, require `x` and `y`
-within 0–1 and null width/height. For a bounding box, require positive width/height
-and the entire box within 0–1. With no anchor, all geometry fields are null.
+- Missing row at a scheduled offset means unreviewed.
+- `annotated` requires a reference and finite positive copied meters, no skip
+  reason. Preserve both reference provenance and its copied value until reconfirmed.
+- `skipped` requires `individual absent` or `midpoint not visible`, no reference
+  or meters, and may retain a carried-infant link. It counts as reviewed, but is
+  not an exported observation.
+- Integer `offset_ms` identifies the scheduled playback offset; recorded camera
+  time is distinct from labeling time. Precise playback positions are not IDs.
+- Foreign keys protect selected reference evidence. Junction pairs are composite
+  primary keys. Box geometry is all-null or complete/valid; first-seen offsets
+  must be inside the video. Parent/infant writes and reopening remain atomic.
 
-### Sample State and Timing
+## Exported Dataset (Deferred)
 
-- No sample row at an expected timestamp means unreviewed.
-- `status = annotated` requires a selected reference frame and distance bin, with
-  no skip reason.
-- `status = skipped` requires a skip reason, with no selected frame or distance
-  bin. It counts as reviewed and is excluded from observation exports.
-- `offset_ms` stores an integer playback offset from the beginning of the video.
-  Sampling follows even seconds of the camera clock. Exported observation time is
-  the recorded start time plus that offset; it is distinct from `labeled_at`.
-- Keep both `reference_frame_id` and the assigned `distance_bin` on annotated
-  samples. The frame's `distance_m` describes the reference's known distance; the
-  bin records the animal's assigned distance interval.
+The research CSV will emit one row per **annotated** Distance sample, not ordinary
+Review observations. Include species, age, sex, individual number/ID, exact
+meters, sample behaviors, individual tags, annotator, folder/location/video, and
+sample camera timestamp (year/month/day/hour/minute/second). Skip rows are omitted.
 
-### Constraints and Reference Provenance
+A separate transfer bundle must preserve skips as well as identities, anchors,
+attributes, behavior/tag vocabulary, reference provenance/media-path resolution,
+verified timing, completion, and resume state. Ordinary annotation CSV is not a
+full-fidelity Distance transfer or database backup.
 
-- Require unique `(video_id, individual_number)` on distance individuals.
-- Require unique `(individual_id, offset_ms)` on distance samples.
-- Require unique `(reference_video_id, offset_ms)` on reference frames and unique
-  `(project_id, video_path)` on reference videos.
-- Each junction table uses its two foreign keys as a composite primary key.
-- Require project and camera values for reference assignment, and ensure the
-  selected reference frame's source video matches the animal video's project and
-  camera. These values currently allow nulls on `videos`, so missing metadata must
-  be resolved before reference-based distance annotation.
-- Reference videos used for an animal video are obtained through
-  `distance_individuals → distance_samples → reference_frames → reference_videos`.
-  The frame foreign key preserves the exact reference selection for each sample;
-  no additional per-video reference association table is needed for selected
-  references.
+## Remaining Work
 
-For a carried infant, `carried_by_individual_id` is set on the infant's sample and
-references the mother. Both individuals must belong to the same video, and an
-individual cannot carry itself. Confirming the sample writes the mother and infant
-rows together at the same offset, using the same selected frame and distance bin.
-The relationship applies only to that sample; the infant retains its own identity
-when annotated separately.
+- Research CSV and transfer-bundle design/implementation.
+- Reference maintenance: import prepared frames, correct distances, relink media,
+  safely delete unused references, and preserve evidence for already-used frames.
+- Safe clock correction after saved samples; currently locked.
+- Final individual-tag vocabulary, including any distinct skin-disease label.
+- Real-footage validation of timestamp accuracy, multiple individuals, carried
+  infants, and the latest UI/state refactor. Automated NiceGUI/Node coverage and
+  earlier browser checks do not establish that this final workflow was validated
+  end to end. Keep validation evidence in the cleanup execution record.
 
-## Exported Dataset
-
-Export one row per annotated distance sample. Join the individual's species, age,
-sex, number, and tags into each row; include the sample's behavior and distance
-bin. Skipped samples produce no rows. Ordinary `individual_observations` are not
-the source of this export.
-
-### Annotator-Provided Fields
-
-| Field | Values or source |
-|---|---|
-| Age | Adult, Adolescent, Juvenile, Infant; stored on the distance individual. |
-| Sex | Male, Female, Unknown; stored on the distance individual. |
-| Distance bin (meters) | 1–2; 2–3; 3–4; 4–5; 5–6; 6–7; 7–8; 8–10; 10–12; 12–15; 15–20; 20–25; >25. Derived from the selected reference frame. |
-| Behavior | Inspection, Staring at camera, Run away, Getting closer, Stop, Rest, Play, Feed, Groom; stored per sample. |
-| Tags | Included at distance-individual level; examples include injured and skin disease. The available values remain to be defined. |
-
-### Automatically Populated Fields
-
-- Individual ID
-- Annotator
-- Folder_name
-- Location_ID
-- Video name
-- Year, Month, Day, Hour, Min, Sec of the sampled camera timestamp
-- Species from the distance individual
-
-## Suggested Implementation Approach
-
-The following are proposed defaults and next steps, rather than confirmed product
-decisions. The schema direction is sufficient to begin backend work; settle these
-details before completing the annotation workflow.
-
-### Reference Preparation and Recording Time
-
-- Provide a setup screen to register reference videos by project and camera, open
-  a video, select reference frames, and enter each frame's known distance.
-- Use imported recording metadata after checking it against the visible camera
-  timestamp. Require correction of missing or inaccurate recording times before
-  timed distance annotation. Verify whether `videos.created_at` can serve as that
-  source or whether a dedicated camera-clock field is needed.
-- Define bin boundaries, including exact values such as 2 meters and 25 meters,
-  and handling of distances below 1 meter.
-
-### Individual Selection, Resume, and Completion
-
-- Show a list of manually created individuals. Initially label entries by number;
-  add age and sex to the display when entered. Adding an individual selects it.
-  Use the first-seen frame and optional anchor to help recognize the animal.
-- Add `review_status` (`not_started`, `in_progress`, or `completed`),
-  `completed_by`, and `completed_at` to `distance_individuals`.
-- Store the active selection in a proposed `distance_review_progress` table with
-  `video_id`, `annotator_name`, `active_individual_id`, and `updated_at`, keyed by
-  `(video_id, annotator_name)`. Require the active individual to belong to that
-  video. Each annotator can resume their own selection.
-- On opening or switching individuals, resume at the next unreviewed scheduled
-  sample. Completed individuals remain available for inspection and correction.
-- Display progress such as “8/15 samples reviewed,” counting annotated and skipped
-  samples. An explicit **Finish individual** action checks that every scheduled
-  sample has been reviewed before marking the individual completed.
-- Provide an explicit **Finish video** action and persist distance-review
-  completion separately from ordinary review. Completing all listed individuals
-  does not establish that every animal has been added. Finalize the video-level
-  completion schema and rules for reopening completed reviews.
-- When marking a carried infant, allow selecting an existing infant or creating
-  one, so the same infant is reused across samples.
-
-### Review Page and Transfer
-
-- Provide a dedicated distance-review page using the existing video player, with
-  a species filter and progress separate from ordinary review.
-- Keep the research CSV described above focused on annotated observations.
-- Provide a separate transfer bundle that preserves skips, durable individual
-  identities, first-seen anchors, individual attributes and tags, sample behavior,
-  reference selections, and completion state. Define how reference metadata and
-  media paths are transferred so selections resolve when imported elsewhere.
-
-### Example Data and Implementation Order
-
-Use a small representative deployment during development: an animal video, its
-reference videos, and trustworthy recording metadata. Multiple visible animals
-and a carried infant would help exercise identity and relationship handling.
-
-Start a feature branch with this specification and its mockup assets, then proceed
-in this order:
-
-1. Schema, migrations, and storage operations, including the finalized progress
-   and completion fields.
-2. Reference-video registration and frame preparation.
-3. Individual creation, first-seen anchors, selection, and resume.
-4. Timed samples, skips, infant handling, and completion.
-5. Research export and transfer bundles.
-
-## Open Questions
-
-- Confirm handling of distances below 1 meter and which bin includes each shared
-  boundary.
-- How are reference frames and their known distances prepared and imported?
-- Establish a reliable recorded start time matching the camera clock. The existing
-  `videos.created_at` comes from imported or probed metadata; verify whether it
-  provides that time and how to handle missing or inaccurate timestamps.
-- Define explicit completion tracking for individuals and the whole distance
-  review, using the suggestions above as a starting point; include reopening rules.
-- Confirm the dedicated review page, species filtering, and transfer-bundle scope.
-- Define how to handle edits or removal of references already used by samples,
-  preserving the evidence for existing annotations.
-- Confirm the keyboard jump interval for reference videos.
-- Which individual tag values should be available?
-- If model suggestions are introduced later, how should they assist reference
-  selection? They are not required by the current workflow.
+Duplicate-individual copying and model-assisted reference suggestions are outside
+current scope. Revisit only with an explicit workflow/policy decision.

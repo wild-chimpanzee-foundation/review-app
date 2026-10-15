@@ -52,7 +52,9 @@ Development mode enables hot reload and logs to the console in addition to the l
 
 ## Tests
 
-Tests live in `tests/` and use pytest. They exercise the backend only — the NiceGUI frontend has no automated tests.
+Tests live in `tests/` and use pytest. Coverage includes backend behavior, pure UI
+state, NiceGUI interactions, and Node-backed player scripts. These do not replace
+real-browser/media validation for playback or layout changes.
 
 Run them:
 
@@ -60,7 +62,8 @@ Run them:
 uv run pytest tests/
 ```
 
-The test suite spins up an in-memory SQLite database per test, so no external state is required.
+Database tests use isolated temporary SQLite databases; do not point tests or
+cleanup worktrees at your live application data directory.
 
 When adding backend functionality, add a corresponding test. The existing files are a reasonable guide for where things belong:
 
@@ -74,29 +77,39 @@ When adding backend functionality, add a corresponding test. The existing files 
 
 ## Database migrations
 
-Migrations live in `review_app/backend/migrations.py` as a versioned list. The rules:
+Migrations live in `review_app/backend/db/migrations.py` as a versioned list. The rules:
 
-- **Never modify or remove an existing entry** — migrations are applied once per database and tracked by version number.
+- **Never modify or remove a published entry** — migrations are applied once per database and tracked by version number. The private Distance chain was consolidated before release; see the [cleanup plan](docs/decisions/distance-branch-cleanup-plan.md) for its explicit development-database rebuild.
 - To make a schema change, append a new `(version, sql)` entry. Versions must be contiguous starting at 1.
 - Use a callable (instead of a SQL string) when the migration needs conditional logic or multiple steps — see `_migration_v4` for an example.
-- Write a test in `test_migrations.py` that applies migrations to a fresh DB and asserts the expected schema.
+- Test both fresh construction and the supported upgrade path. Fresh databases use ORM `create_all()` and are stamped current without executing migration SQL. Keep the published v22 schema fixture as an upgrade regression; do not replace it with a current snapshot just to make parity checks pass.
+- Reject newer schema versions rather than decrementing their stamp. The one-off development converter writes a separate output and is not an automatic startup migration.
 
 ## Code layout
 
 ```
 review_app/
-  app/           # UI layer (NiceGUI pages, state, translations)
-    pages/       # One file per page (overview, review, settings, model_import)
-  backend/       # Data layer — no UI imports allowed here
-    models.py    # SQLAlchemy schema
-    migrations.py
-    local_data_provider.py  # Main data access class
-    video.py     # ffprobe probing and transcoding (VideoMixin)
-    species.py   # Fuzzy matching and species queries (SpeciesMixin)
-    backup.py    # Backup/restore with dedicated exception hierarchy
+  app/                   # UI layer (NiceGUI pages, state, translations)
+    pages/
+      review/            # Ordinary Review
+      distance_review/   # Distance composition, state, dialogs and player scripts
+  backend/
+    db/
+      models.py          # SQLAlchemy schema
+      migrations.py      # Frozen upgrade definitions and version guard
+      backup.py          # Backup/restore and dedicated errors
+    provider/
+      local_data_provider.py  # Main data access class
+      distance_*.py      # Public facade and session-aware Distance responsibilities
+      video.py           # Probing, sync and video queries
+      species.py         # Vocabulary and species queries
+    distance_timing.py   # Pure camera-clock/sample timing
 ```
 
-`LocalDataProvider` composes `VideoMixin` and `SpeciesMixin` via multiple inheritance. Keep backend modules free of NiceGUI imports.
+`LocalDataProvider` composes feature mixins as its public API. Distance's internal
+helpers use the caller's SQLAlchemy session so sample/infant/completion changes
+share one transaction. Keep domain helpers independent of NiceGUI; the existing
+provider/config integration remains outside this focused cleanup.
 
 ## Linting and formatting
 
