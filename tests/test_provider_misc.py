@@ -6,6 +6,7 @@ _normalize_annotation_type, get_csv_templates.
 
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from review_app.backend.db.models import ModelAnnotation
@@ -68,6 +69,49 @@ def test_fresh_database_seeds_animal_tags_but_excludes_import_metadata_tags(tmp_
     tags = {tag["key"]: tag for tag in dp.get_all_tags()}
     assert tags["comments"]["individual_eligible"] is False
     assert tags["import_tags"]["individual_eligible"] is False
+
+
+def test_bundled_behavior_labels_use_consistent_gerunds(tmp_db, monkeypatch):
+    dp = LocalDataProvider()
+    behavior_file = Path(__file__).parents[1] / "review_app" / "data" / "behaviors.csv"
+    monkeypatch.setattr(
+        "review_app.app.config.get_bundled_behaviors_csv", lambda: str(behavior_file)
+    )
+    dp._load_species_behaviors()
+
+    with dp.engine.connect() as conn:
+        labels = {
+            key: (name_en, name_fr)
+            for key, name_en, name_fr in conn.execute(
+                text("SELECT key, name_en, name_fr FROM behaviors")
+            )
+        }
+    assert {
+        key: labels[key]
+        for key in (
+            "reacts_to_camera",
+            "inspection",
+            "staring_at_camera",
+            "run_away",
+            "getting_closer",
+            "stop",
+            "rest",
+            "play",
+            "feed",
+            "groom",
+        )
+    } == {
+        "reacts_to_camera": ("Reacting to camera", "Réagir à la caméra"),
+        "inspection": ("Inspecting", "Inspecter"),
+        "staring_at_camera": ("Staring at camera", "Regarder la caméra"),
+        "run_away": ("Running away", "S'enfuir"),
+        "getting_closer": ("Getting closer", "S'approcher"),
+        "stop": ("Stopping", "S'arrêter"),
+        "rest": ("Resting", "Se reposer"),
+        "play": ("Playing", "Jouer"),
+        "feed": ("Feeding", "Se nourrir"),
+        "groom": ("Grooming", "Faire sa toilette"),
+    }
 
 
 def test_tag_csv_rejects_malformed_individual_eligibility_and_keeps_builtin(tmp_db):
