@@ -1,3 +1,4 @@
+import json
 import logging
 
 from nicegui import ui
@@ -35,10 +36,21 @@ SPEED_OPTIONS = [
 logger = logging.getLogger(__name__)
 
 
-def render_custom_video_player(video_url, duration, vid_key):
+def render_custom_video_player(
+    video_url,
+    duration,
+    vid_key,
+    *,
+    autoplay: bool | None = None,
+    keyboard: bool = True,
+    compact: bool = False,
+    image_state: dict | None = None,
+    paused_frame_only: bool = False,
+    fixed_offset_ms: int | None = None,
+):
     """Render a video component with mouse-wheel zoom, drag-to-pan, and custom controls."""
 
-    autoplay = is_autoplay()
+    autoplay = is_autoplay() if autoplay is None else autoplay
     muted = is_muted()
 
     with (
@@ -72,6 +84,7 @@ def render_custom_video_player(video_url, duration, vid_key):
 
         ui.html(f'''
             <style>
+                {f"#vp-wrap-{vid_key} #vp-playpause-{vid_key}, #vp-wrap-{vid_key} #vp-range-{vid_key}, #vp-wrap-{vid_key} #vp-time-{vid_key}, #vp-wrap-{vid_key} #vp-speed-{vid_key}, #vp-wrap-{vid_key} #vp-mute-{vid_key} {{ display:none!important }}" if paused_frame_only else ""}
                 #vp-range-{vid_key} {{ -webkit-appearance: none; background: transparent; }}
                 #vp-range-{vid_key}::-webkit-slider-runnable-track {{
                     height: 36px; border-radius: 3px;
@@ -82,7 +95,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                     background: var(--q-primary); margin-top: -5px; cursor: pointer;
                 }}
             </style>
-            <div style="display:flex;align-items:center;gap:8px;padding:4px 8px 0;width:100%;flex-wrap:wrap;">
+            <div class="vp-controls" style="display:flex;align-items:center;gap:8px;padding:4px 8px 0;width:100%;flex-wrap:wrap;">
                 <button id="vp-playpause-{vid_key}" style="flex-shrink:0;width:32px;height:32px;border:none;background:none;cursor:pointer;color:var(--q-primary);">
                     <svg id="vp-play-icon-{vid_key}" viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                     <svg id="vp-pause-icon-{vid_key}" viewBox="0 0 24 24" width="32" height="32" fill="currentColor" style="display:none"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
@@ -103,6 +116,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                     </button>
                 </div>
             </div>
+            {f"<details><summary>{t('distance_image_controls')}</summary>" if compact else ""}
             <div style="display:flex;align-items:center;gap:8px;padding:4px 8px;width:100%;flex-wrap:wrap;">
                 <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:220px;">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="#888" style="flex-shrink:0" title="Brightness"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>
@@ -119,6 +133,7 @@ def render_custom_video_player(video_url, duration, vid_key):
                     <button id="vp-reset-zoom-{vid_key}" style="font-size:13px;color:#888;background:none;border:1px solid #444;border-radius:3px;padding:4px 8px;cursor:pointer;white-space:nowrap;">{t("reset_zoom")}</button>
                 </div>
             </div>
+            {"</details>" if compact else ""}
         ''').classes("full-width")
 
         def _persist_speed(e):
@@ -153,9 +168,13 @@ def render_custom_video_player(video_url, duration, vid_key):
                 if (!comp || !comp.$el) {{ setTimeout(setup, 50); return; }}
                 const videoEl = comp.$el.tagName === 'VIDEO' ? comp.$el : comp.$el.querySelector('video');
                 const range = document.getElementById('vp-range-{vid_key}');
+                const timeLabel = document.getElementById('vp-time-{vid_key}');
                 const speedSel = document.getElementById('vp-speed-{vid_key}');
                 const brightnessSlider = document.getElementById('vp-brightness-{vid_key}');
                 const contrastSlider = document.getElementById('vp-contrast-{vid_key}');
+                const initialImageState = {json.dumps(image_state or {})};
+                if (brightnessSlider && initialImageState.brightness != null) brightnessSlider.value = initialImageState.brightness;
+                if (contrastSlider && initialImageState.contrast != null) contrastSlider.value = initialImageState.contrast;
                 const brightnessVal = document.getElementById('vp-brightness-val-{vid_key}');
                 const contrastVal = document.getElementById('vp-contrast-val-{vid_key}');
                 const resetBtn = document.getElementById('vp-reset-filters-{vid_key}');
@@ -167,7 +186,28 @@ def render_custom_video_player(video_url, duration, vid_key):
                 const muteBtn = document.getElementById('vp-mute-{vid_key}');
                 const mutedIcon = document.getElementById('vp-muted-icon-{vid_key}');
                 const unmutedIcon = document.getElementById('vp-unmuted-icon-{vid_key}');
+                const formatTime = seconds =>
+                    Math.floor(seconds / 60).toString().padStart(2, '0') + ':' +
+                    Math.floor(seconds % 60).toString().padStart(2, '0');
+                videoEl.addEventListener('loadedmetadata', () => {{
+                    if (Number.isFinite(videoEl.duration)) range.max = videoEl.duration;
+                }});
+                const fixedOffset = {json.dumps(fixed_offset_ms)};
+                if (fixedOffset !== null) {{
+                    let restoring = false;
+                    const restoreFixedFrame = () => {{
+                        if (restoring || Math.abs(videoEl.currentTime * 1000 - fixedOffset) < 1) return;
+                        restoring = true;
+                        videoEl.pause();
+                        videoEl.currentTime = fixedOffset / 1000;
+                        videoEl.addEventListener('seeked', () => {{ restoring = false; }}, {{once:true}});
+                    }};
+                    videoEl.addEventListener('seeking', restoreFixedFrame);
+                    videoEl.addEventListener('timeupdate', restoreFixedFrame);
+                    videoEl.addEventListener('play', () => {{ videoEl.pause(); restoreFixedFrame(); }});
+                }}
 
+                const playerEvents = new AbortController();
                 let state = {{
                     scale: 1,
                     x: 0,
@@ -309,12 +349,12 @@ def render_custom_video_player(video_url, duration, vid_key):
                     state.x = e.clientX - state.startX;
                     state.y = e.clientY - state.startY;
                     updateTransform();
-                }});
+                }}, {{signal: playerEvents.signal}});
 
                 window.addEventListener('mouseup', () => {{
                     state.isDragging = false;
                     videoEl.style.cursor = state.scale > 1 ? 'grab' : 'default';
-                }});
+                }}, {{signal: playerEvents.signal}});
 
                 brightnessSlider.addEventListener('input', updateTransform);
                 contrastSlider.addEventListener('input', updateTransform);
@@ -331,37 +371,41 @@ def render_custom_video_player(video_url, duration, vid_key):
                     resetZoomBtn.addEventListener('click', resetZoom);
                 }}
 
-                if (window.__vpKeyController) window.__vpKeyController.abort();
-                window.__vpKeyController = new AbortController();
-                window.addEventListener('keydown', (e) => {{
-                    if (document.querySelector('.q-dialog[aria-modal="true"]')) return;
-                    const _tag = e.target.tagName.toLowerCase();
-                    if (_tag === 'input' || _tag === 'textarea' || _tag === 'select') return;
-                    if (e.key === 'z') {{
-                        resetZoom();
-                    }} else if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey) {{
-                        if (resetBtn) resetBtn.click();
-                    }} else if (e.key === 'Escape' && vpWrapper.classList.contains('vp-fs-active')) {{
-                        exitFs();
-                    }} else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey) {{
-                        vpWrapper.classList.contains('vp-fs-active') ? exitFs() : enterFs();
-                    }}
-                }}, {{ signal: window.__vpKeyController.signal }});
+                if ({str(keyboard).lower()}) {{
+                    if (window.__vpKeyController) window.__vpKeyController.abort();
+                    window.__vpKeyController = new AbortController();
+                    window.addEventListener('keydown', (e) => {{
+                        if (document.querySelector('.q-dialog[aria-modal="true"]')) return;
+                        const _tag = e.target.tagName.toLowerCase();
+                        if (_tag === 'input' || _tag === 'textarea' || _tag === 'select') return;
+                        if (e.key === 'z') {{
+                            resetZoom();
+                        }} else if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey) {{
+                            if (resetBtn) resetBtn.click();
+                        }} else if (e.key === 'Escape' && vpWrapper.classList.contains('vp-fs-active')) {{
+                            exitFs();
+                        }} else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey) {{
+                            vpWrapper.classList.contains('vp-fs-active') ? exitFs() : enterFs();
+                        }}
+                    }}, {{ signal: window.__vpKeyController.signal }});
+                }}
 
                 // Playback and Range Logic
                 const btn = document.getElementById('vp-playpause-{vid_key}');
                 const playIcon = document.getElementById('vp-play-icon-{vid_key}');
                 const pauseIcon = document.getElementById('vp-pause-icon-{vid_key}');
-
-                btn.addEventListener('click', () => videoEl.paused ? videoEl.play() : videoEl.pause());
                 let clickTimer = null;
-                videoEl.addEventListener('click', () => {{
-                    if (clickTimer) return;
-                    clickTimer = setTimeout(() => {{
-                        clickTimer = null;
-                        videoEl.paused ? videoEl.play() : videoEl.pause();
-                    }}, 250);
-                }});
+
+                if (!{str(paused_frame_only).lower()}) {{
+                    btn.addEventListener('click', () => videoEl.paused ? videoEl.play() : videoEl.pause());
+                    videoEl.addEventListener('click', () => {{
+                        if (clickTimer) return;
+                        clickTimer = setTimeout(() => {{
+                            clickTimer = null;
+                            videoEl.paused ? videoEl.play() : videoEl.pause();
+                        }}, 250);
+                    }});
+                }}
                 videoEl.addEventListener('dblclick', () => {{
                     clearTimeout(clickTimer);
                     clickTimer = null;
@@ -389,27 +433,38 @@ def render_custom_video_player(video_url, duration, vid_key):
                 }});
 
                 videoEl.addEventListener('timeupdate', () => {{
-                    if (range._seeking) return;
+                    if (!videoEl.isConnected || range._seeking) return;
                     range.value = videoEl.currentTime;
                     const pct = (range.value / range.max) * 100;
                     range.style.setProperty('--pct', pct + '%');
-                    document.getElementById('vp-time-{vid_key}').textContent =
+                    if (timeLabel) timeLabel.textContent =
                         Math.floor(videoEl.currentTime/60).toString().padStart(2,'0') + ':' +
-                        Math.floor(videoEl.currentTime%60).toString().padStart(2,'0') + ' / ' + '{_fmt(duration)}';
+                        Math.floor(videoEl.currentTime%60).toString().padStart(2,'0') + ' / ' + formatTime(range.max);
                 }});
 
                 range.addEventListener('input', () => {{
                     videoEl.currentTime = range.value;
                     const pct = (range.value / range.max) * 100;
                     range.style.setProperty('--pct', pct + '%');
-                    document.getElementById('vp-time-{vid_key}').textContent =
+                    if (timeLabel) timeLabel.textContent =
                         Math.floor(range.value/60).toString().padStart(2,'0') + ':' +
-                        Math.floor(range.value%60).toString().padStart(2,'0') + ' / ' + '{_fmt(duration)}';
+                        Math.floor(range.value%60).toString().padStart(2,'0') + ' / ' + formatTime(range.max);
                 }});
                 range.addEventListener('mousedown', () => range._seeking = true);
                 range.addEventListener('mouseup', () => range._seeking = false);
 
                 videoEl.style.transformOrigin = '0 0'; // Critical for zoom math
+                updateTransform();
+                // NiceGUI can remount existing elements when a dialog introduces
+                // global JS events. Reattach controls to the replacement video.
+                const lifecycle = new MutationObserver(() => {{
+                    if (videoEl.isConnected) return;
+                    lifecycle.disconnect();
+                    playerEvents.abort();
+                    videoEl.pause(); videoEl.removeAttribute('src'); videoEl.load();
+                    setTimeout(() => {{ if (getElement({v.id})) setup(); }}, 50);
+                }});
+                lifecycle.observe(document.body, {{childList:true, subtree:true}});
             }})();
         """)
 
@@ -417,7 +472,7 @@ def render_custom_video_player(video_url, duration, vid_key):
             ui.badge(k).props("outline color=grey-6").classes("text-caption")
 
         with (
-            ui.element("div").classes("tour-target-shortcuts"),
+            ui.element("div").classes("tour-target-shortcuts" + ("" if keyboard else " hidden")),
             ui.expansion(t("shortcuts_title"), icon="keyboard", value=False)
             .classes("w-full text-caption")
             .props("dense"),

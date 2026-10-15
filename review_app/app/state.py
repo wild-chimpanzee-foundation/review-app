@@ -232,6 +232,21 @@ def reset_filters() -> None:
     app.storage.user["filters"] = _DEFAULT_FILTERS.copy()
 
 
+def get_distance_queue_state(project_id: str) -> dict:
+    """Distance filters and selected video, independent of ordinary Review."""
+    from nicegui import app
+
+    return dict(app.storage.user.get("distance_queue_state", {}).get(project_id, {}))
+
+
+def set_distance_queue_state(project_id: str, **values) -> None:
+    from nicegui import app
+
+    projects = dict(app.storage.user.get("distance_queue_state", {}))
+    projects[project_id] = {**projects.get(project_id, {}), **values}
+    app.storage.user["distance_queue_state"] = projects
+
+
 def get_annotator_name() -> str:
     from nicegui import app
 

@@ -1,0 +1,50 @@
+.nicegui-content:has(> .distance-workspace) {padding:0;gap:0}
+    .review-sidebar {background:transparent}
+    .distance-panel > .distance-panel-heading {height:32px;min-height:32px}
+    .distance-panel > .text-subtitle1 {height:32px;display:flex;align-items:center}
+    .distance-sidebar .nicegui-refreshable {width:100%;min-width:0}
+    .distance-workspace {width:100%;max-width:1600px;margin:0 auto;padding:16px;gap:12px;min-width:0}
+    .distance-grid {display:grid;width:100%;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start;container-type:inline-size}
+    .distance-grid > .nicegui-refreshable {min-width:0}
+    .distance-panel {width:100%;min-width:0;padding:16px;gap:8px}
+    .distance-grid .vp-video-container, .distance-grid .distance-placeholder {
+        height:clamp(140px,calc((100cqw - 76px) * .28125),min(430px,40vh));background:#0f172a}
+    .distance-player video {height:100%;object-fit:contain}
+    .vp-video-container:has(> video.distance-reference-dimmed) {filter:grayscale(1) brightness(.45)}
+    .distance-player [id^=vp-time] {font-size:12px!important}
+    .distance-player .vp-controls {gap:4px!important;padding:4px 0!important}
+    .distance-player .vp-controls > div {flex-wrap:wrap;min-width:0;max-width:100%;flex-shrink:1!important;gap:4px!important}
+    .distance-player .vp-controls button {width:24px!important;height:26px!important}
+    .distance-player .vp-controls svg {width:22px;height:22px}
+    .distance-player .vp-controls select {font-size:12px!important}
+    .distance-player details {font-size:12px;color:#64748b;padding-top:4px}
+    .distance-player summary {cursor:pointer}
+    .distance-player:focus-within {outline:2px solid var(--q-primary);outline-offset:2px}
+    .distance-frames {flex-wrap:nowrap;overflow-x:auto;width:100%;padding:4px 0 8px;gap:6px}
+    .distance-frames .q-btn {flex-shrink:0}
+    .distance-reference-clips {width:100%;flex-wrap:nowrap;overflow-x:auto;gap:8px;padding:4px 0 8px}
+    .distance-reference-clip {width:144px;flex-shrink:0;padding:4px;border:2px solid transparent;border-radius:8px}
+    .distance-reference-clip.active {border-color:var(--q-primary);background:rgba(128,128,128,.12)}
+    .distance-reference-clip .q-btn__content {width:100%;flex-direction:column;gap:4px}
+    .distance-reference-thumbnail {width:132px;height:76px;border-radius:4px;background:#0f172a}
+    .distance-sidebar {width:100%}
+    .distance-review-card {gap:8px}
+    .distance-individual-card {gap:8px}
+    .distance-sample-controls {gap:8px}
+    .distance-sample-controls > .text-positive,
+    .distance-sample-controls > .text-warning,
+    .distance-sample-controls > .text-primary,
+    .distance-sample-controls > .text-grey-6 {font-size:13px;line-height:18px}
+    .distance-actions {padding-top:8px;gap:8px;width:100%;
+        border-top:1px solid rgba(128,128,128,.15)}
+    .distance-confirm {min-height:60px;font-weight:700}
+    .distance-queue {width:100%;gap:0}
+    .distance-queue-header {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;
+        align-items:center;width:100%;gap:8px}
+    .distance-queue-text {overflow-wrap:anywhere;min-width:0}
+    .distance-animal-timing {width:100%;gap:4px;flex-wrap:wrap}
+    .distance-dialog {width:760px;max-width:95vw!important;max-height:90vh;overflow:auto}
+    .distance-dialog .vp-video-container {height:clamp(200px,34vh,430px)}
+    .vp-fs-active {position:fixed!important;inset:0;z-index:9999;background:#f8fafc;overflow:auto;padding:16px}
+    .vp-fs-active .vp-video-container {height:calc(100vh - 150px)}
+    .body--dark .vp-fs-active {background:#0f172a}

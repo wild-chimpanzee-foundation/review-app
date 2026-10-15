@@ -54,8 +54,12 @@ def render_users_section(dp) -> None:
                     ).props("flat dense color=negative").tooltip(t("users_delete_btn"))
 
     async def _delete(name: str):
-        await run.io_bound(dp.remove_annotator, name)
-        ui.notify(t("users_deleted", name=name), type="positive")
+        try:
+            await run.io_bound(dp.remove_annotator, name)
+        except ValueError:
+            ui.notify(t("users_cannot_delete_has_annotations"), type="negative")
+        else:
+            ui.notify(t("users_deleted", name=name), type="positive")
         _user_list.refresh()
 
     def _confirm_delete(name: str):

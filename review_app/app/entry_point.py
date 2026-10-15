@@ -94,7 +94,12 @@ for _ext, _mime in [
     mimetypes.add_type(_mime, _ext.upper())
 
 
-def shared_header(show_drawer: bool = False):
+def shared_header(
+    show_drawer: bool = False,
+    *,
+    distance_shortcuts: bool = False,
+    distance_interface: bool = False,
+):
     from nicegui import ui
 
     apply_theme()
@@ -119,7 +124,9 @@ def shared_header(show_drawer: bool = False):
     # Define shortcuts dialog once per page
     with (
         ui.dialog() as shortcuts_dialog,
-        ui.card().classes("q-pa-lg relative").style("min-width: 420px; max-width: 560px"),
+        ui.card()
+        .classes("q-pa-lg relative" + (" gap-2" if distance_shortcuts else ""))
+        .style("min-width: 420px; max-width: 560px"),
     ):
         ui.button(icon="close", on_click=shortcuts_dialog.close).props("flat round").classes(
             "absolute-top-right q-ma-sm"
@@ -133,27 +140,41 @@ def shared_header(show_drawer: bool = False):
 
         ui.label(t("shortcuts_global")).classes("text-caption text-grey-5 text-uppercase q-mt-sm")
         ui.separator().classes("q-mb-xs")
-        _shortcut_row("Enter", t("shortcut_submit_next"))
+        _shortcut_row(
+            "Enter", t("distance_confirm_sample" if distance_shortcuts else "shortcut_submit_next")
+        )
         _shortcut_row("N", t("shortcut_next_video"))
         _shortcut_row("P", t("shortcut_prev_video"))
-        _shortcut_row("M", t("review_later"))
-        _shortcut_row("A", t("shortcut_add_species"))
-        _shortcut_row("C", t("shortcut_clear_annotations"))
-        _shortcut_row("1 – 9", t("shortcut_add_ai"))
-        _shortcut_row("J / K", t("shortcut_next_annotation"))
-        _shortcut_row("Tab", t("shortcut_enter_annotation"))
-        _shortcut_row("X", t("shortcut_delete_annotation"))
-        _shortcut_row("T", t("shortcut_focus_tags"))
+        _shortcut_row(
+            "A", t("distance_add_individual" if distance_shortcuts else "shortcut_add_species")
+        )
+        if distance_shortcuts:
+            _shortcut_row("← / →", t("distance_sample_shortcut"))
+            _shortcut_row("↑ / ↓", t("distance_reference_shortcut"))
+            _shortcut_row("Tab", t("distance_cycle_references"))
+        if not distance_shortcuts:
+            _shortcut_row("M", t("review_later"))
+            _shortcut_row("C", t("shortcut_clear_annotations"))
+            _shortcut_row("1 – 9", t("shortcut_add_ai"))
+            _shortcut_row("J / K", t("shortcut_next_annotation"))
+            _shortcut_row("Tab", t("shortcut_enter_annotation"))
+            _shortcut_row("X", t("shortcut_delete_annotation"))
+            _shortcut_row("T", t("shortcut_focus_tags"))
 
-        ui.label(t("shortcuts_review")).classes("text-caption text-grey-5 text-uppercase q-mt-md")
+        ui.label(
+            t("distance_shortcuts_playback" if distance_shortcuts else "shortcuts_review")
+        ).classes("text-caption text-grey-5 text-uppercase q-mt-md")
         ui.separator().classes("q-mb-xs")
+        if distance_shortcuts:
+            ui.label(t("distance_shortcuts_focus")).classes("text-caption text-grey-6 q-mb-xs")
         _shortcut_row("Space", t("shortcut_play_pause"))
-        _shortcut_row("← →", t("shortcut_seek"))
+        _shortcut_row("Shift + ← →" if distance_shortcuts else "← →", t("shortcut_seek"))
         _shortcut_row("S / D", t("shortcut_speed_up_down"))
         _shortcut_row("[ / ]", t("shortcut_brightness"))
         _shortcut_row("{ / }", t("shortcut_contrast"))
-
-        ui.separator().classes("q-mt-md q-mb-sm")
+        _shortcut_row("Z", t("reset_zoom"))
+        _shortcut_row("R", t("shortcut_reset_filters"))
+        _shortcut_row("F / Escape", t("shortcut_fullscreen"))
 
         def _restart_tour():
             from review_app.app.onboarding import show_tour
@@ -161,11 +182,13 @@ def shared_header(show_drawer: bool = False):
             shortcuts_dialog.close()
             show_tour(t)
 
-        ui.button(
-            t("tour_restart"),
-            icon="travel_explore",
-            on_click=_restart_tour,
-        ).props("flat color=primary").classes("w-full")
+        if not distance_shortcuts:
+            ui.separator().classes("q-mt-md q-mb-sm")
+            ui.button(
+                t("tour_restart"),
+                icon="travel_explore",
+                on_click=_restart_tour,
+            ).props("flat color=primary").classes("w-full")
 
     drawer = None
 
@@ -179,12 +202,17 @@ def shared_header(show_drawer: bool = False):
         with drawer:
             ui.label(t("filters_label")).classes("text-subtitle2 font-weight-medium q-mb-sm")
 
-    with ui.header().classes("bg-primary text-white"):
+    header = ui.header().classes("bg-primary text-white")
+    with header:
         with ui.row().classes("w-full items-center q-px-md no-wrap gap-2"):
             if show_drawer:
                 ui.button(icon="filter_list", on_click=toggle_drawer).props(
                     "flat round color=white"
                 ).tooltip(t("filters_label"))
+            if distance_interface:
+                ui.button(icon="visibility_off", on_click=header.hide).props(
+                    "flat round color=white"
+                ).tooltip(t("distance_hide_header"))
             _active_pid = get_active_project_id()
             if _active_pid:
                 _header_dp = get_data_provider()
@@ -209,6 +237,9 @@ def shared_header(show_drawer: bool = False):
                 ui.button(t("nav_review"), on_click=lambda: ui.navigate.to("/review")).props(
                     "flat color=white"
                 ).classes("gt-sm")
+                ui.button(
+                    t("nav_distance"), on_click=lambda: ui.navigate.to("/distance-review")
+                ).props("flat color=white").classes("gt-sm")
                 ui.button(t("nav_import"), on_click=lambda: ui.navigate.to("/model-import")).props(
                     "flat color=white"
                 ).classes("gt-sm")
@@ -221,6 +252,9 @@ def shared_header(show_drawer: bool = False):
                             t("nav_overview"), on_click=lambda: ui.navigate.to("/overview")
                         )
                         ui.menu_item(t("nav_review"), on_click=lambda: ui.navigate.to("/review"))
+                        ui.menu_item(
+                            t("nav_distance"), on_click=lambda: ui.navigate.to("/distance-review")
+                        )
                         ui.menu_item(
                             t("nav_import"), on_click=lambda: ui.navigate.to("/model-import")
                         )
@@ -315,6 +349,12 @@ def shared_header(show_drawer: bool = False):
                                     ui.icon("logout", size="xs").style("width: 18px")
                                     ui.label(t("login_logout"))
 
+    if distance_interface:
+        ui.button(t("distance_restore_header"), icon="visibility", on_click=header.show).classes(
+            "distance-header-restore"
+        ).style("position:fixed;top:8px;left:8px;z-index:2100").bind_visibility_from(
+            header, "value", backward=lambda visible: not visible
+        )
     return drawer, toggle_drawer
 
 
@@ -438,6 +478,15 @@ class GUI:
 
         await setup_model_import()
 
+    async def distance_review_page(self):
+        from review_app.app.utils import require_login
+
+        if not require_login():
+            return
+        from review_app.app.pages.distance_review import setup_distance_review
+
+        await setup_distance_review()
+
     async def settings_page(self):
         from review_app.app.utils import require_login
 
@@ -536,6 +585,7 @@ class GUI:
         ui.page("/db-error")(self.db_error_page)
         ui.page("/overview")(self.overview_page)
         ui.page("/review")(self.review_page)
+        ui.page("/distance-review")(self.distance_review_page)
         ui.page("/setup")(self.setup_page)
         ui.page("/model-import")(self.model_import_page)
         ui.page("/distribution")(self.distribution_page)

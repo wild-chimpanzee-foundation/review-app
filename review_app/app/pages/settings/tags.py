@@ -137,9 +137,18 @@ def _render_custom_tag_row(section: TagsSection, tag: dict) -> None:
         dlg.close()
         section.render.refresh()
 
+    def set_individual_eligibility(event):
+        dp.set_tag_individual_eligibility(tag["key"], bool(event.value))
+        section.render.refresh()
+
     with ui.row().classes("w-full items-center gap-sm"):
         ui.chip(_tag_label(tag), icon="label", color=color).props("outline")
         ui.label(tag["key"]).classes("text-caption text-grey-5 col")
+        ui.checkbox(
+            t("settings_tag_individual_eligible"),
+            value=tag["individual_eligible"],
+            on_change=set_individual_eligibility,
+        ).props("dense")
         ui.button(icon="edit", on_click=open_edit_dialog).props(
             "flat round dense size=sm color=grey-6"
         )

@@ -34,6 +34,7 @@ def smoke_app(provider_with_project):
 
     _register("/overview", gui.overview_page)
     _register("/review", gui.review_page)
+    _register("/distance-review", gui.distance_review_page)
     _register("/settings", gui.settings_page)
     _register("/model-import", gui.model_import_page)
     _register("/distribution", gui.distribution_page)
@@ -48,7 +49,8 @@ def smoke_app(provider_with_project):
 
 
 @pytest.mark.parametrize(
-    "path", ["/overview", "/review", "/settings", "/model-import", "/distribution"]
+    "path",
+    ["/overview", "/review", "/distance-review", "/settings", "/model-import", "/distribution"],
 )
 async def test_page_renders(user: User, smoke_app, path: str) -> None:
     await user.open("/test-login")
