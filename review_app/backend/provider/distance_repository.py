@@ -232,8 +232,9 @@ class DistanceMixin(ProviderBase):
         clock_anchor_offset_ms: int | None = None,
         clock_anchor_playback_ms: float | None = None,
         opening_even_second: bool = False,
+        reset_tracks: bool = False,
     ) -> None:
-        """Persist a deliberately verified camera wall clock, never infer it from metadata."""
+        """Correct timestamps in even-second steps, or explicitly reset tracks to realign."""
         with self.Session.begin() as session:
             verify_recording_time(
                 session,
@@ -244,6 +245,7 @@ class DistanceMixin(ProviderBase):
                 clock_anchor_offset_ms=clock_anchor_offset_ms,
                 clock_anchor_playback_ms=clock_anchor_playback_ms,
                 opening_even_second=opening_even_second,
+                reset_tracks=reset_tracks,
             )
 
     def calibrate_distance_clock(
@@ -254,8 +256,9 @@ class DistanceMixin(ProviderBase):
         annotator_name: str,
         *,
         opening_even_second: bool = False,
+        reset_tracks: bool = False,
     ) -> None:
-        """Align the selected even-second frame once for every individual in this video."""
+        """Align the selected even-second frame, resetting existing tracks only by consent."""
         if (
             not isinstance(camera_time, datetime)
             or camera_time.tzinfo is not None
@@ -290,6 +293,7 @@ class DistanceMixin(ProviderBase):
             clock_anchor_offset_ms=offset,
             clock_anchor_playback_ms=float(playback_offset_ms),
             opening_even_second=opening_even_second,
+            reset_tracks=reset_tracks,
         )
 
     def get_distance_behavior_options(self, lang: str = "en") -> dict[str, str]:

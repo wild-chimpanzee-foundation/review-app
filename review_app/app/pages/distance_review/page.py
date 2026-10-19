@@ -1199,12 +1199,15 @@ class DistanceReviewPage:
             proposed = datetime.fromisoformat(proposed)
         if proposed and review and review.get("clock_anchor_offset_ms") is not None:
             proposed += timedelta(milliseconds=review["clock_anchor_offset_ms"])
-        elif proposed:
+        elif proposed and not review:
             proposed = proposed.replace(microsecond=0) + timedelta(seconds=2 - proposed.second % 2)
 
         async def on_calibrated():
-            await self.reload_review()
-            self.resume_sample()
+            await self.reload_individuals()
+            if not self.individual:
+                self.individual_id = self.sample_offset = None
+            elif self.sample_offset not in self.offsets:
+                self.resume_sample()
             await self.restore_sample()
             self.render_timing.refresh()
             self.render_individuals.refresh()
@@ -1226,13 +1229,11 @@ class DistanceReviewPage:
                 else None,
                 duration_sec=video.get("duration_sec") or 0,
                 frame_rate=self.animal_frame_rate or 25,
-                initial_offset_ms=(
-                    review.get("clock_anchor_playback_ms") or 0 if review and self.samples else 0
-                ),
+                initial_offset_ms=(review.get("clock_anchor_playback_ms") or 0 if review else 0),
                 clock_description=self.clock_description() if review else None,
                 proposed_camera_time=proposed,
                 opening_even_second=bool(review and review.get("opening_even_second")),
-                locked=bool(review and self.samples),
+                review=review,
                 unavailable_message=unavailable,
                 show_estimated_steps=self.animal_frame_rate is None,
                 guard=self.client_handler,

@@ -6,18 +6,27 @@ from pathlib import Path
 from review_app.backend.path_matching import normalize_path_str
 
 
-def camera_id_for_path(path: Path, scan_dir: Path) -> str:
+def _paired_deployment(path: Path, scan_dir: Path) -> Path | None:
     parent = path.parent
-    # Only collapse the explicit paired layout. A lone folder called "videos"
-    # or "references" can still be an ordinary camera folder.
-    if parent.name in {"videos", "references"}:
-        deployment = parent.parent
-        if (
-            deployment.is_relative_to(scan_dir)
-            and (deployment / "videos").is_dir()
-            and (deployment / "references").is_dir()
-        ):
-            parent = deployment
+    deployment = parent.parent
+    if (
+        parent.name in {"videos", "references"}
+        and deployment.is_relative_to(scan_dir)
+        and (deployment / "videos").is_dir()
+        and (deployment / "references").is_dir()
+    ):
+        return deployment
+    return None
+
+
+def is_reference_video_path(path: Path, scan_dir: Path) -> bool:
+    """Recognize references only inside an explicit paired deployment layout."""
+    return path.parent.name == "references" and _paired_deployment(path, scan_dir) is not None
+
+
+def camera_id_for_path(path: Path, scan_dir: Path) -> str:
+    # A lone folder called "videos" or "references" can be an ordinary camera.
+    parent = _paired_deployment(path, scan_dir) or path.parent
     relative = parent.relative_to(scan_dir)
     if relative != Path("."):
         return normalize_path_str(str(relative))

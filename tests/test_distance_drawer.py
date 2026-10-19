@@ -907,7 +907,7 @@ async def test_clock_confirmation_uses_current_frame_without_selection_controls(
                 "created_at": datetime(2026, 10, 12, 16, 2, 49),
             }
         ]
-        page.animal_player = SimpleNamespace(source=page.media_url(video_path))
+        page.animal_player = SimpleNamespace(source=page.media_url(video_path), id=0)
         page.restore_sample = AsyncMock()
         with ui.right_drawer() as sidebar:
             page.render_sidebar()

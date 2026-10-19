@@ -135,14 +135,14 @@ def test_invalid_clock_calibration_is_atomic(distance_data, camera, offset, open
     assert state(data)["offsets"] == []
 
 
-def test_calibration_is_locked_after_any_individual_saves_a_sample(distance_data):
+def test_alignment_changes_require_explicit_reset_after_a_sample(distance_data):
     data, dp = distance_data, distance_data["dp"]
     camera = datetime(2026, 10, 12, 16, 2, 50)
     dp.calibrate_distance_clock(data["videos"][0], camera, 920.125, "alice")
     confirm(data, 920)
     dp.calibrate_distance_clock(data["videos"][0], camera, 920.125, "bob")
     for offset, opening in [(920.5, False), (920.125, True), (1020.125, False)]:
-        with pytest.raises(ValueError, match="cannot change"):
+        with pytest.raises(ValueError, match="requires resetting"):
             dp.calibrate_distance_clock(
                 data["videos"][0], camera, offset, "alice", opening_even_second=opening
             )
@@ -459,21 +459,21 @@ def test_carry_relationship_cannot_conflict_or_invalidate_ages(timed_data):
     assert len(state(data)["samples"]) == 2
 
 
-def test_verified_clock_can_be_corrected_before_samples_and_is_locked_afterwards(timed_data):
+def test_verified_timestamp_correction_keeps_the_sampling_grid(timed_data):
     data, dp = timed_data, timed_data["dp"]
-    even_start = datetime(2026, 10, 12, 16, 2, 48)
-    dp.verify_distance_recording_time(data["videos"][0], even_start, "bob")
-    assert state(data)["offsets"] == [0, 2000, 4000, 6000, 8000]
-    confirm(data, 0)
-    with pytest.raises(ValueError, match="cannot change"):
+    corrected_start = datetime(2026, 10, 12, 16, 2, 51)
+    dp.verify_distance_recording_time(data["videos"][0], corrected_start, "bob")
+    assert state(data)["offsets"] == [1000, 3000, 5000, 7000, 9000]
+    confirm(data)
+    with pytest.raises(ValueError, match="requires resetting"):
         dp.verify_distance_recording_time(
-            data["videos"][0], even_start + timedelta(seconds=1), "alice"
+            data["videos"][0], corrected_start + timedelta(seconds=1), "alice"
         )
-    assert state(data)["review"]["recorded_start"] == even_start
+    assert state(data)["review"]["recorded_start"] == corrected_start
 
 
-def test_even_start_cannot_complete_without_reviewing_the_opening_still(timed_data):
-    data, dp = timed_data, timed_data["dp"]
+def test_even_start_cannot_complete_without_reviewing_the_opening_still(distance_data):
+    data, dp = distance_data, distance_data["dp"]
     dp.verify_distance_recording_time(
         data["videos"][0], datetime(2026, 10, 12, 16, 2, 48), "alice"
     )

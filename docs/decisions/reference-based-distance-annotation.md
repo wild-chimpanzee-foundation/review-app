@@ -21,8 +21,10 @@ they do not create or synchronize Distance observations automatically.
 
 ## Annotation Workflow
 
-1. Tag imported reference clips **Reference Video** in ordinary Review. Open
-   **Distance** and prepare their known-distance frames for the deployment.
+1. Import reference clips in a deployment's paired `references/` and `videos/`
+   layout to tag them **Reference Video** automatically, or tag other reference
+   clips manually in ordinary Review. Open **Distance** and prepare their
+   known-distance frames for the deployment.
 2. Align the animal video's camera clock using the visible timestamp, not file
    metadata. Confirm the displayed even-second transition frame and its camera
    timestamp in the independent clock dialog.
@@ -54,9 +56,19 @@ samples remain editable; a missing sample row means unreviewed, not absent.
 - Mark whether the opening still already shows an even second. If so, that still
   is also required, and alignment normally uses the next odd-to-even transition.
   A short clip ending before a transition may use its even opening still.
-- Alignment is shared across individuals/annotators and locked after any sample
-  is saved. `videos.created_at` is only a suggested time. Store the verified
-  camera wall clock without timezone conversion, separately from file metadata.
+- Alignment is shared across individuals/annotators. After verification, timestamp-only
+  corrections must be whole multiples of two seconds and preserve the exact anchor,
+  opening-even setting, and scheduled playback offsets. They retain all annotations,
+  progress, and completion, and update verification attribution/time.
+- Changing the alignment frame or opening-even setting requires explicitly choosing
+  **Change alignment frame and reset Distance review** and confirming the destructive
+  warning. The reset atomically deletes every Distance individual (including infants),
+  box, attribute/tag, sample/behavior, resume state, and completion for this video,
+  including other annotators' work, before saving the new alignment. Other videos,
+  prepared references, and ordinary Review remain unchanged. Cancellation or invalid
+  alignment leaves the existing review intact.
+- `videos.created_at` is only a suggested time. Store the verified camera wall clock
+  without timezone conversion, separately from file metadata.
 - Preserve precise playback anchors independently of integer-millisecond sample
   identities. For example, a `16:02:50` anchor at playback `0.920 s` schedules the
   next camera sample at `2.920 s`, not `3.000 s`.
@@ -184,8 +196,13 @@ end, retain the completed video and notify the annotator.
 
 Reference clips are imported videos with the video-level `reference_video` tag.
 They remain in ordinary Review for tagging/conversion and are excluded from the
-Distance animal queue. Missing sources or unresolved project/camera metadata do
-not become selectable references.
+Distance animal queue. Import and rescan automatically add the tag to clips
+inside a recognized paired deployment's `references/` folder, including existing
+clips. Existing tags and attribution are preserved; manually removing this tag
+is undone on the next rescan while the clip remains in that folder. A standalone
+folder named `references` is still an ordinary camera folder. Tags on other clips
+are never removed by folder inference. Missing sources or unresolved
+project/camera metadata do not become selectable references.
 
 Reference matching uses **project + registered import-root ID + camera label**.
 Separate roots both containing `cam_1` are distinct deployments. Prefer the most
@@ -301,7 +318,6 @@ full-fidelity Distance transfer or database backup.
 - Research CSV and transfer-bundle design/implementation.
 - Reference maintenance: import prepared frames, correct distances, relink media,
   safely delete unused references, and preserve evidence for already-used frames.
-- Safe clock correction after saved samples; currently locked.
 - Final individual-tag vocabulary, including any distinct skin-disease label.
 - Real-footage validation of timestamp accuracy, multiple individuals, carried
   infants, and the latest UI/state refactor. Automated NiceGUI/Node coverage and

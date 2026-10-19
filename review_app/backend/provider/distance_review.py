@@ -175,7 +175,10 @@ def verify_recording_time(
     clock_anchor_offset_ms: int | None = None,
     clock_anchor_playback_ms: float | None = None,
     opening_even_second: bool = False,
+    reset_tracks: bool = False,
 ) -> None:
+    if not isinstance(reset_tracks, bool):
+        raise ValueError("Confirm whether to reset Distance review")
     if not annotator_name or not annotator_name.strip():
         raise ValueError("Annotator is required")
     video = session.get(Video, video_id)
@@ -203,30 +206,34 @@ def verify_recording_time(
     if not offsets:
         raise ValueError("No even camera second occurs within this video")
     review = session.get(DistanceVideoReview, video_id)
-    has_samples = (
-        session.query(DistanceSample.id)
-        .join(DistanceIndividual, DistanceSample.individual_id == DistanceIndividual.id)
-        .filter(DistanceIndividual.video_id == video_id)
-        .first()
-    )
-    calibration = (
-        recorded_start,
-        clock_anchor_offset_ms,
-        clock_anchor_playback_ms,
-        opening_even_second,
-    )
-    if (
-        review
-        and has_samples
-        and calibration
-        != (
-            review.recorded_start,
-            review.clock_anchor_offset_ms,
-            review.clock_anchor_playback_ms,
-            review.opening_even_second,
+    if review:
+        timestamp_only = (
+            (recorded_start - review.recorded_start).total_seconds() % 2 == 0
+            and clock_anchor_offset_ms == review.clock_anchor_offset_ms
+            and clock_anchor_playback_ms == review.clock_anchor_playback_ms
+            and opening_even_second == review.opening_even_second
+            and offsets == review_offsets(review, video.duration_sec)
         )
-    ):
-        raise ValueError("Recording time cannot change after samples have been saved")
+        has_tracks = (
+            session.query(DistanceIndividual.id).filter_by(video_id=video_id).first() is not None
+        )
+        if not timestamp_only and has_tracks and not reset_tracks:
+            raise ValueError(
+                "Changing clock alignment requires resetting this video's Distance review"
+            )
+        if reset_tracks:
+            # Delete samples first: infant evidence can reference a different track.
+            individuals = session.query(DistanceIndividual.id).filter_by(video_id=video_id)
+            session.query(DistanceSample).filter(
+                DistanceSample.individual_id.in_(individuals)
+            ).delete(synchronize_session=False)
+            session.query(DistanceReviewProgress).filter_by(video_id=video_id).delete(
+                synchronize_session=False
+            )
+            session.query(DistanceIndividual).filter_by(video_id=video_id).delete(
+                synchronize_session=False
+            )
+            review.completed_by = review.completed_at = None
     if review is None:
         review = DistanceVideoReview(video_id=video_id)
         session.add(review)

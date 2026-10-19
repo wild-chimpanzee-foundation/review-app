@@ -15,11 +15,12 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 import pandas as pd
-from sqlalchemy import select, text
+from sqlalchemy import literal, select, text
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from review_app.app.config import VIDEO_EXTENSIONS
-from review_app.backend.camera_layout import camera_id_for_path
-from review_app.backend.db.models import ProjectDir, Video
+from review_app.backend.camera_layout import camera_id_for_path, is_reference_video_path
+from review_app.backend.db.models import ProjectDir, Tag, Video, VideoTag
 from review_app.backend.errors import VideoError
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
@@ -263,10 +264,16 @@ class VideoMixin(ProviderBase):
                 if any(part.startswith(".") for part in p.relative_to(scan_dir).parts):
                     continue
                 camera_id = camera_id_for_path(p, scan_dir)
-                rows.append({"video_path": normalize_path_str(str(p)), "camera_id": camera_id})
+                rows.append(
+                    {
+                        "video_path": normalize_path_str(str(p)),
+                        "camera_id": camera_id,
+                        "is_reference_video": is_reference_video_path(p, scan_dir),
+                    }
+                )
 
         if not rows:
-            return pd.DataFrame(columns=["video_path", "camera_id"])
+            return pd.DataFrame(columns=["video_path", "camera_id", "is_reference_video"])
         return pd.DataFrame(rows)
 
     def _sync_videos_table(
@@ -366,6 +373,23 @@ class VideoMixin(ProviderBase):
                 )
                 if progress_callback:
                     progress_callback(n_existing, total_scanned, "")
+
+            reference_paths = scanned.loc[scanned["is_reference_video"], "video_path"].tolist()
+            if reference_paths:
+                session.execute(
+                    sqlite_insert(VideoTag)
+                    .from_select(
+                        ["video_id", "tag_id", "tagged_at"],
+                        select(Video.video_id, Tag.id, literal(now))
+                        .select_from(Video)
+                        .join(Tag, Tag.key == "reference_video")
+                        .where(
+                            Video.project_id == active_project_id,
+                            Video.video_path.in_(reference_paths),
+                        ),
+                    )
+                    .on_conflict_do_nothing(index_elements=["video_id", "tag_id"])
+                )
 
             if orphaned_paths:
                 session.execute(
