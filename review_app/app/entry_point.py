@@ -197,6 +197,16 @@ def shared_header(
         if drawer is not None:
             drawer.toggle()
 
+    def toggle_annotations():
+        if "mini-width" in annotation_drawer.props:
+            annotation_drawer.show()
+            if annotation_drawer.props.get("mini", False):
+                annotation_drawer.props(remove="mini")
+            else:
+                annotation_drawer.props("mini")
+        else:
+            annotation_drawer.toggle()
+
     if show_drawer:
         drawer = ui.left_drawer(value=True).props("behavior=default").classes("q-pa-sm")
 
@@ -211,7 +221,7 @@ def shared_header(
                     "flat round color=white"
                 ).tooltip(t("filters_label"))
             if annotation_drawer is not None:
-                ui.button(icon="view_sidebar", on_click=annotation_drawer.toggle).props(
+                ui.button(icon="view_sidebar", on_click=toggle_annotations).props(
                     'flat round color=white data-testid="distance-toggle-annotations" '
                     f'aria-label="{t("distance_toggle_annotations")}"'
                 ).tooltip(t("distance_toggle_annotations"))

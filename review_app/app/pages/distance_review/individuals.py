@@ -65,6 +65,51 @@ def render_individuals(context: IndividualViewsContext) -> None:
         render_individual_card(context, row)
 
 
+def render_individual_rail(context: IndividualViewsContext) -> None:
+    if not context.review_active:
+        ui.button(icon="schedule", on_click=context.on_clock).props(
+            'flat round dense data-distance-action="rail-clock"'
+        ).tooltip(t("distance_verify_time"))
+    ui.button("A", on_click=context.on_add).props(
+        'outline dense color=primary data-distance-action="rail-add"'
+    ).classes("distance-rail-add").tooltip(t("distance_add_individual")).bind_enabled_from(
+        context.busy_state,
+        "busy",
+        backward=lambda busy: bool(
+            context.review_active
+            and context.has_player
+            and context.camera_id
+            and context.species_options
+            and not busy
+        ),
+    )
+    with ui.column().classes("distance-rail-individuals"):
+        for row in context.individuals:
+            active = row["id"] == context.individual_id
+            completed = row["review_status"] == "completed"
+            label = context.label(row)
+            if completed:
+                label += " · " + t("distance_individual_completed")
+            with (
+                ui.button(on_click=lambda _e, row=row: context.on_select(row["id"]))
+                .props(
+                    'flat dense no-caps data-distance-action="rail-select-individual" '
+                    f'data-distance-rail-individual="{row["id"]}" '
+                    f'aria-pressed="{str(active).lower()}"'
+                )
+                .classes("distance-rail-individual" + (" active" if active else ""))
+                .tooltip(label)
+                .bind_enabled_from(context.busy_state, "busy", backward=lambda busy: not busy)
+            ) as button:
+                button.props["aria-label"] = label
+                button.props["data-distance-complete"] = str(completed).lower()
+                with ui.row().classes("items-center gap-1 no-wrap"):
+                    ui.icon(
+                        "check_box" if completed else "check_box_outline_blank", size="xs"
+                    ).classes("text-positive" if completed else "text-grey-6")
+                    ui.label(str(row["individual_number"]))
+
+
 def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
     active = row["id"] == context.individual_id
     card = (

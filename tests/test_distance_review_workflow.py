@@ -128,6 +128,7 @@ def distance_page(monkeypatch):
     page.render_samples = SimpleNamespace(refresh=Mock())
     page.render_sample_actions = SimpleNamespace(refresh=Mock())
     page.render_video_actions = SimpleNamespace(refresh=Mock())
+    page.render_sidebar_rail = SimpleNamespace(refresh=Mock())
     page.render_individual_progress = SimpleNamespace(refresh=Mock())
     page.render_tracks = SimpleNamespace(refresh=Mock())
     page.render_sample_navigation = SimpleNamespace(refresh=Mock())

@@ -177,7 +177,23 @@ def render_sample_actions(context: SampleControlsContext) -> None:
         )
 
 
-def render_video_actions(context: SampleControlsContext) -> None:
+def render_video_actions(context: SampleControlsContext, *, compact: bool = False) -> None:
+    if compact:
+        ui.button(icon="done_all", color="positive", on_click=context.on_finish_video).props(
+            'unelevated dense data-distance-action="rail-finish-video"'
+        ).classes("distance-rail-finish").tooltip(
+            t("distance_video_completed" if context.video_completed else "distance_finish_video")
+        ).set_enabled(
+            bool(
+                context.review_active
+                and context.individual
+                and context.sample_offset is not None
+                and context.all_individuals_completed
+                and not context.video_completed
+                and not context.busy
+            )
+        )
+        return
     if not context.review_active or not context.individual or context.sample_offset is None:
         return
     with ui.row().classes("w-full items-center justify-between gap-xs"):

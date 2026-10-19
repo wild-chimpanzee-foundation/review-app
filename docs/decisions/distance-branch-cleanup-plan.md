@@ -135,6 +135,15 @@ approval and an explicit verified force-with-lease.
   With the added action row, reference controls occupy about 232 px when wide,
   and the narrow layout ends at about 790 px in an 800 px viewport. Finish stays
   in the sidebar; no save/completion semantics changed.
+- Compact-sidebar follow-up: **seven focused tests passed** for mini/expanded
+  state preservation (including an empty queue), rail Add/select/finish controls,
+  completion/busy guards, ordinary selected-card behavior, and translation parity.
+  The rail uses separate entry markers so J/K still enumerates one full card per
+  individual, and completion indicators remain derived/read-only.
+- Isolated Chromium at 1920×1080 confirms 400→72→400 px right-drawer widths
+  (workspace 1520→1848→1520 px with filters closed), visible rail actions,
+  preserved player IDs and draft input, header hide/restore, and no horizontal
+  overflow. No broad suite was rerun for the compact-sidebar change.
 - This is bounded UI/media validation, not a full application/real-footage review.
   No live application database was used or changed.
 

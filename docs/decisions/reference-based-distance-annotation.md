@@ -241,11 +241,15 @@ alongside rounded millisecond frame identities; never round saved meter values.
 ## Desktop UI and shortcuts
 
 - Reuse Review's header and desktop drawers: 300 px filters on the left, 400 px
-  individual/completion controls on the right. An annotation-panel icon button
-  in the header, next to the filter toggle, collapses/restores the right drawer,
-  freeing its width
-  without losing players, active identity/sample, or unconfirmed form choices.
-  Mobile compatibility is deferred.
+  individual/completion controls on the right. The annotation-panel icon next to
+  the header's filter toggle switches the right drawer between its full width and
+  a 72 px rail, rather than hiding it. The rail retains **A / Add**, each
+  individual's number and automatic completion checkbox indicator, and a green
+  finish icon. Highlight the active individual; clicking a rail entry selects it,
+  never manually changes its completion. Keep add/select/finish guards and show a
+  clock-verification action when needed. Tooltips retain full labels.
+  Switching widths preserves full-form elements, players, active identity/sample,
+  and unconfirmed form choices. Mobile compatibility is deferred.
 - Keep equally sized animal/reference frames, graph, and essential actions
   visible at 1280×800. Reference clips/distance choices use bounded strips; long
   individual lists scroll inside the right drawer. Allow hiding/restoring the

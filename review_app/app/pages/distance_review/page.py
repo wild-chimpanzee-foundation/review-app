@@ -28,6 +28,9 @@ from review_app.app.pages.distance_review.individuals import (
     render_individual_card as render_individual_card_view,
 )
 from review_app.app.pages.distance_review.individuals import (
+    render_individual_rail as render_individual_rail_view,
+)
+from review_app.app.pages.distance_review.individuals import (
     render_individuals as render_individuals_view,
 )
 from review_app.app.pages.distance_review.player import (
@@ -210,6 +213,7 @@ class DistanceReviewPage:
         self.render_samples.refresh()
         self.render_sample_actions.refresh()
         self.render_video_actions.refresh()
+        self.render_sidebar_rail.refresh()
         self.render_individual_progress.refresh()
         self.render_tracks.refresh()
 
@@ -625,7 +629,7 @@ class DistanceReviewPage:
     @ui.refreshable
     def render_sidebar(self) -> None:
         if self.video:
-            with ui.card().classes("full-width distance-review-card"):
+            with ui.card().classes("full-width distance-review-card q-mini-drawer-hide"):
                 with ui.row().classes("items-center w-full q-mb-none no-wrap"):
                     ui.label(t("manual_review")).classes("text-subtitle1 font-weight-medium")
                     ui.space()
@@ -636,6 +640,15 @@ class DistanceReviewPage:
                 self.render_individuals()
                 self.render_reviewed_species()
                 self.render_video_actions()
+            self.render_sidebar_rail()
+
+    @ui.refreshable
+    def render_sidebar_rail(self) -> None:
+        if not self.video:
+            return
+        with ui.column().classes("distance-sidebar-rail q-mini-drawer-only"):
+            render_individual_rail_view(self._individual_views_context())
+            render_video_actions_view(self._sample_controls_context(), compact=True)
 
     @ui.refreshable
     def render_workspace(self) -> None:
@@ -2058,7 +2071,7 @@ async def setup_distance_review() -> None:
 
     right_drawer = (
         ui.right_drawer(value=True)
-        .props("behavior=desktop width=400")
+        .props("behavior=desktop width=400 mini-width=72")
         .classes("q-pa-sm review-sidebar")
     )
     left_drawer, _ = shared_header(

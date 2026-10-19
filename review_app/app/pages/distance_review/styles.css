@@ -43,6 +43,11 @@
     .distance-reference-clip .q-btn__content {width:100%;flex-direction:column;gap:2px}
     .distance-reference-thumbnail {width:94px;height:53px;border-radius:4px;background:#0f172a}
     .distance-sidebar {width:100%;gap:8px}
+    .distance-sidebar-rail {width:100%;min-width:0;align-items:stretch;gap:8px}
+    .distance-rail-add, .distance-rail-finish {width:100%;min-height:36px}
+    .distance-rail-individuals {width:100%;min-width:0;gap:4px}
+    .distance-rail-individual {width:100%;min-height:36px;padding:2px}
+    .distance-rail-individual.active {background:rgba(245,158,11,.15);outline:2px solid var(--q-warning)}
     .distance-sidebar .q-card, .distance-filter .q-card {padding:8px;gap:8px}
     .distance-review-card {gap:8px}
     .distance-individual-card {gap:8px}

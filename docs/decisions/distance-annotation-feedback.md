@@ -136,9 +136,12 @@ have not yet been specified.
 space, including excessive white borders, margins, padding, and gaps. Prioritize
 usable animal/reference image area and essential annotation controls.
 
-The right-hand annotation sidebar must be collapsible and restorable. Collapsing
-it should give the comparison panels the freed width without losing the active
-individual, sample, or unsaved form selection. Keep a visible way to reopen it.
+The right-hand annotation sidebar must collapse to a narrow rail, rather than
+completely disappear. Keep **A / Add**, a completion checkbox indicator and number
+per individual, and the green finish checkmark visible. Clicking an individual
+selects it; completion remains derived from sample coverage. Collapsing gives the
+comparison panels the freed width without losing the active individual, sample,
+or unsaved form selection. Keep the header toggle available to expand it.
 
 Coordinate this layout work with detachable panels: when a panel is popped out
 or the sidebar is collapsed, the remaining content should expand into the
@@ -147,9 +150,10 @@ available space rather than leave empty reserved columns.
 **Scope:** A general Distance UI design overhaul, not just isolated spacing
 adjustments. Detailed visual design remains to be worked out.
 
-**Partially implemented:** Added an annotation-panel icon toggle in the header,
-next to the filters, that collapses/restores the right drawer without rebuilding
-players or form controls. It uses the same round white icon-button styling as the
+**Partially implemented:** The annotation-panel icon toggle in the header,
+next to the filters, switches between a 400 px drawer and a 72 px action rail
+without rebuilding players or full form controls. The rail retains Add, individual
+selection/completion marks, and guarded video completion. It uses the same round white icon-button styling as the
 filter toggle. Restore the header first if it has been hidden.
 An initial spacing pass reduces sidebar/card padding and panel gaps and removes
 the workspace width cap. The follow-up removes comparison-card borders, shadows,

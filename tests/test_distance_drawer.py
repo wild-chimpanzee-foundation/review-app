@@ -285,7 +285,9 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     active_id = page.individual_id
     values = page.sample_values.copy()
     with user:
-        page.right_drawer = ui.right_drawer(value=True).props("behavior=desktop width=400")
+        page.right_drawer = ui.right_drawer(value=True).props(
+            "behavior=desktop width=400 mini-width=72"
+        )
         left_drawer, _ = entry_point.shared_header(
             show_drawer=True, distance_interface=True, annotation_drawer=page.right_drawer
         )
@@ -307,7 +309,7 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     assert toggle.parent_slot is filters.parent_slot
     assert toggle not in list(workspace.descendants())
     assert toggle.props["round"] and toggle.props["flat"] and toggle.props["color"] == "white"
-    assert toggle.props["aria-label"] == "Show/hide annotations"
+    assert toggle.props["aria-label"] == "Expand/collapse annotations"
 
     def click(button):
         interaction = user.find(ui.button)
@@ -317,12 +319,14 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     expected_renders = 0 if empty_queue else 1
     assert page.render_animal.call_count == expected_renders
     click(toggle)
-    assert page.right_drawer.value is False and left_drawer.value is True
+    assert page.right_drawer.value is True and page.right_drawer.props["mini"] is True
+    assert left_drawer.value is True
     click(filters)
-    assert left_drawer.value is False and page.right_drawer.value is False
+    assert left_drawer.value is False and page.right_drawer.props["mini"] is True
     click(filters)
     click(toggle)
-    assert page.right_drawer.value is True and left_drawer.value is True
+    assert page.right_drawer.value is True and not page.right_drawer.props.get("mini", False)
+    assert left_drawer.value is True
     click(
         next(
             element
@@ -345,6 +349,83 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     assert page.sample_values == values
     assert page.render_animal.call_count == expected_renders
     assert page.render_references.call_count == expected_renders
+
+
+async def test_compact_rail_keeps_add_individuals_and_guarded_finish(user: User, drawer_page):
+    holder, data, second = drawer_page
+    data["dp"].verify_distance_recording_time(
+        data["videos"][0], datetime(2026, 10, 12, 16, 2, 49), "alice"
+    )
+    await user.open("/distance-drawer-test")
+    page = holder["page"]
+    await page.reload_review()
+    page.sample_offset = 1000
+    page.animal_player = object()
+    page.add_individual_dialog = AsyncMock()
+    page.select_individual = AsyncMock()
+    page.finish_video = AsyncMock()
+    page.individuals[1]["review_status"] = "completed"
+    with user:
+        page.render_sidebar_rail()
+
+    def button(action, individual_id=None):
+        return next(
+            element
+            for element in page.client.elements.values()
+            if isinstance(element, ui.button)
+            and element.props.get("data-distance-action") == action
+            and (
+                individual_id is None
+                or element.props.get("data-distance-rail-individual") == individual_id
+            )
+        )
+
+    def click(target):
+        interaction = user.find(ui.button)
+        interaction.elements = {target}
+        interaction.click()
+
+    add = button("rail-add")
+    assert add.text == "A" and add.enabled
+    first = button("rail-select-individual", data["individual"]["id"])
+    other = button("rail-select-individual", second["id"])
+    assert first.props["aria-pressed"] == "true"
+    assert first.props["data-distance-complete"] == "false"
+    assert other.props["data-distance-complete"] == "true"
+    assert any(
+        isinstance(item, ui.icon) and item.props["name"] == "check_box"
+        for item in other.descendants()
+    )
+    assert not button("rail-finish-video").enabled
+    # Rail entries do not duplicate the cards used by the existing J/K shortcut.
+    assert (
+        sum(
+            bool(item.props.get("data-distance-individual"))
+            for item in page.client.elements.values()
+        )
+        == 2
+    )
+    click(add)
+    await wait_for_saved(page, lambda: page.add_individual_dialog.await_count == 1)
+    click(other)
+    await wait_for_saved(page, lambda: page.select_individual.await_count == 1)
+    page.select_individual.assert_awaited_once_with(second["id"])
+
+    page.individuals[0]["review_status"] = "completed"
+    with user:
+        page.render_sidebar_rail.refresh()
+    await wait_for_saved(page, lambda: button("rail-finish-video").enabled)
+    finish = button("rail-finish-video")
+    assert finish.enabled and finish.props["color"] == "positive"
+    click(finish)
+    await wait_for_saved(page, lambda: page.finish_video.await_count == 1)
+    page.busy = True
+    with user:
+        page.render_sidebar_rail.refresh()
+    await asyncio.sleep(0.01)
+    assert not button("rail-add").enabled
+    assert not button("rail-select-individual", second["id"]).enabled
+    assert not button("rail-finish-video").enabled
 
 
 async def test_ordinary_header_does_not_add_annotation_toggle(user: User, monkeypatch):
