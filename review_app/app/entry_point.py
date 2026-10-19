@@ -99,6 +99,7 @@ def shared_header(
     *,
     distance_shortcuts: bool = False,
     distance_interface: bool = False,
+    annotation_drawer=None,
 ):
     from nicegui import ui
 
@@ -209,6 +210,11 @@ def shared_header(
                 ui.button(icon="filter_list", on_click=toggle_drawer).props(
                     "flat round color=white"
                 ).tooltip(t("filters_label"))
+            if annotation_drawer is not None:
+                ui.button(icon="view_sidebar", on_click=annotation_drawer.toggle).props(
+                    'flat round color=white data-testid="distance-toggle-annotations" '
+                    f'aria-label="{t("distance_toggle_annotations")}"'
+                ).tooltip(t("distance_toggle_annotations"))
             if distance_interface:
                 ui.button(icon="visibility_off", on_click=header.hide).props(
                     "flat round color=white"

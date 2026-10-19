@@ -241,8 +241,9 @@ alongside rounded millisecond frame identities; never round saved meter values.
 ## Desktop UI and shortcuts
 
 - Reuse Review's header and desktop drawers: 300 px filters on the left, 400 px
-  individual/confirmation controls on the right. A **Hide/Show annotations**
-  button in the workspace collapses/restores the right drawer, freeing its width
+  individual/confirmation controls on the right. An annotation-panel icon button
+  in the header, next to the filter toggle, collapses/restores the right drawer,
+  freeing its width
   without losing players, active identity/sample, or unconfirmed form choices.
   Mobile compatibility is deferred.
 - Keep equally sized animal/reference frames, graph, and essential actions

@@ -112,6 +112,11 @@ approval and an explicit verified force-with-lease.
   and full-width uncapped videos. At 1920 px with both drawers hidden, each 16:9
   video occupies 958×538.875 px. Native 4:3 sizing, dark-theme overrides, and
   fullscreen/dialog sizing also pass; unrelated cards retain their borders.
+- Header-toggle follow-up: **64 passed** across drawer, translation, and ordinary
+  UI smoke tests. The annotation toggle is now a round white header icon next to
+  filters, not a workspace action. Isolated Chromium at 1280×800 confirms header
+  placement, collapse/reopen (580→980→580 px workspace), header hide/restore,
+  preserved player IDs/draft input, and no horizontal overflow.
 - This is bounded UI/media validation, not a full application/real-footage review.
   No live application database was used or changed.
 

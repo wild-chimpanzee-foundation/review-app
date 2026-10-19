@@ -263,8 +263,12 @@ async def test_replay_includes_first_sample_lead_in(
 
 @pytest.mark.parametrize("empty_queue", [False, True])
 async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
-    user: User, drawer_page, empty_queue
+    user: User, drawer_page, empty_queue, monkeypatch
 ):
+    from review_app.app import entry_point
+
+    monkeypatch.setattr(entry_point, "get_active_project_id", lambda: None)
+    monkeypatch.setattr("review_app.app.update_checker.check_for_update", lambda: None)
     holder, _, _ = drawer_page
     await user.open("/distance-drawer-test")
     page = holder["page"]
@@ -282,23 +286,82 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     values = page.sample_values.copy()
     with user:
         page.right_drawer = ui.right_drawer(value=True).props("behavior=desktop width=400")
+        left_drawer, _ = entry_point.shared_header(
+            show_drawer=True, distance_interface=True, annotation_drawer=page.right_drawer
+        )
         with page.right_drawer:
             draft = ui.input("Unsaved draft", value="keep me")
-        page.render_workspace()
+        with ui.column() as workspace:
+            page.render_workspace()
+    header = next(
+        element for element in page.client.elements.values() if isinstance(element, ui.header)
+    )
+    toggle = next(
+        element
+        for element in header.descendants()
+        if element.props.get("data-testid") == "distance-toggle-annotations"
+    )
+    filters = next(
+        element for element in header.descendants() if element.props.get("icon") == "filter_list"
+    )
+    assert toggle.parent_slot is filters.parent_slot
+    assert toggle not in list(workspace.descendants())
+    assert toggle.props["round"] and toggle.props["flat"] and toggle.props["color"] == "white"
+    assert toggle.props["aria-label"] == "Show/hide annotations"
+
+    def click(button):
+        interaction = user.find(ui.button)
+        interaction.elements = {button}
+        interaction.click()
+
     expected_renders = 0 if empty_queue else 1
     assert page.render_animal.call_count == expected_renders
-    user.find("Hide annotations").click()
-    await user.should_see("Show annotations")
-    assert page.right_drawer.value is False
-    user.find("Show annotations").click()
-    await user.should_see("Hide annotations")
-    assert page.right_drawer.value is True
+    click(toggle)
+    assert page.right_drawer.value is False and left_drawer.value is True
+    click(filters)
+    assert left_drawer.value is False and page.right_drawer.value is False
+    click(filters)
+    click(toggle)
+    assert page.right_drawer.value is True and left_drawer.value is True
+    click(
+        next(
+            element
+            for element in header.descendants()
+            if element.props.get("icon") == "visibility_off"
+        )
+    )
+    assert header.value is False
+    restore = next(
+        element
+        for element in page.client.elements.values()
+        if "distance-header-restore" in element.classes
+    )
+    click(restore)
+    assert header.value is True
+    assert toggle in list(header.descendants())
     assert draft.value == "keep me"
     assert (page.animal_player, page.reference_player) == players
     assert page.individual_id == active_id and page.sample_offset == 1000
     assert page.sample_values == values
     assert page.render_animal.call_count == expected_renders
     assert page.render_references.call_count == expected_renders
+
+
+async def test_ordinary_header_does_not_add_annotation_toggle(user: User, monkeypatch):
+    from review_app.app import entry_point
+
+    monkeypatch.setattr(entry_point, "get_active_project_id", lambda: None)
+    monkeypatch.setattr("review_app.app.update_checker.check_for_update", lambda: None)
+
+    @ui.page("/ordinary-header-test")
+    def ordinary_header():
+        entry_point.shared_header(show_drawer=True)
+
+    await user.open("/ordinary-header-test")
+    assert not any(
+        element.props.get("data-testid") == "distance-toggle-annotations"
+        for element in user.client.elements.values()
+    )
 
 
 async def wait_for_saved_timing_disabled(page):

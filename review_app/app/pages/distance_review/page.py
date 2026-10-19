@@ -633,28 +633,10 @@ class DistanceReviewPage:
                 self.render_reviewed_species()
                 self.render_sample_actions()
 
-    def render_annotation_toggle(self) -> None:
-        if self.right_drawer is None:
-            return
-        ui.button(on_click=self.right_drawer.toggle).props(
-            'flat dense no-caps data-testid="distance-toggle-annotations"'
-        ).bind_text_from(
-            self.right_drawer,
-            "value",
-            backward=lambda opened: t(
-                "distance_hide_annotations" if opened else "distance_show_annotations"
-            ),
-        ).bind_icon_from(
-            self.right_drawer,
-            "value",
-            backward=lambda opened: "chevron_right" if opened else "chevron_left",
-        )
-
     @ui.refreshable
     def render_workspace(self) -> None:
         video = self.video
         if not video:
-            self.render_annotation_toggle()
             with ui.card().classes("w-full items-center q-pa-xl"):
                 ui.icon("video_library", size="lg").classes("text-grey-5")
                 ui.label(t("distance_no_videos"))
@@ -698,7 +680,6 @@ class DistanceReviewPage:
                         _shortcut_badge("N")
                         ui.icon("chevron_right")
                 next_button.set_enabled(self.index + 1 < len(self.queue))
-                self.render_annotation_toggle()
         with ui.element("div").classes("distance-grid"):
             self.render_animal()
             self.render_references()
@@ -2063,8 +2044,16 @@ class DistanceReviewPage:
 async def setup_distance_review() -> None:
     from review_app.app.entry_point import shared_header
 
+    right_drawer = (
+        ui.right_drawer(value=True)
+        .props("behavior=desktop width=400")
+        .classes("q-pa-sm review-sidebar")
+    )
     left_drawer, _ = shared_header(
-        show_drawer=True, distance_shortcuts=True, distance_interface=True
+        show_drawer=True,
+        distance_shortcuts=True,
+        distance_interface=True,
+        annotation_drawer=right_drawer,
     )
     left_drawer.props("behavior=desktop").classes("review-sidebar distance-filter")
     # Register styles before the first await: NiceGUI may send the initial page
@@ -2073,6 +2062,7 @@ async def setup_distance_review() -> None:
     dp = await get_or_create_data_provider()
     project_id = get_active_project_id()
     if not dp or not project_id:
+        right_drawer.hide()
         ui.label(t("distance_choose_project")).classes("text-grey-6 q-pa-lg")
         ui.button(t("go_to_overview_btn"), on_click=lambda: ui.navigate.to("/overview"))
         return
@@ -2091,11 +2081,7 @@ async def setup_distance_review() -> None:
     await page.load_video()
     with left_drawer:
         page.render_filters()
-    page.right_drawer = (
-        ui.right_drawer(value=True)
-        .props("behavior=desktop width=400")
-        .classes("q-pa-sm review-sidebar")
-    )
+    page.right_drawer = right_drawer
     with ui.column().classes("distance-workspace"):
         page.render_workspace()
     with page.right_drawer, ui.column().classes("distance-sidebar"):
