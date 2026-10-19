@@ -53,6 +53,7 @@ def bulk_page(distance_data, monkeypatch):
             "carries": False,
             "infant_id": "_new",
         }
+        page.render_individuals()
         page.render_sample_actions()
         holder["page"] = page
 
@@ -100,7 +101,15 @@ async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sampl
     user.find("Apply and overwrite").click()
     await user.should_see("Applied selection to 4 samples.")
     await wait_until(lambda: not page.busy and len(page.samples) == 5)
-    await user.should_see("Individual completed")
+    await user.should_see("5/5 samples reviewed")
+    select = next(
+        element
+        for element in user.find("#1", kind=ui.button).elements
+        if element.props.get("data-distance-action") == "select-individual"
+    )
+    assert select.props["icon"] == "check_box"
+    assert select.props["color"] == "positive"
+    assert page.individual["review_status"] == "completed"
     await user.should_not_see("Absent to end")
     await user.should_not_see("Undo absent to end")
     assert page.review["completed_at"] is None

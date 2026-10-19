@@ -1055,9 +1055,56 @@ def test_distance_migration_upgrades_v22_and_matches_constraints(tmp_path):
                 }
 
             assert checks(upgraded) == checks(fresh)
-            assert inspect(upgraded).get_foreign_keys(table) == inspect(fresh).get_foreign_keys(
-                table
-            )
+
+            def foreign_keys(engine):
+                # SQLAlchemy can omit ON DELETE from ALTER-added inline FKs.
+                # Compare SQLite's actual constraints, ignoring declaration IDs.
+                with engine.connect() as conn:
+                    return sorted(
+                        tuple(row[1:])
+                        for row in conn.exec_driver_sql(f'PRAGMA foreign_key_list("{table}")')
+                    )
+
+            assert foreign_keys(upgraded) == foreign_keys(fresh)
+        for engine in (upgraded, fresh):
+            with engine.begin() as conn:
+                conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+                assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+                conn.exec_driver_sql(
+                    "INSERT OR IGNORE INTO projects (id, name, created_at) "
+                    "VALUES ('p1', 'Existing', '2026-01-01')"
+                )
+                conn.exec_driver_sql(
+                    "INSERT OR IGNORE INTO videos "
+                    "(video_id, project_id, video_path, last_seen_at) "
+                    "VALUES ('v1', 'p1', 'animal.mp4', '2026-01-01')"
+                )
+                conn.execute(
+                    Species.__table__.insert(),
+                    {"id": "species", "scientific_name": "deer"},
+                )
+                conn.execute(
+                    DistanceIndividual.__table__.insert(),
+                    [
+                        {
+                            "id": individual_id,
+                            "video_id": "v1",
+                            "individual_number": number,
+                            "species_id": "species",
+                            "first_seen_offset_ms": 0,
+                            "initial_carrier_individual_id": carrier_id,
+                        }
+                        for individual_id, number, carrier_id in (
+                            ("carrier", 1, None),
+                            ("infant", 2, "carrier"),
+                        )
+                    ],
+                )
+                conn.exec_driver_sql("DELETE FROM distance_individuals WHERE id='carrier'")
+                assert conn.exec_driver_sql(
+                    "SELECT id, initial_carrier_individual_id FROM distance_individuals"
+                ).all() == [("infant", None)]
+                assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
     finally:
         upgraded.dispose()
         fresh.dispose()
