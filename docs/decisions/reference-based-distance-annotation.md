@@ -241,14 +241,17 @@ alongside rounded millisecond frame identities; never round saved meter values.
 ## Desktop UI and shortcuts
 
 - Reuse Review's header and desktop drawers: 300 px filters on the left, 400 px
-  individual/completion controls on the right. The annotation-panel icon on the
-  right of the header, next to the account menu, switches the right drawer between
-  its full width and
-  a 72 px rail, rather than hiding it. The rail retains **A / Add**, each
+  individual/completion controls on the right. A sticky expand/collapse button
+  at the top of the sidebar switches between its full width and a 72 px rail,
+  rather than hiding it. The button remains visible in both modes even when the
+  page header is hidden; it is not duplicated in the header. The rail retains **A / Add**, each
   individual's number and automatic completion checkbox indicator, and a green
   finish icon. Highlight the active individual; clicking a rail entry selects it,
   never manually changes its completion. Keep add/select/finish guards and show a
-  clock-verification action when needed. Tooltips retain full labels.
+  clock-verification action when needed. Tooltips retain full labels. Completed
+  individuals in the expanded view have a green checked icon and number, plus a
+  green card border when inactive. Preserve the active card's orange border
+  independently of completion.
   Switching widths preserves full-form elements, players, active identity/sample,
   and unconfirmed form choices. Mobile compatibility is deferred.
 - Keep equally sized animal/reference frames, graph, and essential actions

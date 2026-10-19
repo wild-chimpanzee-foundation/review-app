@@ -43,6 +43,10 @@
     .distance-reference-clip .q-btn__content {width:100%;flex-direction:column;gap:2px}
     .distance-reference-thumbnail {width:94px;height:53px;border-radius:4px;background:#0f172a}
     .distance-sidebar {width:100%;gap:8px}
+    .distance-sidebar-toggle-row {width:100%;justify-content:flex-end;position:sticky;
+        top:0;z-index:2;background:#f8fafc}
+    .body--dark .distance-sidebar-toggle-row {background:#0f172a}
+    .q-drawer--mini .distance-sidebar-toggle-row {justify-content:center}
     .distance-sidebar-rail {width:100%;min-width:0;align-items:stretch;gap:8px}
     /* Override NiceGUI's display:flex defaults, which outrank Quasar's mini helpers. */
     .distance-sidebar .distance-sidebar-rail {display:none!important}

@@ -626,6 +626,28 @@ class DistanceReviewPage:
                 on_change=lambda e: update("status_filter", e),
             ).props("dense outlined").classes("w-full")
 
+    def render_sidebar_toggle(self) -> None:
+        def toggle():
+            compact = not self.right_drawer.props.get("mini", False)
+            self.right_drawer.props["mini"] = compact
+            self.right_drawer.update()
+            button.set_icon("chevron_left" if compact else "chevron_right")
+
+        with ui.row().classes("distance-sidebar-toggle-row"):
+            button = (
+                ui.button(
+                    icon="chevron_left"
+                    if self.right_drawer.props.get("mini", False)
+                    else "chevron_right",
+                    on_click=toggle,
+                )
+                .props(
+                    'flat round dense color=primary data-testid="distance-toggle-annotations" '
+                    f'aria-label="{t("distance_toggle_annotations")}"'
+                )
+                .tooltip(t("distance_toggle_annotations"))
+            )
+
     @ui.refreshable
     def render_sidebar(self) -> None:
         if self.video:
@@ -2078,7 +2100,6 @@ async def setup_distance_review() -> None:
         show_drawer=True,
         distance_shortcuts=True,
         distance_interface=True,
-        annotation_drawer=right_drawer,
     )
     left_drawer.props("behavior=desktop").classes("review-sidebar distance-filter")
     # Register styles before the first await: NiceGUI may send the initial page
@@ -2110,6 +2131,7 @@ async def setup_distance_review() -> None:
     with ui.column().classes("distance-workspace"):
         page.render_workspace()
     with page.right_drawer, ui.column().classes("distance-sidebar"):
+        page.render_sidebar_toggle()
         page.render_sidebar()
     ui.run_javascript("""
         const header = document.querySelector('.q-header');

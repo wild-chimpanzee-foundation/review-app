@@ -94,6 +94,37 @@ async def test_only_selected_animal_expands(user: User, drawer_page):
     assert_cards(second["id"])
 
 
+@pytest.mark.parametrize("active", [False, True])
+async def test_completed_expanded_individual_is_green_and_checked(user: User, drawer_page, active):
+    holder, data, second = drawer_page
+    await user.open("/distance-drawer-test")
+    page = holder["page"]
+    page.individuals[1]["review_status"] = "completed"
+    if active:
+        page.individual_id = second["id"]
+
+    def card():
+        return next(
+            element
+            for element in page.client.elements.values()
+            if element.props.get("data-distance-individual") == second["id"]
+        )
+
+    def select():
+        return next(
+            element
+            for element in card().descendants()
+            if element.props.get("data-distance-action") == "select-individual"
+        )
+
+    with user:
+        page.render_individuals.refresh()
+    await wait_for_saved(page, lambda: select().props.get("icon") == "check_box")
+    assert select().props["color"] == "positive"
+    assert select().props["aria-pressed"] == str(active).lower()
+    assert f"var(--q-{'warning' if active else 'positive'})" in str(card().style)
+
+
 async def test_individual_shortcut_targets_keep_card_selection_and_busy_guards(
     user: User, drawer_page
 ):
@@ -288,10 +319,9 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
         page.right_drawer = ui.right_drawer(value=True).props(
             "behavior=desktop width=400 mini-width=72"
         )
-        left_drawer, _ = entry_point.shared_header(
-            show_drawer=True, distance_interface=True, annotation_drawer=page.right_drawer
-        )
+        left_drawer, _ = entry_point.shared_header(show_drawer=True, distance_interface=True)
         with page.right_drawer:
+            page.render_sidebar_toggle()
             draft = ui.input("Unsaved draft", value="keep me")
         with ui.column() as workspace:
             page.render_workspace()
@@ -300,21 +330,18 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     )
     toggle = next(
         element
-        for element in header.descendants()
+        for element in page.right_drawer.descendants()
         if element.props.get("data-testid") == "distance-toggle-annotations"
     )
     filters = next(
         element for element in header.descendants() if element.props.get("icon") == "filter_list"
     )
-    account = next(
-        element
-        for element in header.descendants()
-        if element.props.get("icon") == "account_circle"
-    )
-    assert toggle.parent_slot is account.parent_slot
-    assert toggle.parent_slot is not filters.parent_slot
+    assert toggle not in list(header.descendants())
+    assert toggle in list(page.right_drawer.descendants())
+    assert "distance-sidebar-toggle-row" in toggle.parent_slot.parent.classes
     assert toggle not in list(workspace.descendants())
-    assert toggle.props["round"] and toggle.props["flat"] and toggle.props["color"] == "white"
+    assert toggle.props["round"] and toggle.props["flat"] and toggle.props["color"] == "primary"
+    assert toggle.props["icon"] == "chevron_right"
     assert toggle.props["aria-label"] == "Expand/collapse annotations"
 
     def click(button):
@@ -326,12 +353,14 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     assert page.render_animal.call_count == expected_renders
     click(toggle)
     assert page.right_drawer.value is True and page.right_drawer.props["mini"] is True
+    assert toggle.props["icon"] == "chevron_left"
     assert left_drawer.value is True
     click(filters)
     assert left_drawer.value is False and page.right_drawer.props["mini"] is True
     click(filters)
     click(toggle)
     assert page.right_drawer.value is True and not page.right_drawer.props.get("mini", False)
+    assert toggle.props["icon"] == "chevron_right"
     assert left_drawer.value is True
     click(
         next(
@@ -348,7 +377,7 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     )
     click(restore)
     assert header.value is True
-    assert toggle in list(header.descendants())
+    assert toggle in list(page.right_drawer.descendants())
     assert draft.value == "keep me"
     assert (page.animal_player, page.reference_player) == players
     assert page.individual_id == active_id and page.sample_offset == 1000

@@ -151,6 +151,11 @@ approval and an explicit verified force-with-lease.
   the fix and passes afterward, asserting both visibility of the active view and
   absence of the inactive view across expanded→compact→expanded, with player IDs
   and draft input preserved. No broad test suite was repeated for this CSS fix.
+- Sidebar affordance follow-up: **five focused tests passed** for green checked
+  expanded cards (active and inactive), unchanged individual selection, and the
+  relocated in-sidebar toggle (populated and empty queues). The toggle is outside
+  both mutually exclusive views and remains in the sidebar when the header is
+  hidden. Lint/format and whitespace checks pass; no broad suite was repeated.
 - This is bounded UI/media validation, not a full application/real-footage review.
   No live application database was used or changed.
 

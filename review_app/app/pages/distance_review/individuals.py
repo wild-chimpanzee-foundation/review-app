@@ -112,10 +112,12 @@ def render_individual_rail(context: IndividualViewsContext) -> None:
 
 def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
     active = row["id"] == context.individual_id
+    completed = row["review_status"] == "completed"
+    border_color = "warning" if active else "positive" if completed else "primary"
     card = (
         ui.card()
         .classes("full-width q-pa-sm q-mb-sm distance-individual-card")
-        .style(f"border:2px solid var(--q-{'warning' if active else 'primary'})")
+        .style(f"border:2px solid var(--q-{border_color})")
     )
     card._props["data-distance-individual"] = row["id"]
     card._props["data-distance-active"] = "true" if active else "false"
@@ -124,10 +126,16 @@ def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
             select = (
                 ui.button(
                     f"#{row['individual_number']}",
-                    icon="radio_button_checked" if active else "radio_button_unchecked",
+                    icon=(
+                        "check_box"
+                        if completed
+                        else "radio_button_checked"
+                        if active
+                        else "radio_button_unchecked"
+                    ),
                     on_click=lambda: context.on_select(row["id"]),
                 )
-                .props("flat dense no-caps")
+                .props(f"flat dense no-caps color={'positive' if completed else 'primary'}")
                 .classes("self-center")
             )
             select._props["aria-pressed"] = "true" if active else "false"

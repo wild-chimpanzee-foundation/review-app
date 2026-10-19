@@ -99,7 +99,6 @@ def shared_header(
     *,
     distance_shortcuts: bool = False,
     distance_interface: bool = False,
-    annotation_drawer=None,
 ):
     from nicegui import ui
 
@@ -196,16 +195,6 @@ def shared_header(
     def toggle_drawer():
         if drawer is not None:
             drawer.toggle()
-
-    def toggle_annotations():
-        if "mini-width" in annotation_drawer.props:
-            annotation_drawer.show()
-            if annotation_drawer.props.get("mini", False):
-                annotation_drawer.props(remove="mini")
-            else:
-                annotation_drawer.props("mini")
-        else:
-            annotation_drawer.toggle()
 
     if show_drawer:
         drawer = ui.left_drawer(value=True).props("behavior=default").classes("q-pa-sm")
@@ -315,11 +304,6 @@ def shared_header(
                     clear_session(keep_prefs=True)
                     ui.navigate.to("/login")
 
-                if annotation_drawer is not None:
-                    ui.button(icon="view_sidebar", on_click=toggle_annotations).props(
-                        'flat round color=white data-testid="distance-toggle-annotations" '
-                        f'aria-label="{t("distance_toggle_annotations")}"'
-                    ).tooltip(t("distance_toggle_annotations"))
                 _current_lang = get_language()
                 with (
                     ui.button(icon="account_circle")

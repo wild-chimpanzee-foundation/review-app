@@ -141,7 +141,8 @@ completely disappear. Keep **A / Add**, a completion checkbox indicator and numb
 per individual, and the green finish checkmark visible. Clicking an individual
 selects it; completion remains derived from sample coverage. Collapsing gives the
 comparison panels the freed width without losing the active individual, sample,
-or unsaved form selection. Keep the header toggle available to expand it.
+or unsaved form selection. Keep the expand/collapse button in the sidebar itself,
+visible in both modes, independently of whether the page header is shown.
 
 Coordinate this layout work with detachable panels: when a panel is popped out
 or the sidebar is collapsed, the remaining content should expand into the
@@ -150,11 +151,12 @@ available space rather than leave empty reserved columns.
 **Scope:** A general Distance UI design overhaul, not just isolated spacing
 adjustments. Detailed visual design remains to be worked out.
 
-**Partially implemented:** The annotation-panel icon toggle on the right of the
-header, next to the account menu, switches between a 400 px drawer and a 72 px
-action rail without rebuilding players or full form controls. The rail retains Add, individual
-selection/completion marks, and guarded video completion. It uses the same round white icon-button styling as the
-filter toggle. Restore the header first if it has been hidden.
+**Partially implemented:** A sticky toggle at the top of the sidebar switches
+between a 400 px drawer and a 72 px action rail without rebuilding players or full
+form controls. It remains available in both modes with no header duplicate. The
+rail retains Add, individual selection/completion marks, and guarded video
+completion. In the expanded view, completed individuals have green numbers and
+checked icons; their borders are green unless active, when orange is retained.
 An initial spacing pass reduces sidebar/card padding and panel gaps and removes
 the workspace width cap. The follow-up removes comparison-card borders, shadows,
 backgrounds, and padding entirely, along with outer workspace padding and the
