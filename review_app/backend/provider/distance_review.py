@@ -29,6 +29,7 @@ def review_offsets(review, duration_sec: float | None) -> list[int]:
             clock_anchor_offset_ms=review.clock_anchor_offset_ms,
             opening_even_second=review.opening_even_second,
             alignment_mode=review.alignment_mode,
+            clock_anchor_playback_ms=review.clock_anchor_playback_ms,
         )
     except ValueError:
         # Keep evidence readable when a re-probe invalidates an existing schedule.
@@ -192,6 +193,7 @@ def verify_recording_time(
         clock_anchor_offset_ms=clock_anchor_offset_ms,
         opening_even_second=opening_even_second,
         alignment_mode=alignment_mode,
+        clock_anchor_playback_ms=clock_anchor_playback_ms,
     )
     if clock_anchor_offset_ms is None:
         if clock_anchor_playback_ms is not None or (
@@ -216,8 +218,12 @@ def verify_recording_time(
                 recorded_start is None
                 and review.recorded_start is None
                 or recorded_start is not None
-                and review.recorded_start is not None
-                and (recorded_start - review.recorded_start).total_seconds() % 2 == 0
+                and (
+                    review.recorded_start is None
+                    and alignment_mode == "simplified"
+                    or review.recorded_start is not None
+                    and (recorded_start - review.recorded_start).total_seconds() % 2 == 0
+                )
             )
             and clock_anchor_offset_ms == review.clock_anchor_offset_ms
             and clock_anchor_playback_ms == review.clock_anchor_playback_ms

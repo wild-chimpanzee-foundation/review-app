@@ -296,6 +296,44 @@ class DistanceMixin(ProviderBase):
             reset_tracks=reset_tracks,
         )
 
+    def align_distance_on_even_frame(
+        self,
+        video_id: str,
+        playback_offset_ms: float,
+        annotator_name: str,
+        *,
+        camera_time: datetime | None = None,
+        reset_tracks: bool = False,
+    ) -> None:
+        """Anchor a bidirectional grid; only explicit camera times become verified."""
+        if camera_time is not None and (
+            not isinstance(camera_time, datetime)
+            or camera_time.tzinfo is not None
+            or camera_time.microsecond
+            or camera_time.second % 2
+        ):
+            raise ValueError("Enter the visible even whole-second camera timestamp")
+        if (
+            isinstance(playback_offset_ms, bool)
+            or not isinstance(playback_offset_ms, (int, float))
+            or not math.isfinite(playback_offset_ms)
+            or playback_offset_ms < 0
+        ):
+            raise ValueError("Select a frame within the video")
+        offset = math.floor(playback_offset_ms)
+        with self.Session.begin() as session:
+            verify_recording_time(
+                session,
+                self._utcnow_dt,
+                video_id,
+                camera_time - timedelta(milliseconds=offset) if camera_time else None,
+                annotator_name,
+                alignment_mode="simplified",
+                clock_anchor_offset_ms=offset,
+                clock_anchor_playback_ms=float(playback_offset_ms),
+                reset_tracks=reset_tracks,
+            )
+
     def align_distance_by_parity(
         self,
         video_id: str,

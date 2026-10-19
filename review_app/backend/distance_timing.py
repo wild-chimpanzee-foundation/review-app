@@ -30,8 +30,9 @@ def sample_offsets(
     clock_anchor_offset_ms: int | None = None,
     opening_even_second: bool = False,
     alignment_mode: str = "exact",
+    clock_anchor_playback_ms: float | None = None,
 ) -> list[int]:
-    """Even camera seconds within [0, duration), including fractional start times."""
+    """Exact clock or even-frame grid within [0, duration); retain legacy parity grids."""
     if alignment_mode not in ("exact", "simplified"):
         raise ValueError("Choose exact or simplified alignment")
     if duration_sec is None or not math.isfinite(duration_sec) or duration_sec <= 0:
@@ -39,10 +40,38 @@ def sample_offsets(
     if not isinstance(opening_even_second, bool):
         raise ValueError("Check whether the opening timestamp is even")
     if alignment_mode == "simplified":
-        if recorded_start is not None or clock_anchor_offset_ms is not None:
-            raise ValueError("Simplified alignment has no camera timestamp or anchor frame")
+        if clock_anchor_offset_ms is None:
+            # Keep existing parity-only reviews readable without reinterpreting evidence.
+            if recorded_start is not None or clock_anchor_playback_ms is not None:
+                raise ValueError("Select an anchor frame before setting clock alignment")
+            return list(
+                range(0 if opening_even_second else 1000, math.ceil(duration_sec * 1000), 2000)
+            )
+        if (
+            isinstance(clock_anchor_offset_ms, bool)
+            or not isinstance(clock_anchor_offset_ms, int)
+            or not 0 <= clock_anchor_offset_ms < duration_sec * 1000
+            or isinstance(clock_anchor_playback_ms, bool)
+            or not isinstance(clock_anchor_playback_ms, (int, float))
+            or not math.isfinite(clock_anchor_playback_ms)
+            or not 0 <= clock_anchor_playback_ms < duration_sec * 1000
+            or math.floor(clock_anchor_playback_ms) != clock_anchor_offset_ms
+        ):
+            raise ValueError("Select an anchor frame within the video")
+        if opening_even_second:
+            raise ValueError("Anchored simplified alignment uses only its two-second grid")
+        if recorded_start is not None:
+            # Validate an explicitly confirmed/corrected time against the even anchor.
+            sample_offsets(
+                recorded_start, duration_sec, clock_anchor_offset_ms=clock_anchor_offset_ms
+            )
+        phase = clock_anchor_playback_ms - clock_anchor_offset_ms
         return list(
-            range(0 if opening_even_second else 1000, math.ceil(duration_sec * 1000), 2000)
+            range(
+                clock_anchor_offset_ms % 2000,
+                math.ceil(duration_sec * 1000 - phase),
+                2000,
+            )
         )
     if not isinstance(recorded_start, datetime) or recorded_start.tzinfo is not None:
         raise ValueError("Use the camera's local recording time without a timezone")
