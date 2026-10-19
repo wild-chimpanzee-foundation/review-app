@@ -90,3 +90,69 @@ def test_failed_v23_upgrade_rolls_back_ddl_data_and_version(legacy_database, mon
         assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
         assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
     migrations.run_migrations(engine)
+
+
+@pytest.mark.parametrize("fail_first", [False, True])
+def test_v26_preserves_distance_evidence_and_allows_unknown_age(
+    legacy_database, monkeypatch, fail_first
+):
+    engine = legacy_database
+    with monkeypatch.context() as patch:
+        patch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:25])
+        migrations.run_migrations(engine)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("""
+            INSERT INTO distance_individuals
+                (id, video_id, individual_number, species_id, age, sex,
+                 first_seen_offset_ms, updated_at, initial_carrier_individual_id)
+            VALUES ('adult', 'video', 1, 'species', 'Adult', 'Female', 0, '2026-01-01', NULL),
+                   ('infant', 'video', 2, 'species', 'Infant', 'Unknown', 0, '2026-01-01', 'adult'),
+                   ('unset', 'video', 3, 'species', NULL, NULL, 0, '2026-01-01', NULL)
+        """)
+        conn.exec_driver_sql("""
+            INSERT INTO distance_samples
+                (id, individual_id, offset_ms, status, skip_reason, updated_at)
+            VALUES ('sample', 'adult', 0, 'skipped', 'individual absent', '2026-01-01')
+        """)
+        conn.exec_driver_sql("""
+            INSERT INTO distance_review_progress
+                (video_id, annotator_name, active_individual_id, updated_at)
+            VALUES ('video', 'alice', 'infant', '2026-01-01')
+        """)
+        conn.exec_driver_sql("""
+            INSERT INTO distance_video_reviews
+                (video_id, recorded_start, verified_by, verified_at, completed_by, completed_at)
+            VALUES ('video', '2026-01-01', 'alice', '2026-01-01', 'alice', '2026-01-01')
+        """)
+        tables = ("distance_individuals", "distance_samples", "distance_review_progress")
+        before = {table: conn.exec_driver_sql(f"SELECT * FROM {table}").all() for table in tables}
+    if fail_first:
+        with engine.connect() as conn:
+            dump = list(conn.connection.driver_connection.iterdump())
+
+        def fail_after_rebuild(conn):
+            migrations._migration_v26(conn)
+            raise RuntimeError("abort age migration")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                migrations,
+                "MIGRATIONS",
+                [(v, fail_after_rebuild if v == 26 else m) for v, m in migrations.MIGRATIONS],
+            )
+            with pytest.raises(RuntimeError, match="abort age migration"):
+                migrations.run_migrations(engine)
+        with engine.connect() as conn:
+            assert list(conn.connection.driver_connection.iterdump()) == dump
+            assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+    migrations.run_migrations(engine)
+    migrations.run_migrations(engine)
+    with engine.begin() as conn:
+        for table in tables:
+            assert conn.exec_driver_sql(f"SELECT * FROM {table}").all() == before[table]
+        assert conn.exec_driver_sql(
+            "SELECT completed_by, completed_at FROM distance_video_reviews"
+        ).one() == (None, None)
+        conn.exec_driver_sql("UPDATE distance_individuals SET age='Unknown' WHERE id='unset'")
+        assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
+        assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1

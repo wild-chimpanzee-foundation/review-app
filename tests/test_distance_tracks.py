@@ -223,10 +223,11 @@ def test_installed_nicegui_dynamic_property_conversion_installs_axis_formatter()
     converter = Path(nicegui.__file__).parent / "static/utils/dynamic_properties.js"
     options = track_options(
         [{"id": "one", "individual_number": 1}],
-        [],
-        [],
-        2,
-        None,
+        [{"individual_id": "one", "offset_ms": 1000, "skip_reason": "individual absent"}],
+        [1000, 3000],
+        4,
+        "one",
+        preview={"individual_id": "one", "offset_ms": 3000, "skip_reason": "midpoint not visible"},
     )
     script = """
         import fs from 'node:fs';
@@ -247,6 +248,27 @@ def test_installed_nicegui_dynamic_property_conversion_installs_axis_formatter()
         assert.equal(format(0), '0 m');
         assert.equal(format(6.6), '7 m');
         assert.equal(format(12.5), '13 m');
+        const render = options.series[1].renderItem;
+        const intervals = options.series[1].data;
+        function shape(point) {
+            return render({}, {
+                coord: value => value, size: () => [0, 20],
+                value: index => point.value[index],
+            });
+        }
+        assert.deepEqual(shape(intervals[0]).style.lineDash, []);
+        assert.deepEqual(shape(intervals[1]).style.lineDash, [5, 3]);
+        assert.equal(shape(intervals[1]).style.stroke, '#38bdf8');
+        const tooltip = options.tooltip.formatter;
+        const previewText = tooltip({
+            data: intervals[1], value: intervals[1].value, seriesName: '#1',
+        });
+        assert.match(previewText, /Unsaved preview/);
+        assert.match(previewText, /Not visible/);
+        assert.match(previewText, /2.0–4.0 s/);
+        assert.equal(tooltip({
+            data: {previewLabel: 'Unsaved preview'}, value: [1, 9], seriesName: '#1',
+        }), 'Unsaved preview\\n#1\\n1.0 s · 9 m');
     """
     result = subprocess.run(
         [node, "--input-type=module", "-e", script, str(converter)],

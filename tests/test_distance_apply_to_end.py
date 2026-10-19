@@ -23,6 +23,9 @@ from review_app.backend.db.models import (
 @pytest.fixture
 def apply_data(distance_data):
     data = distance_data
+    data["dp"].set_distance_individual_attributes(
+        data["individual"]["id"], age="Adult", sex="Unknown", tag_ids=[]
+    )
     data["dp"].verify_distance_recording_time(
         data["videos"][0], datetime(2026, 10, 12, 16, 2, 49), "alice"
     )

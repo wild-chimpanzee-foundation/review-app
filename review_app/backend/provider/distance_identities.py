@@ -21,7 +21,7 @@ from review_app.backend.provider.distance_review import (
     review_offsets,
 )
 
-AGES = {"Adult", "Adolescent", "Juvenile", "Infant"}
+AGES = {"Adult", "Adolescent", "Juvenile", "Infant", "Unknown"}
 SEXES = {"Male", "Female", "Unknown"}
 
 

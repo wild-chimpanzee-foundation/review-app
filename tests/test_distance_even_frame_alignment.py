@@ -26,6 +26,9 @@ def test_midvideo_anchor_schedules_both_directions_and_reconfirms_without_reset(
         data["individual"]["id"], 1120, skip_reason="individual absent", labeled_by="alice"
     )
     dp.set_distance_active_individual(video_id, "alice", data["individual"]["id"])
+    dp.set_distance_individual_attributes(
+        data["individual"]["id"], age="Unknown", sex="Unknown", tag_ids=[]
+    )
     dp.finish_distance_video(video_id, "alice")
     before = dp.get_distance_review_state(video_id, "alice")
     dp.align_distance_on_even_frame(video_id, 5120.125, "bob", camera_time=camera_time)
@@ -41,6 +44,9 @@ def test_optional_timestamp_confirmation_and_correction_preserve_evidence(distan
     dp.align_distance_on_even_frame(video_id, 5120.125, "alice")
     dp.apply_distance_to_end(
         data["individual"]["id"], 1120, skip_reason="individual absent", labeled_by="alice"
+    )
+    dp.set_distance_individual_attributes(
+        data["individual"]["id"], age="Unknown", sex="Unknown", tag_ids=[]
     )
     dp.finish_distance_video(video_id, "alice")
     before = dp.get_distance_review_state(video_id, "alice")

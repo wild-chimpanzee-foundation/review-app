@@ -550,6 +550,13 @@ async def test_fixed_frame_anchor_dialog_setup_guards_and_actions(
     dialog = next(
         element for element in page.client.elements.values() if isinstance(element, ui.dialog)
     )
+    if dialog_kind == "creation":
+        age_select = next(
+            element
+            for element in dialog.descendants()
+            if isinstance(element, ui.select) and element.props.get("label") == "Age"
+        )
+        assert age_select.value is None and "Unknown" in age_select.options
     if dialog_kind == "creation" and create_infant:
         values = {"Age": "Adult", "Sex": "Female", "Individual tags": ["test-tag"]}
         for element in dialog.descendants():
@@ -949,6 +956,27 @@ async def test_redraw_draw_and_save_ignore_stale_video_or_identity(
     )
     assert saved["first_seen_offset_ms"] == original_first_seen
     user.find("Cancel").click()
+
+
+async def test_unknown_age_is_explicit_and_can_be_cleared(user: User, drawer_page):
+    holder, data, _ = drawer_page
+    await user.open("/distance-drawer-test")
+    page = holder["page"]
+    age = next(
+        element
+        for element in page.client.elements.values()
+        if isinstance(element, ui.select) and element.props.get("label") == "Age"
+    )
+    assert age.value is None and "Unknown" in age.options
+    age.set_value("Unknown")
+    await wait_for_saved(
+        page,
+        lambda: data["dp"].list_distance_individuals(data["videos"][0])[0]["age"] == "Unknown",
+    )
+    user.find("Age").clear()
+    await wait_for_saved(
+        page, lambda: data["dp"].list_distance_individuals(data["videos"][0])[0]["age"] is None
+    )
 
 
 async def test_attributes_save_immediately_and_keep_rapid_changes(user: User, drawer_page):

@@ -162,6 +162,11 @@ samples remain editable; a missing sample row means unreviewed, not absent.
   evidence, select the smallest available distance and empty metadata. Neither
   navigation nor prefilling writes or overwrites evidence. Individual attributes
   save immediately and are rendered directly from their saved values.
+- Explicit distance/visibility changes immediately preview the current sample in
+  the graph: a cyan diamond for distance or a cyan dashed status interval, labeled
+  **Unsaved preview**. This is presentation-only; stored samples and completion are
+  unchanged until confirmation. Navigation discards the preview; untouched prefills
+  and locked carried-infant evidence do not create graph previews.
 - Reference browsing retains sample behaviors, infant choices, visibility choice,
   brightness/contrast, and the animal player. Reuse the reference player on clip
   switches; keep its prior image until the next source has loaded and sought.
@@ -189,8 +194,10 @@ available; there is no separate bulk-absence or bulk-undo API.
 
 - Each individual has a durable UUID and an incremental displayed number within
   the video. Species, age, sex, and tags belong to the individual; behavior belongs
-  to each sample. Age/sex may remain unset. Allowed ages are `Adult`, `Adolescent`,
-  `Juvenile`, `Infant`; sexes are `Male`, `Female`, `Unknown`.
+  to each sample. Age/sex may remain unset during creation and annotation, but both
+  are required to finish the video. Allowed ages are `Adult`, `Adolescent`,
+  `Juvenile`, `Infant`, `Unknown`; sexes are `Male`, `Female`, `Unknown`.
+  Explicit `Unknown` satisfies completion; unset values do not.
 - Species defaults, in order, to the active species filter, active individual,
   then the clip's first reviewed species. The selector remains editable across
   project vocabulary, with saved species still available outside that vocabulary.
@@ -242,7 +249,10 @@ Show ordinary Review's species and summed counts without synchronizing records.
 An individual completes automatically once every scheduled sample is annotated or
 explicitly skipped. Persist completion attribution; edits/reprobes reconcile
 coverage and reopen video completion when required. An empty individual list or
-incomplete coverage cannot finish a video.
+incomplete coverage cannot finish a video. Every individual must also have age and
+sex set (explicit `Unknown` is accepted). Failure identifies the individual numbers
+and missing fields and leaves the video open. Schema v26 preserves Distance data
+and reopens older completed reviews with unset age/sex.
 
 **Finish video** checks every reviewed species, independent of the Distance
 species filter. Warn if a species has no Distance individual or its reviewed

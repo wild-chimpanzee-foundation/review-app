@@ -77,6 +77,9 @@ def test_distance_only_work_protects_annotator_in_ui_and_backend(distance_data, 
                 individual_id, 0, reference_frame_id=data["frame"]["id"], labeled_by="bob"
             )
         elif work == "completion":
+            dp.set_distance_individual_attributes(
+                individual_id, age="Unknown", sex="Unknown", tag_ids=[]
+            )
             for offset in dp.get_distance_review_state(video_id, "alice")["offsets"]:
                 dp.save_distance_sample(
                     individual_id, offset, skip_reason="individual absent", labeled_by="alice"
