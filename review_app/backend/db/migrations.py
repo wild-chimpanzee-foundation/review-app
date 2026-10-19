@@ -668,6 +668,41 @@ def _migration_v25(conn) -> None:
     conn.exec_driver_sql("ALTER TABLE distance_video_reviews_v25 RENAME TO distance_video_reviews")
 
 
+def _migration_v26(conn) -> None:
+    """Allow an explicit Unknown age without changing existing assessments/evidence."""
+    schema = conn.exec_driver_sql(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='distance_individuals'"
+    ).scalar_one()
+    old_ages = "'Adult', 'Adolescent', 'Juvenile', 'Infant'"
+    if old_ages + ", 'Unknown'" in schema:
+        return
+    if old_ages not in schema:
+        raise ValueError("Unrecognized Distance age constraint")
+    # Retain all columns/constraints, including the self-referencing carrier FK.
+    indexes = (
+        conn.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE type='index' "
+            "AND tbl_name='distance_individuals' AND sql IS NOT NULL"
+        )
+        .scalars()
+        .all()
+    )
+    updated = schema.replace(old_ages, old_ages + ", 'Unknown'")
+    conn.exec_driver_sql("CREATE TABLE distance_individuals_v26 " + updated[updated.index("(") :])
+    conn.exec_driver_sql("INSERT INTO distance_individuals_v26 SELECT * FROM distance_individuals")
+    conn.exec_driver_sql("DROP TABLE distance_individuals")
+    conn.exec_driver_sql("ALTER TABLE distance_individuals_v26 RENAME TO distance_individuals")
+    for sql in indexes:
+        conn.exec_driver_sql(sql)
+    # Older completed reviews with unset attributes must be corrected before finishing.
+    conn.exec_driver_sql("""
+        UPDATE distance_video_reviews SET completed_by = NULL, completed_at = NULL
+        WHERE video_id IN (
+            SELECT video_id FROM distance_individuals WHERE age IS NULL OR sex IS NULL
+        )
+    """)
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -810,6 +845,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (23, _migration_v23),
     (24, _migration_v24),
     (25, _migration_v25),
+    (26, _migration_v26),
 ]
 
 # Frozen upgrade DDL. Keep independent of evolving ORM metadata.

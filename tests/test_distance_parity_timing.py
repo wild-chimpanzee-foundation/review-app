@@ -49,6 +49,9 @@ def test_v24_upgrade_preserves_clock_samples_progress_and_completion(
         data["individual"]["id"], 920, skip_reason="individual absent", labeled_by="alice"
     )
     dp.set_distance_active_individual(video_id, "alice", data["individual"]["id"])
+    dp.set_distance_individual_attributes(
+        data["individual"]["id"], age="Unknown", sex="Unknown", tag_ids=[]
+    )
     dp.finish_distance_video(video_id, "alice")
     with dp.engine.begin() as conn:
         expected = {

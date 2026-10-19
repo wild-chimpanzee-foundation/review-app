@@ -151,6 +151,9 @@ def test_alignment_changes_require_explicit_reset_after_a_sample(distance_data):
 
 def test_calibrated_even_opening_requires_first_still_for_completion(distance_data):
     data, dp = distance_data, distance_data["dp"]
+    dp.set_distance_individual_attributes(
+        data["individual"]["id"], age="Adult", sex="Unknown", tag_ids=[]
+    )
     dp.calibrate_distance_clock(
         data["videos"][0],
         datetime(2026, 10, 12, 16, 2, 50),
@@ -171,6 +174,9 @@ def test_calibrated_even_opening_requires_first_still_for_completion(distance_da
 @pytest.fixture
 def timed_data(distance_data):
     data = distance_data
+    data["dp"].set_distance_individual_attributes(
+        data["individual"]["id"], age="Adult", sex="Unknown", tag_ids=[]
+    )
     data["dp"].verify_distance_recording_time(
         data["videos"][0], datetime(2026, 10, 12, 16, 2, 49), "alice"
     )
@@ -474,6 +480,9 @@ def test_verified_timestamp_correction_keeps_the_sampling_grid(timed_data):
 
 def test_even_start_cannot_complete_without_reviewing_the_opening_still(distance_data):
     data, dp = distance_data, distance_data["dp"]
+    dp.set_distance_individual_attributes(
+        data["individual"]["id"], age="Adult", sex="Unknown", tag_ids=[]
+    )
     dp.verify_distance_recording_time(
         data["videos"][0], datetime(2026, 10, 12, 16, 2, 48), "alice"
     )

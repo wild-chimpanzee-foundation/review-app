@@ -133,14 +133,23 @@ changes, without waiting for sample confirmation.
 sample. Leaving without confirmation discards the preview and restores the saved
 graph state.
 
-**Presentation recommendation:** Distinguish the preview from saved evidence.
+**Implemented:** Explicit distance/visibility changes (buttons, keyboard, and
+reference switching) immediately project the current sample into the graph without
+mutating saved samples. Distance previews use a cyan diamond; visibility previews
+use cyan dashed intervals. A graph badge and tooltips label **Unsaved preview**.
+Navigation/individual changes discard the preview, and confirmation replaces it
+with ordinary saved evidence. Untouched prefills are not shown as confirmed data;
+carried-infant distance locks remain respected.
 
 ## 7. Add an unknown age option
 
 **Requested change:** Add **Unknown** to the age dropdown, alongside Adult,
 Adolescent, Juvenile, and Infant.
 
-This should represent an explicit assessment, distinct from an unset age.
+**Implemented:** Both individual creation and sidebar editing offer **Unknown** age.
+It is stored as an explicit assessment, distinct from an unset age. Schema v26
+preserves existing identities, relationships, and samples while expanding the age
+constraint; existing unset values are not silently changed to Unknown.
 
 ## 8. Require age and sex when finishing
 
@@ -152,7 +161,13 @@ unset values do not. Identify individuals with missing fields and keep the video
 open for correction. In species-specific packages, check individuals of the
 assigned species, consistent with species-scoped completion.
 
-**Dependency:** Add the unknown age option first.
+**Implemented:** Finish video checks every individual in the current video after
+sample coverage validation. Missing age/sex blocks completion and reports the
+individual numbers and missing fields; the video remains open. Explicit **Unknown**
+satisfies either field. Creation and in-progress editing still allow unset values;
+clearing a field reopens video completion without changing sample coverage.
+Schema v26 also reopens previously completed videos with unset attributes.
+Species-package-scoped validation will follow the packaging work in item 1.
 
 ## 9. Animal-video companion window
 

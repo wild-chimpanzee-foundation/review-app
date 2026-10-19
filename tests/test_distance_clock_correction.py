@@ -74,6 +74,13 @@ def clock_data(distance_data):
     )
     dp.set_distance_active_individual(video_id, "alice", data["individual"]["id"])
     dp.set_distance_active_individual(video_id, "bob", carrier["id"])
+    for individual in dp.list_distance_individuals(video_id):
+        dp.set_distance_individual_attributes(
+            individual["id"],
+            age=individual["age"] or "Unknown",
+            sex="Unknown",
+            tag_ids=individual["tag_ids"],
+        )
     dp.finish_distance_video(video_id, "alice")
     dp.update_manual_review(
         video_id,
@@ -388,6 +395,9 @@ def test_parity_alignment_schedules_without_a_camera_time(distance_data, opening
         data["individual"]["id"], first, skip_reason="individual absent", labeled_by="alice"
     )
     dp.set_distance_active_individual(video_id, "alice", data["individual"]["id"])
+    dp.set_distance_individual_attributes(
+        data["individual"]["id"], age="Unknown", sex="Unknown", tag_ids=[]
+    )
     dp.finish_distance_video(video_id, "alice")
     before = dp.get_distance_review_state(video_id, "alice")
     dp.align_distance_by_parity(video_id, opening_even, "bob")

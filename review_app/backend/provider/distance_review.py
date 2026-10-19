@@ -163,6 +163,17 @@ def finish_video(session, video_id: str, annotator_name: str, now) -> None:
         refresh_individual_completion(session, individual)
         if individual.review_status != "completed":
             raise ValueError("Review every scheduled sample before finishing the video")
+    missing = []
+    for individual in sorted(individuals, key=lambda row: row.individual_number):
+        fields = [field for field in ("age", "sex") if getattr(individual, field) is None]
+        if fields:
+            missing.append(f"#{individual.individual_number} ({', '.join(fields)})")
+    if missing:
+        raise ValueError(
+            "Set age and sex before finishing the video. Missing: "
+            + "; ".join(missing)
+            + ". Select Unknown if undetermined."
+        )
     review.completed_by = annotator_name
     review.completed_at = now
 

@@ -148,6 +148,26 @@ def distance_page(monkeypatch):
     return page
 
 
+async def test_finish_with_missing_attributes_identifies_individual_and_stays_open(
+    distance_page, distance_data
+):
+    page, data = distance_page, distance_data
+    page.dp = data["dp"]
+    video_id = data["videos"][0]
+    page.queue = [{"video_id": video_id}, {"video_id": data["videos"][1]}]
+    page.load_video = AsyncMock()
+    page.dp.verify_distance_recording_time(video_id, datetime(2026, 10, 12, 16, 2, 49), "alice")
+    page.dp.apply_distance_to_end(
+        data["individual"]["id"], 1000, skip_reason="individual absent", labeled_by="alice"
+    )
+    assert not await page.complete_video()
+    assert page.index == 0 and not page.busy
+    page.load_video.assert_not_awaited()
+    page_module.ui.notify.assert_called_once()
+    assert "#1 (age, sex)" in page_module.ui.notify.call_args.args[0]
+    assert page.dp.get_distance_review_state(video_id, "alice")["review"]["completed_at"] is None
+
+
 async def test_loading_aligned_video_without_individuals_selects_first_stop(distance_page):
     page = distance_page
     page.individuals = []

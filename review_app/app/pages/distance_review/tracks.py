@@ -7,6 +7,7 @@ from review_app.app.translations import t
 GRID_TOP = 42
 GRID_BOTTOM = 52
 STATUS_BAND_FRACTION = 0.25
+PREVIEW_COLOR = "#38bdf8"
 
 
 def track_height(individual_count: int) -> int:
@@ -15,15 +16,27 @@ def track_height(individual_count: int) -> int:
 
 
 def track_options(
-    individuals, samples, offsets, duration, active_id, current_offset=None, chart_height=500
+    individuals,
+    samples,
+    offsets,
+    duration,
+    active_id,
+    current_offset=None,
+    chart_height=500,
+    *,
+    preview=None,
 ) -> dict:
     """Build one chart with meter-scaled distances and a proportional status band."""
     by_sample = {(row["individual_id"], row["offset_ms"]): row for row in samples}
+    preview_key = None
+    if preview and preview["individual_id"] == active_id and preview["offset_ms"] in offsets:
+        preview_key = (preview["individual_id"], preview["offset_ms"])
+        by_sample[preview_key] = preview
     labels = [f"#{row['individual_number']}" for row in individuals]
     count = len(individuals)
     series = []
     max_distance = max(
-        (row["distance_m"] for row in samples if row.get("distance_m") is not None),
+        (row["distance_m"] for row in by_sample.values() if row.get("distance_m") is not None),
         default=0,
     )
     y_max = max(1, ceil(max_distance * 1.1))
@@ -45,7 +58,19 @@ def track_options(
         for position, offset in enumerate(offsets):
             sample = by_sample.get((individual_id, offset))
             distance = sample.get("distance_m") if sample else None
-            data.append([offset / 1000, distance])
+            is_preview = (individual_id, offset) == preview_key
+            point = [offset / 1000, distance]
+            data.append(
+                {
+                    "value": point,
+                    "symbol": "diamond",
+                    "symbolSize": 14,
+                    "itemStyle": {"color": PREVIEW_COLOR, "borderColor": "#fff", "borderWidth": 1},
+                    "previewLabel": t("distance_unsaved_preview"),
+                }
+                if is_preview and distance is not None
+                else point
+            )
             if sample is None:
                 unreviewed.append(
                     {
@@ -65,7 +90,9 @@ def track_options(
                 midpoint_hidden = sample["skip_reason"] == "midpoint not visible"
                 intervals.append(
                     {
-                        "value": [start, lane_y, end, int(midpoint_hidden)],
+                        "value": [start, lane_y, end, int(midpoint_hidden)]
+                        + ([1] if is_preview else []),
+                        **({"previewLabel": t("distance_unsaved_preview")} if is_preview else {}),
                         "sampleOffset": offset,
                         "statusLabel": t(
                             "distance_midpoint_hidden" if midpoint_hidden else "distance_absent"
@@ -118,6 +145,7 @@ def track_options(
                 "id": f"{individual_id}-intervals",
                 "name": labels[lane],
                 "type": "custom",
+                "dimensions": ["start", "lane", "end", "hidden", "preview"],
                 "data": intervals,
                 "encode": {"x": [0, 2], "y": 1},
                 "clip": True,
@@ -127,13 +155,17 @@ def track_options(
                     const end = api.coord([api.value(2), api.value(1)]);
                     const height = Math.abs(api.size([0, __LANE_SPAN__])[1]) * 0.2;
                     const hidden = Boolean(api.value(3));
+                    const preview = Boolean(api.value(4));
+                    const color = preview ? '__PREVIEW_COLOR__' : '__COLOR__';
                     return {type: 'rect', shape: {x: start[0], y: start[1] - height / 2,
                         width: Math.max(1, end[0] - start[0]), height},
-                        style: {fill: hidden ? 'transparent' : '__COLOR__',
-                            stroke: '__COLOR__', lineWidth: hidden ? 2 : 1,
-                            lineDash: hidden ? [2, 3] : [], opacity: __OPACITY__}};
+                        style: {fill: hidden ? 'transparent' : color,
+                            stroke: color, lineWidth: hidden || preview ? 2 : 1,
+                            lineDash: preview ? [5, 3] : hidden ? [2, 3] : [],
+                            opacity: __OPACITY__}};
                 }""".replace("__LANE_SPAN__", repr(lane_span))
                 .replace("__COLOR__", color)
+                .replace("__PREVIEW_COLOR__", PREVIEW_COLOR)
                 .replace("__OPACITY__", "1" if active else "0.6"),
             }
         )
@@ -212,11 +244,12 @@ def track_options(
         "tooltip": {
             "trigger": "item",
             "renderMode": "richText",
-            ":formatter": "p => p.data.statusLabel "
+            ":formatter": "p => (p.data.previewLabel ? p.data.previewLabel + '\\n' : '') + "
+            "(p.data.statusLabel "
             "? `${p.seriesName} · ${p.data.statusLabel}` + "
-            "(p.value.length === 4 ? `\\n${p.value[0].toFixed(1)}–${p.value[2].toFixed(1)} s` "
+            "(p.value.length >= 4 ? `\\n${p.value[0].toFixed(1)}–${p.value[2].toFixed(1)} s` "
             ": `\\n${p.value[0].toFixed(1)} s`) "
-            ": `${p.seriesName}\\n${p.value[0].toFixed(1)} s · ${p.value[1]} m`",
+            ": `${p.seriesName}\\n${p.value[0].toFixed(1)} s · ${p.value[1]} m`)",
         },
         "series": series,
     }

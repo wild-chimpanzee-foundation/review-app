@@ -195,7 +195,7 @@ def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
             ui.select(
                 {
                     value: t(f"distance_{value.lower()}")
-                    for value in ("Adult", "Adolescent", "Juvenile", "Infant")
+                    for value in ("Adult", "Adolescent", "Juvenile", "Infant", "Unknown")
                 },
                 value=row["age"],
                 label=t("distance_age"),

@@ -286,7 +286,7 @@ class DistanceIndividual(Base):
         CheckConstraint("individual_number > 0", name="ck_distance_individual_number"),
         CheckConstraint("first_seen_offset_ms >= 0", name="ck_distance_first_seen"),
         CheckConstraint(
-            "age IS NULL OR age IN ('Adult', 'Adolescent', 'Juvenile', 'Infant')",
+            "age IS NULL OR age IN ('Adult', 'Adolescent', 'Juvenile', 'Infant', 'Unknown')",
             name="ck_distance_age",
         ),
         CheckConstraint(

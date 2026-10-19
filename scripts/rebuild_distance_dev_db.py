@@ -1,4 +1,4 @@
-"""Rebuild a private v29 development DB as v25, preserving ordinary Review exactly.
+"""Rebuild a private v29 development DB as v26, preserving ordinary Review exactly.
 
 Stop the app and back up the source first. This command never installs the result
 or changes the source. Run from the repository root:
@@ -25,7 +25,7 @@ from review_app.backend.db.models import Base
 from sqlalchemy import create_engine
 
 SOURCE_VERSION = 29
-TARGET_VERSION = 25
+TARGET_VERSION = 26
 DISTANCE_TABLES = frozenset(
     {
         "reference_videos",
@@ -178,7 +178,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path, help="Original v29 backup")
     parser.add_argument(
-        "--output", required=True, type=Path, help="New v25 database (must not exist)"
+        "--output", required=True, type=Path, help="New v26 database (must not exist)"
     )
     parser.add_argument("--execute", action="store_true", help="Create output; default is dry run")
     args = parser.parse_args()

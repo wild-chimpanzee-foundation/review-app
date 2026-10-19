@@ -109,7 +109,7 @@ async def open_create_individual_dialog(context: AnchorDialogContext) -> None:
                 ui.select(
                     {
                         value: t(f"distance_{value.lower()}")
-                        for value in ("Adult", "Adolescent", "Juvenile", "Infant")
+                        for value in ("Adult", "Adolescent", "Juvenile", "Infant", "Unknown")
                     },
                     label=t("distance_age"),
                     clearable=True,

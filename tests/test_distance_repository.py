@@ -554,7 +554,9 @@ def test_deleting_custom_tag_cascades_distance_tag_association_only(distance_dat
     key = dp.create_custom_tag("Temporary individual tag")
     dp.set_tag_individual_eligibility(key, True)
     tag_id = next(tag["id"] for tag in dp.get_all_tags() if tag["key"] == key)
-    dp.set_distance_individual_attributes(individual_id, age=None, sex=None, tag_ids=[tag_id])
+    dp.set_distance_individual_attributes(
+        individual_id, age="Unknown", sex="Unknown", tag_ids=[tag_id]
+    )
 
     dp.verify_distance_recording_time(data["videos"][0], datetime(2026, 1, 1, 0, 0, 0), "alice")
     for offset in dp.get_distance_review_state(data["videos"][0], "alice")["offsets"]:
@@ -727,6 +729,7 @@ def test_reviewed_species_are_ordered_unique_manual_labels_for_this_clip(distanc
 def test_species_correction_preserves_evidence_and_reopens_completion(distance_data):
     data = distance_data
     dp, video_id, individual_id = data["dp"], data["videos"][0], data["individual"]["id"]
+    dp.set_distance_individual_attributes(individual_id, age="Adult", sex="Unknown", tag_ids=[])
     dp.verify_distance_recording_time(video_id, datetime(2026, 10, 12, 16, 2, 49), "alice")
     offsets = dp.get_distance_review_state(video_id, "alice")["offsets"]
     for offset in offsets:
@@ -1182,6 +1185,9 @@ def test_distance_queue_filters_use_distance_completion_and_camera(distance_data
         )
     assert dp.list_distance_individuals(first)[0]["review_status"] == "completed"
     # Complete sample coverage alone does not finish its video.
+    dp.set_distance_individual_attributes(
+        individual["id"], age="Unknown", sex="Unknown", tag_ids=[]
+    )
     assert dp.get_distance_video_queue(project.id, status="completed") == []
     dp.finish_distance_video(first, "alice")
     assert [

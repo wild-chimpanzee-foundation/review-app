@@ -171,6 +171,7 @@ class DistanceReviewPage:
         self.offsets: list[int] = []
         self.samples: list[dict] = []
         self.sample_offset: int | None = None
+        self._graph_preview_key: tuple[str, str, int] | None = None
         self.behavior_options: dict[str, str] = {}
         self.sample_values = {"behavior_ids": [], "carries": False, "infant_id": "_new"}
 
@@ -282,6 +283,34 @@ class DistanceReviewPage:
             ),
             None,
         )
+
+    def graph_preview_key(self) -> tuple[str, str, int] | None:
+        if not self.video or not self.individual or self.sample_offset not in self.offsets:
+            return None
+        return self.video["video_id"], self.individual_id, self.sample_offset
+
+    def graph_preview(self) -> dict | None:
+        """Project an explicit unsaved choice without modifying persisted samples."""
+        key = self.graph_preview_key()
+        if key is None or key != getattr(self, "_graph_preview_key", None) or self.distance_locked:
+            return None
+        reason = self.selected_skip_reason
+        frame = next((row for row in self.frames if row["id"] == self.selected_frame_id), None)
+        if reason is None and frame is None:
+            return None
+        reference_id = None if reason else frame["id"]
+        if self.sample and (
+            self.sample.get("reference_frame_id") == reference_id
+            and self.sample.get("skip_reason") == reason
+        ):
+            return None
+        return {
+            "individual_id": self.individual_id,
+            "offset_ms": self.sample_offset,
+            "reference_frame_id": reference_id,
+            "skip_reason": reason,
+            "distance_m": None if reason else frame["distance_m"],
+        }
 
     def reviewed_offsets(self) -> set[int]:
         return {
@@ -427,6 +456,7 @@ class DistanceReviewPage:
         self.review = None
         self.offsets, self.samples = [], []
         self.sample_offset = None
+        self._graph_preview_key = None
         self.animal_frame_rate = None
         self.reset_sample_values()
         self.animal_player = self.reference_player = None
@@ -869,9 +899,14 @@ class DistanceReviewPage:
     def render_tracks(self) -> None:
         if not self.video:
             return
+        preview = self.graph_preview()
         with ui.column().classes("w-full gap-1 distance-tracks"):
             with ui.row().classes("w-full items-center gap-1"):
                 ui.label(t("distance_track_title")).classes("text-caption text-weight-medium")
+                if preview:
+                    ui.label("◇ " + t("distance_unsaved_preview")).classes(
+                        "text-caption text-light-blue-5"
+                    )
                 ui.icon("info_outline", size="xs").classes("text-grey-6").tooltip(
                     t("distance_track_help")
                 )
@@ -884,6 +919,7 @@ class DistanceReviewPage:
                 self.individual_id,
                 self.sample_offset,
                 chart_height,
+                preview=preview,
             )
             ui.echart(options, renderer="svg", on_point_click=self.on_track_click).classes(
                 "w-full"
@@ -1743,6 +1779,7 @@ class DistanceReviewPage:
 
     @stable_client
     async def restore_sample(self, *, seek: bool = True) -> None:
+        self._graph_preview_key = None
         if seek:
             self.seek_sample()
         # Navigation discards unconfirmed edits. Restore saved evidence or the
@@ -2134,6 +2171,7 @@ class DistanceReviewPage:
         self.selected_frame_id = selected_frame_id
         self.frames = frames
         if seek_animal:
+            self._graph_preview_key = self.graph_preview_key()
             self.seek_sample()
         if self.reference_player:
             self.render_reference_controls.refresh()
@@ -2163,6 +2201,7 @@ class DistanceReviewPage:
         if self.busy or self.distance_locked:
             return
         self.selected_frame_id = frame["id"]
+        self._graph_preview_key = self.graph_preview_key()
         if self.animal_player:
             if self.sample_offset is not None:
                 self.seek_sample()
