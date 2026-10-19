@@ -8,6 +8,12 @@ from nicegui import ui
 from review_app.backend.distance_timing import SAMPLE_STOP_TOLERANCE_MS
 
 
+def run_player_javascript(player, code: str, *, timeout: float = 1):
+    """Run on the active player surface, not necessarily the review tab."""
+    execute = getattr(player, "run_player_javascript", ui.run_javascript)
+    return execute(code, timeout=timeout)
+
+
 def video_element(player) -> str:
     return f"getElement({player.id})?.$el"
 
@@ -19,7 +25,8 @@ def frame_tolerance_ms(frame_rate: float | None) -> float:
 
 async def capture_offset(player, *, exact: bool = False) -> int | float:
     """Pause and read the actual displayed frame, rather than a delayed timeupdate event."""
-    result = await ui.run_javascript(
+    result = await run_player_javascript(
+        player,
         f"""const video = {video_element(player)};
         if (!video || video.seeking || video.readyState < 2 || !Number.isFinite(video.duration)) return null;
         if (!video.paused) video._distanceSuppressedPauseEvents =
@@ -34,7 +41,9 @@ async def capture_offset(player, *, exact: bool = False) -> int | float:
 
 
 def seek_paused(player, offset_ms: int | float, *, retain_after_ms: int = 0) -> None:
-    ui.run_javascript(f"""
+    run_player_javascript(
+        player,
+        f"""
         const video = {video_element(player)};
         if (video) {{
             const seek = () => {{
@@ -50,12 +59,14 @@ def seek_paused(player, offset_ms: int | float, *, retain_after_ms: int = 0) -> 
             if (video.readyState >= 1) seek();
             else video.addEventListener('loadedmetadata', seek, {{once: true}});
         }}
-    """)
+    """,
+    )
 
 
 async def step_frames(player, delta: int, frame_rate: float) -> None:
     """Pause and move by a whole number of frames, bounded by the video's ends."""
-    ready = await ui.run_javascript(
+    ready = await run_player_javascript(
+        player,
         f"""const video = {video_element(player)};
         if (!video || video.readyState < 2 || !Number.isFinite(video.duration)) return false;
         video._distancePlayback = (video._distancePlayback || 0) + 1;
@@ -80,7 +91,8 @@ async def switch_source(player, source: str, offset_ms: int | float) -> bool:
         seek_paused(player, offset_ms)
         return True
     script = Path(__file__).with_name("source_switch.js").read_text()
-    prepared = await ui.run_javascript(
+    prepared = await run_player_javascript(
+        player,
         script.replace("__VIDEO__", video_element(player))
         .replace("__SOURCE__", json.dumps(source))
         .replace("__OFFSET__", str(offset_ms / 1000)),
@@ -90,7 +102,8 @@ async def switch_source(player, source: str, offset_ms: int | float) -> bool:
         return False
     player.set_source(source)
     return bool(
-        await ui.run_javascript(
+        await run_player_javascript(
+            player,
             f"return await {video_element(player)}?._distanceSourceSwitch?.promise;",
             timeout=20,
         )
@@ -100,7 +113,8 @@ async def switch_source(player, source: str, offset_ms: int | float) -> bool:
 async def play_to_sample(player, from_ms: int | float, to_ms: int | float) -> None:
     """Play to the intended scheduled frame, correcting callback delay if needed."""
     script = Path(__file__).with_name("sample_playback.js").read_text()
-    completed = await ui.run_javascript(
+    completed = await run_player_javascript(
+        player,
         script.replace("__VIDEO__", video_element(player))
         .replace("__FROM__", str(from_ms / 1000))
         .replace("__TO__", str(to_ms / 1000))
@@ -116,7 +130,9 @@ def install_manual_pause_snap(player, handler) -> None:
     """Report only user-initiated pauses from this annotation player."""
     event_name = f"distance_manual_pause_{player.id}"
     ui.on(event_name, handler)
-    ui.run_javascript(f"""
+    run_player_javascript(
+        player,
+        f"""
         (function install() {{
             const video = {video_element(player)};
             if (!video || video._distancePauseSnapInstalled) return;
@@ -139,30 +155,37 @@ def install_manual_pause_snap(player, handler) -> None:
             }});
             lifecycle.observe(document.body, {{childList: true, subtree: true}});
         }})();
-    """)
+    """,
+    )
 
 
 def pause_programmatically(player) -> None:
-    ui.run_javascript(f"""
+    run_player_javascript(
+        player,
+        f"""
         const video = {video_element(player)};
         if (video) {{
             if (!video.paused) video._distanceSuppressedPauseEvents =
                 (video._distanceSuppressedPauseEvents || 0) + 1;
             video.pause();
         }}
-    """)
+    """,
+    )
 
 
 def stop_player(player) -> None:
     if player is not None:
-        ui.run_javascript(f"""
+        run_player_javascript(
+            player,
+            f"""
             const video = {video_element(player)};
             if (video) {{
                 if (!video.paused) video._distanceSuppressedPauseEvents =
                     (video._distanceSuppressedPauseEvents || 0) + 1;
                 video.pause(); video.removeAttribute('src'); video.load();
             }}
-        """)
+        """,
+        )
 
 
 def playback_shortcuts(container, player) -> None:
@@ -240,7 +263,8 @@ def install_anchor_editor(
     event_name = f"distance_anchor_{player.id}"
     ui.on(event_name, on_anchor)
     source = Path(__file__).with_name("anchor_editor.js").read_text()
-    ui.run_javascript(
+    run_player_javascript(
+        player,
         source.replace("__PLAYER_ID__", str(player.id))
         .replace("__EVENT__", event_name)
         .replace(
@@ -254,7 +278,7 @@ def install_anchor_editor(
             ),
         )
         .replace("__MODE__", json.dumps(initial_mode))
-        .replace("__FRAME_RATE__", json.dumps(frame_rate))
+        .replace("__FRAME_RATE__", json.dumps(frame_rate)),
     )
 
 
@@ -263,19 +287,21 @@ def configure_anchor(player, individual: dict | None, *, individuals=None) -> No
         "individual": individual,
         "individuals": individuals or ([individual] if individual else []),
     }
-    ui.run_javascript(
+    run_player_javascript(
+        player,
         f"""const component = getElement({player.id});
         if (component) {{
             const state = {json.dumps(state, default=str)};
             (window.__distanceIndividuals ||= new Map()).set({player.id}, state);
             component.$el?._distanceAnchor?.configure(state);
-        }}"""
+        }}""",
     )
 
 
 async def image_filters(player) -> dict[str, float]:
     """Read the current player brightness and contrast for an independent dialog player."""
-    result = await ui.run_javascript(
+    result = await run_player_javascript(
+        player,
         f"""const video = {video_element(player)};
         const wrapper = video?.closest('[id^="vp-wrap-"]');
         return {{
@@ -290,4 +316,6 @@ async def image_filters(player) -> dict[str, float]:
 def anchor_mode(player, mode: str | None) -> None:
     if mode not in ("box", None):
         raise ValueError("Anchor editor only supports bounding boxes")
-    ui.run_javascript(f"{video_element(player)}?._distanceAnchor?.setMode({json.dumps(mode)});")
+    run_player_javascript(
+        player, f"{video_element(player)}?._distanceAnchor?.setMode({json.dumps(mode)});"
+    )

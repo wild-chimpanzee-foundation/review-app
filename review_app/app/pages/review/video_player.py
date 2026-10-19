@@ -217,6 +217,20 @@ def render_custom_video_player(
                     startY: 0
                 }};
 
+                let viewportWidth = videoEl.parentElement.clientWidth || 1;
+                let viewportHeight = videoEl.parentElement.clientHeight || 1;
+                const viewportResize = new ResizeObserver(() => {{
+                    const width = videoEl.parentElement.clientWidth;
+                    const height = videoEl.parentElement.clientHeight;
+                    if (!width || !height) return;
+                    state.x *= width / viewportWidth;
+                    state.y *= height / viewportHeight;
+                    viewportWidth = width;
+                    viewportHeight = height;
+                    updateTransform();
+                }});
+                viewportResize.observe(videoEl.parentElement);
+
                 videoEl.playbackRate = parseFloat(speedSel.value);
                 // Sync select to what browser actually accepted (browsers may cap max rate)
                 setTimeout(() => {{
@@ -249,6 +263,49 @@ def render_custom_video_player(
                     state.y = 0;
                     updateTransform();
                 }}
+
+                // Portable view state for the Distance animal-video companion.
+                // Pan is normalized so a different window size retains the same view.
+                videoEl._reviewPlayer = {{
+                    getState() {{
+                        const viewport = videoEl.parentElement;
+                        return {{
+                            offset_ms: videoEl.currentTime * 1000,
+                            brightness: Number(brightnessSlider.value),
+                            contrast: Number(contrastSlider.value),
+                            scale: state.scale,
+                            pan_x: state.x / (viewport.clientWidth || 1),
+                            pan_y: state.y / (viewport.clientHeight || 1),
+                            speed: videoEl.playbackRate,
+                            muted: videoEl.muted,
+                        }};
+                    }},
+                    setState(value) {{
+                        const viewport = videoEl.parentElement;
+                        videoEl._distancePlayback = (videoEl._distancePlayback || 0) + 1;
+                        if (!videoEl.paused) videoEl._distanceSuppressedPauseEvents =
+                            (videoEl._distanceSuppressedPauseEvents || 0) + 1;
+                        videoEl.pause();
+                        brightnessSlider.value = value.brightness ?? 1;
+                        contrastSlider.value = value.contrast ?? 1;
+                        state.scale = Math.max(1, Math.min(10, value.scale ?? 1));
+                        viewportWidth = viewport.clientWidth || 1;
+                        viewportHeight = viewport.clientHeight || 1;
+                        state.x = (value.pan_x ?? 0) * viewportWidth;
+                        state.y = (value.pan_y ?? 0) * viewportHeight;
+                        if (value.speed != null) {{
+                            videoEl.playbackRate = value.speed;
+                            const option = Array.from(speedSel.options).find(option =>
+                                Math.abs(Number(option.value) - videoEl.playbackRate) < 0.0001);
+                            if (option) speedSel.value = option.value;
+                        }}
+                        if (value.muted != null) videoEl.muted = value.muted;
+                        syncMuteUi();
+                        updateTransform();
+                        videoEl.currentTime = Math.max(0, Math.min(
+                            (value.offset_ms ?? 0) / 1000, videoEl.duration || 0));
+                    }},
+                }};
 
                 // --- FULLSCREEN LOGIC ---
                 function enterFs() {{
@@ -443,6 +500,7 @@ def render_custom_video_player(
                 }});
 
                 range.addEventListener('input', () => {{
+                    videoEl._distancePlayback = (videoEl._distancePlayback || 0) + 1;
                     videoEl.currentTime = range.value;
                     const pct = (range.value / range.max) * 100;
                     range.style.setProperty('--pct', pct + '%');
@@ -461,6 +519,7 @@ def render_custom_video_player(
                     if (videoEl.isConnected) return;
                     lifecycle.disconnect();
                     playerEvents.abort();
+                    viewportResize.disconnect();
                     videoEl.pause(); videoEl.removeAttribute('src'); videoEl.load();
                     setTimeout(() => {{ if (getElement({v.id})) setup(); }}, 50);
                 }});

@@ -154,24 +154,39 @@ assigned species, consistent with species-scoped completion.
 
 **Dependency:** Add the unknown age option first.
 
-## 9. Independently detachable animal and reference panels
+## 9. Animal-video companion window
 
-**Clarified direction:** Pop out the full animal or reference panel, not merely
-a read-only image mirror. Either panel can be detached independently, and both
-can be detached if desired.
+**Revised scope after discussion:** Browser-only initially. Only the animal/species
+video pops out; reference videos, both sidebars, the graph, and annotation controls
+stay in the main tab. This supersedes the earlier proposal to detach either full
+comparison panel independently. There is one main-owned review session, not two
+independent reviews to synchronize.
 
-When one panel is detached, the remaining panel expands to use the full available
-comparison width in the original tab. The detached panel retains its associated
-controls and remains part of the same annotation session; popping it out must
-not create a separate review or independent selection state.
+The companion retains seeking, play/pause, speed, mute, brightness, contrast,
+zoom/pan, and playback shortcuts. Main-tab navigation, reference selection, replay,
+and confirm/advance control that same animal player. Existing manual-pause snapping
+to the preceding scheduled sample is retained. Inspection does not itself save
+annotation evidence; confirmation checks the active player's actual position.
 
-**Feasibility:** Possible in principle, using user-triggered companion tabs or
-windows with coordinated session state. Panel ownership, playback/selection
-synchronization, and main-tab layout reflow need implementation validation.
+**Reattachment decision:** Explicit **Bring animal video back**, not automatic
+reattachment when the companion closes. With a live companion, transfer its paused
+position and image settings back to the inline player. If it was closed or lost,
+restore the selected scheduled frame and last reported image settings. A missing
+companion must never cause confirmation to read a hidden inline duplicate.
 
-**Still open:** Exact playback-sync guarantees and how closing a companion view
-reattaches its panel. The desired interaction is established; these mechanics
-have not yet been specified.
+**Implemented prototype:** A capability-scoped companion page reuses the shared
+interactive player. It has no provider or separate annotation session. The inline
+player's source is unloaded while detached; the reference panel uses the full main
+comparison width, with animal timing/graph controls retained below it. Changing
+clips reuses the same companion window. Generation guards reject stale responses;
+disconnection interrupts pending commands. Popup creation runs directly inside the
+browser click handler, with feedback when the browser blocks it. Main-tab closure
+expires the companion session.
+
+Focused regression tests and a real-Chromium test with synthetic video cover the
+workflow, local inspection, confirmation/replay, image-state transfer, clip changes,
+and closed-companion safety. Real-footage, cross-browser, and native desktop-window
+validation remain open; broader visual redesign is not completed by this prototype.
 
 ## 10. General design overhaul and collapsible annotation sidebar
 
@@ -214,8 +229,10 @@ the annotation sidebar. Graph height is reduced for typical
 individual counts while retaining readable status lanes; long help text moves to
 tooltips. At the validated desktop sizes the standard three-individual workflow
 fits without page scrolling, without shrinking the videos. Very large individual
-counts and expanded inspection controls may still require scrolling. Detachable
-panels and any further visual redesign remain deferred.
+counts and expanded inspection controls may still require scrolling. The animal-only
+companion prototype described above now reflows the reference panel to full width
+and keeps the graph/navigation in the main tab. The larger reference view can still
+require page scrolling. Further visual redesign remains open.
 
 ## Discussion progress
 
@@ -228,8 +245,8 @@ All ten feedback items are captured. Key clarifications:
 - Choose the first visible behavior manually, then carry it forward. Absent and
   Not visible automatically use no behavior.
 - The graph previews unsaved distance choices.
-- Pop out either full comparison panel independently, or both, with the remaining
-  panel expanding in the original tab.
+- Pop out only the interactive animal video into a browser companion; retain one
+  main-owned session and explicitly bring it back. References expand in the main tab.
 - Overhaul the Distance layout to reduce wasted space and make the right-hand
   annotation sidebar collapsible/restorable.
 

@@ -21,6 +21,7 @@ from review_app.app.pages.distance_review.clock_dialog import (
     ClockDialogContext,
     open_clock_alignment_dialog,
 )
+from review_app.app.pages.distance_review.companion import AnimalCompanion
 from review_app.app.pages.distance_review.individuals import (
     IndividualViewsContext,
 )
@@ -164,6 +165,7 @@ class DistanceReviewPage:
         self.frames: list[dict] = []
         self._selection: SampleSelection | None = None
         self.animal_player = self.reference_player = None
+        self.animal_companion = AnimalCompanion(self)
         self.busy = False
         self.review: dict | None = None
         self.offsets: list[int] = []
@@ -193,6 +195,8 @@ class DistanceReviewPage:
         return self.media_urls[path]
 
     def release_media(self) -> None:
+        if companion := getattr(self, "animal_companion", None):
+            companion.dispose()
         for task in self.thumbnail_tasks.values():
             task.cancel()
         for url in self.media_urls.values():
@@ -735,17 +739,19 @@ class DistanceReviewPage:
                         _shortcut_badge("N")
                         ui.icon("chevron_right")
                 next_button.set_enabled(self.index + 1 < len(self.queue))
-        with ui.element("div").classes("distance-grid"):
+        with ui.element("div").classes(
+            "distance-grid" + (" distance-grid-detached" if self.animal_companion.detached else "")
+        ) as self.comparison_grid:
             self.render_animal()
             self.render_references()
 
     @ui.refreshable
     def render_animal(self) -> None:
         video = self.video
-        with ui.card().classes("distance-panel distance-player") as panel:
-            ui.label(t("distance_animal_video")).classes("text-subtitle1 ellipsis w-full").tooltip(
-                t("distance_animal_video")
-            )
+        with ui.card().classes("distance-panel distance-player distance-animal-panel"):
+            with ui.row().classes("w-full items-center gap-xs no-wrap distance-panel-heading"):
+                ui.label(t("distance_animal_video")).classes("text-subtitle1 ellipsis col")
+                self.render_companion_actions()
             path = Path(normalize_path_str(video["video_path"]))
             cache = inspect_transcoded_cache(video.get("transcoded_path"), validate_contents=False)
             if cache.current:
@@ -776,22 +782,40 @@ class DistanceReviewPage:
 
                 conversion = ui.button(t("transcode_for_playback"), on_click=convert, icon="movie")
                 return
-            self.animal_player = render_custom_video_player(
-                self.media_url(path),
-                video.get("duration_sec") or 0,
-                str(uuid.uuid4()),
-                autoplay=False,
-                keyboard=False,
-                compact=True,
+            with ui.column().classes("w-full gap-0") as player_host:
+                inline_player = render_custom_video_player(
+                    self.media_url(path),
+                    video.get("duration_sec") or 0,
+                    str(uuid.uuid4()),
+                    autoplay=False,
+                    keyboard=False,
+                    compact=True,
+                )
+                playback_shortcuts(player_host, inline_player)
+            self.animal_player = self.animal_companion
+            self.animal_companion.bind(inline_player, player_host)
+
+            async def manual_pause(event):
+                if self.animal_companion.active is inline_player:
+                    await self.on_manual_pause(event)
+
+            inline_player.on(
+                "error",
+                lambda: (
+                    ui.notify(t("distance_media_error"), type="warning")
+                    if self.animal_companion.active is inline_player
+                    else None
+                ),
             )
-            self.animal_player.on(
-                "error", lambda: ui.notify(t("distance_media_error"), type="warning")
+            inline_player.on(
+                "loadedmetadata",
+                lambda: (
+                    self.seek_sample() if self.animal_companion.active is inline_player else None
+                ),
             )
-            self.animal_player.on("loadedmetadata", self.seek_sample)
-            install_manual_pause_snap(self.animal_player, self.on_manual_pause)
-            playback_shortcuts(panel, self.animal_player)
+            install_manual_pause_snap(inline_player, manual_pause)
             install_anchor_editor(
-                self.animal_player,
+                inline_player,
                 self.save_anchor,
                 self.individual,
                 individuals=self.individuals,
@@ -801,6 +825,45 @@ class DistanceReviewPage:
                 self.seek_sample()
             self.render_sample_navigation()
             self.render_tracks()
+
+    @ui.refreshable
+    def render_companion_actions(self) -> None:
+        companion = self.animal_companion
+        with ui.row().classes("distance-companion-actions items-center gap-xs no-wrap"):
+            if companion.detached:
+                ui.label(
+                    t(
+                        "distance_companion_active"
+                        if companion.remote_client
+                        and companion.remote_client.has_socket_connection
+                        else "distance_companion_disconnected"
+                    )
+                ).classes("distance-companion-status text-caption text-grey-6").tooltip(
+                    t("distance_companion_unavailable")
+                )
+                ui.button(
+                    t("distance_companion_reattach"),
+                    icon="call_merge",
+                    on_click=self.client_handler(companion.reattach),
+                ).props('flat dense data-distance-action="reattach-animal"').bind_enabled_from(
+                    self, "busy", backward=lambda busy: not busy and not companion.transitioning
+                )
+            ui.button(
+                t(
+                    "distance_companion_reopen"
+                    if companion.detached
+                    else "distance_companion_popout"
+                ),
+                icon="open_in_new",
+            ).props('flat dense data-distance-action="popout-animal"').on(
+                "click", companion.opened, js_handler=companion.open_script()
+            ).bind_enabled_from(
+                self,
+                "busy",
+                backward=lambda busy: bool(
+                    companion.inline and not busy and not companion.transitioning
+                ),
+            )
 
     @ui.refreshable
     def render_tracks(self) -> None:

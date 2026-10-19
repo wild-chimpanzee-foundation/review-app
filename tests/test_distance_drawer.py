@@ -206,11 +206,12 @@ async def test_sample_timing_is_below_video_and_progress_is_in_selected_card(
         for element in page.client.elements.values()
         if "distance-animal-timing" in element.classes
     )
-    player = page.animal_player
+    player_host = page.animal_companion.inline_host
+    assert page.animal_companion.inline in list(player_host.descendants())
     timing_container = timing.parent_slot.parent
-    assert player.parent_slot is timing_container.parent_slot
-    siblings = player.parent_slot.children
-    assert siblings.index(timing_container) == siblings.index(player) + 1
+    assert player_host.parent_slot is timing_container.parent_slot
+    siblings = player_host.parent_slot.children
+    assert siblings.index(timing_container) == siblings.index(player_host) + 1
     assert any(
         isinstance(element, ui.button) and element.props.get("icon") == "replay"
         for element in timing.descendants()

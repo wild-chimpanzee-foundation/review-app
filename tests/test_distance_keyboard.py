@@ -480,7 +480,9 @@ async def test_automatic_stop_suppresses_delayed_pause_then_reports_user_pause(m
 def test_manual_pause_listener_follows_remounted_video_and_ignores_detached_events(monkeypatch):
     scripts = []
     monkeypatch.setattr(player_module.ui, "on", lambda *_: None)
-    monkeypatch.setattr(player_module.ui, "run_javascript", lambda source: scripts.append(source))
+    monkeypatch.setattr(
+        player_module.ui, "run_javascript", lambda source, **_: scripts.append(source)
+    )
     player_module.install_manual_pause_snap(SimpleNamespace(id=12), lambda *_: None)
     result = run_javascript(
         "const observers=[], emitted=[]; global.document={body:{}};"

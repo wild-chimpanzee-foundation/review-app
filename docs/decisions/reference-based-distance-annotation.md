@@ -317,6 +317,24 @@ alongside rounded millisecond frame identities; never round saved meter values.
   gaps. Videos use the full column width at their native aspect ratio without a
   viewport/430 px height cap, cropping, or stretching. Fullscreen and dialog players
   retain their separate sizing rules.
+- In a browser, **Pop out animal video** opens an interactive companion window
+  (the browser may choose a tab). Only the animal player moves: the main tab keeps
+  the reference videos, sidebars, sample navigation, graph, and annotation state.
+  References expand to full comparison width, with animal timing/graph controls
+  below; this expanded layout may require scrolling. The companion supports local
+  seek/playback, speed/mute, brightness/contrast, and zoom/pan. Main-tab navigation,
+  reference selection, replay, and confirmation still control the same active
+  animal video. Local playback arrows inspect by five seconds; scheduled-sample
+  shortcuts and annotation actions remain in the main tab. Manual pause retains
+  the existing snap to the preceding scheduled sample. Only confirmation saves.
+  **Bring animal video back** explicitly restores the inline player and closes
+  the companion, preserving its position and image settings. Closing the companion
+  manually does not reattach it: **Open companion** reopens it, or **Bring animal
+  video back** restores the selected sample and last reported image settings.
+  Confirmation refuses an unavailable player rather than reading an invisible
+  duplicate. Changing clips reuses the companion; closing/reloading the main review
+  expires its session. Browser popup permissions may be required. Native packaged
+  desktop and cross-browser behavior remain unvalidated.
 - Below the reference player, group distance navigation, distance buttons, and
   visibility choices in a compact toolbar. Behavior, carrying, and infant identity
   use an auto-fitting field grid: share a row when space permits and wrap in
