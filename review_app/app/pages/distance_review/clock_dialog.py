@@ -74,10 +74,13 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
             ui.label(t("distance_clock_correction_help")).classes("text-caption")
             realign = ui.checkbox(t("distance_clock_realign"), on_change=lambda: update_mode())
         proposed = context.proposed_camera_time
-        value = proposed.replace(tzinfo=None).isoformat() if proposed else ""
+        value = proposed.strftime("%Y-%m-%d %H:%M:%S") if proposed else ""
         clock = (
             ui.input(t("distance_clock_frame_time"), value=value)
-            .props('type="datetime-local" step="2" data-testid="distance-clock-time"')
+            .props(
+                'type="text" mask="####-##-## ##:##:##" '
+                'placeholder="YYYY-MM-DD HH:mm:ss" data-testid="distance-clock-time"'
+            )
             .classes("w-full")
         )
         alignment_help = ui.label(t("distance_clock_help")).classes("text-caption text-grey-6")
@@ -156,7 +159,7 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
                     ui.notify(t("distance_clock_confirm_required"), type="warning")
                     return
                 try:
-                    camera_time = datetime.fromisoformat(clock.value)
+                    camera_time = datetime.strptime(clock.value, "%Y-%m-%d %H:%M:%S")
                 except ValueError:
                     ui.notify(t("distance_clock_timestamp_invalid"), type="warning")
                     return

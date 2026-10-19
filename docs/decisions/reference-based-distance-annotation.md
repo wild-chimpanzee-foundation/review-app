@@ -68,7 +68,9 @@ samples remain editable; a missing sample row means unreviewed, not absent.
   prepared references, and ordinary Review remain unchanged. Cancellation or invalid
   alignment leaves the existing review intact.
 - `videos.created_at` is only a suggested time. Store the verified camera wall clock
-  without timezone conversion, separately from file metadata.
+  without timezone conversion, separately from file metadata. Display camera times
+  in 24-hour format; the clock dialog accepts `YYYY-MM-DD HH:mm:ss` explicitly,
+  independent of browser AM/PM preferences.
 - Preserve precise playback anchors independently of integer-millisecond sample
   identities. For example, a `16:02:50` anchor at playback `0.920 s` schedules the
   next camera sample at `2.920 s`, not `3.000 s`.
@@ -83,6 +85,10 @@ samples remain editable; a missing sample row means unreviewed, not absent.
 
 ### Navigation and inspection
 
+- **Play to this sample** replays from the preceding scheduled sample. For the
+  first scheduled sample, replay from the video opening when its offset is
+  nonzero; omit the action when the first sample is already the opening frame.
+  Playback pauses at the selected sample without saving evidence or navigating.
 - Manual annotation pauses snap to the most recent scheduled sample at/before
   the pause position. Automatic stops seek the intended next scheduled frame to
   correct callback delay. Programmatic pause events must not retrigger snapping.
@@ -234,12 +240,17 @@ alongside rounded millisecond frame identities; never round saved meter values.
 
 ## Desktop UI and shortcuts
 
-- Reuse Review's header and desktop drawers: 300 px filters on the left, 520 px
-  individual/sample controls on the right. Mobile compatibility is deferred.
+- Reuse Review's header and desktop drawers: 300 px filters on the left, 400 px
+  individual/confirmation controls on the right. A **Hide/Show annotations**
+  button in the workspace collapses/restores the right drawer, freeing its width
+  without losing players, active identity/sample, or unconfirmed form choices.
+  Mobile compatibility is deferred.
 - Keep equally sized animal/reference frames, graph, and essential actions
   visible at 1280×800. Reference clips/distance choices use bounded strips; long
   individual lists scroll inside the right drawer. Allow hiding/restoring the
-  Distance header without changing ordinary Review.
+  Distance header without changing ordinary Review. Use compact 8 px workspace
+  and panel padding/gaps, 4 px within-panel gaps, and the full available workspace
+  width rather than a centered width cap.
 - Put camera time and interval replay directly below the animal video, and sample
   progress in the selected individual's expanded card. Other cards show their
   first row. Highlight the active identity; metadata/actions stay attached to

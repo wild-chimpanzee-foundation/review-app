@@ -1,8 +1,9 @@
 # Distance Annotation Feedback
 
-**Status:** Discussion notes; not yet an implementation specification. No application
-changes are implied. Confirmed decisions should later be reconciled with the
-[current workflow](./reference-based-distance-annotation.md).
+**Status:** Feedback and decisions with implementation progress noted below.
+Items not marked implemented remain planned or open. The
+[current workflow](./reference-based-distance-annotation.md) describes shipped
+behavior.
 
 ## 1. Independent, species-based annotator packages
 
@@ -22,8 +23,10 @@ requiring ordinary species review to be complete?
 **Requested change:** Display and enter camera times using a 24-hour clock
 (`HH:mm:ss`), without AM/PM.
 
-**Scope to confirm:** All Distance timestamp displays and inputs, including the
-alignment dialog. This is a formatting change, not a timezone conversion.
+**Implemented:** The alignment/correction dialog now uses an explicit
+`YYYY-MM-DD HH:mm:ss` masked text input instead of a browser-localized date/time
+control. Existing timestamp displays already use 24-hour time. This is a
+formatting change, not a timezone conversion.
 
 ## 3. Simplify initial time alignment
 
@@ -59,6 +62,9 @@ sample when that sample is not the video's opening frame.
 **Confirmed:** Play from the start of the video to that sample, then pause.
 “First frame” means the video's opening frame, not the individual's first-seen
 frame. If the sample is already the opening frame, no lead-in is needed.
+
+**Implemented:** The first nonzero sample supports replay from playback zero.
+Later samples retain replay from the previous scheduled sample.
 
 ## 5. Exactly one mandatory behavior
 
@@ -141,6 +147,11 @@ available space rather than leave empty reserved columns.
 **Scope:** A general Distance UI design overhaul, not just isolated spacing
 adjustments. Detailed visual design remains to be worked out.
 
+**Partially implemented:** Added a visible Hide/Show annotations toggle that
+collapses/restores the right drawer without rebuilding players or form controls.
+An initial spacing pass reduces workspace/card padding and panel gaps and removes
+the workspace width cap. The full redesign and detachable panels remain deferred.
+
 ## Discussion progress
 
 All ten feedback items are captured. Key clarifications:
@@ -157,4 +168,7 @@ All ten feedback items are captured. Key clarifications:
   annotation sidebar collapsible/restorable.
 
 Open implementation/policy questions remain noted in the relevant sections.
-No implementation has started.
+
+**First quick-win batch completed:** First-sample playback, a collapsible right
+sidebar, 24-hour timestamp entry, and an initial spacing reduction. Other feedback
+items are not implemented by this batch.

@@ -93,6 +93,22 @@ approval and an explicit verified force-with-lease.
   v29 backup, untouched retired live database, rebuilt v23 copy, conversion
   fingerprints, preserved untracked note, and post-install verification.
 
+### Distance quick-win follow-up validation
+
+- Focused drawer, clock-correction, timing/player, keyboard, and reference-dimming
+  tests: **217 passed**. Translation coverage: **10 passed** (the isolated
+  translation run retains the existing unknown `main_file` warning). Ruff lint,
+  formatting, and whitespace checks pass.
+- Isolated Chromium composition harness at 1280×800, using synthetic 25-fps media:
+  collapsing the 400 px right drawer expands the workspace from 580 to 980 px and
+  each comparison panel from 278 to 478 px, without horizontal overflow. Reopening
+  restores the geometry, player element IDs, and unsaved input.
+- First-sample replay from playback zero pauses at **1.00001 s** for a 1 s sample.
+  The real masked clock input displays `2026-10-12 16:02:50` as text and accepts/
+  saves `2026-10-12 23:02:50` without an AM/PM control or timezone conversion.
+- This is bounded UI/media validation, not a full application/real-footage review.
+  No live application database was used or changed.
+
 ### Converter operation
 
 Run from the cleanup worktree against a backup, not the live database:

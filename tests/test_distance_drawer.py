@@ -223,7 +223,82 @@ async def test_sample_timing_is_below_video_and_progress_is_in_selected_card(
     page.sample_offset = 1000
     with page.client:
         page.render_sample_navigation.refresh()
+    await user.should_see("Play to this sample")
+    page.offsets = [0, 2000]
+    page.sample_offset = 0
+    with page.client:
+        page.render_sample_navigation.refresh()
     await user.should_not_see("Play to this sample")
+
+
+@pytest.mark.parametrize("offset,start", [(1000, 0), (3000, 1000.01), (0, None)])
+async def test_replay_includes_first_sample_lead_in(
+    user: User, drawer_page, monkeypatch, offset, start
+):
+    holder, _, _ = drawer_page
+    playback = AsyncMock()
+    monkeypatch.setattr(page_module, "play_to_sample", playback)
+    await user.open("/distance-drawer-test")
+    page = holder["page"]
+    page.review = {"recorded_start": datetime(2026, 10, 12, 16, 2, 49)}
+    page.offsets = [1000, 3000] if offset else [0, 2000]
+    page.sample_offset = offset
+    page.animal_player = object()
+    page.render_tracks = Mock()
+    del page.render_sample_navigation
+    with user:
+        page.render_sample_navigation()
+    before = list(page.samples)
+    if start is None:
+        await user.should_not_see("Play to this sample")
+        await page.replay_interval()
+        playback.assert_not_awaited()
+    else:
+        user.find("Play to this sample").click()
+        await wait_for_saved(page, lambda: playback.await_count == 1)
+        playback.assert_awaited_once_with(page.animal_player, start, offset + 0.01)
+    assert page.sample_offset == offset
+    assert page.samples == before
+
+
+@pytest.mark.parametrize("empty_queue", [False, True])
+async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
+    user: User, drawer_page, empty_queue
+):
+    holder, _, _ = drawer_page
+    await user.open("/distance-drawer-test")
+    page = holder["page"]
+    page.queue[0]["video_path"] = "animal.mp4"
+    if empty_queue:
+        page.queue = []
+    page.render_animal = Mock()
+    page.render_references = Mock()
+    page.animal_player = object()
+    page.reference_player = object()
+    page.sample_offset = 1000
+    page.sample_values = {"behavior_ids": ["draft-behavior"], "carries": True, "infant_id": "_new"}
+    players = (page.animal_player, page.reference_player)
+    active_id = page.individual_id
+    values = page.sample_values.copy()
+    with user:
+        page.right_drawer = ui.right_drawer(value=True).props("behavior=desktop width=400")
+        with page.right_drawer:
+            draft = ui.input("Unsaved draft", value="keep me")
+        page.render_workspace()
+    expected_renders = 0 if empty_queue else 1
+    assert page.render_animal.call_count == expected_renders
+    user.find("Hide annotations").click()
+    await user.should_see("Show annotations")
+    assert page.right_drawer.value is False
+    user.find("Show annotations").click()
+    await user.should_see("Hide annotations")
+    assert page.right_drawer.value is True
+    assert draft.value == "keep me"
+    assert (page.animal_player, page.reference_player) == players
+    assert page.individual_id == active_id and page.sample_offset == 1000
+    assert page.sample_values == values
+    assert page.render_animal.call_count == expected_renders
+    assert page.render_references.call_count == expected_renders
 
 
 async def wait_for_saved_timing_disabled(page):
@@ -939,7 +1014,10 @@ async def test_clock_confirmation_uses_current_frame_without_selection_controls(
         if isinstance(element, ui.input)
         and element.props.get("data-testid") == "distance-clock-time"
     )
-    assert clock_input.value == "2026-10-12T16:02:50"
+    assert clock_input.value == "2026-10-12 16:02:50"
+    assert clock_input.props["type"] == "text"
+    assert clock_input.props["mask"] == "####-##-## ##:##:##"
+    assert clock_input.props["placeholder"] == "YYYY-MM-DD HH:mm:ss"
     dialog_holder["dialog"] = next(
         element
         for element in user.client.elements.values()

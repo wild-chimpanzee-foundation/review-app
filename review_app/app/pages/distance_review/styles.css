@@ -3,12 +3,12 @@
     .distance-panel > .distance-panel-heading {height:32px;min-height:32px}
     .distance-panel > .text-subtitle1 {height:32px;display:flex;align-items:center}
     .distance-sidebar .nicegui-refreshable {width:100%;min-width:0}
-    .distance-workspace {width:100%;max-width:1600px;margin:0 auto;padding:16px;gap:12px;min-width:0}
-    .distance-grid {display:grid;width:100%;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start;container-type:inline-size}
+    .distance-workspace {width:100%;max-width:none;margin:0;padding:8px;gap:8px;min-width:0}
+    .distance-grid {display:grid;width:100%;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:start;container-type:inline-size}
     .distance-grid > .nicegui-refreshable {min-width:0}
-    .distance-panel {width:100%;min-width:0;padding:16px;gap:8px}
+    .distance-panel {width:100%;min-width:0;padding:8px;gap:4px}
     .distance-grid .vp-video-container, .distance-grid .distance-placeholder {
-        height:clamp(140px,calc((100cqw - 76px) * .28125),min(430px,40vh));background:#0f172a}
+        height:clamp(140px,calc((100cqw - 40px) * .28125),min(430px,40vh));background:#0f172a}
     .distance-player video {height:100%;object-fit:contain}
     .vp-video-container:has(> video.distance-reference-dimmed) {filter:grayscale(1) brightness(.45)}
     .distance-player [id^=vp-time] {font-size:12px!important}
@@ -27,7 +27,8 @@
     .distance-reference-clip.active {border-color:var(--q-primary);background:rgba(128,128,128,.12)}
     .distance-reference-clip .q-btn__content {width:100%;flex-direction:column;gap:4px}
     .distance-reference-thumbnail {width:132px;height:76px;border-radius:4px;background:#0f172a}
-    .distance-sidebar {width:100%}
+    .distance-sidebar {width:100%;gap:8px}
+    .distance-sidebar .q-card, .distance-filter .q-card {padding:8px;gap:8px}
     .distance-review-card {gap:8px}
     .distance-individual-card {gap:8px}
     .distance-sample-controls {gap:8px}

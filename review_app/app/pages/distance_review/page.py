@@ -633,10 +633,28 @@ class DistanceReviewPage:
                 self.render_reviewed_species()
                 self.render_sample_actions()
 
+    def render_annotation_toggle(self) -> None:
+        if self.right_drawer is None:
+            return
+        ui.button(on_click=self.right_drawer.toggle).props(
+            'flat dense no-caps data-testid="distance-toggle-annotations"'
+        ).bind_text_from(
+            self.right_drawer,
+            "value",
+            backward=lambda opened: t(
+                "distance_hide_annotations" if opened else "distance_show_annotations"
+            ),
+        ).bind_icon_from(
+            self.right_drawer,
+            "value",
+            backward=lambda opened: "chevron_right" if opened else "chevron_left",
+        )
+
     @ui.refreshable
     def render_workspace(self) -> None:
         video = self.video
         if not video:
+            self.render_annotation_toggle()
             with ui.card().classes("w-full items-center q-pa-xl"):
                 ui.icon("video_library", size="lg").classes("text-grey-5")
                 ui.label(t("distance_no_videos"))
@@ -680,6 +698,7 @@ class DistanceReviewPage:
                         _shortcut_badge("N")
                         ui.icon("chevron_right")
                 next_button.set_enabled(self.index + 1 < len(self.queue))
+                self.render_annotation_toggle()
         with ui.element("div").classes("distance-grid"):
             self.render_animal()
             self.render_references()
@@ -1268,18 +1287,19 @@ class DistanceReviewPage:
             ui.label(t("distance_sample_time", time=recorded_time.isoformat(sep=" "))).classes(
                 "text-caption text-weight-medium"
             )
-            if self.offsets.index(self.sample_offset) > 0 and self.animal_player:
+            if self.sample_offset > 0 and self.animal_player:
                 ui.button(
                     t("distance_play_interval"), icon="replay", on_click=self.replay_interval
                 ).props("flat dense").set_enabled(not self.busy)
 
     @stable_client
     async def replay_interval(self) -> None:
-        if self.busy or self.sample_offset is None:
+        if self.busy or self.sample_offset is None or self.animal_player is None:
             return
         position = self.offsets.index(self.sample_offset)
-        if not position:
+        if self.sample_offset == 0:
             return
+        start = self.sample_seek_offset(self.offsets[position - 1]) if position else 0
         self.busy = True
         self.refresh_sample_ui()
         self.render_sample_navigation.refresh()
@@ -1287,7 +1307,7 @@ class DistanceReviewPage:
             with self.client:
                 await play_to_sample(
                     self.animal_player,
-                    self.sample_seek_offset(self.offsets[position - 1]),
+                    start,
                     self.sample_seek_offset(self.sample_offset),
                 )
         except (ValueError, TimeoutError):

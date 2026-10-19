@@ -242,17 +242,19 @@ def correction_page(clock_data, monkeypatch, tmp_path):
     return holder, data
 
 
+@pytest.mark.parametrize("hour", [0, 16, 23])
 async def test_timestamp_ui_preserves_tracks_without_capturing_a_new_frame(
-    user: User, correction_page
+    user: User, correction_page, hour
 ):
     holder, data = correction_page
     await user.open("/clock-correction")
     await user.should_see("Correct camera timestamp")
     page = holder["page"]
-    user.find("Camera timestamp at the saved alignment frame").clear().type("2026-10-12T16:02:52")
+    timestamp = f"2026-10-12 {hour:02d}:02:52"
+    user.find("Camera timestamp at the saved alignment frame").clear().type(timestamp)
     user.find("Correct camera timestamp").click()
     await wait_for_clock(page)
-    assert "Aligned camera time: 2026-10-12 16:02:52" in page.clock_description()
+    assert f"Aligned camera time: {timestamp}" in page.clock_description()
     holder["capture"].assert_not_awaited()
     assert len(page.individuals) == 3
     assert page.sample_offset == 2920
@@ -264,9 +266,21 @@ async def test_timestamp_ui_rejects_odd_second_correction(user: User, correction
     holder, data = correction_page
     await user.open("/clock-correction")
     before = snapshot(data["dp"])
-    user.find("Camera timestamp at the saved alignment frame").clear().type("2026-10-12T16:02:51")
+    user.find("Camera timestamp at the saved alignment frame").clear().type("2026-10-12 16:02:51")
     user.find("Correct camera timestamp").click()
     await user.should_see("Timestamp corrections must use whole two-second steps.")
+    assert snapshot(data["dp"]) == before
+    holder["capture"].assert_not_awaited()
+
+
+@pytest.mark.parametrize("timestamp", ["2026-10-12 24:02:52", "2026-10-12 04:02:52 PM"])
+async def test_timestamp_ui_rejects_invalid_24_hour_input(user: User, correction_page, timestamp):
+    holder, data = correction_page
+    await user.open("/clock-correction")
+    before = snapshot(data["dp"])
+    user.find("Camera timestamp at the saved alignment frame").clear().type(timestamp)
+    user.find("Correct camera timestamp").click()
+    await user.should_see("Enter a valid camera timestamp as YYYY-MM-DD HH:mm:ss (24-hour time).")
     assert snapshot(data["dp"]) == before
     holder["capture"].assert_not_awaited()
 
