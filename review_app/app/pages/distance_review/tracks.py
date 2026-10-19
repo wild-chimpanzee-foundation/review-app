@@ -9,6 +9,11 @@ GRID_BOTTOM = 52
 STATUS_BAND_FRACTION = 0.25
 
 
+def track_height(individual_count: int) -> int:
+    """Keep the normal graph compact while retaining readable status lanes."""
+    return max(210, GRID_TOP + GRID_BOTTOM + individual_count * 48)
+
+
 def track_options(
     individuals, samples, offsets, duration, active_id, current_offset=None, chart_height=500
 ) -> dict:

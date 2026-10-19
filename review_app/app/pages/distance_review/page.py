@@ -67,8 +67,11 @@ from review_app.app.pages.distance_review.sample_controls import (
 from review_app.app.pages.distance_review.sample_controls import (
     render_sample_actions as render_sample_actions_view,
 )
+from review_app.app.pages.distance_review.sample_controls import (
+    render_video_actions as render_video_actions_view,
+)
 from review_app.app.pages.distance_review.session import SampleSelection
-from review_app.app.pages.distance_review.tracks import track_options
+from review_app.app.pages.distance_review.tracks import track_height, track_options
 from review_app.app.pages.review.annotations import _shortcut_badge
 from review_app.app.pages.review.video_player import render_custom_video_player
 from review_app.app.state import (
@@ -206,6 +209,7 @@ class DistanceReviewPage:
     def refresh_sample_ui(self) -> None:
         self.render_samples.refresh()
         self.render_sample_actions.refresh()
+        self.render_video_actions.refresh()
         self.render_individual_progress.refresh()
         self.render_tracks.refresh()
 
@@ -631,7 +635,7 @@ class DistanceReviewPage:
                     )
                 self.render_individuals()
                 self.render_reviewed_species()
-                self.render_sample_actions()
+                self.render_video_actions()
 
     @ui.refreshable
     def render_workspace(self) -> None:
@@ -752,9 +756,12 @@ class DistanceReviewPage:
         if not self.video:
             return
         with ui.column().classes("w-full gap-1 distance-tracks"):
-            ui.label(t("distance_track_title")).classes("text-caption text-weight-medium")
-            ui.label(t("distance_track_help")).classes("text-caption text-grey-6")
-            chart_height = 295 + max(28, len(self.individuals) * 32)
+            with ui.row().classes("w-full items-center gap-1"):
+                ui.label(t("distance_track_title")).classes("text-caption text-weight-medium")
+                ui.icon("info_outline", size="xs").classes("text-grey-6").tooltip(
+                    t("distance_track_help")
+                )
+            chart_height = track_height(len(self.individuals))
             options = track_options(
                 self.individuals,
                 self.samples,
@@ -1360,6 +1367,10 @@ class DistanceReviewPage:
     def render_sample_actions(self) -> None:
         render_sample_actions_view(self._sample_controls_context())
 
+    @ui.refreshable
+    def render_video_actions(self) -> None:
+        render_video_actions_view(self._sample_controls_context())
+
     def remaining_sample_offsets(self) -> list[int]:
         if not self.individual or self.sample_offset not in self.offsets:
             return []
@@ -1753,6 +1764,7 @@ class DistanceReviewPage:
             render_controls=self.render_reference_controls,
             render_frames=self.render_frames,
             render_samples=self.render_samples,
+            render_actions=self.render_sample_actions,
         )
 
     def _render_reference_player(self, reference: dict, duration: float, panel):

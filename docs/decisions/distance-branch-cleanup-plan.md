@@ -117,6 +117,24 @@ approval and an explicit verified force-with-lease.
   filters, not a workspace action. Isolated Chromium at 1280×800 confirms header
   placement, collapse/reopen (580→980→580 px workspace), header hide/restore,
   preserved player IDs/draft input, and no horizontal overflow.
+- Below-video control-layout follow-up: **160 passed** across drawer, graph
+  geometry, reference dimming, selection/draft position, bulk-apply UI, and infant
+  creation tests. Ruff lint/format and whitespace checks pass.
+- Isolated Chromium using the real Distance rendering components, three animals,
+  fourteen distances, two reference clips, a selected behavior, and a carried
+  infant fits without page scrolling at 1920×1080 (drawers closed) and 1280×800
+  (both drawers open). The wide reference controls occupy about 192 px vertically;
+  the graph plus its heading occupies 262 px. Videos remain 958×538.875 px at the
+  wide size. Fields share a row when wide and wrap when narrow; toggling the infant
+  field and resizing preserves behavior/infant selection. No horizontal page
+  overflow; long option strips retain local horizontal scrolling.
+- Moving Confirm/advance and Apply to end above the reference clip picker was
+  followed by **five focused tests** for placement, confirmation, bulk cancellation,
+  and sidebar completion; the earlier broad checks were not repeated. The same
+  bounded Chromium layout check still fits without page scrolling at both sizes.
+  With the added action row, reference controls occupy about 232 px when wide,
+  and the narrow layout ends at about 790 px in an 800 px viewport. Finish stays
+  in the sidebar; no save/completion semantics changed.
 - This is bounded UI/media validation, not a full application/real-footage review.
   No live application database was used or changed.
 

@@ -13,10 +13,15 @@ from review_app.app.pages.distance_review.tracks import (
     STATUS_BAND_FRACTION,
     track_options,
 )
+from review_app.app.pages.distance_review.tracks import (
+    track_height as chart_height,
+)
 
 
-def chart_height(individual_count):
-    return 295 + max(28, individual_count * 32)
+def test_normal_graph_is_compact_without_losing_status_lane_space():
+    assert chart_height(1) == 210
+    assert chart_height(3) == 238
+    assert (chart_height(3) - GRID_TOP - GRID_BOTTOM) * STATUS_BAND_FRACTION / 3 == 12
 
 
 def test_tracks_keep_measured_distances_and_review_states_in_separate_coordinates():

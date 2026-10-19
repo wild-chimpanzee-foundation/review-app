@@ -40,7 +40,7 @@ def drawer_page(distance_data, monkeypatch):
         page.behavior_options = dp.get_distance_behavior_options()
         page.render_timing = SimpleNamespace(refresh=Mock())
         page.render_samples = SimpleNamespace(refresh=Mock())
-        page.render_sample_actions = SimpleNamespace(refresh=Mock())
+        page.render_sample_actions = Mock()
         page.render_sample_navigation = SimpleNamespace(refresh=Mock())
         page.render_individuals()
         holder["page"] = page
@@ -1260,7 +1260,16 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
     }
     assert sample_labels <= labels(reference_area)
     assert sample_labels.isdisjoint(labels(sidebar))
-    assert "Confirm selection and advance" in labels(sidebar)
+    assert {"Confirm selection and advance", "Apply to end"} <= labels(reference_area)
+    assert {"Confirm selection and advance", "Apply to end"}.isdisjoint(labels(sidebar))
+    assert any(
+        element.props.get("data-distance-action") == "finish-video"
+        for element in sidebar.descendants()
+    )
+    assert not any(
+        element.props.get("data-distance-action") == "finish-video"
+        for element in reference_area.descendants()
+    )
     distance_strip = next(
         element for element in reference_area.descendants() if "distance-frames" in element.classes
     )
@@ -1281,7 +1290,36 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
     ]
     assert len(visibility_buttons) == 2
     assert all(button.props["color"] == "grey-7" for button in visibility_buttons)
-    assert "w-full" in visibility_row.classes
+    assert "distance-choice-toolbar" in visibility_row.parent_slot.parent.classes
+    fields = next(
+        element
+        for element in reference_area.descendants()
+        if "distance-sample-fields" in element.classes
+    )
+    assert {"Sample behaviors", "Carries an infant", "Carried infant"} <= labels(fields)
+    summary = next(
+        element
+        for element in reference_area.descendants()
+        if "distance-sample-summary" in element.classes
+    )
+    assert {"Saved distance: 5 m", "Selected reference: 5 m"} <= labels(summary)
+    browser = next(
+        element
+        for element in reference_area.descendants()
+        if "distance-reference-browser" in element.classes
+    )
+    assert "Reference clip" in labels(browser)
+    assert any("distance-reference-clips" in element.classes for element in browser.descendants())
+    actions = next(
+        element
+        for element in reference_area.descendants()
+        if "distance-actions" in element.classes
+    )
+    # The refreshable action slot sits directly before the clip picker.
+    action_slot = actions.parent_slot.parent
+    assert action_slot.parent_slot is browser.parent_slot
+    siblings = browser.parent_slot.children
+    assert siblings.index(action_slot) + 1 == siblings.index(browser)
     # Reference changes refresh both the central selection and sidebar confirmation.
     other = dp.add_reference_frame(data["reference"]["id"], 6500, 7.25)
     page.frames.append(other)

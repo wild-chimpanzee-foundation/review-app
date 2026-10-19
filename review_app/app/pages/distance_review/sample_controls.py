@@ -62,7 +62,6 @@ def render_sample_controls(context: SampleControlsContext) -> None:
     with ui.column().classes("distance-sample-controls w-full"):
         if not context.individual or context.sample_offset is None:
             return
-        ui.separator()
         if context.carrier:
             ui.button(
                 t("distance_carried_by", number=context.carrier["individual_number"]),
@@ -71,79 +70,82 @@ def render_sample_controls(context: SampleControlsContext) -> None:
                     context.carrier["id"], context.sample_offset
                 ),
             ).props(
-                'unelevated no-caps icon-right=arrow_forward data-distance-action="select-carrier"'
-            ).classes("w-full text-subtitle1 text-weight-bold q-py-sm").set_enabled(
-                not context.busy
-            )
-            ui.label(t("distance_carried_distance_help")).classes("text-caption text-grey-6")
-        sample = context.sample
-        if sample:
-            if sample["status"] == "skipped":
-                ui.label(
-                    t(
-                        "distance_saved_skip",
-                        reason=t(
-                            "distance_absent"
-                            if sample["skip_reason"] == "individual absent"
-                            else "distance_midpoint_hidden"
-                        ),
-                    )
-                ).classes("text-warning")
-            else:
-                ui.label(t("distance_saved_annotation", meters=sample["distance_m"])).classes(
-                    "text-positive"
-                )
+                'flat dense no-caps icon-right=arrow_forward data-distance-action="select-carrier"'
+            ).tooltip(t("distance_carried_distance_help")).set_enabled(not context.busy)
         values = context.values
-        ui.select(
-            context.behavior_options,
-            value=values["behavior_ids"],
-            multiple=True,
-            label=t("distance_behaviors"),
-            on_change=lambda e: values.update(behavior_ids=list(e.value or [])),
-        ).classes("w-full").props("dense outlined use-chips")
-        carries = ui.checkbox(
-            t("distance_carries_infant"),
-            value=values["carries"],
-            on_change=lambda e: values.update(carries=e.value),
-        )
-        infant_options = {
-            row["id"]: context.individual_label(row)
-            for row in context.individuals
-            if row["id"] != context.individual_id
-            and row["age"] == "Infant"
-            and row["species_id"] == context.individual["species_id"]
-        }
-        infant_options["_new"] = t("distance_new_infant")
-        infant = (
+        with ui.element("div").classes("distance-sample-fields"):
             ui.select(
-                infant_options,
-                value=values["infant_id"],
-                label=t("distance_infant_identity"),
-                on_change=lambda e: values.update(infant_id=e.value),
+                context.behavior_options,
+                value=values["behavior_ids"],
+                multiple=True,
+                label=t("distance_behaviors"),
+                on_change=lambda e: values.update(behavior_ids=list(e.value or [])),
+            ).classes("distance-behavior-field").props("dense outlined use-chips")
+            carries = (
+                ui.checkbox(
+                    t("distance_carries_infant"),
+                    value=values["carries"],
+                    on_change=lambda e: values.update(carries=e.value),
+                )
+                .props("dense")
+                .classes("distance-carry-toggle")
             )
-            .classes("w-full")
-            .props("dense outlined")
-        )
-        infant.bind_visibility_from(carries, "value")
-        if context.individual["age"] == "Infant":
-            carries.set_enabled(False)
-        if context.carrier:
-            return
-        frame = _selected_frame(context)
-        skip_reason = _selected_skip(context)
-        if skip_reason:
-            choice = next(
-                item for item in context.skip_choices if item["skip_reason"] == skip_reason
+            infant_options = {
+                row["id"]: context.individual_label(row)
+                for row in context.individuals
+                if row["id"] != context.individual_id
+                and row["age"] == "Infant"
+                and row["species_id"] == context.individual["species_id"]
+            }
+            infant_options["_new"] = t("distance_new_infant")
+            infant = (
+                ui.select(
+                    infant_options,
+                    value=values["infant_id"],
+                    label=t("distance_infant_identity"),
+                    on_change=lambda e: values.update(infant_id=e.value),
+                )
+                .classes("distance-infant-field")
+                .props("dense outlined")
             )
-            ui.label(t("distance_selected_choice", choice=t(choice["label"]))).classes(
-                "text-primary"
-            )
-        elif frame:
-            ui.label(t("distance_selected_reference", meters=frame["distance_m"])).classes(
-                "text-primary"
-            )
-        else:
-            ui.label(t("distance_select_reference")).classes("text-grey-6")
+            infant.bind_visibility_from(carries, "value")
+            if context.individual["age"] == "Infant":
+                carries.set_enabled(False)
+        with ui.row().classes("distance-sample-summary"):
+            sample = context.sample
+            if sample:
+                if sample["status"] == "skipped":
+                    ui.label(
+                        t(
+                            "distance_saved_skip",
+                            reason=t(
+                                "distance_absent"
+                                if sample["skip_reason"] == "individual absent"
+                                else "distance_midpoint_hidden"
+                            ),
+                        )
+                    ).classes("text-warning")
+                else:
+                    ui.label(t("distance_saved_annotation", meters=sample["distance_m"])).classes(
+                        "text-positive"
+                    )
+            if context.carrier:
+                return
+            frame = _selected_frame(context)
+            skip_reason = _selected_skip(context)
+            if skip_reason:
+                choice = next(
+                    item for item in context.skip_choices if item["skip_reason"] == skip_reason
+                )
+                ui.label(t("distance_selected_choice", choice=t(choice["label"]))).classes(
+                    "text-primary"
+                )
+            elif frame:
+                ui.label(t("distance_selected_reference", meters=frame["distance_m"])).classes(
+                    "text-primary"
+                )
+            else:
+                ui.label(t("distance_select_reference")).classes("text-grey-6")
 
 
 def render_sample_actions(context: SampleControlsContext) -> None:
@@ -151,43 +153,47 @@ def render_sample_actions(context: SampleControlsContext) -> None:
         return
     frame = _selected_frame(context)
     valid_choice = bool(context.carrier or frame or _selected_skip(context))
-    with ui.column().classes("distance-actions"):
+    with ui.row().classes("distance-actions"):
         with (
             ui.button(on_click=context.on_confirm, color="warning")
-            .classes("w-full distance-confirm")
-            .props('full-width data-distance-action="confirm"')
+            .classes("distance-confirm")
+            .props('data-distance-action="confirm"')
         ) as confirm:
-            with ui.row().classes("items-center justify-between w-full q-px-xs q-py-sm no-wrap"):
+            with ui.row().classes("items-center justify-between w-full q-px-xs no-wrap"):
                 ui.label(t("distance_confirm_sample")).classes("text-center col")
                 _shortcut_badge("↵ Enter")
         confirm.set_enabled(bool(valid_choice and context.animal_player and not context.busy))
-        with ui.row().classes("w-full items-center gap-xs"):
+        ui.button(
+            t("distance_apply_to_end"),
+            icon="playlist_add_check",
+            on_click=context.on_apply_to_end,
+        ).props('outline dense data-distance-action="apply-to-end"').set_enabled(
+            bool(
+                context.remaining_offsets
+                and valid_choice
+                and not context.busy
+                and not context.carrier
+            )
+        )
+
+
+def render_video_actions(context: SampleControlsContext) -> None:
+    if not context.review_active or not context.individual or context.sample_offset is None:
+        return
+    with ui.row().classes("w-full items-center justify-between gap-xs"):
+        if context.individual["review_status"] == "completed":
+            ui.label(t("distance_individual_completed")).classes("text-caption text-positive")
+        if context.video_completed:
+            ui.label(t("distance_video_completed")).classes("text-caption text-positive")
+        else:
             ui.button(
-                t("distance_apply_to_end"),
-                icon="playlist_add_check",
-                on_click=context.on_apply_to_end,
-            ).props('outline dense data-distance-action="apply-to-end"').set_enabled(
-                bool(
-                    context.remaining_offsets
-                    and valid_choice
-                    and not context.busy
-                    and not context.carrier
-                )
-            )
-        with ui.row().classes("w-full items-center justify-between gap-xs"):
-            if context.individual["review_status"] == "completed":
-                ui.label(t("distance_individual_completed")).classes("text-caption text-positive")
-            if context.video_completed:
-                ui.label(t("distance_video_completed")).classes("text-caption text-positive")
-            else:
-                ui.button(
-                    t("distance_finish_video"), icon="done_all", on_click=context.on_finish_video
-                ).props(
-                    'color=positive unelevated size=md data-distance-action="finish-video"'
-                ).set_enabled(bool(context.all_individuals_completed and not context.busy))
-            ui.icon("info_outline", size="xs").classes("text-grey-6").tooltip(
-                t("distance_correction_help")
-            )
+                t("distance_finish_video"), icon="done_all", on_click=context.on_finish_video
+            ).props(
+                'color=positive unelevated size=md data-distance-action="finish-video"'
+            ).set_enabled(bool(context.all_individuals_completed and not context.busy))
+        ui.icon("info_outline", size="xs").classes("text-grey-6").tooltip(
+            t("distance_correction_help")
+        )
 
 
 @dataclass(frozen=True)

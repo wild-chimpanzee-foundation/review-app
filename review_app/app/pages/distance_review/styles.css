@@ -28,25 +28,39 @@
     .distance-player details {font-size:12px;color:#64748b;padding-top:4px}
     .distance-player summary {cursor:pointer}
     .distance-player:focus-within {outline:2px solid var(--q-primary);outline-offset:2px}
-    .distance-frames {flex-wrap:nowrap;overflow-x:auto;width:100%;padding:4px 0 8px;gap:6px}
-    .distance-frames .q-btn {flex-shrink:0}
-    .distance-reference-clips {width:100%;flex-wrap:nowrap;overflow-x:auto;gap:8px;padding:4px 0 8px}
-    .distance-reference-clip {width:144px;flex-shrink:0;padding:4px;border:2px solid transparent;border-radius:8px}
+    .distance-reference-controls {gap:4px;min-width:0;container-type:inline-size}
+    .distance-reference-controls > .nicegui-refreshable {width:100%;min-width:0}
+    .distance-choice-toolbar {display:grid;grid-template-columns:auto minmax(0,1fr) auto;
+        align-items:center;width:100%;gap:4px;min-width:0}
+    .distance-choice-navigation {gap:0}
+    .distance-frames {flex-wrap:nowrap;overflow-x:auto;width:100%;min-width:0;padding:0;gap:4px;scrollbar-width:thin}
+    .distance-frames .q-btn, .distance-visibility-choices .q-btn {flex-shrink:0}
+    .distance-reference-browser {width:100%;min-width:0;flex-wrap:nowrap;align-items:center;gap:8px}
+    .distance-reference-browser-label {flex-shrink:0;max-width:160px;gap:0}
+    .distance-reference-clips {flex:1;min-width:0;flex-wrap:nowrap;overflow-x:auto;gap:4px;padding:0;scrollbar-width:thin}
+    .distance-reference-clip {width:102px;flex-shrink:0;padding:2px;border:2px solid transparent;border-radius:6px}
     .distance-reference-clip.active {border-color:var(--q-primary);background:rgba(128,128,128,.12)}
-    .distance-reference-clip .q-btn__content {width:100%;flex-direction:column;gap:4px}
-    .distance-reference-thumbnail {width:132px;height:76px;border-radius:4px;background:#0f172a}
+    .distance-reference-clip .q-btn__content {width:100%;flex-direction:column;gap:2px}
+    .distance-reference-thumbnail {width:94px;height:53px;border-radius:4px;background:#0f172a}
     .distance-sidebar {width:100%;gap:8px}
     .distance-sidebar .q-card, .distance-filter .q-card {padding:8px;gap:8px}
     .distance-review-card {gap:8px}
     .distance-individual-card {gap:8px}
-    .distance-sample-controls {gap:8px}
-    .distance-sample-controls > .text-positive,
-    .distance-sample-controls > .text-warning,
-    .distance-sample-controls > .text-primary,
-    .distance-sample-controls > .text-grey-6 {font-size:13px;line-height:18px}
-    .distance-actions {padding-top:8px;gap:8px;width:100%;
-        border-top:1px solid rgba(128,128,128,.15)}
-    .distance-confirm {min-height:60px;font-weight:700}
+    .distance-sample-controls {gap:4px}
+    .distance-sample-fields {display:grid;width:100%;min-width:0;align-items:center;gap:4px;
+        grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))}
+    .distance-sample-fields > * {width:100%;min-width:0}
+    .distance-sample-summary {width:100%;gap:8px;align-items:center;font-size:13px;line-height:18px}
+    @container (max-width:560px) {
+        .distance-choice-toolbar {grid-template-columns:auto minmax(0,1fr)}
+        .distance-visibility-choices {grid-column:1/-1}
+        .distance-sample-fields {grid-template-columns:auto minmax(0,1fr)}
+        .distance-behavior-field {grid-column:1/-1}
+        .distance-carry-toggle {width:auto}
+        .distance-confirm .q-badge {display:none}
+    }
+    .distance-actions {gap:4px;width:100%;align-items:center}
+    .distance-confirm {flex:1;min-width:min(100%,240px);min-height:36px;font-weight:700}
     .distance-queue {width:100%;gap:0}
     .distance-queue-header {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;
         align-items:center;width:100%;gap:8px}

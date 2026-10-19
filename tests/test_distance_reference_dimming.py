@@ -69,7 +69,7 @@ def reference_page(monkeypatch, tmp_path, request):
         page.frames = frames
         page.selected_frame_id = "frame"
         page.render_samples = Mock()
-        page.render_sample_actions = SimpleNamespace(refresh=Mock())
+        page.render_sample_actions = Mock()
         page.render_tracks = SimpleNamespace(refresh=Mock())
         page.render_sample_navigation = SimpleNamespace(refresh=Mock())
         page.reference_thumbnail_path = Mock(return_value=None)

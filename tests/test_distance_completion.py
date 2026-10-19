@@ -40,7 +40,7 @@ def completion_page(monkeypatch):
         page.refresh_sample_ui = Mock()
         for name in ("render_workspace", "render_sidebar", "render_sample_navigation"):
             setattr(page, name, SimpleNamespace(refresh=Mock()))
-        page.render_sample_actions()
+        page.render_video_actions()
         holder["page"] = page
 
     return holder
@@ -149,7 +149,7 @@ async def test_finish_stays_disabled_until_every_individual_is_complete(
     page = completion_page["page"]
     page.individuals[0]["review_status"] = "in_progress"
     with page.client:
-        page.render_sample_actions.refresh()
+        page.render_video_actions.refresh()
     await wait_until(
         lambda: any(
             element.props.get("data-distance-action") == "finish-video" and not element.enabled

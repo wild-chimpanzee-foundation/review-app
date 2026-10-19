@@ -155,7 +155,18 @@ An initial spacing pass reduces sidebar/card padding and panel gaps and removes
 the workspace width cap. The follow-up removes comparison-card borders, shadows,
 backgrounds, and padding entirely, along with outer workspace padding and the
 video height cap. Videos fill their column at their native aspect ratio without
-cropping or stretching. The full redesign and detachable panels remain deferred.
+cropping or stretching.
+
+The below-video controls now use a compact distance/visibility toolbar, an
+adaptive behavior/carrying/infant grid, inline saved/selected summaries, and a
+smaller horizontal reference browser. Confirm/advance and Apply to end are in
+the reference controls, immediately above the clip picker; Finish video stays in
+the annotation sidebar. Graph height is reduced for typical
+individual counts while retaining readable status lanes; long help text moves to
+tooltips. At the validated desktop sizes the standard three-individual workflow
+fits without page scrolling, without shrinking the videos. Very large individual
+counts and expanded inspection controls may still require scrolling. Detachable
+panels and any further visual redesign remain deferred.
 
 ## Discussion progress
 

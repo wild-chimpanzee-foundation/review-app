@@ -86,6 +86,7 @@ def selection_page(distance_data, monkeypatch):
         "render_individuals",
         "render_samples",
         "render_sample_actions",
+        "render_video_actions",
         "render_individual_progress",
         "render_tracks",
         "render_sample_navigation",

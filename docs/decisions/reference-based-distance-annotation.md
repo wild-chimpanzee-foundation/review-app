@@ -241,7 +241,7 @@ alongside rounded millisecond frame identities; never round saved meter values.
 ## Desktop UI and shortcuts
 
 - Reuse Review's header and desktop drawers: 300 px filters on the left, 400 px
-  individual/confirmation controls on the right. An annotation-panel icon button
+  individual/completion controls on the right. An annotation-panel icon button
   in the header, next to the filter toggle, collapses/restores the right drawer,
   freeing its width
   without losing players, active identity/sample, or unconfirmed form choices.
@@ -254,6 +254,16 @@ alongside rounded millisecond frame identities; never round saved meter values.
   gaps. Videos use the full column width at their native aspect ratio without a
   viewport/430 px height cap, cropping, or stretching. Fullscreen and dialog players
   retain their separate sizing rules.
+- Below the reference player, group distance navigation, distance buttons, and
+  visibility choices in a compact toolbar. Behavior, carrying, and infant identity
+  use an auto-fitting field grid: share a row when space permits and wrap in
+  narrower panels. Show saved/selected summaries inline and use a compact
+  horizontal reference-thumbnail browser with its label/navigation alongside it.
+  **Confirm selection and advance** and **Apply to end** sit together immediately
+  above the clip picker, below the sample fields/summary; they are not in the
+  sidebar. **Finish video** remains in the sidebar. Actions wrap when necessary;
+  omit the Enter badge in narrow panels without changing its keyboard shortcut.
+  Keep horizontal overflow local to long distance/reference strips.
 - Put camera time and interval replay directly below the animal video, and sample
   progress in the selected individual's expanded card. Other cards show their
   first row. Highlight the active identity; metadata/actions stay attached to
@@ -261,7 +271,11 @@ alongside rounded millisecond frame identities; never round saved meter values.
 - The graph shows all individuals over elapsed time, highlighting the active
   track in orange. Use gaps for skipped/unreviewed distances, plus labeled status
   lanes: dotted not-visible, blocked absent, hollow unreviewed. Never imply zero
-  meters for a visibility status.
+  meters for a visibility status. Use a compact graph (210 px for up to two
+  individuals, 238 px for three), retaining at least 12 px per status lane as the
+  count grows. Graph/keyboard/carrier explanations live in tooltips instead of
+  permanent multi-line help blocks. Large individual counts or expanded inspection
+  controls may still need scrolling; do not clip essential controls to force a fit.
 - Species, camera, and Distance-completion filters plus selected video ID persist
   per browser/project, separately from ordinary Review. Clear stale filters and
   fall back to an available video if the saved selection disappears.
