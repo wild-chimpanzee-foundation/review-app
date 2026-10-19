@@ -444,8 +444,9 @@ review/debugging until the replacement is validated.
 
 ## Alignment comparison follow-up
 
-- Added Exact/Simplified selection to the clock dialog. Exact remains the default;
-  Simplified uses explicit opening parity and stores absolute camera time as unknown.
+- Initially added Exact/Simplified selection to the clock dialog with Exact as
+  default; Simplified used opening parity and unknown absolute camera time. Later
+  midpoint and code-only configuration follow-ups below supersede that UI choice.
   Mode/parity changes use the existing confirmed, transactional Distance reset.
 - Migration v25 preserves existing Exact anchors, evidence, resume state, and
   completion while allowing unknown camera timestamps. The private-v29 converter
@@ -456,9 +457,100 @@ review/debugging until the replacement is validated.
   All 12 failures reproduce on an isolated, unchanged HEAD snapshot: three
   apply-to-end completion-label expectations, eight clock-dialog tests blocked
   by an existing Add-individual tooltip visibility assertion, and the existing
-  initial-carrier foreign-key reflection mismatch. These are not fixed here.
+  initial-carrier foreign-key reflection mismatch. These were initially left unchanged.
+- Test follow-up resolves all 12 stale expectations without changing application
+  behavior or migrations: apply-to-end checks the completed card icon and coverage;
+  clock tests check actual Add controls instead of the rail tooltip; schema parity
+  compares SQLite's foreign-key metadata and directly verifies carrier deletion
+  clears the infant link on fresh and upgraded databases. The affected UI,
+  repository, clock/parity, and schema test files now report **220 passed**, with
+  Ruff lint and formatting clean.
 - Real-browser/real-footage effort and subsecond-accuracy comparison remains open;
   automated checks do not select a permanent alignment replacement.
+
+### Midpoint even-frame follow-up
+
+- Replaced parity-only setup for new Simplified alignments with a selected even
+  frame, initially near the midpoint. Its precise phase defines the grid in both
+  directions; no forward FPS estimate/padding is applied. Existing parity-only
+  evidence retains its original grid until an explicit confirmed reset.
+- The dialog shows the expected camera time and prefills a 24-hour date/time
+  correction field with calendar/time pickers and seconds. Untouched/programmatic prefills remain estimates.
+  Only explicit timestamp edits establish camera timestamps; the main confirmation
+  button confirms the even frame, not an untouched estimate. Frame changes reset
+  the prior frame’s correction and refresh the
+  estimate; timestamp-only corrections remain tied to the saved anchor.
+- No schema change is needed: existing anchor columns and nullable camera time
+  hold the new alignment. Validation covers backward/forward schedules, precise
+  clip-end exclusion, optional camera-time attribution/correction, retained
+  evidence, reset guards, and legacy compatibility.
+- Both modes now use prefilled 24-hour date/time fields with seconds and adjacent
+  −1 s / +1 s controls. Timestamp stepping handles date rollover, does not move
+  video frames or save automatically, and counts as an explicit Simplified
+  correction. Existing even-second and two-second correction rules are retained.
+- Combined Distance, migrations, and converter check: **866 passed** before the
+  final timestamp-control adjustments. The focused clock/UI and initial-alignment
+  check reports **53 passed**, with **2 additional 24-hour picker cases passed**.
+  These cover untouched estimates, explicit confirmation, calendar/time binding,
+  edits/second stepping, rollover, retained evidence, omitted zero seconds, and
+  invalid/odd correction rejection. Explicit 24-hour pickers replace native inputs
+  whose AM/PM presentation followed browser locale. Ruff checks pass.
+  Real-media/browser validation remains outstanding.
+
+### Pre-individual schedule browsing
+
+- Aligned videos expose neutral scheduled markers, selected sample timing, arrow
+  navigation, and replay before an individual is created. Loading an aligned empty
+  review selects its first stop; deleting the final individual keeps the schedule
+  available. Annotation controls/commands still require an individual.
+- UI tests compare database snapshots while clicking, navigating, replaying, and
+  attempting a save without an individual: no identities, samples, or progress
+  records are created. Existing individual-first annotation and reset paths remain
+  covered.
+- Affected clock/UI, graph, orchestration, and drawer tests: **260 passed**.
+  Ruff lint/format checks pass. Real-media/browser validation remains outstanding.
+
+### Simplified default, code-only Exact opt-in
+
+- `review_app/app/config.py` now sets `DISTANCE_CLOCK_ALIGNMENT_MODE` to
+  `"simplified"`. Developers can set `"exact"` to use the retained Exact workflow;
+  no frontend mode selector, settings control, or hidden mode radio remains.
+- Both workflows share one 24-hour timestamp input and second-step controls.
+  Exact calibration help/opening-parity controls are constructed only when opted
+  in through code. Existing Exact and legacy parity reviews retain their timing
+  and safe timestamp-only corrections until an explicitly confirmed reset; reset
+  uses the configured workflow. Unchecking reset restores saved-review behavior;
+  cancelling confirmation keeps saved evidence unchanged.
+- Focused clock/UI and configured-Exact initial-alignment checks: **56 passed**,
+  covering default Simplified creation, absence of frontend mode controls, Exact
+  code opt-in, saved evidence preservation, and reset/cancellation semantics.
+  Ruff lint and formatting checks pass.
+
+### Compact clock confirmation
+
+- Removed the even-frame checkbox, long gray hint, and separate expected-timestamp
+  confirmation button. Bold **Choose even frame** text and frame-step controls now
+  sit directly below the player. The primary Simplified action is **Frame shows an
+  even camera second.**, and its click is the frame confirmation.
+- Timestamp edits remain optional; untouched estimates are not promoted to verified
+  time by the frame-confirmation click. Changed-frame capture still requires a
+  fresh confirmation; destructive reset and cancellation guards are unchanged.
+- Focused clock/UI and configured-Exact initial-alignment checks: **56 passed**,
+  including removed-control/layout assertions, direct confirmation without a
+  checkbox, optional timestamp semantics, and stale-frame/reset regressions.
+  Ruff lint/format checks pass. Real-browser visual validation remains outstanding.
+
+### Enter shortcut before clock setup
+
+- Enter now activates clock setup when alignment is missing, including the compact
+  rail; after alignment it retains normal sample confirmation. A/a remains Add
+  individual and no longer opens setup. Typing, modal, repeat/modifier, and
+  disabled/busy guards are retained.
+- Expanded and rail clock-setup buttons show an **↵ Enter** badge and respect busy
+  state. Keyboard routing, badge rendering, and the actual clock action/dialog are
+  covered without creating an individual as a side effect.
+- Focused Node keyboard/player and clock/rail UI checks: **62 passed**.
+  Ruff lint/format checks pass.
 
 ## Validation gates
 

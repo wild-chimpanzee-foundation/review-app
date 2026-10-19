@@ -25,11 +25,11 @@ they do not create or synchronize Distance observations automatically.
    layout to tag them **Reference Video** automatically, or tag other reference
    clips manually in ordinary Review. Open **Distance** and prepare their
    known-distance frames for the deployment.
-2. Choose an alignment mode in the independent clock dialog. **Exact alignment**
-   (the default) uses the visible camera timestamp, not file metadata: confirm the
-   displayed even-second transition frame and its timestamp. **Simplified alignment**
-   asks only whether the opening still shows an even or odd second; absolute camera
-   date/time stays unknown.
+2. Align in the independent clock dialog. The default Simplified workflow opens
+   near the video midpoint: select any frame showing an even camera second.
+   It shows the expected timestamp as an estimate; correcting that time is optional.
+   Without an explicit timestamp edit, absolute camera time stays
+   unknown. There is no frontend alignment-mode selector.
 3. Add an individual on its identifying first-seen frame. Choose species and draw
    a bounding box. Earlier scheduled samples are saved as **Absent**; samples at
    or after first sighting remain unreviewed. Creation retains the identifying
@@ -50,15 +50,37 @@ samples remain editable; a missing sample row means unreviewed, not absent.
 
 ### Camera clock and sampling
 
-- Both modes remain available for testing. New videos default to Exact; saved
-  videos reopen in their persisted mode. Existing alignments remain Exact.
-- In **Simplified alignment**, explicitly choose even/odd from the opening still.
-  Even samples at playback 0, 2, 4… seconds; odd at 1, 3, 5… seconds (excluding the
-  video endpoint). No transition-frame selection or timestamp entry is required.
-  Absolute camera time is stored as unknown, and sample labels show playback
-  offsets instead. The schedule may be offset from true camera-even transitions
-  by a subsecond amount; compare both modes on real clips before selecting a
-  permanent replacement.
+- New and explicitly reset alignments default to Simplified. Exact is retained
+  only as a code configuration option: set `DISTANCE_CLOCK_ALIGNMENT_MODE = "exact"`
+  in `review_app/app/config.py` to opt into that calibration workflow. No frontend
+  control exposes mode selection, and Exact-specific calibration controls are not
+  rendered under the default configuration. Saved reviews retain their schedules
+  and timestamp-correction semantics regardless of the configured default; only
+  an explicitly confirmed reset applies the configured workflow to an old review.
+- In **Simplified alignment**, the dialog opens near the midpoint, or at the saved
+  anchor. Bold **Choose even frame** text and frame controls appear directly below
+  the player. Select a frame showing an even camera second, then press **Frame shows
+  an even camera second.**; no checkbox or exact transition selection is required.
+  The long gray hint and separate expected-timestamp confirmation button are omitted.
+  Schedule every two seconds backwards and
+  forwards from its precise playback offset, excluding samples outside the video.
+  For example, an anchor at playback `5.120125 s` yields samples at `1.120125`,
+  `3.120125`, `5.120125`, `7.120125`… seconds.
+- Show the expected camera timestamp for the displayed frame, using an existing
+  verified clock or file metadata as a suggestion. Label it as an estimate and
+  update it during inspection. Prefill the optional 24-hour date/time field
+  with calendar/time pickers (including seconds) with that expected time. Leave it
+  unchanged to align frames only, or edit it to establish camera time. Calendar/time
+  picker changes and ±1 s adjustments count as edits. Pressing the even-frame button
+  alone does not verify an untouched estimate; previously confirmed camera time is
+  retained on reconfirmation. Otherwise camera time remains unknown and sample labels
+  show playback offsets. Moving frames refreshes the estimate and discards the prior
+  frame's optional correction. A frame change during capture requires checking the
+  new frame and pressing the confirmation button again.
+- Previously saved parity-only Simplified reviews retain their old 0/2/4… or
+  1/3/5… grid. They are never silently converted to a midpoint anchor. Use the
+  confirmed reset workflow to change them. Compare both current modes on real
+  clips; a single anchor does not correct irregular frames or camera-clock drift.
 - In **Exact alignment**, sample every even second of the camera's timestamp, not
   every two playback seconds. A clip starting at `16:02:49` samples at camera
   `16:02:50`, `:52`, `:54`. The following timestamp/anchor rules apply to Exact.
@@ -78,26 +100,45 @@ samples remain editable; a missing sample row means unreviewed, not absent.
   box, attribute/tag, sample/behavior, resume state, and completion for this video,
   including other annotators' work, before saving the new alignment. Other videos,
   prepared references, and ordinary Review remain unchanged. Cancellation or invalid
-  alignment leaves the existing review intact. Reconfirming unchanged Simplified
-  parity also preserves all evidence; changing it uses the same reset workflow.
+  alignment leaves the existing review intact. Reconfirming an unchanged Simplified
+  anchor (or legacy parity), or explicitly establishing/correcting its camera time,
+  preserves evidence and completion. Timestamp corrections retain even-second parity.
 - `videos.created_at` is only a suggested time. Store the verified camera wall clock
   without timezone conversion, separately from file metadata. Display camera times
-  in 24-hour format; the clock dialog accepts `YYYY-MM-DD HH:mm:ss` explicitly,
-  independent of browser AM/PM preferences.
+  in 24-hour format. Both alignment modes use prefilled `YYYY-MM-DD HH:mm:ss`
+  fields with calendar and explicit 24-hour time pickers, including seconds,
+  independent of browser AM/PM preferences. Values represent camera wall time
+  without timezone conversion. Adjacent **−1 s / +1 s** buttons adjust
+  the timestamp (including minute/date rollover), not the selected video frame.
+  In Simplified mode these adjustments explicitly confirm/correct camera time.
+  Saving still requires an even camera second; timestamp-only corrections retain
+  the existing two-second-step restriction.
 - Preserve precise playback anchors independently of integer-millisecond sample
   identities. For example, a `16:02:50` anchor at playback `0.920 s` schedules the
   next camera sample at `2.920 s`, not `3.000 s`.
-- Estimate the first frame at/after a sample boundary from reported FPS and anchor
-  phase. Probe metadata once per file with a two-second timeout; do not scan all
-  frames while loading. Without FPS, use a 40 ms margin shortened near clip end.
-  The opening sample remains the opening still.
-- Direct sample seeks pad ten microseconds inside the estimated frame to avoid
-  its predecessor. Saving verifies the displayed position using frame-based
-  tolerance. Irregular/dropped frames may still show a neighboring frame; stored
-  sample identities and camera timestamps do not change.
+- In Exact mode, estimate the first frame at/after a sample boundary from reported
+  FPS and anchor phase. Probe metadata once per file with a two-second timeout;
+  do not scan all frames while loading. Without FPS, use a 40 ms margin shortened
+  near clip end. The opening exception remains the opening still.
+- Direct Exact sample seeks pad ten microseconds inside the estimated frame to
+  avoid its predecessor. Simplified seeks and playback stops preserve the chosen
+  frame's precise phase in both directions, without forward FPS rounding or padding;
+  legacy parity-only schedules likewise use their unshifted playback offsets.
+  Forward adjustments could otherwise cross into the next odd displayed second.
+  Saving verifies the displayed position using frame-based tolerance.
+  Irregular/dropped frames may still show a neighboring frame; stored sample
+  identities and camera timestamps do not change.
 
 ### Navigation and inspection
 
+- Scheduled stops are browseable as soon as alignment is saved, before creating
+  an individual. The graph shows neutral scheduled markers and highlights the
+  selected stop without implying distance evidence. Click markers, use left/right
+  sample navigation, or replay intervals to inspect alignment. Loading an aligned
+  video with no individuals selects its first stop; deleting the final individual
+  returns to schedule-only browsing. Browsing never creates individuals, samples,
+  or resume/progress records. Annotation controls and saves still require an
+  individual.
 - **Play to this sample** replays from the preceding scheduled sample. For the
   first scheduled sample, replay from the video opening when its offset is
   nonzero; omit the action when the first sample is already the opening frame.
@@ -302,7 +343,10 @@ alongside rounded millisecond frame identities; never round saved meter values.
   per browser/project, separately from ordinary Review. Clear stale filters and
   fall back to an available video if the saved selection disappears.
 - **Left/Right:** scheduled samples. **Up/Down:** distance/visibility choices.
-  **Enter:** confirm. **J/K:** next/previous individual with wrapping. **A:** add.
+  **Enter:** open clock setup if alignment has not been saved; otherwise confirm
+  the current sample. Clock-setup buttons show an **↵ Enter** badge in the expanded
+  sidebar and compact rail. **J/K:** next/previous individual with wrapping.
+  **A:** add an individual after alignment; it does not open clock setup.
   **P/N:** previous/next video, respecting completion guards for forward moves.
   **Tab:** cycle reference clips, retaining visibility or matching/nearest distance.
 - Focused playback supports **Space**, **Shift+Left/Right** five-second inspection,
@@ -357,7 +401,7 @@ The research CSV will emit one row per **annotated** Distance sample, not ordina
 Review observations. Include species, age, sex, individual number/ID, exact
 meters, sample behaviors, individual tags, annotator, folder/location/video, and
 sample camera timestamp (year/month/day/hour/minute/second), explicitly unknown
-for Simplified alignment. Skip rows are omitted.
+when Simplified camera time has not been explicitly confirmed. Skip rows are omitted.
 
 A separate transfer bundle must preserve skips as well as identities, anchors,
 attributes, behavior/tag vocabulary, reference provenance/media-path resolution,

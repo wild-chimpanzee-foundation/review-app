@@ -23,10 +23,14 @@ requiring ordinary species review to be complete?
 **Requested change:** Display and enter camera times using a 24-hour clock
 (`HH:mm:ss`), without AM/PM.
 
-**Implemented:** The alignment/correction dialog now uses an explicit
-`YYYY-MM-DD HH:mm:ss` masked text input instead of a browser-localized date/time
-control. Existing timestamp displays already use 24-hour time. This is a
-formatting change, not a timezone conversion.
+**Implemented:** Both Exact and Simplified alignment use explicit 24-hour
+`YYYY-MM-DD HH:mm:ss` fields with calendar and 24-hour time pickers, including
+seconds, prefilled with the proposed/current expected time. Both have **−1 s /
++1 s** buttons that adjust the timestamp, including minute/date rollover, without
+moving the selected video frame. In Simplified mode these buttons or picker edits
+count as an explicit correction; an untouched automatic prefill remains estimated.
+Native browser date/time inputs were replaced because their AM/PM presentation
+depends on browser locale. Neither control converts the camera's timezone.
 
 ## 3. Simplify initial time alignment
 
@@ -36,36 +40,62 @@ selecting the exact transition frame is unnecessary.
 **Exact workflow:** Locate an exact odd-to-even transition frame, enter its
 camera timestamp, and specify whether the opening frame is even.
 
-**Confirmed direction:** Keep both approaches available for testing; do not
-choose a permanent replacement yet:
-- **Exact alignment:** Keep the current transition-frame workflow.
-- **Simplified alignment:** Select opening-frame parity. An even opening samples
-  at playback 0, 2, 4… seconds; an odd opening samples at 1, 3, 5… seconds.
+**Revised direction after testing:** Simplified is the default annotator workflow;
+Exact remains implemented but is available only through code configuration, not
+a frontend selector. Replace parity-only setup for new Simplified alignments:
+- **Exact alignment (code-only opt-in):** Keep the transition-frame workflow.
+- **Simplified alignment:** Start near the video midpoint and select any frame
+  whose visible camera timestamp shows an even second, preferably away from a
+  timestamp change. An exact transition frame is not required. Sample every two
+  seconds backwards and forwards from that selected frame.
 
 **Important trade-off:** Parity alone does not establish where the next camera
 second begins within playback. The simplified schedule can be offset from exact
-camera-even-second transitions by a subsecond amount. Absolute camera date/time
-also needs a source if it remains required for export.
+camera-even-second transitions by a subsecond amount. Testing found odd displayed
+seconds from the first sample on some clips. Reusing Exact's forward-frame estimate
+could also push a late-even frame into the next odd second. The revised Simplified
+grid preserves the selected frame's phase without this forward rounding/padding.
+Irregular frames or camera-clock drift still require real-footage validation.
 
-**Evaluation goal:** Compare annotation effort and timing accuracy on real clips
-before choosing a default or removing either approach.
+**Evaluation goal:** Validate annotation effort and timing accuracy on real clips;
+the Exact implementation remains available for developer-configured comparison.
 
-**Implemented for comparison:** The clock dialog offers **Exact alignment** and
-**Simplified alignment**. Exact remains the default for new videos; reopening a
-video retains its saved mode. Simplified requires an explicit even/odd choice
-from the opening still and hides the timestamp input and transition-frame controls.
-It stores absolute camera date/time as unknown (not file metadata or an invented
-date); sample labels show playback offsets and “camera time unknown”.
+**Implemented:** Simplified opens at the midpoint (or its saved anchor), retains
+inspection/frame-step controls, and uses **Frame shows an even camera second.**
+as the confirmation action. Bold **Choose even frame** text and frame controls sit
+immediately below the player, before timestamp fields. The extra confirmation
+checkbox, long gray hint, and separate expected-time confirmation button are removed. There is no frontend mode selector or Exact calibration
+option under the default configuration. The code-only
+`DISTANCE_CLOCK_ALIGNMENT_MODE` constant in `review_app/app/config.py` defaults to
+`"simplified"`; developers may set `"exact"` to use the retained Exact workflow.
+Saved reviews are not reinterpreted when this default changes.
 
-Existing alignments migrate as Exact without changing their anchors, samples,
-progress, or completion. Changing a saved mode or parity uses the explicit
-Distance reset option and destructive confirmation; cancellation/invalid input
-leaves evidence unchanged. Reconfirming unchanged parity retains evidence.
+The dialog displays the expected timestamp for the current frame, using an
+existing verified clock or file metadata as a suggestion. It updates while seeking.
+This is explicitly labeled an estimate and is not silently saved as verified time.
+Timestamp correction is optional: a 24-hour date/time field with pickers and seconds is
+prefilled with the current expected time. Leave it unchanged to align frames only,
+or edit it (including calendar/time picker and ±1 s changes) to establish camera
+time. Pressing the even-frame button confirms the frame, not an untouched timestamp
+estimate. Otherwise camera time remains unknown and sample labels show playback
+offsets. Moving frames refreshes the estimate and discards the prior frame's optional
+correction. If the frame changes during capture, ask the user to check and press again.
+
+Existing Exact and parity-only reviews retain their original schedules and evidence.
+Changing a saved mode or anchor, including converting an old parity-only review,
+uses the explicit Distance reset option and destructive confirmation. Cancellation
+or invalid input leaves evidence unchanged. Reconfirming an unchanged anchor or
+adding/correcting its timestamp preserves evidence, progress, and completion.
 A future export must handle unknown absolute camera timestamps.
 
+Scheduled stops are now selectable immediately after alignment, before adding an
+individual, so alignment can be checked using graph markers, arrow navigation,
+and replay. These browse-only actions do not create annotation evidence or resume
+records; saving still requires an individual.
+
 Automated timing, backend, UI, and migration tests cover these paths. Comparing
-effort and subsecond accuracy on real footage remains open; neither approach has
-been selected as a permanent replacement.
+effort and subsecond accuracy on real footage remains open. Simplified is now the
+default; Exact has not been removed from the code.
 
 ## 4. Play up to the first sample
 
@@ -192,7 +222,8 @@ panels and any further visual redesign remain deferred.
 All ten feedback items are captured. Key clarifications:
 - Mixed-species videos go to both relevant species packages; annotation and
   completion are scoped to the assigned species.
-- Keep exact and simplified alignment testable; the final choice is deferred.
+- Simplified is the frontend default, using an even frame near the midpoint and
+  optional time confirmation. Exact remains only as a code-configured workflow.
 - The first-sample lead-in plays from the video opening.
 - Choose the first visible behavior manually, then carry it forward. Absent and
   Not visible automatically use no behavior.
