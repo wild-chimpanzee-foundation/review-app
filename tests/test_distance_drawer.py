@@ -340,7 +340,8 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     assert toggle in list(page.right_drawer.descendants())
     assert "distance-sidebar-toggle-row" in toggle.parent_slot.parent.classes
     assert toggle not in list(workspace.descendants())
-    assert toggle.props["round"] and toggle.props["flat"] and toggle.props["color"] == "primary"
+    assert toggle.props["flat"] and toggle.props["color"] == "primary"
+    assert toggle.text == "Collapse sidebar" and not toggle.props.get("round", False)
     assert toggle.props["icon"] == "chevron_right"
     assert toggle.props["aria-label"] == "Expand/collapse annotations"
 
@@ -354,6 +355,7 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     click(toggle)
     assert page.right_drawer.value is True and page.right_drawer.props["mini"] is True
     assert toggle.props["icon"] == "chevron_left"
+    assert toggle.text == "" and toggle.props["round"] is True
     assert left_drawer.value is True
     click(filters)
     assert left_drawer.value is False and page.right_drawer.props["mini"] is True
@@ -361,6 +363,7 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     click(toggle)
     assert page.right_drawer.value is True and not page.right_drawer.props.get("mini", False)
     assert toggle.props["icon"] == "chevron_right"
+    assert toggle.text == "Collapse sidebar" and not toggle.props.get("round", False)
     assert left_drawer.value is True
     click(
         next(

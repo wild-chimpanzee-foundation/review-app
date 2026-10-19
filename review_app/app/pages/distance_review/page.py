@@ -627,26 +627,29 @@ class DistanceReviewPage:
             ).props("dense outlined").classes("w-full")
 
     def render_sidebar_toggle(self) -> None:
-        def toggle():
-            compact = not self.right_drawer.props.get("mini", False)
-            self.right_drawer.props["mini"] = compact
-            self.right_drawer.update()
+        def update_button():
+            compact = self.right_drawer.props.get("mini", False)
             button.set_icon("chevron_left" if compact else "chevron_right")
+            button.set_text("" if compact else t("distance_collapse_sidebar"))
+            button.props(
+                "round" if compact else "no-caps", remove="no-caps" if compact else "round"
+            )
+
+        def toggle():
+            self.right_drawer.props["mini"] = not self.right_drawer.props.get("mini", False)
+            self.right_drawer.update()
+            update_button()
 
         with ui.row().classes("distance-sidebar-toggle-row"):
             button = (
-                ui.button(
-                    icon="chevron_left"
-                    if self.right_drawer.props.get("mini", False)
-                    else "chevron_right",
-                    on_click=toggle,
-                )
+                ui.button(on_click=toggle)
                 .props(
-                    'flat round dense color=primary data-testid="distance-toggle-annotations" '
+                    'flat dense color=primary data-testid="distance-toggle-annotations" '
                     f'aria-label="{t("distance_toggle_annotations")}"'
                 )
                 .tooltip(t("distance_toggle_annotations"))
             )
+            update_button()
 
     @ui.refreshable
     def render_sidebar(self) -> None:

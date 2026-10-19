@@ -243,7 +243,8 @@ alongside rounded millisecond frame identities; never round saved meter values.
 - Reuse Review's header and desktop drawers: 300 px filters on the left, 400 px
   individual/completion controls on the right. A sticky expand/collapse button
   at the top of the sidebar switches between its full width and a 72 px rail,
-  rather than hiding it. The button remains visible in both modes even when the
+  rather than hiding it. Label it **Collapse sidebar** when expanded and use only
+  the expand icon in the narrow rail. The button remains visible in both modes even when the
   page header is hidden; it is not duplicated in the header. The rail retains **A / Add**, each
   individual's number and automatic completion checkbox indicator, and a green
   finish icon. Highlight the active individual; clicking a rail entry selects it,
