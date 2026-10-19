@@ -338,7 +338,8 @@ class DistanceVideoReview(Base):
         String, ForeignKey("videos.video_id", ondelete="CASCADE"), primary_key=True
     )
     # Camera wall-clock time, deliberately independent of file creation metadata.
-    recorded_start: Mapped[datetime] = mapped_column(DateTime)
+    recorded_start: Mapped[datetime | None] = mapped_column(DateTime)
+    alignment_mode: Mapped[str] = mapped_column(String, default="exact", server_default="exact")
     clock_anchor_offset_ms: Mapped[int | None] = mapped_column(Integer)
     clock_anchor_playback_ms: Mapped[float | None] = mapped_column(Float)
     opening_even_second: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")

@@ -312,3 +312,170 @@ async def test_realignment_ui_requires_destructive_confirmation(
     assert page.review["completed_at"] is None
     assert page.review["clock_anchor_playback_ms"] == 1120.5
     await user.should_not_see("Reset Distance review for this video?")
+
+
+@pytest.mark.parametrize("opening_even,first", [(True, 0), (False, 1000)])
+def test_parity_alignment_schedules_without_a_camera_time(distance_data, opening_even, first):
+    data, dp = distance_data, distance_data["dp"]
+    video_id = data["videos"][0]
+    dp.align_distance_by_parity(video_id, opening_even, "alice")
+    state = dp.get_distance_review_state(video_id, "alice")
+    assert state["offsets"] == list(range(first, 10000, 2000))
+    review = state["review"]
+    assert review["alignment_mode"] == "simplified"
+    assert review["recorded_start"] is None
+    assert review["clock_anchor_offset_ms"] is None
+    assert review["clock_anchor_playback_ms"] is None
+    assert all(sample_camera_time(review, offset) is None for offset in state["offsets"])
+    dp.apply_distance_to_end(
+        data["individual"]["id"], first, skip_reason="individual absent", labeled_by="alice"
+    )
+    dp.set_distance_active_individual(video_id, "alice", data["individual"]["id"])
+    dp.finish_distance_video(video_id, "alice")
+    before = dp.get_distance_review_state(video_id, "alice")
+    dp.align_distance_by_parity(video_id, opening_even, "bob")
+    after = dp.get_distance_review_state(video_id, "alice")
+    assert after["samples"] == before["samples"]
+    assert after["active_individual_id"] == before["active_individual_id"]
+    assert after["review"]["completed_at"] == before["review"]["completed_at"]
+    assert after["review"]["verified_by"] == "bob"
+
+
+@pytest.mark.parametrize("opening_even", [True, False])
+def test_switching_modes_requires_reset_and_only_clears_target_video(clock_data, opening_even):
+    data, dp = clock_data, clock_data["dp"]
+    video_id = data["videos"][0]
+    other = dp.get_distance_review_state(data["videos"][1], "alice")
+    before = snapshot(dp)
+    with pytest.raises(ValueError, match="requires resetting"):
+        dp.align_distance_by_parity(video_id, opening_even, "bob")
+    assert snapshot(dp) == before
+    dp.align_distance_by_parity(video_id, opening_even, "bob", reset_tracks=True)
+    assert dp.list_distance_individuals(video_id) == []
+    state = dp.get_distance_review_state(video_id, "alice")
+    assert state["samples"] == []
+    assert state["active_individual_id"] is None
+    assert state["review"]["completed_at"] is None
+    assert dp.get_distance_review_state(data["videos"][1], "alice") == other
+    # Even an empty, previously verified video requires consent to switch modes.
+    before = snapshot(dp)
+    with pytest.raises(ValueError, match="requires resetting"):
+        dp.calibrate_distance_clock(video_id, CAMERA_TIME, ANCHOR, "bob")
+    assert snapshot(dp) == before
+    dp.calibrate_distance_clock(video_id, CAMERA_TIME, ANCHOR, "bob", reset_tracks=True)
+    assert dp.get_distance_review_state(video_id, "alice")["offsets"][0] == 920
+
+
+@pytest.mark.parametrize("opening_even", [None, 0, 1, "even"])
+def test_invalid_parity_reset_preserves_evidence(clock_data, opening_even):
+    data, dp = clock_data, clock_data["dp"]
+    before = snapshot(dp)
+    with pytest.raises(ValueError, match="opening timestamp"):
+        dp.align_distance_by_parity(data["videos"][0], opening_even, "bob", reset_tracks=True)
+    assert snapshot(dp) == before
+
+
+def test_changing_parity_requires_explicit_reset(distance_data):
+    data, dp = distance_data, distance_data["dp"]
+    video_id = data["videos"][0]
+    dp.align_distance_by_parity(video_id, True, "alice")
+    before = snapshot(dp)
+    with pytest.raises(ValueError, match="requires resetting"):
+        dp.align_distance_by_parity(video_id, False, "bob")
+    assert snapshot(dp) == before
+    dp.align_distance_by_parity(video_id, False, "bob", reset_tracks=True)
+    assert dp.get_distance_review_state(video_id, "alice")["offsets"][0] == 1000
+
+
+@pytest.mark.parametrize("confirm", [False, True])
+async def test_simplified_ui_requires_parity_and_reset_without_capturing_a_frame(
+    user: User, correction_page, confirm
+):
+    holder, data = correction_page
+    await user.open("/clock-correction")
+    before = snapshot(data["dp"])
+    user.find("Change alignment frame and reset Distance review").click()
+    user.find("Simplified alignment").click()
+    await user.should_not_see("Camera timestamp visible on the displayed frame")
+    user.find("Confirm clock alignment").click()
+    await user.should_see("Choose whether the opening timestamp is even or odd.")
+    assert snapshot(data["dp"]) == before
+    holder["capture"].assert_not_awaited()
+    user.find("Odd", kind=ui.radio).click()
+    user.find("Confirm clock alignment").click()
+    await user.should_see("Reset Distance review for this video?")
+    assert snapshot(data["dp"]) == before
+    if not confirm:
+        user.find("Cancel").click()
+        await user.should_not_see("Reset Distance review for this video?")
+        assert snapshot(data["dp"]) == before
+        return
+    user.find("Delete Distance tracks and realign").click()
+    page = holder["page"]
+    await wait_for_clock(page)
+    holder["capture"].assert_not_awaited()
+    assert page.review["alignment_mode"] == "simplified"
+    assert page.review["recorded_start"] is None
+    assert page.offsets == [1000, 3000, 5000, 7000, 9000]
+    assert page.individuals == []
+    assert "camera time unknown" in page.clock_description()
+    with page.client:
+        await page.clock_dialog()
+    await user.should_see("Simplified alignment")
+    await user.should_not_see("Camera timestamp at the saved alignment frame")
+    parity = max(user.find("Odd", kind=ui.radio).elements, key=lambda element: element.id)
+    assert parity.value == "odd"
+    assert not parity.enabled
+    user.find("Confirm clock alignment").click()
+    await wait_for_clock(page)
+    assert page.offsets == [1000, 3000, 5000, 7000, 9000]
+
+
+async def test_disabling_reset_restores_the_saved_mode(user: User, correction_page):
+    holder, data = correction_page
+    await user.open("/clock-correction")
+    user.find("Change alignment frame and reset Distance review").click()
+    user.find("Simplified alignment").click()
+    user.find("Odd", kind=ui.radio).click()
+    user.find("Change alignment frame and reset Distance review").click()
+    await user.should_see("Correct camera timestamp")
+    mode = next(iter(user.find("Exact alignment", kind=ui.radio).elements))
+    assert mode.value == "exact"
+    assert not mode.enabled
+    user.find("Correct camera timestamp").click()
+    await wait_for_clock(holder["page"])
+    assert holder["page"].review["alignment_mode"] == "exact"
+    assert len(holder["page"].individuals) == 3
+    holder["capture"].assert_not_awaited()
+
+
+@pytest.mark.parametrize("parity,first", [("Even", 0), ("Odd", 1000)])
+async def test_initial_parity_alignment_and_unknown_sample_time(
+    user: User, correction_page, parity, first
+):
+    holder, data = correction_page
+    dp, video_id = data["dp"], data["videos"][0]
+    dp.align_distance_by_parity(video_id, True, "alice", reset_tracks=True)
+    with dp.Session.begin() as session:
+        session.delete(session.get(DistanceVideoReview, video_id))
+    await user.open("/clock-correction")
+    mode = next(iter(user.find("Exact alignment", kind=ui.radio).elements))
+    assert mode.value == "exact"
+    assert mode.enabled
+    user.find("Simplified alignment").click()
+    user.find(parity, kind=ui.radio).click()
+    user.find("Confirm clock alignment").click()
+    page = holder["page"]
+    await wait_for_clock(page)
+    holder["capture"].assert_not_awaited()
+    assert page.offsets == list(range(first, 10000, 2000))
+    individual = dp.create_distance_individual(
+        video_id, data["species_id"], 0, anchor=data["anchor"]
+    )
+    await page.reload_individuals()
+    page.individual_id = individual["id"]
+    page.sample_offset = first
+    with page.client:
+        page.render_sample_navigation()
+    await user.should_see("camera time unknown")
+    assert page.sample_frame_offset(first) == first

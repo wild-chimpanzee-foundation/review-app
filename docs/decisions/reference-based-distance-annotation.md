@@ -25,9 +25,11 @@ they do not create or synchronize Distance observations automatically.
    layout to tag them **Reference Video** automatically, or tag other reference
    clips manually in ordinary Review. Open **Distance** and prepare their
    known-distance frames for the deployment.
-2. Align the animal video's camera clock using the visible timestamp, not file
-   metadata. Confirm the displayed even-second transition frame and its camera
-   timestamp in the independent clock dialog.
+2. Choose an alignment mode in the independent clock dialog. **Exact alignment**
+   (the default) uses the visible camera timestamp, not file metadata: confirm the
+   displayed even-second transition frame and its timestamp. **Simplified alignment**
+   asks only whether the opening still shows an even or odd second; absolute camera
+   date/time stays unknown.
 3. Add an individual on its identifying first-seen frame. Choose species and draw
    a bounding box. Earlier scheduled samples are saved as **Absent**; samples at
    or after first sighting remain unreviewed. Creation retains the identifying
@@ -48,8 +50,18 @@ samples remain editable; a missing sample row means unreviewed, not absent.
 
 ### Camera clock and sampling
 
-- Sample every even second of the camera's timestamp, not every two playback
-  seconds. A clip starting at `16:02:49` samples at camera `16:02:50`, `:52`, `:54`.
+- Both modes remain available for testing. New videos default to Exact; saved
+  videos reopen in their persisted mode. Existing alignments remain Exact.
+- In **Simplified alignment**, explicitly choose even/odd from the opening still.
+  Even samples at playback 0, 2, 4… seconds; odd at 1, 3, 5… seconds (excluding the
+  video endpoint). No transition-frame selection or timestamp entry is required.
+  Absolute camera time is stored as unknown, and sample labels show playback
+  offsets instead. The schedule may be offset from true camera-even transitions
+  by a subsecond amount; compare both modes on real clips before selecting a
+  permanent replacement.
+- In **Exact alignment**, sample every even second of the camera's timestamp, not
+  every two playback seconds. A clip starting at `16:02:49` samples at camera
+  `16:02:50`, `:52`, `:54`. The following timestamp/anchor rules apply to Exact.
 - Select the first frame showing an odd-to-even transition and enter that even
   whole-second camera time. Confirmation pauses/captures the displayed frame;
   there is no additional frame-selection/verification action.
@@ -60,13 +72,14 @@ samples remain editable; a missing sample row means unreviewed, not absent.
   corrections must be whole multiples of two seconds and preserve the exact anchor,
   opening-even setting, and scheduled playback offsets. They retain all annotations,
   progress, and completion, and update verification attribution/time.
-- Changing the alignment frame or opening-even setting requires explicitly choosing
+- Changing the saved alignment mode, alignment frame, or opening-even setting requires explicitly choosing
   **Change alignment frame and reset Distance review** and confirming the destructive
   warning. The reset atomically deletes every Distance individual (including infants),
   box, attribute/tag, sample/behavior, resume state, and completion for this video,
   including other annotators' work, before saving the new alignment. Other videos,
   prepared references, and ordinary Review remain unchanged. Cancellation or invalid
-  alignment leaves the existing review intact.
+  alignment leaves the existing review intact. Reconfirming unchanged Simplified
+  parity also preserves all evidence; changing it uses the same reset workflow.
 - `videos.created_at` is only a suggested time. Store the verified camera wall clock
   without timezone conversion, separately from file metadata. Display camera times
   in 24-hour format; the clock dialog accepts `YYYY-MM-DD HH:mm:ss` explicitly,
@@ -314,7 +327,7 @@ automatic compatibility migrations or a manually decremented version stamp.
 | `distance_samples` | UUID, individual/offset, annotated/skipped state, reference and copied distance, skip reason, optional carrier, attribution; unique individual/offset. |
 | `distance_individual_tags` | Individual/tag pair with attribution/time. |
 | `distance_sample_behaviors` | Sample/behavior pair. |
-| `distance_video_reviews` | Verified wall-clock start, integer/precise clock anchor, opening-even flag, verification and explicit completion attribution. |
+| `distance_video_reviews` | Alignment mode, nullable verified wall-clock start (unknown in Simplified), integer/precise clock anchor, opening-even flag, verification and explicit completion attribution. |
 | `distance_review_progress` | Active individual per video/annotator, with update time. |
 
 `individual_observations` remains ordinary Review's independent store. Reuse
@@ -343,7 +356,8 @@ Sample invariants:
 The research CSV will emit one row per **annotated** Distance sample, not ordinary
 Review observations. Include species, age, sex, individual number/ID, exact
 meters, sample behaviors, individual tags, annotator, folder/location/video, and
-sample camera timestamp (year/month/day/hour/minute/second). Skip rows are omitted.
+sample camera timestamp (year/month/day/hour/minute/second), explicitly unknown
+for Simplified alignment. Skip rows are omitted.
 
 A separate transfer bundle must preserve skips as well as identities, anchors,
 attributes, behavior/tag vocabulary, reference provenance/media-path resolution,

@@ -73,8 +73,9 @@ def original_database(distance_data, tmp_path):
     path = tmp_path / "original-v29.db"
     with closing(sqlite3.connect(dp.db_path)) as src, closing(sqlite3.connect(path)) as dst:
         src.backup(dst)
-        # The private v29 and final v23 have identical columns/constraints, but
-        # different migration histories. Do not open this source with the provider.
+        # The private v29 predates parity-only alignment. Do not open this
+        # source with the provider.
+        dst.execute("ALTER TABLE distance_video_reviews DROP COLUMN alignment_mode")
         dst.execute("UPDATE _schema_version SET version=29")
         dst.commit()
     return path

@@ -71,8 +71,16 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
             ui.label(context.clock_description).classes("text-caption")
         realign = None
         if context.review:
-            ui.label(t("distance_clock_correction_help")).classes("text-caption")
+            if context.review.get("alignment_mode", "exact") == "exact":
+                ui.label(t("distance_clock_correction_help")).classes("text-caption")
+            ui.label(t("distance_clock_mode_reset_help")).classes("text-caption")
             realign = ui.checkbox(t("distance_clock_realign"), on_change=lambda: update_mode())
+        saved_mode = (context.review or {}).get("alignment_mode", "exact")
+        mode = ui.radio(
+            {"exact": t("distance_clock_exact"), "simplified": t("distance_clock_simplified")},
+            value=saved_mode,
+            on_change=lambda: update_mode(),
+        ).props('inline data-testid="distance-clock-mode"')
         proposed = context.proposed_camera_time
         value = proposed.strftime("%Y-%m-%d %H:%M:%S") if proposed else ""
         clock = (
@@ -89,9 +97,23 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
             t("distance_clock_opening_even"), value=context.opening_even_second
         )
 
+        parity_help = ui.label(t("distance_clock_parity_help")).classes("text-caption text-grey-6")
+        parity = ui.radio(
+            {"even": t("distance_clock_even"), "odd": t("distance_clock_odd")},
+            value=("even" if context.opening_even_second else "odd")
+            if saved_mode == "simplified"
+            else None,
+        ).props('inline data-testid="distance-clock-parity"')
+
         @context.guard
         async def move_clock_frames(delta: int):
-            if context.is_busy() or not dialog.value or opening is None or not alignment_mode():
+            if (
+                context.is_busy()
+                or not dialog.value
+                or opening is None
+                or not alignment_mode()
+                or mode.value != "exact"
+            ):
                 return
             context.set_busy(True)
             try:
@@ -122,20 +144,36 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
 
         def update_mode():
             aligning = alignment_mode()
+            if not aligning:
+                mode.set_value(saved_mode)
+                parity.set_value(
+                    ("even" if context.opening_even_second else "odd")
+                    if saved_mode == "simplified"
+                    else None
+                )
+                opening_even.set_value(context.opening_even_second)
+            exact = mode.value == "exact"
+            mode.set_enabled(aligning)
+            parity.set_enabled(aligning)
+            parity.set_visibility(not exact)
+            parity_help.set_visibility(not exact)
+            clock.set_visibility(exact)
             opening_even.set_enabled(aligning)
-            alignment_help.set_visibility(aligning)
-            shortcuts.set_visibility(aligning)
+            opening_even.set_visibility(exact)
+            alignment_help.set_visibility(aligning and exact)
+            shortcuts.set_visibility(aligning and exact)
             verify_button.set_enabled(opening is not None or not aligning)
             for button in frame_buttons:
-                button.set_enabled(aligning and opening is not None)
+                button.set_enabled(aligning and exact and opening is not None)
+                button.set_visibility(exact)
             clock.set_label(
                 t("distance_clock_frame_time" if aligning else "distance_clock_saved_time")
             )
             verify_button.set_text(
-                t("distance_clock_save" if aligning else "distance_clock_correct")
+                t("distance_clock_save" if aligning or not exact else "distance_clock_correct")
             )
             if opening is not None:
-                seek_paused(opening, context.initial_offset_ms)
+                seek_paused(opening, context.initial_offset_ms if exact else 0)
 
         def reset_clock_frame():
             if not context.is_busy() and opening is not None and alignment_mode():
@@ -154,20 +192,32 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
             verify_button.set_enabled(False)
             if realign is not None:
                 realign.set_enabled(False)
+            mode.set_enabled(False)
+            parity.set_enabled(False)
+            opening_even.set_enabled(False)
             try:
-                if not clock.value:
-                    ui.notify(t("distance_clock_confirm_required"), type="warning")
-                    return
-                try:
-                    camera_time = datetime.strptime(clock.value, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    ui.notify(t("distance_clock_timestamp_invalid"), type="warning")
-                    return
-                if alignment_mode():
-                    playback_offset = await capture_offset(opening, exact=True)
+                simplified = mode.value == "simplified"
+                camera_time = None
+                if simplified:
+                    if parity.value not in ("even", "odd"):
+                        ui.notify(t("distance_clock_parity_required"), type="warning")
+                        return
+                else:
+                    if not clock.value:
+                        ui.notify(t("distance_clock_confirm_required"), type="warning")
+                        return
+                    try:
+                        camera_time = datetime.strptime(clock.value, "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        ui.notify(t("distance_clock_timestamp_invalid"), type="warning")
+                        return
+                if alignment_mode() or simplified:
+                    playback_offset = (
+                        None if simplified else await capture_offset(opening, exact=True)
+                    )
                     if not dialog.value or not context.is_current():
                         return
-                    reset_tracks = context.review is not None
+                    reset_tracks = context.review is not None and alignment_mode()
                     new_opening_even = bool(opening_even.value)
                     if reset_tracks:
                         with ui.dialog() as confirmation, ui.card().classes("distance-dialog"):
@@ -185,15 +235,24 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
                         confirmation.delete()
                         if not confirmed or not dialog.value or not context.is_current():
                             return
-                    await run.io_bound(
-                        context.provider.calibrate_distance_clock,
-                        context.video_id,
-                        camera_time,
-                        playback_offset,
-                        context.annotator,
-                        opening_even_second=new_opening_even,
-                        reset_tracks=reset_tracks,
-                    )
+                    if simplified:
+                        await run.io_bound(
+                            context.provider.align_distance_by_parity,
+                            context.video_id,
+                            parity.value == "even",
+                            context.annotator,
+                            reset_tracks=reset_tracks,
+                        )
+                    else:
+                        await run.io_bound(
+                            context.provider.calibrate_distance_clock,
+                            context.video_id,
+                            camera_time,
+                            playback_offset,
+                            context.annotator,
+                            opening_even_second=new_opening_even,
+                            reset_tracks=reset_tracks,
+                        )
                 else:
                     if (
                         camera_time.tzinfo is not None
@@ -235,6 +294,9 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
                 context.set_busy(False)
                 if realign is not None:
                     realign.set_enabled(True)
+                mode.set_enabled(alignment_mode())
+                parity.set_enabled(alignment_mode())
+                opening_even.set_enabled(alignment_mode())
                 verify_button.set_enabled(opening is not None or not alignment_mode())
                 context.on_refresh()
 

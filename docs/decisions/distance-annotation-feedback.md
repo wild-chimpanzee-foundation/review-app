@@ -33,7 +33,7 @@ formatting change, not a timezone conversion.
 **Feedback:** Ask only whether the first frame shows an even or odd second;
 selecting the exact transition frame is unnecessary.
 
-**Current workflow:** Locate an exact odd-to-even transition frame, enter its
+**Exact workflow:** Locate an exact odd-to-even transition frame, enter its
 camera timestamp, and specify whether the opening frame is even.
 
 **Confirmed direction:** Keep both approaches available for testing; do not
@@ -50,9 +50,22 @@ also needs a source if it remains required for export.
 **Evaluation goal:** Compare annotation effort and timing accuracy on real clips
 before choosing a default or removing either approach.
 
-**To decide:** How to expose the two modes for testing, what happens to the
-existing timestamp input, and how mode changes affect already annotated videos.
-Testing both must not silently reinterpret existing saved evidence.
+**Implemented for comparison:** The clock dialog offers **Exact alignment** and
+**Simplified alignment**. Exact remains the default for new videos; reopening a
+video retains its saved mode. Simplified requires an explicit even/odd choice
+from the opening still and hides the timestamp input and transition-frame controls.
+It stores absolute camera date/time as unknown (not file metadata or an invented
+date); sample labels show playback offsets and “camera time unknown”.
+
+Existing alignments migrate as Exact without changing their anchors, samples,
+progress, or completion. Changing a saved mode or parity uses the explicit
+Distance reset option and destructive confirmation; cancellation/invalid input
+leaves evidence unchanged. Reconfirming unchanged parity retains evidence.
+A future export must handle unknown absolute camera timestamps.
+
+Automated timing, backend, UI, and migration tests cover these paths. Comparing
+effort and subsecond accuracy on real footage remains open; neither approach has
+been selected as a permanent replacement.
 
 ## 4. Play up to the first sample
 

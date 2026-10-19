@@ -1209,6 +1209,16 @@ class DistanceReviewPage:
         ).props("flat round dense").tooltip(self.clock_description())
 
     def clock_description(self) -> str:
+        if self.review.get("alignment_mode") == "simplified":
+            return t(
+                "distance_clock_parity_aligned",
+                parity=t(
+                    "distance_clock_even"
+                    if self.review["opening_even_second"]
+                    else "distance_clock_odd"
+                ),
+                annotator=self.review["verified_by"],
+            )
         anchor = self.review.get("clock_anchor_offset_ms")
         if anchor is not None:
             return t(
@@ -1310,9 +1320,12 @@ class DistanceReviewPage:
             return
         with ui.row().classes("distance-animal-timing items-center w-full gap-xs"):
             recorded_time = sample_camera_time(self.review, self.sample_offset)
-            ui.label(t("distance_sample_time", time=recorded_time.isoformat(sep=" "))).classes(
-                "text-caption text-weight-medium"
+            label = (
+                t("distance_sample_time", time=recorded_time.isoformat(sep=" "))
+                if recorded_time is not None
+                else t("distance_sample_relative_time", offset=frame_time(self.sample_offset))
             )
+            ui.label(label).classes("text-caption text-weight-medium")
             if self.sample_offset > 0 and self.animal_player:
                 ui.button(
                     t("distance_play_interval"), icon="replay", on_click=self.replay_interval

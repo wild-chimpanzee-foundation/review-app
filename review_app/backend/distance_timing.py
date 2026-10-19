@@ -24,19 +24,30 @@ def sample_frame_time(
 
 
 def sample_offsets(
-    recorded_start: datetime,
+    recorded_start: datetime | None,
     duration_sec: float,
     *,
     clock_anchor_offset_ms: int | None = None,
     opening_even_second: bool = False,
+    alignment_mode: str = "exact",
 ) -> list[int]:
     """Even camera seconds within [0, duration), including fractional start times."""
+    if alignment_mode not in ("exact", "simplified"):
+        raise ValueError("Choose exact or simplified alignment")
+    if duration_sec is None or not math.isfinite(duration_sec) or duration_sec <= 0:
+        raise ValueError("A known positive video duration is required")
+    if not isinstance(opening_even_second, bool):
+        raise ValueError("Check whether the opening timestamp is even")
+    if alignment_mode == "simplified":
+        if recorded_start is not None or clock_anchor_offset_ms is not None:
+            raise ValueError("Simplified alignment has no camera timestamp or anchor frame")
+        return list(
+            range(0 if opening_even_second else 1000, math.ceil(duration_sec * 1000), 2000)
+        )
     if not isinstance(recorded_start, datetime) or recorded_start.tzinfo is not None:
         raise ValueError("Use the camera's local recording time without a timezone")
     if recorded_start.microsecond % 1000:
         raise ValueError("Recording time precision must not exceed milliseconds")
-    if duration_sec is None or not math.isfinite(duration_sec) or duration_sec <= 0:
-        raise ValueError("A known positive video duration is required")
     if clock_anchor_offset_ms is not None:
         if (
             isinstance(clock_anchor_offset_ms, bool)
@@ -56,8 +67,10 @@ def sample_offsets(
     return list(range(first, math.ceil(duration_sec * 1000), 2000))
 
 
-def sample_camera_time(review: dict, offset_ms: int) -> datetime:
+def sample_camera_time(review: dict, offset_ms: int) -> datetime | None:
     """Label the opening exception with its visible even second, then the anchor grid."""
+    if review.get("recorded_start") is None:
+        return None
     time = review["recorded_start"] + timedelta(milliseconds=offset_ms)
     anchor = review.get("clock_anchor_offset_ms")
     if offset_ms == 0 and anchor and review.get("opening_even_second"):

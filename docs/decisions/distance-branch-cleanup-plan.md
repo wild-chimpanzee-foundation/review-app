@@ -442,6 +442,24 @@ with species/count warnings and next-video navigation must remain unchanged.
 History cleanup comes last so normal cleanup commits remain available for
 review/debugging until the replacement is validated.
 
+## Alignment comparison follow-up
+
+- Added Exact/Simplified selection to the clock dialog. Exact remains the default;
+  Simplified uses explicit opening parity and stores absolute camera time as unknown.
+  Mode/parity changes use the existing confirmed, transactional Distance reset.
+- Migration v25 preserves existing Exact anchors, evidence, resume state, and
+  completion while allowing unknown camera timestamps. The private-v29 converter
+  now produces v25 and still validates the original source columns.
+- Focused clock/parity/migration tests: **40 passed**. Ruff lint and format checks
+  pass for the affected implementation, tests, and converter.
+- Combined Distance, migration, and converter check: **833 passed, 12 failed**.
+  All 12 failures reproduce on an isolated, unchanged HEAD snapshot: three
+  apply-to-end completion-label expectations, eight clock-dialog tests blocked
+  by an existing Add-individual tooltip visibility assertion, and the existing
+  initial-carrier foreign-key reflection mismatch. These are not fixed here.
+- Real-browser/real-footage effort and subsecond-accuracy comparison remains open;
+  automated checks do not select a permanent alignment replacement.
+
 ## Validation gates
 
 Run the smallest affected tests and Ruff checks per step. Do not rerun a complete

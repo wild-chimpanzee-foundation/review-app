@@ -296,6 +296,27 @@ class DistanceMixin(ProviderBase):
             reset_tracks=reset_tracks,
         )
 
+    def align_distance_by_parity(
+        self,
+        video_id: str,
+        opening_even_second: bool,
+        annotator_name: str,
+        *,
+        reset_tracks: bool = False,
+    ) -> None:
+        """Use playback parity only; absolute camera time remains unknown."""
+        with self.Session.begin() as session:
+            verify_recording_time(
+                session,
+                self._utcnow_dt,
+                video_id,
+                None,
+                annotator_name,
+                alignment_mode="simplified",
+                opening_even_second=opening_even_second,
+                reset_tracks=reset_tracks,
+            )
+
     def get_distance_behavior_options(self, lang: str = "en") -> dict[str, str]:
         with self.Session() as session:
             return {

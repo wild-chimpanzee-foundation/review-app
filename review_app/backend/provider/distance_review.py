@@ -28,6 +28,7 @@ def review_offsets(review, duration_sec: float | None) -> list[int]:
             duration_sec,
             clock_anchor_offset_ms=review.clock_anchor_offset_ms,
             opening_even_second=review.opening_even_second,
+            alignment_mode=review.alignment_mode,
         )
     except ValueError:
         # Keep evidence readable when a re-probe invalidates an existing schedule.
@@ -169,13 +170,14 @@ def verify_recording_time(
     session,
     utcnow,
     video_id: str,
-    recorded_start: datetime,
+    recorded_start: datetime | None,
     annotator_name: str,
     *,
     clock_anchor_offset_ms: int | None = None,
     clock_anchor_playback_ms: float | None = None,
     opening_even_second: bool = False,
     reset_tracks: bool = False,
+    alignment_mode: str = "exact",
 ) -> None:
     if not isinstance(reset_tracks, bool):
         raise ValueError("Confirm whether to reset Distance review")
@@ -189,11 +191,12 @@ def verify_recording_time(
         video.duration_sec,
         clock_anchor_offset_ms=clock_anchor_offset_ms,
         opening_even_second=opening_even_second,
+        alignment_mode=alignment_mode,
     )
-    if not isinstance(opening_even_second, bool):
-        raise ValueError("Check whether the opening timestamp is even")
     if clock_anchor_offset_ms is None:
-        if clock_anchor_playback_ms is not None or opening_even_second:
+        if clock_anchor_playback_ms is not None or (
+            opening_even_second and alignment_mode == "exact"
+        ):
             raise ValueError("Select an anchor frame before setting clock alignment")
     elif (
         isinstance(clock_anchor_playback_ms, bool)
@@ -208,7 +211,14 @@ def verify_recording_time(
     review = session.get(DistanceVideoReview, video_id)
     if review:
         timestamp_only = (
-            (recorded_start - review.recorded_start).total_seconds() % 2 == 0
+            alignment_mode == review.alignment_mode
+            and (
+                recorded_start is None
+                and review.recorded_start is None
+                or recorded_start is not None
+                and review.recorded_start is not None
+                and (recorded_start - review.recorded_start).total_seconds() % 2 == 0
+            )
             and clock_anchor_offset_ms == review.clock_anchor_offset_ms
             and clock_anchor_playback_ms == review.clock_anchor_playback_ms
             and opening_even_second == review.opening_even_second
@@ -217,7 +227,15 @@ def verify_recording_time(
         has_tracks = (
             session.query(DistanceIndividual.id).filter_by(video_id=video_id).first() is not None
         )
-        if not timestamp_only and has_tracks and not reset_tracks:
+        if (
+            not timestamp_only
+            and (
+                has_tracks
+                or alignment_mode != review.alignment_mode
+                or alignment_mode == "simplified"
+            )
+            and not reset_tracks
+        ):
             raise ValueError(
                 "Changing clock alignment requires resetting this video's Distance review"
             )
@@ -238,6 +256,7 @@ def verify_recording_time(
         review = DistanceVideoReview(video_id=video_id)
         session.add(review)
     review.recorded_start = recorded_start
+    review.alignment_mode = alignment_mode
     review.clock_anchor_offset_ms = clock_anchor_offset_ms
     review.clock_anchor_playback_ms = clock_anchor_playback_ms
     review.opening_even_second = opening_even_second

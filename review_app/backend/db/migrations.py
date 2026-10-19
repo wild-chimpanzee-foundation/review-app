@@ -635,6 +635,39 @@ def _migration_v24(conn) -> None:
     )
 
 
+def _migration_v25(conn) -> None:
+    """Allow parity-only alignment without inventing a camera wall clock."""
+    columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(distance_video_reviews)")}
+    if "alignment_mode" in columns:
+        return
+    conn.exec_driver_sql("""
+        CREATE TABLE distance_video_reviews_v25 (
+            video_id VARCHAR NOT NULL PRIMARY KEY,
+            recorded_start DATETIME,
+            alignment_mode VARCHAR NOT NULL DEFAULT 'exact',
+            clock_anchor_offset_ms INTEGER,
+            clock_anchor_playback_ms FLOAT,
+            opening_even_second BOOLEAN NOT NULL DEFAULT 0,
+            verified_by VARCHAR NOT NULL,
+            verified_at DATETIME NOT NULL,
+            completed_by VARCHAR,
+            completed_at DATETIME,
+            FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE
+        )
+    """)
+    conn.exec_driver_sql("""
+        INSERT INTO distance_video_reviews_v25 (
+            video_id, recorded_start, clock_anchor_offset_ms, clock_anchor_playback_ms,
+            opening_even_second, verified_by, verified_at, completed_by, completed_at
+        )
+        SELECT video_id, recorded_start, clock_anchor_offset_ms, clock_anchor_playback_ms,
+            opening_even_second, verified_by, verified_at, completed_by, completed_at
+        FROM distance_video_reviews
+    """)
+    conn.exec_driver_sql("DROP TABLE distance_video_reviews")
+    conn.exec_driver_sql("ALTER TABLE distance_video_reviews_v25 RENAME TO distance_video_reviews")
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -776,6 +809,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (22, _migration_v22),
     (23, _migration_v23),
     (24, _migration_v24),
+    (25, _migration_v25),
 ]
 
 # Frozen upgrade DDL. Keep independent of evolving ORM metadata.
