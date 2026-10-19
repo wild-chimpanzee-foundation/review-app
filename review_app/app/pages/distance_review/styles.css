@@ -44,6 +44,10 @@
     .distance-reference-thumbnail {width:94px;height:53px;border-radius:4px;background:#0f172a}
     .distance-sidebar {width:100%;gap:8px}
     .distance-sidebar-rail {width:100%;min-width:0;align-items:stretch;gap:8px}
+    /* Override NiceGUI's display:flex defaults, which outrank Quasar's mini helpers. */
+    .distance-sidebar .distance-sidebar-rail {display:none!important}
+    .q-drawer--mini .distance-sidebar .distance-review-card {display:none!important}
+    .q-drawer--mini .distance-sidebar .distance-sidebar-rail {display:flex!important}
     .distance-rail-add, .distance-rail-finish {width:100%;min-height:36px}
     .distance-rail-individuals {width:100%;min-width:0;gap:4px}
     .distance-rail-individual {width:100%;min-height:36px;padding:2px}

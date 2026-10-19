@@ -144,6 +144,13 @@ approval and an explicit verified force-with-lease.
   (workspace 1520→1848→1520 px with filters closed), visible rail actions,
   preserved player IDs and draft input, header hide/restore, and no horizontal
   overflow. No broad suite was rerun for the compact-sidebar change.
+- Mini/full visibility regression: reproduced with the actual full sidebar, not
+  the earlier simplified form harness. NiceGUI's display defaults override
+  Quasar's mini helper classes, leaving both views visible. Scoped explicit
+  `display` rules now override those defaults. The Chromium check failed before
+  the fix and passes afterward, asserting both visibility of the active view and
+  absence of the inactive view across expanded→compact→expanded, with player IDs
+  and draft input preserved. No broad test suite was repeated for this CSS fix.
 - This is bounded UI/media validation, not a full application/real-footage review.
   No live application database was used or changed.
 
