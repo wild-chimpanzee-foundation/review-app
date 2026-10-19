@@ -106,6 +106,12 @@ approval and an explicit verified force-with-lease.
 - First-sample replay from playback zero pauses at **1.00001 s** for a 1 s sample.
   The real masked clock input displays `2026-10-12 16:02:50` as text and accepts/
   saves `2026-10-12 23:02:50` without an AM/PM control or timezone conversion.
+- Frameless-video follow-up: **60 passed** across drawer/reference-dimming tests.
+  Isolated Chromium checks with the application theme at 1280×800 and 1920×1080
+  confirm zero comparison-card padding/borders/shadows, transparent backgrounds,
+  and full-width uncapped videos. At 1920 px with both drawers hidden, each 16:9
+  video occupies 958×538.875 px. Native 4:3 sizing, dark-theme overrides, and
+  fullscreen/dialog sizing also pass; unrelated cards retain their borders.
 - This is bounded UI/media validation, not a full application/real-footage review.
   No live application database was used or changed.
 

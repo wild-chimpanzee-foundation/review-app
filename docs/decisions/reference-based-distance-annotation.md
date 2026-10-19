@@ -248,9 +248,11 @@ alongside rounded millisecond frame identities; never round saved meter values.
 - Keep equally sized animal/reference frames, graph, and essential actions
   visible at 1280×800. Reference clips/distance choices use bounded strips; long
   individual lists scroll inside the right drawer. Allow hiding/restoring the
-  Distance header without changing ordinary Review. Use compact 8 px workspace
-  and panel padding/gaps, 4 px within-panel gaps, and the full available workspace
-  width rather than a centered width cap.
+  Distance header without changing ordinary Review. Comparison panels are frameless:
+  no card border, shadow, background, or padding; no outer workspace padding; 4 px
+  gaps. Videos use the full column width at their native aspect ratio without a
+  viewport/430 px height cap, cropping, or stretching. Fullscreen and dialog players
+  retain their separate sizing rules.
 - Put camera time and interval replay directly below the animal video, and sample
   progress in the selected individual's expanded card. Other cards show their
   first row. Highlight the active identity; metadata/actions stay attached to

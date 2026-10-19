@@ -149,8 +149,11 @@ adjustments. Detailed visual design remains to be worked out.
 
 **Partially implemented:** Added a visible Hide/Show annotations toggle that
 collapses/restores the right drawer without rebuilding players or form controls.
-An initial spacing pass reduces workspace/card padding and panel gaps and removes
-the workspace width cap. The full redesign and detachable panels remain deferred.
+An initial spacing pass reduces sidebar/card padding and panel gaps and removes
+the workspace width cap. The follow-up removes comparison-card borders, shadows,
+backgrounds, and padding entirely, along with outer workspace padding and the
+video height cap. Videos fill their column at their native aspect ratio without
+cropping or stretching. The full redesign and detachable panels remain deferred.
 
 ## Discussion progress
 
