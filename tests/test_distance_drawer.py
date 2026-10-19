@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from nicegui import app, ui
 from nicegui.testing import User
+from review_app.app import config as app_config
 from review_app.app.pages.distance_review import anchor_drawing as anchor_module
 from review_app.app.pages.distance_review import clock_dialog as clock_module
 from review_app.app.pages.distance_review import page as page_module
@@ -1120,6 +1121,7 @@ async def test_delete_active_and_last_animal_restores_drawer(user: User, drawer_
 async def test_clock_confirmation_uses_current_frame_without_selection_controls(
     user: User, distance_data, monkeypatch, tmp_path, opening_even, offset, duration, change
 ):
+    monkeypatch.setattr(app_config, "DISTANCE_CLOCK_ALIGNMENT_MODE", "exact")
     data, holder = distance_data, {}
     dp, video_id = data["dp"], data["videos"][0]
     monkeypatch.setattr(page_module, "get_annotator_name", lambda: "alice")
@@ -1185,7 +1187,17 @@ async def test_clock_confirmation_uses_current_frame_without_selection_controls(
         isinstance(element, (ui.label, ui.button, ui.card))
         for element in holder["workspace"].descendants()
     )
-    await user.should_not_see("Add individual")
+    # The compact rail retains its Add tooltip; guard the actual actions instead.
+    assert not any(
+        element.props.get("data-distance-action") == "add"
+        for element in holder["sidebar"].descendants()
+    )
+    rail_add = next(
+        element
+        for element in holder["sidebar"].descendants()
+        if element.props.get("data-distance-action") == "rail-add"
+    )
+    assert not rail_add.enabled
     await page.add_individual_dialog()
     capture.assert_not_awaited()
     user.find("Verify recording time").click()
@@ -1214,7 +1226,13 @@ async def test_clock_confirmation_uses_current_frame_without_selection_controls(
     if opening_even:
         user.find("The opening still already shows an even second.").click()
     if change == "stepped":
-        user.find("+1").click()
+        step_button = user.find(ui.button)
+        step_button.elements = {
+            element
+            for element in step_button.elements
+            if element.props.get("data-distance-clock-step") == "1"
+        }
+        step_button.click()
         await wait_for_saved(page, lambda: step.await_count == 1)
         assert step.await_args.args[1:] == (1, 25)
         offset += 40
@@ -1238,8 +1256,9 @@ async def test_clock_confirmation_uses_current_frame_without_selection_controls(
         assert capture.await_args.kwargs == {"exact": True}
         return
     await wait_for_saved(page, lambda: page.review is not None)
-    await user.should_see("Add individual")
     assert page.review["verified_by"] == "alice"
+    assert page.review["alignment_mode"] == "exact"
+    assert not any(isinstance(element, ui.radio) for element in user.client.elements.values())
     assert page.review["clock_anchor_playback_ms"] == offset
     assert page.review["clock_anchor_offset_ms"] == int(offset)
     assert page.review["opening_even_second"] is opening_even

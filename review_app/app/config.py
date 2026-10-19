@@ -1,9 +1,14 @@
 import sys
 from pathlib import Path
+from typing import Literal
 
 import platformdirs
 
 APP_NAME = "VideoAnnotation"
+
+# Code-only calibration workflow; never expose this as an annotator-facing setting.
+# Existing reviews keep their saved timing until an explicitly confirmed reset.
+DISTANCE_CLOCK_ALIGNMENT_MODE: Literal["simplified", "exact"] = "simplified"
 
 VIDEO_EXTENSIONS: frozenset[str] = frozenset(
     {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm", ".m4v"}

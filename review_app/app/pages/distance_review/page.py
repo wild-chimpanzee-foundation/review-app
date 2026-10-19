@@ -347,6 +347,15 @@ class DistanceReviewPage:
         self.animal_frame_rate = self.animal_frame_rates[path]
 
     def sample_frame_offset(self, offset_ms: int) -> float:
+        if self.review and self.review.get("alignment_mode") == "simplified":
+            # Keep the selected even frame's phase in both directions. Legacy
+            # parity-only reviews retain their original playback grid.
+            anchor = self.review.get("clock_anchor_playback_ms")
+            return (
+                round(anchor + offset_ms - self.review["clock_anchor_offset_ms"], 9)
+                if anchor is not None
+                else float(offset_ms)
+            )
         if self.review and self.review.get("clock_anchor_playback_ms") is not None:
             if offset_ms == 0 and self.review.get("opening_even_second"):
                 return 0.0
@@ -371,6 +380,8 @@ class DistanceReviewPage:
 
     def sample_seek_offset(self, offset_ms: int) -> float:
         frame_ms = self.sample_frame_offset(offset_ms)
+        if self.review and self.review.get("alignment_mode") == "simplified":
+            return frame_ms
         # Seek ten microseconds inside the chosen frame to avoid browser rounding
         # to its predecessor. This does not move to a later frame.
         padding_ms = 0.01
@@ -1209,7 +1220,20 @@ class DistanceReviewPage:
         ).props("flat round dense").tooltip(self.clock_description())
 
     def clock_description(self) -> str:
-        if self.review.get("alignment_mode") == "simplified":
+        if (
+            self.review.get("alignment_mode") == "simplified"
+            and self.review.get("recorded_start") is None
+            and self.review.get("clock_anchor_offset_ms") is not None
+        ):
+            return t(
+                "distance_clock_simple_aligned",
+                offset=frame_time(self.review["clock_anchor_playback_ms"]),
+                annotator=self.review["verified_by"],
+            )
+        if (
+            self.review.get("alignment_mode") == "simplified"
+            and self.review.get("clock_anchor_offset_ms") is None
+        ):
             return t(
                 "distance_clock_parity_aligned",
                 parity=t(
@@ -1260,8 +1284,8 @@ class DistanceReviewPage:
         async def on_calibrated():
             await self.reload_individuals()
             if not self.individual:
-                self.individual_id = self.sample_offset = None
-            elif self.sample_offset not in self.offsets:
+                self.individual_id = None
+            if self.sample_offset not in self.offsets:
                 self.resume_sample()
             await self.restore_sample()
             self.render_timing.refresh()
@@ -1287,6 +1311,13 @@ class DistanceReviewPage:
                 initial_offset_ms=(review.get("clock_anchor_playback_ms") or 0 if review else 0),
                 clock_description=self.clock_description() if review else None,
                 proposed_camera_time=proposed,
+                expected_recorded_start=(
+                    review["recorded_start"]
+                    if review and review.get("recorded_start") is not None
+                    else datetime.fromisoformat(video["created_at"])
+                    if isinstance(video.get("created_at"), str)
+                    else video.get("created_at")
+                ),
                 opening_even_second=bool(review and review.get("opening_even_second")),
                 review=review,
                 unavailable_message=unavailable,
@@ -1336,7 +1367,7 @@ class DistanceReviewPage:
         if self.busy or self.sample_offset is None or self.animal_player is None:
             return
         position = self.offsets.index(self.sample_offset)
-        if self.sample_offset == 0:
+        if self.sample_seek_offset(self.sample_offset) == 0:
             return
         start = self.sample_seek_offset(self.offsets[position - 1]) if position else 0
         self.busy = True
@@ -1549,7 +1580,7 @@ class DistanceReviewPage:
         try:
             frame_offset = self.sample_frame_offset(offset_ms)
             actual_offset = await capture_offset(self.animal_player, exact=True)
-            tolerance = frame_tolerance_ms(self.animal_frame_rate) if offset_ms else 0.001
+            tolerance = frame_tolerance_ms(self.animal_frame_rate) if frame_offset else 0.001
             if not frame_offset <= actual_offset <= self.sample_seek_offset(offset_ms) + tolerance:
                 self.seek_sample()
                 ui.notify(t("distance_review_restored_sample"), type="warning")

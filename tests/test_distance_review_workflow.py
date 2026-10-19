@@ -353,6 +353,63 @@ def test_calibrated_sample_keeps_the_selected_frame_and_uses_its_phase(
     assert page.sample_frame_offset(920 + delta) == expected
 
 
+@pytest.mark.parametrize("rate,opening_second", [(None, 49.98), (30000 / 1001, 49.9995)])
+def test_simplified_seek_does_not_advance_into_the_next_odd_camera_second(
+    distance_page, rate, opening_second
+):
+    page = distance_page
+    page.review = {"alignment_mode": "simplified", "opening_even_second": False}
+    page.animal_frame_rate = rate
+    # An odd opening near its end should still show an even second at playback 1s.
+    # Forward rounding to 1.040s (unknown FPS) or 1.001s (29.97 FPS) crosses to odd.
+    assert int(opening_second + page.sample_seek_offset(1000) / 1000) % 2 == 0
+    for offset in (1000, 3000, 5000):
+        assert page.sample_frame_offset(offset) == offset
+        assert page.sample_seek_offset(offset) == offset
+
+
+@pytest.mark.parametrize("rate", [None, 30000 / 1001])
+async def test_simplified_save_and_playback_use_unshifted_schedule(distance_page, rate):
+    page = distance_page
+    page.review = {"alignment_mode": "simplified", "opening_even_second": False}
+    page.animal_frame_rate = rate
+    page_module.capture_offset.return_value = 1000
+    await page.commit_sample()
+    assert page.dp.save_distance_sample.call_args.args == ("adult", 1000)
+    page_module.play_to_sample.assert_awaited_once_with(page.animal_player, 1000, 3000)
+    assert page.sample_offset == 3000
+
+
+@pytest.mark.parametrize("rate", [None, 30000 / 1001])
+def test_simplified_even_frame_phase_is_preserved_in_both_directions(distance_page, rate):
+    page = distance_page
+    page.review = {
+        "alignment_mode": "simplified",
+        "clock_anchor_offset_ms": 5120,
+        "clock_anchor_playback_ms": 5120.125,
+    }
+    page.animal_frame_rate = rate
+    for offset in (1120, 3120, 5120, 7120, 9120):
+        assert page.sample_frame_offset(offset) == offset + 0.125
+        assert page.sample_seek_offset(offset) == offset + 0.125
+
+
+async def test_fractional_first_sample_with_zero_identity_still_has_a_replay_lead_in(
+    distance_page,
+):
+    page = distance_page
+    page.review = {
+        "alignment_mode": "simplified",
+        "clock_anchor_offset_ms": 2000,
+        "clock_anchor_playback_ms": 2000.125,
+    }
+    page.offsets = [0, 2000, 4000]
+    page.sample_offset = 0
+    assert page.sample_frame_offset(0) == 0.125
+    await page.replay_interval()
+    page_module.play_to_sample.assert_awaited_once_with(page.animal_player, 0, 0.125)
+
+
 def test_calibrated_even_opening_keeps_the_first_still_at_zero(distance_page):
     page = distance_page
     page.review = {

@@ -3,11 +3,12 @@
 import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from nicegui import ui
 from nicegui.testing import User
+from review_app.app import config as app_config
 from review_app.app.pages.distance_review import clock_dialog as clock_module
 from review_app.app.pages.distance_review import page as page_module
 from review_app.app.pages.distance_review.page import DistanceReviewPage
@@ -209,7 +210,9 @@ def correction_page(clock_data, monkeypatch, tmp_path):
     monkeypatch.setattr(page_module, "get_annotator_name", lambda: "alice")
     capture = AsyncMock(return_value=1120.5)
     monkeypatch.setattr(clock_module, "capture_offset", capture)
-    holder = {"capture": capture}
+    seek = Mock()
+    monkeypatch.setattr(clock_module, "seek_paused", seek)
+    holder = {"capture": capture, "seek": seek}
 
     @ui.page("/clock-correction")
     async def correction():
@@ -225,17 +228,21 @@ def correction_page(clock_data, monkeypatch, tmp_path):
                 "camera_id": "cam_x",
                 "video_path": str(path),
                 "duration_sec": 10,
+                "created_at": datetime(2026, 10, 12, 16, 2, 49),
             }
         ]
         page.animal_player = SimpleNamespace(source=page.media_url(path), id=0)
         page.load_sample_timing = AsyncMock()
         page.animal_frame_rate = 25
         page.individuals = dp.list_distance_individuals(data["videos"][0])
-        page.individual_id = data["individual"]["id"]
+        page.individual_id = data["individual"]["id"] if page.individuals else None
         await page.reload_review()
-        page.sample_offset = 2920
+        page.sample_offset = 2920 if 2920 in page.offsets else page.sample_offset
         page.render_individuals()
         page.render_timing()
+        page.render_sample_navigation()
+        page.render_tracks()
+        page.render_sample_actions()
         holder["page"] = page
         await page.clock_dialog()
 
@@ -266,29 +273,30 @@ async def test_timestamp_ui_rejects_odd_second_correction(user: User, correction
     holder, data = correction_page
     await user.open("/clock-correction")
     before = snapshot(data["dp"])
-    user.find("Camera timestamp at the saved alignment frame").clear().type("2026-10-12 16:02:51")
+    user.find("Camera timestamp at the saved alignment frame").clear().type("2026-10-12T16:02:51")
     user.find("Correct camera timestamp").click()
     await user.should_see("Timestamp corrections must use whole two-second steps.")
     assert snapshot(data["dp"]) == before
     holder["capture"].assert_not_awaited()
 
 
-@pytest.mark.parametrize("timestamp", ["2026-10-12 24:02:52", "2026-10-12 04:02:52 PM"])
-async def test_timestamp_ui_rejects_invalid_24_hour_input(user: User, correction_page, timestamp):
+@pytest.mark.parametrize("timestamp", ["2026-10-12T24:02:52", "2026-10-12T04:02:52 PM"])
+async def test_timestamp_ui_rejects_invalid_datetime_input(user: User, correction_page, timestamp):
     holder, data = correction_page
     await user.open("/clock-correction")
     before = snapshot(data["dp"])
     user.find("Camera timestamp at the saved alignment frame").clear().type(timestamp)
     user.find("Correct camera timestamp").click()
-    await user.should_see("Enter a valid camera timestamp as YYYY-MM-DD HH:mm:ss (24-hour time).")
+    await user.should_see("Choose a valid camera date and time.")
     assert snapshot(data["dp"]) == before
     holder["capture"].assert_not_awaited()
 
 
 @pytest.mark.parametrize("confirm", [False, True])
 async def test_realignment_ui_requires_destructive_confirmation(
-    user: User, correction_page, confirm
+    user: User, correction_page, confirm, monkeypatch
 ):
+    monkeypatch.setattr(app_config, "DISTANCE_CLOCK_ALIGNMENT_MODE", "exact")
     holder, data = correction_page
     await user.open("/clock-correction")
     before = snapshot(data["dp"])
@@ -308,7 +316,7 @@ async def test_realignment_ui_requires_destructive_confirmation(
     assert page.individuals == []
     assert page.samples == []
     assert page.individual_id is None
-    assert page.sample_offset is None
+    assert page.sample_offset == 1120
     assert page.review["completed_at"] is None
     assert page.review["clock_anchor_playback_ms"] == 1120.5
     await user.should_not_see("Reset Distance review for this video?")
@@ -387,22 +395,44 @@ def test_changing_parity_requires_explicit_reset(distance_data):
     assert dp.get_distance_review_state(video_id, "alice")["offsets"][0] == 1000
 
 
+def seek_clock_test_player(user, offset_ms):
+    interaction = user.find(ui.video)
+    interaction.elements = {max(interaction.elements, key=lambda element: element.id)}
+    interaction.trigger("seeked", {"offset_ms": offset_ms})
+
+
 @pytest.mark.parametrize("confirm", [False, True])
-async def test_simplified_ui_requires_parity_and_reset_without_capturing_a_frame(
+async def test_simplified_button_confirms_even_frame_and_requires_reset(
     user: User, correction_page, confirm
 ):
     holder, data = correction_page
+    holder["capture"].return_value = 5120.125
     await user.open("/clock-correction")
     before = snapshot(data["dp"])
     user.find("Change alignment frame and reset Distance review").click()
-    user.find("Simplified alignment").click()
-    await user.should_not_see("Camera timestamp visible on the displayed frame")
-    user.find("Confirm clock alignment").click()
-    await user.should_see("Choose whether the opening timestamp is even or odd.")
-    assert snapshot(data["dp"]) == before
+    assert holder["seek"].call_args.args[1] == 5000
+    await user.should_see("Choose even frame")
+    await user.should_see("Frame shows an even camera second.")
+    await user.should_not_see("The displayed frame shows an even camera second.")
+    await user.should_not_see("Use expected timestamp (I checked it)")
+    await user.should_not_see("Choose a frame showing an even camera second, preferably away")
+    heading = next(
+        item
+        for item in user.client.elements.values()
+        if item.props.get("data-testid") == "distance-clock-choose-even"
+    )
+    controls = next(
+        item
+        for item in user.client.elements.values()
+        if item.props.get("data-testid") == "distance-clock-frame-controls"
+    )
+    clock = next(iter(user.find("Camera timestamp correction (optional)").elements))
+    assert "text-weight-bold" in heading._classes
+    assert heading.id < controls.id < clock.id
+    await user.should_see("Expected camera timestamp (estimate): 2026-10-12 16:02:54")
     holder["capture"].assert_not_awaited()
-    user.find("Odd", kind=ui.radio).click()
-    user.find("Confirm clock alignment").click()
+    seek_clock_test_player(user, 5120.125)
+    user.find("Frame shows an even camera second.").click()
     await user.should_see("Reset Distance review for this video?")
     assert snapshot(data["dp"]) == before
     if not confirm:
@@ -413,35 +443,34 @@ async def test_simplified_ui_requires_parity_and_reset_without_capturing_a_frame
     user.find("Delete Distance tracks and realign").click()
     page = holder["page"]
     await wait_for_clock(page)
-    holder["capture"].assert_not_awaited()
+    holder["capture"].assert_awaited_once()
     assert page.review["alignment_mode"] == "simplified"
+    assert page.review["clock_anchor_playback_ms"] == 5120.125
     assert page.review["recorded_start"] is None
-    assert page.offsets == [1000, 3000, 5000, 7000, 9000]
+    assert page.offsets == [1120, 3120, 5120, 7120, 9120]
     assert page.individuals == []
     assert "camera time unknown" in page.clock_description()
     with page.client:
         await page.clock_dialog()
-    await user.should_see("Simplified alignment")
+    assert holder["seek"].call_args.args[1] == 5120.125
     await user.should_not_see("Camera timestamp at the saved alignment frame")
-    parity = max(user.find("Odd", kind=ui.radio).elements, key=lambda element: element.id)
-    assert parity.value == "odd"
-    assert not parity.enabled
-    user.find("Confirm clock alignment").click()
+    user.find("Frame shows an even camera second.").click()
     await wait_for_clock(page)
-    assert page.offsets == [1000, 3000, 5000, 7000, 9000]
+    holder["capture"].assert_awaited_once()
+    assert page.offsets == [1120, 3120, 5120, 7120, 9120]
 
 
 async def test_disabling_reset_restores_the_saved_mode(user: User, correction_page):
     holder, data = correction_page
     await user.open("/clock-correction")
     user.find("Change alignment frame and reset Distance review").click()
-    user.find("Simplified alignment").click()
-    user.find("Odd", kind=ui.radio).click()
     user.find("Change alignment frame and reset Distance review").click()
     await user.should_see("Correct camera timestamp")
-    mode = next(iter(user.find("Exact alignment", kind=ui.radio).elements))
-    assert mode.value == "exact"
-    assert not mode.enabled
+    await user.should_not_see("Exact alignment")
+    assert not any(
+        element.props.get("data-testid") == "distance-clock-mode"
+        for element in user.client.elements.values()
+    )
     user.find("Correct camera timestamp").click()
     await wait_for_clock(holder["page"])
     assert holder["page"].review["alignment_mode"] == "exact"
@@ -449,33 +478,243 @@ async def test_disabling_reset_restores_the_saved_mode(user: User, correction_pa
     holder["capture"].assert_not_awaited()
 
 
-@pytest.mark.parametrize("parity,first", [("Even", 0), ("Odd", 1000)])
-async def test_initial_parity_alignment_and_unknown_sample_time(
-    user: User, correction_page, parity, first
+@pytest.mark.parametrize(
+    "timestamp", [None, "2026-10-12 16:02:50", "2026-10-12 16:02", "2026-10-12 16:02:54"]
+)
+async def test_initial_even_frame_alignment_with_optional_camera_time(
+    user: User, correction_page, timestamp
 ):
     holder, data = correction_page
+    holder["capture"].return_value = 5000
     dp, video_id = data["dp"], data["videos"][0]
     dp.align_distance_by_parity(video_id, True, "alice", reset_tracks=True)
     with dp.Session.begin() as session:
         session.delete(session.get(DistanceVideoReview, video_id))
     await user.open("/clock-correction")
-    mode = next(iter(user.find("Exact alignment", kind=ui.radio).elements))
-    assert mode.value == "exact"
-    assert mode.enabled
-    user.find("Simplified alignment").click()
-    user.find(parity, kind=ui.radio).click()
-    user.find("Confirm clock alignment").click()
+    assert app_config.DISTANCE_CLOCK_ALIGNMENT_MODE == "simplified"
+    await user.should_not_see("Exact alignment")
+    await user.should_not_see("The opening still already shows an even second.")
+    assert not any(isinstance(element, ui.radio) for element in user.client.elements.values())
+    assert holder["seek"].call_args.args[1] == 5000
+    await user.should_see("Expected camera timestamp (estimate): 2026-10-12 16:02:54")
+    correction = next(iter(user.find("Camera timestamp correction (optional)").elements))
+    assert correction.value == "2026-10-12 16:02:54"
+    assert correction.props["type"] == "text"
+    assert correction.props["mask"] == "####-##-## ##:##:##"
+    assert correction.props["placeholder"] == "YYYY-MM-DD HH:mm:ss"
+    if timestamp:
+        user.find("Camera timestamp correction (optional)").clear().type(timestamp)
+    user.find("Frame shows an even camera second.").click()
     page = holder["page"]
     await wait_for_clock(page)
-    holder["capture"].assert_not_awaited()
-    assert page.offsets == list(range(first, 10000, 2000))
+    holder["capture"].assert_awaited_once()
+    assert page.offsets == [1000, 3000, 5000, 7000, 9000]
+    assert page.review["clock_anchor_playback_ms"] == 5000
+    assert page.review["alignment_mode"] == "simplified"
+    assert page.sample_offset == 1000
+    assert page.individual is None and page.samples == []
+    assert (page.review["recorded_start"] is None) == (timestamp is None)
+    if timestamp:
+        anchor_time = sample_camera_time(page.review, 5000)
+        assert anchor_time == datetime.fromisoformat(timestamp)
     individual = dp.create_distance_individual(
         video_id, data["species_id"], 0, anchor=data["anchor"]
     )
     await page.reload_individuals()
     page.individual_id = individual["id"]
-    page.sample_offset = first
+    page.sample_offset = 1000
     with page.client:
         page.render_sample_navigation()
-    await user.should_see("camera time unknown")
-    assert page.sample_frame_offset(first) == first
+    if timestamp is None:
+        await user.should_see("camera time unknown")
+    else:
+        await user.should_see(sample_camera_time(page.review, 1000).isoformat(sep=" "))
+    assert page.sample_frame_offset(1000) == 1000
+
+
+async def test_moving_frame_refreshes_estimate_and_requires_fresh_button_confirmation(
+    user: User, correction_page
+):
+    holder, data = correction_page
+    await user.open("/clock-correction")
+    before = snapshot(data["dp"])
+    user.find("Change alignment frame and reset Distance review").click()
+    user.find("Camera timestamp correction (optional)").clear().type("2026-10-12 16:02:50")
+    seek_clock_test_player(user, 6000)
+    await user.should_see("Expected camera timestamp (estimate): 2026-10-12 16:02:55")
+    correction = next(iter(user.find("Camera timestamp correction (optional)").elements))
+    assert correction.value == "2026-10-12 16:02:55"
+    # The video advances after the seek event but before capture: don't associate
+    # the previous frame's timestamp/click with this new frame.
+    holder["capture"].return_value = 6000.125
+    user.find("Frame shows an even camera second.").click()
+    await user.should_see(
+        "The frame changed. Check that it shows an even camera second and press again."
+    )
+    assert snapshot(data["dp"]) == before
+    user.find("Frame shows an even camera second.").click()
+    await user.should_see("Reset Distance review for this video?")
+    user.find("Delete Distance tracks and realign").click()
+    await wait_for_clock(holder["page"])
+    assert holder["page"].review["clock_anchor_playback_ms"] == 6000.125
+    assert holder["page"].review["recorded_start"] is None
+
+
+@pytest.mark.parametrize(
+    "timestamp,message",
+    [
+        ("2026-10-12T25:02:50", "Choose a valid camera date and time."),
+        ("2026-10-12T16:02:51", "Enter a whole-second even camera timestamp."),
+    ],
+)
+async def test_invalid_optional_datetime_does_not_change_alignment(
+    user: User, correction_page, timestamp, message
+):
+    holder, data = correction_page
+    await user.open("/clock-correction")
+    before = snapshot(data["dp"])
+    user.find("Change alignment frame and reset Distance review").click()
+    user.find("Camera timestamp correction (optional)").clear().type(timestamp)
+    user.find("Frame shows an even camera second.").click()
+    await user.should_see(message)
+    assert snapshot(data["dp"]) == before
+    holder["capture"].assert_not_awaited()
+
+
+async def test_simple_timestamp_correction_stays_on_the_saved_frame(user: User, correction_page):
+    holder, data = correction_page
+    dp, video_id = data["dp"], data["videos"][0]
+    dp.align_distance_on_even_frame(video_id, 5120.125, "alice", reset_tracks=True)
+    await user.open("/clock-correction")
+    page = holder["page"]
+    seek_clock_test_player(user, 6000)
+    assert holder["seek"].call_args.args[1] == 5120.125
+    await user.should_see("Expected camera timestamp (estimate): 2026-10-12 16:02:54")
+    user.find("Camera timestamp correction (optional)").clear().type("2026-10-12T16:02:50")
+    user.find("Frame shows an even camera second.").click()
+    await wait_for_clock(page)
+    holder["capture"].assert_not_awaited()
+    assert page.review["clock_anchor_playback_ms"] == 5120.125
+    assert sample_camera_time(page.review, 5120) == CAMERA_TIME
+    assert page.offsets == [1120, 3120, 5120, 7120, 9120]
+
+
+async def test_legacy_parity_review_is_not_silently_reanchored(user: User, correction_page):
+    holder, data = correction_page
+    dp, video_id = data["dp"], data["videos"][0]
+    dp.align_distance_by_parity(video_id, False, "alice", reset_tracks=True)
+    await user.open("/clock-correction")
+    page = holder["page"]
+    await user.should_see("This review uses the previous opening-parity schedule.")
+    user.find("Frame shows an even camera second.").click()
+    await wait_for_clock(page)
+    holder["capture"].assert_not_awaited()
+    assert page.review["clock_anchor_playback_ms"] is None
+    assert page.offsets == [1000, 3000, 5000, 7000, 9000]
+
+
+@pytest.mark.parametrize("mode", ["exact", "simplified"])
+@pytest.mark.parametrize(
+    "timestamp,button,expected",
+    [
+        ("2026-12-31 23:59:59", "+1 s", "2027-01-01 00:00:00"),
+        ("2026-01-01 00:00", "-1 s", "2025-12-31 23:59:59"),
+    ],
+)
+async def test_timestamp_second_buttons_roll_over_without_saving_or_moving_frames(
+    user: User, correction_page, mode, timestamp, button, expected
+):
+    holder, data = correction_page
+    await user.open("/clock-correction")
+    if mode == "simplified":
+        user.find("Change alignment frame and reset Distance review").click()
+    label = (
+        "Camera timestamp at the saved alignment frame"
+        if mode == "exact"
+        else "Camera timestamp correction (optional)"
+    )
+    field = next(iter(user.find(label).elements))
+    assert field.props["type"] == "text"
+    assert field.props["mask"] == "####-##-## ##:##:##"
+    user.find(label).clear().type(timestamp)
+    before = snapshot(data["dp"])
+    seeks_before = holder["seek"].call_count
+    user.find(button, kind=ui.button).click()
+    assert field.value == expected
+    assert snapshot(data["dp"]) == before
+    assert holder["seek"].call_count == seeks_before
+    holder["capture"].assert_not_awaited()
+
+
+@pytest.mark.parametrize("mode", ["exact", "simplified"])
+async def test_calendar_and_24_hour_time_picker_keep_field_and_saved_time_in_sync(
+    user: User, correction_page, mode
+):
+    holder, data = correction_page
+    if mode == "simplified":
+        data["dp"].align_distance_on_even_frame(
+            data["videos"][0], 5000, "alice", reset_tracks=True
+        )
+    await user.open("/clock-correction")
+    prefix = "distance-clock-time"
+
+    def element(suffix=""):
+        return next(
+            item
+            for item in user.client.elements.values()
+            if item.props.get("data-testid") == prefix + suffix
+        )
+
+    picker = element("-time")
+    assert isinstance(picker, ui.time)
+    assert picker.props["format24h"] is True
+    assert picker.props["with-seconds"] is True
+    assert picker.props["mask"] == "YYYY-MM-DD HH:mm:ss"
+    assert picker.value == element().value
+    click = user.find(ui.button)
+    click.elements = {element("-time-button")}
+    click.click()
+    await user.should_see(ui.time)
+    with user:
+        picker.set_value("2026-10-12 23:02:52")
+        assert element().value == "2026-10-12 23:02:52"
+        element("-date").set_value("2026-10-13 23:02:52")
+        assert element().value == picker.value == "2026-10-13 23:02:52"
+        for menu in user.client.elements.values():
+            if isinstance(menu, ui.menu):
+                menu.close()
+    user.find(
+        "Correct camera timestamp" if mode == "exact" else "Frame shows an even camera second."
+    ).click()
+    await wait_for_clock(holder["page"])
+    review = holder["page"].review
+    assert sample_camera_time(review, review["clock_anchor_offset_ms"]) == datetime(
+        2026, 10, 13, 23, 2, 52
+    )
+    holder["capture"].assert_not_awaited()
+
+
+@pytest.mark.parametrize("mode", ["exact", "simplified"])
+async def test_timestamp_second_buttons_save_explicit_correction_with_evidence_intact(
+    user: User, correction_page, mode
+):
+    holder, data = correction_page
+    dp, video_id = data["dp"], data["videos"][0]
+    if mode == "simplified":
+        dp.align_distance_on_even_frame(video_id, 5000, "alice", reset_tracks=True)
+    before = dp.get_distance_review_state(video_id, "alice")
+    await user.open("/clock-correction")
+    user.find("+1 s", kind=ui.button).click()
+    user.find("+1 s", kind=ui.button).click()
+    user.find(
+        "Correct camera timestamp" if mode == "exact" else "Frame shows an even camera second."
+    ).click()
+    await wait_for_clock(holder["page"])
+    after = dp.get_distance_review_state(video_id, "alice")
+    assert sample_camera_time(after["review"], after["review"]["clock_anchor_offset_ms"]) == (
+        CAMERA_TIME + timedelta(seconds=2 if mode == "exact" else 6)
+    )
+    assert after["offsets"] == before["offsets"]
+    assert after["samples"] == before["samples"]
+    assert after["review"]["completed_at"] == before["review"]["completed_at"]
+    holder["capture"].assert_not_awaited()
