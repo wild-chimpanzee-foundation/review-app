@@ -20,6 +20,51 @@ def run_javascript(source):
     return json.loads(result.stdout)
 
 
+def test_enter_opens_clock_setup_until_aligned_then_confirms_and_a_only_adds():
+    source = Path(player_module.__file__).with_name("keyboard.js").read_text()
+    result = run_javascript(
+        """
+        let handler, settings, clicked, prevented;
+        global.window = {addEventListener(type, callback) {handler = callback;}};
+        global.document = {querySelector(selector) {
+            if (selector.includes('data-distance-clock-dialog')) return null;
+            if (selector.startsWith('.q-dialog')) return settings.dialog ? {} : null;
+            const action = selector.match(/data-distance-action="([^"]+)"/)[1];
+            const exists = action === 'verify-clock' ? !settings.verified && !settings.railOnly
+                : action === 'rail-clock' ? !settings.verified && settings.railOnly
+                : ['add', 'confirm'].includes(action) && settings.verified;
+            return exists ? {disabled:settings.disabled, click() {clicked = action;}} : null;
+        }};
+        """
+        + source
+        + """
+        const cases = [
+            ['Enter', {}], ['Enter', {railOnly:true}], ['Enter', {verified:true}],
+            ['A', {verified:true}], ['a', {}], ['A', {}],
+            ['Enter', {editable:true}], ['Enter', {dialog:true}], ['Enter', {disabled:true}],
+        ];
+        const result = cases.map(([key, flags]) => {
+            settings = flags; clicked = null; prevented = false;
+            handler({key, ...flags, target:{closest() {return flags.editable || null;}},
+                preventDefault() {prevented = true;}, stopPropagation() {}});
+            return [clicked, prevented];
+        });
+        console.log(JSON.stringify(result));
+        """
+    )
+    assert result == [
+        ["verify-clock", True],
+        ["rail-clock", True],
+        ["confirm", True],
+        ["add", True],
+        [None, False],
+        [None, False],
+        [None, False],
+        [None, False],
+        [None, True],
+    ]
+
+
 def test_arrow_keys_capture_navigation_and_preserve_fields_dialogs_and_shift_seeking():
     source = Path(player_module.__file__).with_name("keyboard.js").read_text()
     result = run_javascript(
@@ -38,6 +83,7 @@ def test_arrow_keys_capture_navigation_and_preserve_fields_dialogs_and_shift_see
             }
             if (selector.startsWith('.q-dialog')) return settings.dialog ? {} : null;
             const action = selector.match(/data-distance-action="([^"]+)"/)[1];
+            if (action === 'verify-clock' || action === 'rail-clock') return null;
             return {disabled: settings.disabled, click() {clicked = action;}};
         }};
         """

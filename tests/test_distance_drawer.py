@@ -1200,7 +1200,22 @@ async def test_clock_confirmation_uses_current_frame_without_selection_controls(
     assert not rail_add.enabled
     await page.add_individual_dialog()
     capture.assert_not_awaited()
-    user.find("Verify recording time").click()
+    clock_action = next(
+        element
+        for element in holder["sidebar"].descendants()
+        if element.props.get("data-distance-action") == "verify-clock"
+    )
+    assert any(
+        isinstance(element, ui.badge) and element.text == "↵ Enter"
+        for element in clock_action.descendants()
+    )
+    assert any(
+        isinstance(element, ui.badge) and element.text == "↵ Enter"
+        for element in rail_add.parent_slot.parent.descendants()
+    )
+    interaction = user.find(ui.button)
+    interaction.elements = {clock_action}
+    interaction.click()  # Same DOM action selected by Enter before clock setup.
     await user.should_see("Camera timestamp visible on the displayed frame")
     clock_input = next(
         element

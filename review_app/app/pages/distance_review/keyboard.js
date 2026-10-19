@@ -53,7 +53,11 @@ window.addEventListener('keydown', event => {
         Tab: 'next-reference',
     }[event.key];
     if (!action) return;
-    const button = document.querySelector(`[data-distance-action="${action}"]`);
+    const clockButton = action === 'confirm'
+        ? document.querySelector('[data-distance-action="verify-clock"]')
+            || document.querySelector('[data-distance-action="rail-clock"]')
+        : null;
+    const button = clockButton || document.querySelector(`[data-distance-action="${action}"]`);
     if (!button) return;
     event.preventDefault();
     event.stopPropagation();

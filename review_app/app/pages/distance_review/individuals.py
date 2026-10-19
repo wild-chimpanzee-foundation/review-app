@@ -38,7 +38,13 @@ class IndividualViewsContext:
 def render_individuals(context: IndividualViewsContext) -> None:
     if not context.review_active:
         ui.label(t("distance_verify_required")).classes("text-caption text-grey-6")
-        ui.button(t("distance_verify_time"), icon="schedule", on_click=context.on_clock)
+        with (
+            ui.button(t("distance_verify_time"), icon="schedule", on_click=context.on_clock)
+            .props('data-distance-action="verify-clock"')
+            .bind_enabled_from(context.busy_state, "busy", backward=lambda busy: not busy)
+        ):
+            with ui.element("span").classes("q-ml-sm"):
+                _shortcut_badge("↵ Enter")
     else:
         with ui.row().classes("w-full justify-center q-mb-xs"):
             with (
@@ -67,9 +73,15 @@ def render_individuals(context: IndividualViewsContext) -> None:
 
 def render_individual_rail(context: IndividualViewsContext) -> None:
     if not context.review_active:
-        ui.button(icon="schedule", on_click=context.on_clock).props(
-            'flat round dense data-distance-action="rail-clock"'
-        ).tooltip(t("distance_verify_time"))
+        with (
+            ui.button(on_click=context.on_clock)
+            .props('flat dense no-caps data-distance-action="rail-clock"')
+            .tooltip(t("distance_verify_time"))
+            .bind_enabled_from(context.busy_state, "busy", backward=lambda busy: not busy)
+        ):
+            with ui.column().classes("items-center gap-0"):
+                ui.icon("schedule", size="xs")
+                _shortcut_badge("↵ Enter")
     ui.button("A", on_click=context.on_add).props(
         'outline dense color=primary data-distance-action="rail-add"'
     ).classes("distance-rail-add").tooltip(t("distance_add_individual")).bind_enabled_from(
