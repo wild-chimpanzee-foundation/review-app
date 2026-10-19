@@ -220,11 +220,6 @@ def shared_header(
                 ui.button(icon="filter_list", on_click=toggle_drawer).props(
                     "flat round color=white"
                 ).tooltip(t("filters_label"))
-            if annotation_drawer is not None:
-                ui.button(icon="view_sidebar", on_click=toggle_annotations).props(
-                    'flat round color=white data-testid="distance-toggle-annotations" '
-                    f'aria-label="{t("distance_toggle_annotations")}"'
-                ).tooltip(t("distance_toggle_annotations"))
             if distance_interface:
                 ui.button(icon="visibility_off", on_click=header.hide).props(
                     "flat round color=white"
@@ -320,6 +315,11 @@ def shared_header(
                     clear_session(keep_prefs=True)
                     ui.navigate.to("/login")
 
+                if annotation_drawer is not None:
+                    ui.button(icon="view_sidebar", on_click=toggle_annotations).props(
+                        'flat round color=white data-testid="distance-toggle-annotations" '
+                        f'aria-label="{t("distance_toggle_annotations")}"'
+                    ).tooltip(t("distance_toggle_annotations"))
                 _current_lang = get_language()
                 with (
                     ui.button(icon="account_circle")

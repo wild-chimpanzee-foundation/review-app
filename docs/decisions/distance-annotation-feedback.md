@@ -150,9 +150,9 @@ available space rather than leave empty reserved columns.
 **Scope:** A general Distance UI design overhaul, not just isolated spacing
 adjustments. Detailed visual design remains to be worked out.
 
-**Partially implemented:** The annotation-panel icon toggle in the header,
-next to the filters, switches between a 400 px drawer and a 72 px action rail
-without rebuilding players or full form controls. The rail retains Add, individual
+**Partially implemented:** The annotation-panel icon toggle on the right of the
+header, next to the account menu, switches between a 400 px drawer and a 72 px
+action rail without rebuilding players or full form controls. The rail retains Add, individual
 selection/completion marks, and guarded video completion. It uses the same round white icon-button styling as the
 filter toggle. Restore the header first if it has been hidden.
 An initial spacing pass reduces sidebar/card padding and panel gaps and removes

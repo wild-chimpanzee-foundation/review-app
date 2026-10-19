@@ -306,7 +306,13 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     filters = next(
         element for element in header.descendants() if element.props.get("icon") == "filter_list"
     )
-    assert toggle.parent_slot is filters.parent_slot
+    account = next(
+        element
+        for element in header.descendants()
+        if element.props.get("icon") == "account_circle"
+    )
+    assert toggle.parent_slot is account.parent_slot
+    assert toggle.parent_slot is not filters.parent_slot
     assert toggle not in list(workspace.descendants())
     assert toggle.props["round"] and toggle.props["flat"] and toggle.props["color"] == "white"
     assert toggle.props["aria-label"] == "Expand/collapse annotations"

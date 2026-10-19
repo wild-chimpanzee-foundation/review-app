@@ -241,8 +241,9 @@ alongside rounded millisecond frame identities; never round saved meter values.
 ## Desktop UI and shortcuts
 
 - Reuse Review's header and desktop drawers: 300 px filters on the left, 400 px
-  individual/completion controls on the right. The annotation-panel icon next to
-  the header's filter toggle switches the right drawer between its full width and
+  individual/completion controls on the right. The annotation-panel icon on the
+  right of the header, next to the account menu, switches the right drawer between
+  its full width and
   a 72 px rail, rather than hiding it. The rail retains **A / Add**, each
   individual's number and automatic completion checkbox indicator, and a green
   finish icon. Highlight the active individual; clicking a rail entry selects it,
