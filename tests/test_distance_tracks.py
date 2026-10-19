@@ -184,6 +184,20 @@ def test_graph_uses_one_shared_elapsed_time_geometry_and_empty_short_clip_is_val
     assert empty["series"] == []
 
 
+def test_scheduled_stops_are_visible_without_individuals_or_evidence():
+    options = track_options([], [], [1000, 3000, 5000], 6, None, 3000)
+    assert options["yAxis"]["show"] is False
+    assert options["graphic"]["elements"] == []
+    assert options["legend"]["data"] == ["Scheduled samples"]
+    assert len(options["series"]) == 1
+    schedule = options["series"][0]
+    assert schedule["id"] == "schedule"
+    assert [point["value"] for point in schedule["data"]] == [[1, 0], [3, 0], [5, 0]]
+    assert schedule["data"][1]["itemStyle"]["color"] == "#f59e0b"
+    assert schedule["data"][1]["symbolSize"] > schedule["data"][0]["symbolSize"]
+    assert schedule["markLine"]["data"] == [{"xAxis": 3}]
+
+
 def test_skip_intervals_stay_within_clip_and_keep_exact_elapsed_time():
     options = track_options(
         [{"id": "one", "individual_number": 1}],

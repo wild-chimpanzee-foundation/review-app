@@ -249,6 +249,55 @@ def correction_page(clock_data, monkeypatch, tmp_path):
     return holder, data
 
 
+async def test_browsing_schedule_without_individuals_never_creates_evidence(
+    user: User, correction_page, monkeypatch
+):
+    holder, data = correction_page
+    dp, video_id = data["dp"], data["videos"][0]
+    dp.align_distance_on_even_frame(video_id, 5000, "alice", reset_tracks=True)
+    before = snapshot(dp)
+    play = AsyncMock()
+    monkeypatch.setattr(page_module, "play_to_sample", play)
+    await user.open("/clock-correction")
+    page = holder["page"]
+    assert page.individual is None and page.sample_offset == 1000
+    await user.should_see("Browse scheduled stops; add an individual to annotate.")
+    chart = next(
+        chart
+        for chart in user.find(ui.echart).elements
+        if chart.options["series"] and chart.options["series"][0]["id"] == "schedule"
+    )
+    point = chart.options["series"][0]["data"][2]
+    click = user.find(ui.echart)
+    click.elements = {chart}
+    click.trigger(
+        "componentClick",
+        {
+            "componentType": "series",
+            "seriesType": "scatter",
+            "seriesIndex": 0,
+            "seriesName": "Scheduled samples",
+            "name": "",
+            "dataIndex": 2,
+            "data": point,
+            "value": point["value"],
+        },
+    )
+    await wait_for_clock(page)
+    assert page.sample_offset == 5000
+    await page.move_sample(1)
+    assert page.sample_offset == 7000
+    await page.replay_interval()
+    play.assert_awaited_once_with(page.animal_player, 5000, 7000)
+    await page.commit_sample()
+    assert not any(
+        element.props.get("data-distance-action") in ("confirm", "apply-to-end")
+        for element in page.client.elements.values()
+    )
+    assert snapshot(dp) == before
+    assert dp.get_distance_review_state(video_id, "alice")["active_individual_id"] is None
+
+
 @pytest.mark.parametrize("hour", [0, 16, 23])
 async def test_timestamp_ui_preserves_tracks_without_capturing_a_new_frame(
     user: User, correction_page, hour
@@ -513,6 +562,7 @@ async def test_initial_even_frame_alignment_with_optional_camera_time(
     assert page.review["alignment_mode"] == "simplified"
     assert page.sample_offset == 1000
     assert page.individual is None and page.samples == []
+    await user.should_see("Browse scheduled stops; add an individual to annotate.")
     assert (page.review["recorded_start"] is None) == (timestamp is None)
     if timestamp:
         anchor_time = sample_camera_time(page.review, 5000)

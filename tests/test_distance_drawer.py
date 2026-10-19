@@ -1101,7 +1101,7 @@ async def test_delete_active_and_last_animal_restores_drawer(user: User, drawer_
     await wait_for_saved(page, lambda: page.individual_id is None)
     await user.should_not_see("#2")
     await user.should_see("Pause at an animal's first appearance, then add an individual.")
-    assert page.individual_id is None and page.sample_offset is None
+    assert page.individual_id is None and page.sample_offset in page.offsets
     assert data["dp"].list_distance_individuals(data["videos"][0]) == []
 
 

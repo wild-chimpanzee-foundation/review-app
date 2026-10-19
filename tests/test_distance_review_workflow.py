@@ -148,6 +148,38 @@ def distance_page(monkeypatch):
     return page
 
 
+async def test_loading_aligned_video_without_individuals_selects_first_stop(distance_page):
+    page = distance_page
+    page.individuals = []
+    page.individual_id = page.sample_offset = None
+    page.dp.get_distance_review_state = Mock(
+        return_value={
+            "review": {"recorded_start": datetime(2026, 10, 12)},
+            "offsets": [1000, 3000],
+            "samples": [],
+            "active_individual_id": None,
+        }
+    )
+    await page.reload_review()
+    assert page.sample_offset == 1000
+    assert page.individual_id is None
+    page.dp.save_distance_sample.assert_not_called()
+
+
+async def test_schedule_click_and_keyboard_navigation_do_not_require_an_individual(distance_page):
+    page = distance_page
+    page.individuals = []
+    page.individual_id = None
+    await page.on_track_click(SimpleNamespace(series_index=0, data_index=1))
+    assert page.sample_offset == 3000
+    await page.move_sample(1)
+    assert page.sample_offset == 5000
+    assert page.restore_sample.await_count == 2
+    await page.commit_sample()
+    page.dp.save_distance_sample.assert_not_called()
+    page_module.capture_offset.assert_not_awaited()
+
+
 @pytest.mark.parametrize("reason", [None, "individual absent", "midpoint not visible"])
 async def test_save_plays_to_consecutive_even_camera_second(distance_page, reason):
     page = distance_page

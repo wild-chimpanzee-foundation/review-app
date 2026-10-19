@@ -150,6 +150,35 @@ def track_options(
             }
         )
 
+    if not individuals and offsets:
+        labels = [t("distance_scheduled_samples")]
+        schedule = {
+            "id": "schedule",
+            "name": labels[0],
+            "type": "scatter",
+            "symbol": "emptyCircle",
+            "data": [
+                {
+                    "value": [offset / 1000, 0],
+                    "statusLabel": t("distance_scheduled_sample"),
+                    "symbolSize": 12 if offset == current_offset else 9,
+                    "itemStyle": {
+                        "color": "#f59e0b" if offset == current_offset else "#94a3b8",
+                    },
+                }
+                for offset in offsets
+            ],
+        }
+        if current_offset is not None:
+            schedule["markLine"] = {
+                "silent": True,
+                "symbol": "none",
+                "label": {"show": False},
+                "lineStyle": {"color": "#f59e0b", "type": "dashed", "opacity": 0.5},
+                "data": [{"xAxis": current_offset / 1000}],
+            }
+        series.append(schedule)
+
     return {
         "animation": False,
         "legend": {"data": labels, "type": "scroll", "top": 0, "textStyle": {"color": "#94a3b8"}},
@@ -167,6 +196,7 @@ def track_options(
             "nameTextStyle": {"color": "#94a3b8"},
         },
         "yAxis": {
+            "show": bool(individuals),
             "type": "value",
             "min": -band_bottom,
             "max": y_max,

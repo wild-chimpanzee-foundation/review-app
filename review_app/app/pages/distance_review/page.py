@@ -333,6 +333,8 @@ class DistanceReviewPage:
             if any(row["id"] == active for row in self.individuals):
                 self.individual_id = active
             self.resume_sample()
+        elif not self.individual and self.sample_offset not in self.offsets:
+            self.resume_sample()
 
     async def load_sample_timing(self) -> None:
         video = self.video
@@ -828,6 +830,10 @@ class DistanceReviewPage:
     async def on_track_click(self, event) -> None:
         if self.busy or not self.animal_player or not self.offsets:
             return
+        if not self.individuals:
+            if event.series_index == 0 and 0 <= event.data_index < len(self.offsets):
+                await self.choose_sample(self.offsets[event.data_index])
+            return
         # Each animal contributes its distance, interval, and unreviewed series.
         individual_index = event.series_index // 3
         if not 0 <= individual_index < len(self.individuals):
@@ -961,9 +967,12 @@ class DistanceReviewPage:
                     next_id = self.individuals[min(position, len(self.individuals) - 1)]["id"]
                     await self.activate_individual(next_id)
                 else:
-                    self.individual_id = self.sample_offset = self.selected_frame_id = None
+                    self.individual_id = self.selected_frame_id = None
+                    if self.sample_offset not in self.offsets:
+                        self.resume_sample()
                     if self.animal_player:
                         configure_anchor(self.animal_player, None)
+                    await self.restore_sample()
                     self.render_individuals.refresh()
             else:
                 await self.restore_sample()
@@ -1347,7 +1356,7 @@ class DistanceReviewPage:
     @ui.refreshable
     def render_sample_navigation(self) -> None:
         """Show sample timing and replay directly below the animal player."""
-        if not self.review or not self.individual or self.sample_offset is None:
+        if not self.review or self.sample_offset not in self.offsets:
             return
         with ui.row().classes("distance-animal-timing items-center w-full gap-xs"):
             recorded_time = sample_camera_time(self.review, self.sample_offset)
@@ -1357,7 +1366,9 @@ class DistanceReviewPage:
                 else t("distance_sample_relative_time", offset=frame_time(self.sample_offset))
             )
             ui.label(label).classes("text-caption text-weight-medium")
-            if self.sample_offset > 0 and self.animal_player:
+            if not self.individual:
+                ui.label(t("distance_sample_browse_only")).classes("text-caption text-grey-6")
+            if self.sample_seek_offset(self.sample_offset) > 0 and self.animal_player:
                 ui.button(
                     t("distance_play_interval"), icon="replay", on_click=self.replay_interval
                 ).props("flat dense").set_enabled(not self.busy)
