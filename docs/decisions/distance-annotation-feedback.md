@@ -15,8 +15,12 @@ packages, rather than assigned exclusively to one. Each recipient annotates only
 the species assigned to their package. Completion is scoped to that assigned
 species, independently of the other species package.
 
-**To clarify:** What supplies the species labels used to build packages without
-requiring ordinary species review to be complete?
+**Confirmed label source:** Build packages from manual/confirmed species
+annotations, not unconfirmed model predictions. Distance annotation and completion
+remain independent of ordinary species-review completion once those labels exist.
+
+**Still open:** Implement species-based package generation and species-scoped
+annotation/completion.
 
 ## 2. Use a 24-hour timestamp
 
@@ -109,20 +113,29 @@ frame. If the sample is already the opening frame, no lead-in is needed.
 **Implemented:** The first nonzero sample supports replay from playback zero.
 Later samples retain replay from the previous scheduled sample.
 
-## 5. Exactly one mandatory behavior
+## 5. At least one behavior for visible samples
 
-**Confirmed:**
-- Visible distance samples require exactly one behavior.
-- Choose the first behavior manually; there is no fixed initial default.
-- Subsequent samples preselect the preceding confirmed behavior.
+**Revised decision:** For now, require at least one behavior, not exactly one.
+- Visible distance samples with no selected behavior use **Unidentified**.
+- Multiple selected behaviors remain allowed.
+- Existing visible samples with zero behaviors should be set to **Unidentified**;
+  existing multiple-behavior selections are retained.
+- Subsequent samples preselect the preceding confirmed behaviors.
 - **Absent** and **Not visible** allow no behavior and automatically select the
   no-behavior state, rather than requiring a manual behavior choice.
 
 Prefilling should remain a draft until confirmation, rather than saving evidence
 merely because a sample was opened.
 
-**To decide:** How to handle existing visible samples with zero or multiple
-behaviors.
+**Implemented:** Confirming a visible sample with no behavior saves
+**Unidentified**; multiple behaviors are retained. This applies to ordinary saves,
+Apply to end, and carried-infant evidence. Absent/Not visible clears the draft
+selection and disables its behavior field; backend writes also remove behaviors
+for either visibility status. New stops prefill the preceding confirmed behaviors
+without saving them until confirmation. The behavior selector explains the fallback.
+Schema v27 backfills existing zero-behavior visible samples, retains multiple
+visible behaviors, and removes behavior links from skips without changing sample
+provenance, timing, progress, or completion.
 
 ## 6. Live graph preview
 
@@ -236,12 +249,14 @@ panels and any further visual redesign remain deferred.
 
 All ten feedback items are captured. Key clarifications:
 - Mixed-species videos go to both relevant species packages; annotation and
-  completion are scoped to the assigned species.
+  completion are scoped to the assigned species. Package species labels come from
+  manual/confirmed species annotations.
 - Simplified is the frontend default, using an even frame near the midpoint and
   optional time confirmation. Exact remains only as a code-configured workflow.
 - The first-sample lead-in plays from the video opening.
-- Choose the first visible behavior manually, then carry it forward. Absent and
-  Not visible automatically use no behavior.
+- Visible samples require at least one behavior, with **Unidentified** used for
+  zero-behavior selections; multiple behaviors remain allowed. Carry confirmed
+  behaviors forward. Absent and Not visible automatically use no behavior.
 - The graph previews unsaved distance choices.
 - Pop out either full comparison panel independently, or both, with the remaining
   panel expanding in the original tab.

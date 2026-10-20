@@ -167,6 +167,13 @@ samples remain editable; a missing sample row means unreviewed, not absent.
   **Unsaved preview**. This is presentation-only; stored samples and completion are
   unchanged until confirmation. Navigation discards the preview; untouched prefills
   and locked carried-infant evidence do not create graph previews.
+- Visible samples save at least one behavior, with **Unidentified** used when
+  the selection is empty; multiple behaviors are allowed. Behavior prefills are
+  drafts until confirmation. Selecting **Absent** or **Not visible** clears and
+  disables the behavior field; skipped samples save no behaviors. These rules also
+  apply to Apply to end and carried-infant evidence. Schema v27 repairs existing
+  visible samples without behaviors and removes behavior links from skips without
+  altering provenance, timing, progress, or completion.
 - Reference browsing retains sample behaviors, infant choices, visibility choice,
   brightness/contrast, and the animal player. Reuse the reference player on clip
   switches; keep its prior image until the next source has loaded and sought.
