@@ -355,6 +355,10 @@ class DistanceMixin(ProviderBase):
                 reset_tracks=reset_tracks,
             )
 
+    def get_distance_behavior_id(self, key: str) -> str | None:
+        with self.Session() as session:
+            return session.query(Behavior.id).filter_by(key=key).scalar()
+
     def get_distance_behavior_options(self, lang: str = "en") -> dict[str, str]:
         with self.Session() as session:
             return {

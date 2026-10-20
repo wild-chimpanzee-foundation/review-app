@@ -65,6 +65,85 @@ def test_enter_opens_clock_setup_until_aligned_then_confirms_and_a_only_adds():
     ]
 
 
+def test_enter_confirms_behavior_prompt_without_routing_background_actions():
+    source = Path(player_module.__file__).with_name("keyboard.js").read_text()
+    result = run_javascript(
+        """
+        let handler, flags, clicked, prevented;
+        global.window = {addEventListener(type, callback) {handler = callback;}};
+        global.document = {querySelector(selector) {
+            if (selector.includes('data-distance-clock-dialog')) return null;
+            if (!selector.startsWith('.q-dialog')) throw Error('Background action');
+            return {
+                matches() {return true;},
+                querySelector() {
+                    return {disabled:flags.disabled, click() {clicked = true;}};
+                }
+            };
+        }};
+        """
+        + source
+        + """
+        const cases = [
+            ['Enter', {}], ['Enter', {disabled:true}], ['Enter', {ctrlKey:true}],
+            ['ArrowRight', {}], ['Enter', {editable:true}], ['Enter', {repeat:true}]
+        ];
+        const result = cases.map(([key, settings]) => {
+            flags = settings; clicked = false; prevented = false;
+            handler({key, ...settings, target:{closest() {return flags.editable || null;}},
+                preventDefault() {prevented = true;}, stopPropagation() {}});
+            return [clicked, prevented];
+        });
+        console.log(JSON.stringify(result));
+        """
+    )
+    assert result == [[True, True], [False, True], *[[False, False]] * 4]
+
+
+def test_behavior_arrows_move_focus_and_leave_space_escape_and_tab_native():
+    source = Path(player_module.__file__).with_name("keyboard.js").read_text()
+    result = run_javascript(
+        """
+        let handler, focused = 1, prevented, scrolled;
+        global.window = {addEventListener(type, callback) {handler = callback;}};
+        const options = [0, 1, 2].map(index => ({
+            getAttribute(name) {return name === 'aria-checked' && index === 1 ? 'true' : null;},
+            contains(element) {return element === this;},
+            focus() {focused = index; document.activeElement = this;},
+            scrollIntoView() {scrolled = index;}
+        }));
+        const dialog = {
+            matches() {return true;},
+            querySelectorAll() {return options;}
+        };
+        global.document = {
+            activeElement: options[1],
+            querySelector(selector) {
+                if (selector.includes('data-distance-clock-dialog')) return null;
+                if (selector.startsWith('.q-dialog')) return dialog;
+                throw Error('Background action');
+            }
+        };
+        """
+        + source
+        + """
+        const result = ['ArrowDown', 'ArrowDown', 'ArrowUp', ' ', 'Escape', 'Tab'].map(key => {
+            prevented = false; scrolled = null;
+            handler({key, target:{closest() {return null;}},
+                preventDefault() {prevented = true;}, stopPropagation() {}});
+            return [focused, prevented, scrolled];
+        });
+        console.log(JSON.stringify(result));
+        """
+    )
+    assert result == [
+        [2, True, 2],
+        [0, True, 0],
+        [2, True, 2],
+        *[[2, False, None]] * 3,
+    ]
+
+
 def test_arrow_keys_capture_navigation_and_preserve_fields_dialogs_and_shift_seeking():
     source = Path(player_module.__file__).with_name("keyboard.js").read_text()
     result = run_javascript(

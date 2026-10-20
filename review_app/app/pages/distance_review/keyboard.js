@@ -21,7 +21,35 @@ window.addEventListener('keydown', event => {
         }
         return;
     }
-    if (document.querySelector('.q-dialog[aria-modal=true]')) return;
+    const dialog = document.querySelector('.q-dialog[aria-modal=true]');
+    if (dialog) {
+        if (dialog.matches?.('[data-distance-behavior-dialog="true"]')
+            && !event.shiftKey && !event.ctrlKey) {
+            const step = {ArrowUp: -1, ArrowDown: 1}[event.key];
+            if (step !== undefined) {
+                const options = Array.from(dialog.querySelectorAll('[data-distance-behavior-option]'))
+                    .filter(option => option.getAttribute('aria-disabled') !== 'true');
+                if (options.length) {
+                    const current = options.findIndex(option => option.contains(document.activeElement));
+                    const selected = options.findIndex(option => option.getAttribute('aria-checked') === 'true');
+                    const next = current < 0 ? Math.max(0, selected)
+                        : (current + step + options.length) % options.length;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    options[next].focus({preventScroll: true});
+                    options[next].scrollIntoView({block: 'nearest'});
+                }
+            } else if (event.key === 'Enter') {
+                const confirm = dialog.querySelector('[data-distance-behavior-action="confirm"]');
+                if (confirm) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (!confirm.disabled) confirm.click();
+                }
+            }
+        }
+        return;
+    }
     if (event.key === 'j' || event.key === 'J' || event.key === 'k' || event.key === 'K') {
         const cards = Array.from(document.querySelectorAll('[data-distance-individual]'));
         if (cards.length === 0) return;

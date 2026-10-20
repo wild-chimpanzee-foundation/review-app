@@ -171,6 +171,7 @@ class DistanceReviewPage:
         self.sample_offset: int | None = None
         self._graph_preview_key: tuple[str, str, int] | None = None
         self.behavior_options: dict[str, str] = {}
+        self.behavior_dialog: ui.dialog | None = None
         self.sample_values = {"behavior_ids": [], "carries": False, "infant_id": "_new"}
 
     @property
@@ -1482,7 +1483,7 @@ class DistanceReviewPage:
                 self.individuals
                 and all(row["review_status"] == "completed" for row in self.individuals)
             ),
-            on_confirm=self.commit_sample,
+            on_confirm=self.confirm_sample_selection,
             on_select_carrier=self.select_carrier,
             on_apply_to_end=self.apply_to_end_dialog,
             on_finish_video=self.finish_video,
@@ -1602,6 +1603,86 @@ class DistanceReviewPage:
                 apply=apply,
             )
         )
+
+    @stable_client
+    async def confirm_sample_selection(self) -> None:
+        if (
+            self.busy
+            or not self.individual
+            or self.sample_offset is None
+            or not self.animal_player
+        ):
+            return
+        if self.behavior_dialog and self.behavior_dialog.value:
+            return
+        if self.selected_skip_reason or (self.distance_locked and self.sample.get("skip_reason")):
+            await self.commit_sample()
+            return
+        if not self.distance_locked and not any(
+            frame["id"] == self.selected_frame_id for frame in self.frames
+        ):
+            return
+
+        def current_state():
+            return (
+                self.video["video_id"] if self.video else None,
+                self.individual_id,
+                self.sample_offset,
+                self.selected_frame_id,
+                tuple(self.sample_values["behavior_ids"]),
+                self.sample_values["carries"],
+                self.sample_values["infant_id"],
+            )
+
+        state = current_state()
+        selected_behaviors = set(self.sample_values["behavior_ids"])
+        # Enter confirms on keydown; suppress QCheckbox toggling again on keyup.
+        with (
+            ui.dialog().props('data-distance-behavior-dialog="true"') as dialog,
+            ui.card()
+            .classes("w-full")
+            .style("max-width:480px")
+            .on(
+                "keyup.enter.capture",
+                js_handler="event => { event.preventDefault(); event.stopPropagation(); }",
+            ),
+        ):
+            self.behavior_dialog = dialog
+            ui.label(t("distance_select_behaviors")).classes("text-h6")
+            behaviors: dict[str, ui.checkbox] = {}
+            with ui.column().classes("w-full gap-0 overflow-y-auto").style("max-height:45vh"):
+                focus_id = next(
+                    (key for key in self.behavior_options if key in selected_behaviors),
+                    next(iter(self.behavior_options), None),
+                )
+                for behavior_id, label in self.behavior_options.items():
+                    checkbox = (
+                        ui.checkbox(label, value=behavior_id in selected_behaviors)
+                        .props('data-distance-behavior-option="true"')
+                        .classes("distance-behavior-option w-full")
+                    )
+                    if behavior_id == focus_id:
+                        checkbox.props("autofocus")
+                    behaviors[behavior_id] = checkbox
+            ui.label(t("distance_behaviors_keyboard_help")).classes("text-caption text-grey-6")
+
+            @self.client_handler
+            async def confirm():
+                if not dialog.value or self.busy or current_state() != state:
+                    dialog.close()
+                    return
+                self.sample_values["behavior_ids"] = [
+                    behavior_id for behavior_id, checkbox in behaviors.items() if checkbox.value
+                ]
+                dialog.close()
+                await self.commit_sample()
+
+            with ui.row().classes("w-full justify-end"):
+                ui.button(t("cancel"), on_click=dialog.close).props("flat")
+                ui.button(t("distance_confirm_behaviors"), on_click=confirm).props(
+                    'data-distance-behavior-action="confirm"'
+                )
+        dialog.open()
 
     @stable_client
     async def commit_sample(self, reason: str | None = None) -> None:

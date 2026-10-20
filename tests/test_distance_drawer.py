@@ -1345,12 +1345,16 @@ async def test_sample_shows_selected_and_saved_reference_distance(user: User, dr
     await user.should_see("7.25 m")
 
 
+@pytest.mark.parametrize("behavior", ["Walking", "Grazing"])
 async def test_accepting_reference_plays_to_next_frame_with_distance_preselected(
-    user: User, drawer_page, monkeypatch
+    user: User, drawer_page, monkeypatch, behavior
 ):
     holder, data, _ = drawer_page
     dp = data["dp"]
     frame = dp.add_reference_frame(data["reference"]["id"], 6500, 7.25)
+    dp.add_custom_behavior("walking", "Walking", "Marcher")
+    walking_id = dp.get_distance_behavior_id("walking")
+    behavior_id = walking_id if behavior == "Walking" else data["behavior_id"]
     dp.verify_distance_recording_time(
         data["videos"][0], datetime(2026, 10, 12, 16, 2, 49), "alice"
     )
@@ -1374,8 +1378,6 @@ async def test_accepting_reference_plays_to_next_frame_with_distance_preselected
         page.render_sample_actions()
         page.render_frames()
     await user.should_not_see(ui.input)
-    user.find("Sample behaviors").click()
-    user.find("Grazing").click()
     user.find("Carries an infant").click()
     interaction = user.find(ui.button)
     interaction.elements = {
@@ -1384,19 +1386,49 @@ async def test_accepting_reference_plays_to_next_frame_with_distance_preselected
         if element.props.get("data-distance-action") == "confirm"
     }
     interaction.click()
+    await user.should_see("Select sample behaviors")
+    assert page.sample_offset == 1000
+    assert dp.get_distance_review_state(data["videos"][0], "alice")["samples"] == []
+    behavior_checkboxes = {
+        element.text: element
+        for element in page.behavior_dialog.descendants()
+        if isinstance(element, ui.checkbox)
+    }
+    assert not any(checkbox.value for checkbox in behavior_checkboxes.values())
+    with user:
+        behavior_checkboxes[behavior].set_value(True)
+    user.find("Confirm behavior and advance").click()
     await wait_for_saved(
         page, lambda: len(dp.get_distance_review_state(data["videos"][0], "alice")["samples"]) == 2
     )
     saved = dp.get_distance_review_state(data["videos"][0], "alice")["samples"][0]
     assert saved["distance_m"] == 7.25 and saved["reference_frame_id"] == frame["id"]
+    assert saved["behavior_ids"] == [behavior_id]
     assert page.sample_offset == 3000
     playback.assert_awaited_once_with(page.animal_player, 1000.01, 3000.01)
     page.seek_sample.assert_not_called()
     assert page.selected_frame_id == frame["id"]
     await user.should_see("Selected reference: 7.25 m")
-    assert page.sample_values["behavior_ids"] == [data["behavior_id"]]
+    assert page.sample_values["behavior_ids"] == [behavior_id]
     assert page.sample_values["carries"]
     assert page.sample_values["infant_id"] != "_new"
+
+    # The next prompt inherits the previous sample; Enter uses this same confirm action.
+    with user:
+        await page.confirm_sample_selection()
+    behavior_checkboxes = {
+        element.text: element
+        for element in page.behavior_dialog.descendants()
+        if isinstance(element, ui.checkbox)
+    }
+    assert [label for label, checkbox in behavior_checkboxes.items() if checkbox.value] == [
+        behavior
+    ]
+    monkeypatch.setattr(page_module, "capture_offset", AsyncMock(return_value=3000))
+    user.find("Confirm behavior and advance").click()
+    await wait_for_saved(page, lambda: page.sample_offset == 5000)
+    saved = dp.get_distance_review_state(data["videos"][0], "alice")["samples"]
+    assert all(row["behavior_ids"] == [behavior_id] for row in saved if row["offset_ms"] == 3000)
 
 
 async def test_sample_details_and_skip_actions_render_with_reference_distances(
