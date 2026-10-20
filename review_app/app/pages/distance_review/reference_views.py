@@ -159,9 +159,6 @@ def render_frames(context: ReferenceViewsContext) -> None:
     if not context.frames:
         ui.label(t("distance_no_prepared_frames")).classes("text-caption text-grey-6")
     choices = distance_choices(context)
-    position = next(
-        (i for i, frame in enumerate(choices) if frame["id"] == context.selection_id), -1
-    )
     with ui.element("div").classes("distance-choice-toolbar"):
         with ui.row().classes("distance-choice-navigation items-center gap-1 no-wrap"):
             ui.button(
@@ -172,7 +169,7 @@ def render_frames(context: ReferenceViewsContext) -> None:
                 context.busy_state,
                 "busy",
                 backward=lambda busy: bool(
-                    choices and position > 0 and not busy and not context.distance_locked
+                    len(choices) > 1 and not busy and not context.distance_locked
                 ),
             )
             ui.button(icon="keyboard_arrow_up", on_click=lambda: context.move_distance(1)).props(
@@ -181,14 +178,11 @@ def render_frames(context: ReferenceViewsContext) -> None:
                 context.busy_state,
                 "busy",
                 backward=lambda busy: bool(
-                    choices
-                    and position < len(choices) - 1
-                    and not busy
-                    and not context.distance_locked
+                    len(choices) > 1 and not busy and not context.distance_locked
                 ),
             )
             ui.icon("keyboard", size="xs").classes("text-grey-6").tooltip(t("distance_arrow_help"))
-        with ui.row().classes("distance-frames"):
+        with ui.row().classes("distance-frames") as distance_strip:
             for frame in sorted(
                 context.frames, key=lambda row: (row["distance_m"], row["offset_ms"])
             ):
@@ -196,12 +190,23 @@ def render_frames(context: ReferenceViewsContext) -> None:
                     f"{frame['distance_m']:g} m",
                     on_click=lambda _e, frame=frame: context.preview_frame(frame),
                 ).props(
-                    "dense unelevated" if frame["id"] == context.selection_id else "dense outline"
+                    (
+                        "dense unelevated"
+                        if frame["id"] == context.selection_id
+                        else "dense outline"
+                    )
+                    + f' aria-pressed="{str(frame["id"] == context.selection_id).lower()}"'
                 ).tooltip(frame_time(frame["offset_ms"])).bind_enabled_from(
                     context.busy_state,
                     "busy",
                     backward=lambda busy: not busy and not context.distance_locked,
                 )
+        ui.run_javascript(
+            Path(__file__)
+            .with_name("distance_choice_scroll.js")
+            .read_text()
+            .replace("__STRIP_ID__", str(distance_strip.id))
+        )
         with ui.row().classes("distance-visibility-choices gap-1 no-wrap"):
             for choice in context.skip_choices:
                 ui.button(

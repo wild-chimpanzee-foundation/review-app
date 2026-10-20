@@ -2067,7 +2067,7 @@ class DistanceReviewPage:
         position = next(
             (i for i, frame in enumerate(choices) if frame["id"] == self.selected_frame_id), None
         )
-        target = 0 if position is None else max(0, min(len(choices) - 1, position + delta))
+        target = 0 if position is None else (position + delta) % len(choices)
         if choices[target]["id"] != self.selected_frame_id:
             self.preview_frame(choices[target])
 

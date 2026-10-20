@@ -1494,7 +1494,7 @@ async def test_visibility_selection_clears_and_disables_behavior_draft(
 
 
 async def test_sample_details_and_skip_actions_render_with_reference_distances(
-    user: User, drawer_page
+    user: User, drawer_page, monkeypatch
 ):
     holder, data, _ = drawer_page
     dp = data["dp"]
@@ -1513,6 +1513,8 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
     page.render_timing = Mock()
     del page.render_samples
     del page.render_sample_actions
+    javascript = Mock(wraps=ui.run_javascript)
+    monkeypatch.setattr(ui, "run_javascript", javascript)
     with user:
         with ui.column() as reference_area:
             page.render_references()
@@ -1535,8 +1537,9 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
     }
     assert sample_labels <= labels(reference_area)
     assert sample_labels.isdisjoint(labels(sidebar))
-    assert {"Confirm selection and advance", "Apply to end"} <= labels(reference_area)
-    assert {"Confirm selection and advance", "Apply to end"}.isdisjoint(labels(sidebar))
+    actions = {"Confirm selection and advance", "Apply to end"}
+    assert actions <= labels(reference_area)
+    assert actions.isdisjoint(labels(sidebar))
     assert any(
         element.props.get("data-distance-action") == "finish-video"
         for element in sidebar.descendants()
@@ -1554,6 +1557,20 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
         if "distance-visibility-choices" in element.classes
     )
     assert "5 m" in labels(distance_strip)
+    selected_button = next(
+        element for element in distance_strip.descendants() if isinstance(element, ui.button)
+    )
+    assert selected_button.props["aria-pressed"] == "true"
+    assert not any(isinstance(element, ui.scroll_area) for element in reference_area.descendants())
+    assert any(
+        f"getHtmlElement({distance_strip.id})" in call.args[0]
+        for call in javascript.call_args_list
+    )
+    assert all(
+        element.enabled
+        for element in reference_area.descendants()
+        if element.props.get("data-distance-action") in {"distance-down", "distance-up"}
+    )
     assert {"Not visible", "Absent"}.isdisjoint(labels(distance_strip))
     assert {"Not visible", "Absent"} <= labels(visibility_row)
     assert "5 m" not in labels(visibility_row)
@@ -1603,6 +1620,34 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
     await user.should_see("Selected reference: 7.25 m")
     assert "Selected reference: 7.25 m" in labels(reference_area)
     assert "Saved distance: 5 m" in labels(reference_area)
+    refreshed_strip = next(
+        element for element in reference_area.descendants() if "distance-frames" in element.classes
+    )
+    selected_buttons = [
+        element
+        for element in refreshed_strip.descendants()
+        if isinstance(element, ui.button) and element.props["aria-pressed"] == "true"
+    ]
+    assert [button.text for button in selected_buttons] == ["7.25 m"]
+    assert any(
+        f"getHtmlElement({refreshed_strip.id})" in call.args[0]
+        for call in javascript.call_args_list
+    )
+    # Both endpoints stay enabled: lowest distance -> Absent -> lowest distance.
+    with user:
+        page.move_distance(-1)
+        page.move_distance(-1)
+    await user.should_see("Selected: Absent")
+    assert page.selected_skip_reason == "individual absent"
+    assert all(
+        element.enabled
+        for element in reference_area.descendants()
+        if element.props.get("data-distance-action") in {"distance-down", "distance-up"}
+    )
+    with user:
+        page.move_distance(1)
+    await user.should_see("Selected reference: 5 m")
+    assert page.selected_frame_id == data["frame"]["id"]
 
 
 @pytest.mark.parametrize(

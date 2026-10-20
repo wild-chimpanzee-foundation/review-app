@@ -555,7 +555,10 @@ def test_distance_arrows_use_numeric_order_and_skip_duplicate_distances(distance
     page.move_distance(1)
     assert page.selected_skip_reason == "individual absent"
     page.move_distance(1)
-    assert page.preview_frame.call_count == 3
+    assert page.selected_frame_id == "close"
+    assert page.preview_frame.call_count == 4
+    page.move_distance(-1)
+    assert page.selected_skip_reason == "individual absent"
     page.move_distance(-1)
     assert page.selected_skip_reason == "midpoint not visible"
     page.move_distance(-1)
@@ -565,10 +568,11 @@ def test_distance_arrows_use_numeric_order_and_skip_duplicate_distances(distance
     page.move_distance(-1)
     assert page.selected_frame_id == "close"
     page.move_distance(-1)
-    assert page.preview_frame.call_count == 7
+    assert page.selected_skip_reason == "individual absent"
+    assert page.preview_frame.call_count == 10
     page.busy = True
     page.move_distance(1)
-    assert page.selected_frame_id == "close"
+    assert page.selected_skip_reason == "individual absent"
 
 
 @pytest.mark.parametrize("reason", ["midpoint not visible", "individual absent"])
