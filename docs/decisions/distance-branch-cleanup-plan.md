@@ -159,20 +159,21 @@ approval and an explicit verified force-with-lease.
 - This is bounded UI/media validation, not a full application/real-footage review.
   No live application database was used or changed.
 
-### Converter operation
+### Development database repair (supersedes converter operation)
 
-Run from the cleanup worktree against a backup, not the live database:
+The development converter and its tests have been removed. Distance has no
+published installations to support; migrations 1–22 remain unchanged and all
+unreleased Distance changes are consolidated into one schema-creation migration 23.
 
-```sh
-uv run python -m scripts.rebuild_distance_dev_db --source original-v29.db --output rebuilt-v23.db
-# Review the retained fingerprints and discarded row counts, then create a new file:
-uv run python -m scripts.rebuild_distance_dev_db --source original-v29.db --output rebuilt-v23.db --execute
-```
+The sole local database was backed up on 2026-10-20. Its tables, columns,
+constraints and indexes already matched the final schema, so its version stamp
+was manually aligned from 31 to 23 without rebuilding tables or resetting
+annotations. All application rows were fingerprinted before and after; 26
+Distance individuals and 560 samples were preserved. SQLite integrity and foreign
+keys passed. The backup and JSON verification report are under
+`~/.local/share/VideoAnnotation/backups/review_before_distance_consolidation_20261020T142642_051952Z_v31.*`.
 
-Output must not already exist. Source/output cannot be the same file. The command
-never installs its output. In multi-root projects, external references must have
-an unambiguous registered-root path; equal camera labels alone no longer match.
-Single-root explicit external reference assignments remain supported.
+The converter proposal below is historical, not a current supported workflow.
 
 ## Decisions
 
@@ -270,9 +271,10 @@ Acceptance: both fresh install and v22 upgrade produce final v23 with ordinary
 records/IDs unchanged. No automatic migration from the old private v23–29 chain
 is promised. Its version numbers now describe a different history.
 
-### 3. Build a one-off development database converter
+### 3. Build a one-off development database converter (retired)
 
-Proposed file: `scripts/rebuild_distance_dev_db.py`; focused converter tests.
+Historical proposal, superseded by the manual database repair above. No converter
+or converter tests remain in the repository.
 
 This is a local maintenance command, not an application-startup migration.
 
