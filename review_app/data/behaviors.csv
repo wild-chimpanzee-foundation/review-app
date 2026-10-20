@@ -3,6 +3,7 @@ scientific_name;key;name_en;name_fr
 *;inspection;Inspecting;Inspecter
 *;staring_at_camera;Staring at camera;Regarder la caméra
 *;run_away;Running away;S'enfuir
+*;walking;Walking;Marcher
 *;getting_closer;Getting closer;S'approcher
 *;stop;Stopping;S'arrêter
 *;rest;Resting;Se reposer
