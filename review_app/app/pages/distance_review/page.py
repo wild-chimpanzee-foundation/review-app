@@ -1398,9 +1398,11 @@ class DistanceReviewPage:
             if not self.individual:
                 ui.label(t("distance_sample_browse_only")).classes("text-caption text-grey-6")
             if self.sample_seek_offset(self.sample_offset) > 0 and self.animal_player:
-                ui.button(
+                with ui.button(
                     t("distance_play_interval"), icon="replay", on_click=self.replay_interval
-                ).props("flat dense").set_enabled(not self.busy)
+                ).props('flat dense data-distance-action="replay"') as replay:
+                    _shortcut_badge("R")
+                replay.set_enabled(not self.busy)
 
     @stable_client
     async def replay_interval(self) -> None:

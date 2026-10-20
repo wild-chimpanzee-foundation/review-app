@@ -333,6 +333,47 @@ def test_arrow_keys_capture_navigation_and_preserve_fields_dialogs_and_shift_see
     ]
 
 
+def test_r_replays_current_sample_without_resetting_filters_and_respects_guards():
+    source = Path(player_module.__file__).with_name("keyboard.js").read_text()
+    result = run_javascript(
+        """
+        let handler, flags, clicked, prevented, stopped;
+        global.window = {addEventListener(type, callback) {handler = callback;}};
+        global.document = {querySelector(selector) {
+            if (selector.includes('data-distance-clock-dialog')) return null;
+            if (selector.startsWith('.q-dialog')) return flags.dialog ? {} : null;
+            if (selector !== '[data-distance-action="replay"]') throw Error('Wrong action');
+            return flags.missing ? null : {
+                disabled:flags.disabled, click() {clicked = true;}
+            };
+        }};
+        """
+        + source
+        + """
+        const cases = [
+            ['r', {}], ['R', {}], ['r', {disabled:true}], ['R', {missing:true}],
+            ['r', {editable:true}], ['R', {dialog:true}], ['r', {ctrlKey:true}],
+            ['R', {metaKey:true}], ['r', {altKey:true}], ['r', {repeat:true}],
+            ['r', {isComposing:true}],
+        ];
+        const results = cases.map(([key, settings]) => {
+            flags = settings; clicked = false; prevented = false; stopped = false;
+            handler({key, ...settings, target:{closest() {return flags.editable || null;}},
+                preventDefault() {prevented = true;}, stopPropagation() {stopped = true;}});
+            return [clicked, prevented, stopped];
+        });
+        console.log(JSON.stringify(results));
+        """
+    )
+    assert result == [
+        [True, True, True],
+        [True, True, True],
+        [False, True, True],
+        [False, True, True],
+        *[[False, False, False]] * 7,
+    ]
+
+
 def test_individual_keys_dispatch_card_selection_and_respect_navigation_guards():
     source = Path(player_module.__file__).with_name("keyboard.js").read_text()
     result = run_javascript(

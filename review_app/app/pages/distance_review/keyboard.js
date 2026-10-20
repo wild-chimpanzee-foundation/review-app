@@ -82,7 +82,7 @@ window.addEventListener('keydown', event => {
     const action = applyToEnd ? 'apply-to-end' : {
         ArrowDown: 'distance-down', ArrowUp: 'distance-up',
         Enter: 'confirm', a: 'add', A: 'add', n: 'next', N: 'next', p: 'previous', P: 'previous',
-        Tab: 'next-reference',
+        Tab: 'next-reference', r: 'replay', R: 'replay',
     }[event.key];
     if (!action) return;
     const clockButton = action === 'confirm'
@@ -90,8 +90,9 @@ window.addEventListener('keydown', event => {
             || document.querySelector('[data-distance-action="rail-clock"]')
         : null;
     const button = clockButton || document.querySelector(`[data-distance-action="${action}"]`);
-    if (!button) return;
+    // Reserve R even when replay is unavailable; do not reset the player filters.
+    if (!button && action !== 'replay') return;
     event.preventDefault();
     event.stopPropagation();
-    if (!button.disabled) button.click();
+    if (button && !button.disabled) button.click();
 }, {signal: window.__distanceKeys.signal, capture: true});

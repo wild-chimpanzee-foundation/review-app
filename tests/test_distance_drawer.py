@@ -211,9 +211,14 @@ async def test_sample_timing_is_below_video_and_progress_is_in_selected_card(
     assert player.parent_slot is timing_container.parent_slot
     siblings = player.parent_slot.children
     assert siblings.index(timing_container) == siblings.index(player) + 1
-    assert any(
-        isinstance(element, ui.button) and element.props.get("icon") == "replay"
+    replay = next(
+        element
         for element in timing.descendants()
+        if isinstance(element, ui.button) and element.props.get("icon") == "replay"
+    )
+    assert replay.props["data-distance-action"] == "replay"
+    assert any(
+        isinstance(element, ui.badge) and element.text == "R" for element in replay.descendants()
     )
     assert not any(
         "samples reviewed" in (getattr(element, "text", "") or "")
