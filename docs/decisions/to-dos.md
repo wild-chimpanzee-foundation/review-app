@@ -69,6 +69,10 @@ When a user creates a custom behavior/species from the annotation UI, it's immed
 
 ## Data & Export
 
+### Figure out a shared import interface
+
+Define a shared import interface and workflow across the supported import types.
+
 ### Export: change model blank/non-blank column to raw probability
 
 The export pivots `ModelAnnotation` rows to wide format with `model_name__annotation_type` column headers. Currently the `blank_non_blank` column likely shows the predicted class label (`"blank"`/`"non_blank"`) rather than the raw probability float. The `probability` field exists on `ModelAnnotation` — just change which field gets pivoted into the value vs. a separate `__prob` column.
