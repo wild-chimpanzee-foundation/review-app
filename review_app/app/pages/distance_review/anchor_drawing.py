@@ -14,6 +14,7 @@ from review_app.app.pages.distance_review.player import (
     seek_paused,
     stop_player,
 )
+from review_app.app.pages.distance_review.reference_media import individual_frame_offset
 from review_app.app.pages.review.video_player import render_custom_video_player
 from review_app.app.translations import t
 
@@ -35,7 +36,7 @@ def render_fixed_frame_anchor_preview(
     filters: dict,
 ) -> None:
     """Draw and validate a box on the captured first-seen frame only."""
-    offset_ms = draft["first_seen_offset_ms"]
+    offset_ms = individual_frame_offset(draft)
     preview = render_custom_video_player(
         context.player_source,
         context.duration_sec,

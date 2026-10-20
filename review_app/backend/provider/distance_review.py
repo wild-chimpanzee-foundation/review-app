@@ -5,16 +5,20 @@ from __future__ import annotations
 import math
 from datetime import datetime
 
+from review_app.backend.camera_layout import deployment_key
 from review_app.backend.db.models import (
     DistanceIndividual,
     DistanceReviewProgress,
     DistanceSample,
     DistanceSampleBehavior,
     DistanceVideoReview,
+    ProjectDir,
     ReferenceFrame,
+    ReferenceVideo,
     Video,
 )
 from review_app.backend.distance_timing import sample_offsets
+from review_app.backend.path_matching import normalize_path_str
 
 
 def _record(row) -> dict:
@@ -30,6 +34,7 @@ def review_offsets(review, duration_sec: float | None) -> list[int]:
             opening_even_second=review.opening_even_second,
             alignment_mode=review.alignment_mode,
             clock_anchor_playback_ms=review.clock_anchor_playback_ms,
+            imported_sample_times_s=review.imported_sample_times_s,
         )
     except ValueError:
         # Keep evidence readable when a re-probe invalidates an existing schedule.
@@ -49,7 +54,12 @@ def refresh_individual_completion(
         if review
         else set()
     )
-    samples = session.query(DistanceSample).filter_by(individual_id=individual.id).all()
+    samples = (
+        session.query(DistanceSample)
+        .filter_by(individual_id=individual.id)
+        .filter(DistanceSample.status != "pending")
+        .all()
+    )
     if expected and expected.issubset({row.offset_ms for row in samples}):
         individual.review_status = "completed"
         if individual.completed_at is None:
@@ -68,10 +78,17 @@ def refresh_individual_completion(
 
 
 def reopen_individual_review(session, individual: DistanceIndividual) -> None:
+    mark_review_started(session, individual.video_id)
     refresh_individual_completion(session, individual)
     review = session.get(DistanceVideoReview, individual.video_id)
     if review:
         review.completed_by = review.completed_at = None
+
+
+def mark_review_started(session, video_id: str) -> None:
+    review = session.get(DistanceVideoReview, video_id)
+    if review and review.started_at is None:
+        review.started_at = datetime.now()
 
 
 def reconcile_video_completion(session, video_id: str) -> None:
@@ -119,12 +136,37 @@ def get_review_state(session, video_id: str, annotator_name: str) -> dict:
         .order_by(DistanceSampleBehavior.behavior_id)
     ):
         behaviors.setdefault(sample_id, []).append(behavior_id)
+    suggestions = (
+        _suggestion_frames(session, video) if any(row.ai_original for row in rows) else {}
+    )
     samples = []
     for row in rows:
         frame = frames.get(row.reference_frame_id)
+        suggested = None
+        if row.ai_original and not row.ai_original.get("skip_reason"):
+            suggested = suggestions.get(row.ai_original.get("reference_frame_id"))
+            if suggested is None:
+                suggested = min(
+                    suggestions.values(),
+                    key=lambda f: (
+                        abs(f.distance_m - row.ai_original["predicted_distance_m"]),
+                        f.distance_m,
+                        f.id,
+                    ),
+                    default=None,
+                )
         samples.append(
             {
                 **_record(row),
+                "suggestion": {
+                    "predicted_distance_m": row.ai_original.get("predicted_distance_m"),
+                    "skip_reason": row.ai_original.get("skip_reason"),
+                    "reference_frame_id": suggested.id if suggested else None,
+                    "reference_video_id": suggested.reference_video_id if suggested else None,
+                    "distance_m": suggested.distance_m if suggested else None,
+                }
+                if row.ai_original
+                else None,
                 "behavior_ids": behaviors.get(row.id, []),
                 "reference_video_id": frame.reference_video_id if frame else None,
             }
@@ -135,6 +177,37 @@ def get_review_state(session, video_id: str, annotator_name: str) -> dict:
         "offsets": offsets,
         "samples": samples,
         "active_individual_id": progress.active_individual_id if progress else None,
+    }
+
+
+def _suggestion_frames(session, video):
+    """Only currently available references in this deployment may be suggested."""
+    from review_app.backend.provider.distance_references import reference_tagged
+
+    roots = [
+        (row.id, row.path)
+        for row in session.query(ProjectDir).filter_by(project_id=video.project_id)
+    ]
+    scope = deployment_key(video.project_id, video.camera_id, video.video_path, roots)
+    paths = {
+        normalize_path_str(source.video_path)
+        for source in session.query(Video).filter(
+            Video.project_id == video.project_id,
+            Video.is_missing.is_(False),
+            reference_tagged(session),
+        )
+        if scope is not None
+        and deployment_key(source.project_id, source.camera_id, source.video_path, roots) == scope
+    }
+    return {
+        frame.id: frame
+        for frame, source in session.query(ReferenceFrame, ReferenceVideo)
+        .join(ReferenceVideo, ReferenceFrame.reference_video_id == ReferenceVideo.id)
+        .filter(
+            ReferenceVideo.project_id == video.project_id,
+            ReferenceVideo.camera_id == video.camera_id,
+        )
+        if normalize_path_str(source.video_path) in paths
     }
 
 
@@ -176,6 +249,24 @@ def finish_video(session, video_id: str, annotator_name: str, now) -> None:
         )
     review.completed_by = annotator_name
     review.completed_at = now
+
+
+def reset_video_evidence(session, video_id: str) -> None:
+    """Clear a video's human Distance work, retaining references and ordinary Review."""
+    individuals = session.query(DistanceIndividual.id).filter_by(video_id=video_id)
+    # Infant samples may reference another individual; remove all samples first.
+    session.query(DistanceSample).filter(DistanceSample.individual_id.in_(individuals)).delete(
+        synchronize_session=False
+    )
+    session.query(DistanceReviewProgress).filter_by(video_id=video_id).delete(
+        synchronize_session=False
+    )
+    session.query(DistanceIndividual).filter_by(video_id=video_id).delete(
+        synchronize_session=False
+    )
+    review = session.get(DistanceVideoReview, video_id)
+    if review:
+        review.completed_by = review.completed_at = None
 
 
 def verify_recording_time(
@@ -257,23 +348,15 @@ def verify_recording_time(
                 "Changing clock alignment requires resetting this video's Distance review"
             )
         if reset_tracks:
-            # Delete samples first: infant evidence can reference a different track.
-            individuals = session.query(DistanceIndividual.id).filter_by(video_id=video_id)
-            session.query(DistanceSample).filter(
-                DistanceSample.individual_id.in_(individuals)
-            ).delete(synchronize_session=False)
-            session.query(DistanceReviewProgress).filter_by(video_id=video_id).delete(
-                synchronize_session=False
-            )
-            session.query(DistanceIndividual).filter_by(video_id=video_id).delete(
-                synchronize_session=False
-            )
-            review.completed_by = review.completed_at = None
+            reset_video_evidence(session, video_id)
     if review is None:
         review = DistanceVideoReview(video_id=video_id)
         session.add(review)
     review.recorded_start = recorded_start
     review.alignment_mode = alignment_mode
+    review.imported_sample_times_s = None
+    review.import_id = None
+    review.started_at = None if reset_tracks else review.started_at
     review.clock_anchor_offset_ms = clock_anchor_offset_ms
     review.clock_anchor_playback_ms = clock_anchor_playback_ms
     review.opening_even_second = opening_even_second

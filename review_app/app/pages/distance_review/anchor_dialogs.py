@@ -11,7 +11,10 @@ from review_app.app.pages.distance_review.anchor_drawing import (
     render_fixed_frame_anchor_preview,
 )
 from review_app.app.pages.distance_review.dialog_keyboard import keyboard_dialog_card
-from review_app.app.pages.distance_review.reference_media import frame_time
+from review_app.app.pages.distance_review.reference_media import (
+    frame_time,
+    individual_frame_offset,
+)
 from review_app.app.translations import t
 
 
@@ -49,7 +52,7 @@ def _fixed_preview(context: AnchorDialogContext, dialog, draft, on_anchor) -> No
 
 async def open_redraw_anchor_dialog(context: AnchorDialogContext) -> None:
     row = context.row
-    offset_ms = row["first_seen_offset_ms"]
+    offset_ms = individual_frame_offset(row)
     draft = dict(row)
     geometry = None
     with ui.dialog() as dialog, keyboard_dialog_card().classes("distance-dialog distance-player"):

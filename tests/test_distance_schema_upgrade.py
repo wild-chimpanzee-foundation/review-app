@@ -92,67 +92,45 @@ def test_failed_v23_upgrade_rolls_back_ddl_data_and_version(legacy_database, mon
     migrations.run_migrations(engine)
 
 
-@pytest.mark.parametrize("fail_first", [False, True])
-def test_v26_preserves_distance_evidence_and_allows_unknown_age(
-    legacy_database, monkeypatch, fail_first
-):
+def test_v22_upgrade_creates_final_distance_schema_directly(legacy_database):
     engine = legacy_database
-    with monkeypatch.context() as patch:
-        patch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:25])
-        migrations.run_migrations(engine)
+    migrations.run_migrations(engine)
     with engine.begin() as conn:
+        assert conn.exec_driver_sql("SELECT version FROM _schema_version").scalar() == 23
+        tables = {
+            row[0]
+            for row in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "distance_imports" in tables
+        assert not any(name.startswith("distance_ai_") for name in tables)
         conn.exec_driver_sql("""
             INSERT INTO distance_individuals
                 (id, video_id, individual_number, species_id, age, sex,
-                 first_seen_offset_ms, updated_at, initial_carrier_individual_id)
-            VALUES ('adult', 'video', 1, 'species', 'Adult', 'Female', 0, '2026-01-01', NULL),
-                   ('infant', 'video', 2, 'species', 'Infant', 'Unknown', 0, '2026-01-01', 'adult'),
-                   ('unset', 'video', 3, 'species', NULL, NULL, 0, '2026-01-01', NULL)
+                 first_seen_offset_ms, first_seen_playback_ms, updated_at)
+            VALUES ('animal', 'video', 1, 'species', 'Unknown', 'Unknown',
+                    1250, 1250.000001, '2026-01-01')
         """)
         conn.exec_driver_sql("""
-            INSERT INTO distance_samples
-                (id, individual_id, offset_ms, status, skip_reason, updated_at)
-            VALUES ('sample', 'adult', 0, 'skipped', 'individual absent', '2026-01-01')
-        """)
-        conn.exec_driver_sql("""
-            INSERT INTO distance_review_progress
-                (video_id, annotator_name, active_individual_id, updated_at)
-            VALUES ('video', 'alice', 'infant', '2026-01-01')
+            INSERT INTO distance_individuals
+                (id, video_id, individual_number, species_id, age,
+                 first_seen_offset_ms, initial_carrier_individual_id, updated_at)
+            VALUES ('infant', 'video', 2, 'species', 'Infant',
+                    1250, 'animal', '2026-01-01')
         """)
         conn.exec_driver_sql("""
             INSERT INTO distance_video_reviews
-                (video_id, recorded_start, verified_by, verified_at, completed_by, completed_at)
-            VALUES ('video', '2026-01-01', 'alice', '2026-01-01', 'alice', '2026-01-01')
+                (video_id, alignment_mode, imported_sample_times_s, verified_by, verified_at)
+            VALUES ('video', 'imported', '[1.250000001]', 'AI', '2026-01-01')
         """)
-        tables = ("distance_individuals", "distance_samples", "distance_review_progress")
-        before = {table: conn.exec_driver_sql(f"SELECT * FROM {table}").all() for table in tables}
-    if fail_first:
-        with engine.connect() as conn:
-            dump = list(conn.connection.driver_connection.iterdump())
-
-        def fail_after_rebuild(conn):
-            migrations._migration_v26(conn)
-            raise RuntimeError("abort age migration")
-
-        with monkeypatch.context() as patch:
-            patch.setattr(
-                migrations,
-                "MIGRATIONS",
-                [(v, fail_after_rebuild if v == 26 else m) for v, m in migrations.MIGRATIONS],
-            )
-            with pytest.raises(RuntimeError, match="abort age migration"):
-                migrations.run_migrations(engine)
-        with engine.connect() as conn:
-            assert list(conn.connection.driver_connection.iterdump()) == dump
-            assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
-    migrations.run_migrations(engine)
-    migrations.run_migrations(engine)
-    with engine.begin() as conn:
-        for table in tables:
-            assert conn.exec_driver_sql(f"SELECT * FROM {table}").all() == before[table]
+        conn.exec_driver_sql("""
+            INSERT INTO distance_samples
+                (id, individual_id, offset_ms, status, ai_original, updated_at)
+            VALUES ('proposal', 'animal', 1250, 'pending', '{"time_s": 1.250000001}', '2026-01-01')
+        """)
         assert conn.exec_driver_sql(
-            "SELECT completed_by, completed_at FROM distance_video_reviews"
+            "SELECT recorded_start, started_at FROM distance_video_reviews"
         ).one() == (None, None)
-        conn.exec_driver_sql("UPDATE distance_individuals SET age='Unknown' WHERE id='unset'")
+        assert conn.exec_driver_sql(
+            "SELECT reference_frame_id, distance_m, labeled_by, labeled_at FROM distance_samples"
+        ).one() == (None, None, None, None)
         assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
-        assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1

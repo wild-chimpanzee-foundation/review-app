@@ -81,7 +81,9 @@ def distance_page(monkeypatch):
     page.client = nullcontext()
     page.busy = False
     page.individual_id = "adult"
-    page.individuals = [{"id": "adult", "age": "Adult", "species_id": "deer"}]
+    page.individuals = [
+        {"id": "adult", "age": "Adult", "species_id": "deer", "first_seen_offset_ms": 500}
+    ]
     page.project_id = "test-project"
     page.species_filter = page.camera_filter = page.status_filter = None
     monkeypatch.setattr(page_module, "set_distance_queue_state", Mock())
@@ -147,6 +149,95 @@ def distance_page(monkeypatch):
 
     monkeypatch.setattr(page_module.run, "io_bound", io_bound)
     return page
+
+
+async def test_ai_prefill_restores_without_saving_and_saved_evidence_wins(distance_page):
+    page = distance_page
+    page.reference = {"id": "ai-reference"}
+    page.frames = [
+        {"id": "ai-frame", "distance_m": 3, "offset_ms": 500},
+        {"id": "corrected-frame", "distance_m": 5, "offset_ms": 750},
+    ]
+    page.samples = [
+        {
+            "individual_id": "adult",
+            "offset_ms": 1000,
+            "status": "pending",
+            "suggestion": {
+                "reference_frame_id": "ai-frame",
+                "reference_video_id": "ai-reference",
+                "predicted_distance_m": 2.696,
+                "distance_m": 3,
+            },
+        }
+    ]
+    page.seek_reference = Mock()
+    await DistanceReviewPage.restore_sample(page, seek=False)
+    assert page.selected_frame_id == "ai-frame"
+    assert page.samples[0]["status"] == "pending" and page.reviewed_offsets() == set()
+    assert page.graph_preview() is None
+    page.dp.save_distance_sample.assert_not_called()
+    page.samples = [
+        {
+            "individual_id": "adult",
+            "offset_ms": 1000,
+            "reference_frame_id": "corrected-frame",
+            "reference_video_id": "ai-reference",
+            "carried_by_individual_id": None,
+            "behavior_ids": ["walking"],
+            "skip_reason": None,
+        }
+    ]
+    await DistanceReviewPage.restore_sample(page, seek=False)
+    assert page.selected_frame_id == "corrected-frame"
+    assert page.sample_values["behavior_ids"] == ["walking"]
+    page.dp.save_distance_sample.assert_not_called()
+
+
+async def test_ai_prefill_switches_to_its_reference_clip(distance_page):
+    page = distance_page
+    page.reference = {"id": "previous-reference"}
+    page.references = [{"id": "ai-reference"}]
+    page.samples = [
+        {
+            "individual_id": "adult",
+            "offset_ms": 1000,
+            "status": "pending",
+            "suggestion": {
+                "reference_frame_id": "ai-frame",
+                "reference_video_id": "ai-reference",
+            },
+        }
+    ]
+
+    async def open_reference(reference, **kwargs):
+        page.reference = reference
+        page.frames = [{"id": "ai-frame", "distance_m": 3}]
+
+    page.open_reference = AsyncMock(side_effect=open_reference)
+    page.seek_reference = Mock()
+    await DistanceReviewPage.restore_sample(page, seek=False)
+    assert page.selected_frame_id == "ai-frame"
+    page.open_reference.assert_awaited_once_with(
+        page.references[0], restoring=True, selected_frame_id="ai-frame"
+    )
+    page.dp.save_distance_sample.assert_not_called()
+
+
+async def test_imported_identifying_frame_seek_retains_mask_precision(distance_page, monkeypatch):
+    page = distance_page
+    page.individuals[0].update(first_seen_offset_ms=1250, first_seen_playback_ms=1250.000001)
+    page.review = {"alignment_mode": "imported", "imported_sample_times_s": [1.250000001, 3.75]}
+    page.offsets = [1250, 3750]
+    page.dp.set_distance_active_individual = Mock()
+    page.reload_review = AsyncMock()
+    page.render_individuals = SimpleNamespace(refresh=Mock())
+    seek = Mock()
+    monkeypatch.setattr(page_module, "seek_paused", seek)
+    monkeypatch.setattr(page_module, "configure_anchor", Mock())
+    await page.activate_individual("adult")
+    assert page.sample_offset == 1250
+    seek.assert_called_once_with(page.animal_player, 1250.000001)
 
 
 async def test_finish_with_missing_attributes_identifies_individual_and_stays_open(

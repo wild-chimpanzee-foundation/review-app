@@ -2,8 +2,13 @@
 
 **Status:** Implemented workflow at `/distance-review`. This is the authoritative
 workflow/design document; it replaces the earlier
-[depth-estimation proposal](./distance-annotation.md). Research export and transfer
-remain deferred. See the [cleanup plan](./distance-branch-cleanup-plan.md) for
+[depth-estimation proposal](./distance-annotation.md). Versioned AI Distance ZIP
+input is supported via Model Import → AI Distance (see the
+[package format and current limitations](../../userdocs/importing.md#ai-distance-packages)).
+AI predictions remain separate from human evidence. Their supplied playback times
+are retained exactly, with no manual clock verification required. Imports create
+full-video AI drafts with inferred Absent recommendations at missing samples, and
+original animal masks can be overlaid at prediction frames. Research export and transfer remain deferred. See the [cleanup plan](./distance-branch-cleanup-plan.md) for
 migration consolidation, development-database recovery, and validation status.
 
 ## Approach
@@ -52,6 +57,24 @@ Selecting a reference only changes the current form, not saved evidence. Existin
 samples remain editable; a missing sample row means unreviewed, not absent.
 
 ### Camera clock and sampling
+
+- **AI-imported schedules take precedence.** Retain every supplied prediction time
+  exactly. Infer the dominant within-track cadence and fractional phase for each video,
+  include the opening frame, and fill gaps through the video end (exclusive). Nearby
+  frame-quantization jitter occupies the inferred stop rather than creating a duplicate.
+  Each imported individual gets a pending sample at every stop; missing predictions
+  recommend Absent, never human-reviewed absence. At least two predictions on a track
+  in each video are required to infer cadence. No snapping, even-second validation,
+  or clock verification is required. Absolute camera time remains unknown.
+  Manual-only videos retain the alignment workflows below.
+- A different package may replace only untouched AI drafts, with a preview warning
+  and explicit confirmation. Manual configuration, human edits, started reviews, and
+  completed reviews block import regardless of whether the times agree. Import
+  rechecks these guards inside its transaction; confirmation never authorizes
+  deleting human work. Reference calibration and original package provenance survive
+  draft replacement. Identical package reimports are always no-ops, including after
+  corrections, deletions, or later imports; old packages cannot switch active drafts
+  or restore earlier schedules.
 
 - New and explicitly reset alignments default to Simplified. Exact is retained
   only as a code configuration option: set `DISTANCE_CLOCK_ALIGNMENT_MODE = "exact"`
@@ -436,22 +459,44 @@ alongside rounded millisecond frame identities; never round saved meter values.
 
 ## Database Schema
 
-Published migrations 1–22 remain unchanged. Consolidated migration 23 adds the
-final eight Distance tables and `tags.individual_eligible`; fresh installs and
-v22 upgrades enforce the same schema. Private development v23–29 databases use
-an explicit [backup/rebuild procedure](./distance-branch-cleanup-plan.md), not
-automatic compatibility migrations or a manually decremented version stamp.
+Published migrations 1–22 remain unchanged. The only Distance migration is
+migration 23: it creates the final nine tables and adds `tags.individual_eligible`.
+Fresh installs and v22 upgrades enforce the same schema. Distance is unreleased
+and has only one development database; intermediate schemas have no compatibility
+migrations or maintained rebuild tool. That database was backed up and manually
+aligned after verifying full schema parity and preservation of every application
+row. Future application versions should migrate from this final schema.
 
 | Table | Purpose and key fields |
 |---|---|
+| `distance_imports` | Immutable original package, manifest, content hash and import time; unique project/content hash. |
 | `reference_videos` | UUID, project, camera label, normalized path; unique project/path. |
 | `reference_frames` | UUID, source reference, integer offset, optional precise playback offset, known meters; unique source/offset. |
 | `distance_individuals` | UUID, video/number, species, age/sex, first-seen offset and optional complete box, attribution and derived completion; unique video/number. |
-| `distance_samples` | UUID, individual/offset, annotated/skipped state, reference and copied distance, skip reason, optional carrier, attribution; unique individual/offset. |
+| `distance_samples` | UUID, individual/offset, pending/annotated/skipped state, original AI suggestion, separate human reference/distance or skip, optional carrier, attribution; unique individual/offset. |
 | `distance_individual_tags` | Individual/tag pair with attribution/time. |
 | `distance_sample_behaviors` | Sample/behavior pair. |
 | `distance_video_reviews` | Alignment mode, nullable verified wall-clock start (unknown in Simplified), integer/precise clock anchor, opening-even flag, verification and explicit completion attribution. |
 | `distance_review_progress` | Active individual per video/annotator, with update time. |
+
+AI provenance is part of the same initial Distance schema: `distance_imports`
+retains immutable package provenance (manifest, content hash and original payload),
+with provenance on ordinary references, individuals and samples.
+Imported individuals are ordinary `distance_individuals`; predictions become
+`distance_samples` with `status = 'pending'`. Their immutable `ai_original` values
+are separate from nullable human answer/attribution fields and survive confirmation
+or correction. Pending rows never count toward completion, progress, or reviewed
+graph distances. Identifying boxes come from the first usable mask; no mask means no
+invented box or first-sighting evidence. Missing predictions produce explicitly
+inferred Absent suggestions, with no human answer fields or review credit.
+
+The initial schema includes precise identity playback positions, imported sample
+times, review start attribution, and the pending-state constraint. Prepared references are
+added/reused without overwriting conflicting calibration. Missing species must be
+added/mapped before import. Content-identical packages are always no-ops; changed
+content is a new import even with the same source/run IDs. Import and confirmed
+replacement of untouched drafts are transactional. Viewing saved packages is
+inspection only, not run switching.
 
 `individual_observations` remains ordinary Review's independent store. Reuse
 species, behaviors, tags, and annotator vocabulary; retain separate junctions.
@@ -490,7 +535,11 @@ full-fidelity Distance transfer or database backup.
 ## Remaining Work
 
 - Research CSV and transfer-bundle design/implementation.
-- Reference maintenance: import prepared frames, correct distances, relink media,
+- AI assistance: reference-mask overlays remain deferred. Imported animal masks are
+  shown on their exact prediction frames with a visibility toggle; they hide during
+  playback, seeking and box drawing. Selected masks are yellow and other animals gray.
+  Mask rendering and inferred absences never change original AI values or human answers.
+- Reference maintenance beyond package import: correct distances, relink media,
   safely delete unused references, and preserve evidence for already-used frames.
 - Final individual-tag vocabulary, including any distinct skin-disease label.
 - Real-footage validation of timestamp accuracy, multiple individuals, carried

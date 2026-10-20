@@ -16,6 +16,7 @@ from review_app.backend.db.models import (
     Video,
 )
 from review_app.backend.provider.distance_review import (
+    mark_review_started,
     refresh_individual_completion,
     reopen_individual_review,
     review_offsets,
@@ -121,6 +122,7 @@ def create_distance_individual(
     session.flush()
     review = session.get(DistanceVideoReview, video_id)
     if review:
+        mark_review_started(session, video_id)
         # The identifying frame establishes when this animal first appears.
         # Earlier scheduled samples are reviewed as absent, atomically with
         # creation; the first-seen sample itself remains unreviewed.
@@ -320,6 +322,8 @@ def set_distance_individual_anchor(
     if row is None:
         raise ValueError("Distance individual not found")
     _first_seen(session.get(Video, row.video_id), first_seen_offset_ms)
+    if row.first_seen_offset_ms != first_seen_offset_ms:
+        row.first_seen_playback_ms = None
     row.first_seen_offset_ms = first_seen_offset_ms
     for name, value in geometry.items():
         setattr(row, name, value)

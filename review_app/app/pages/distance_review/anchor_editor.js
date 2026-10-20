@@ -9,6 +9,8 @@
     overlay.style.cssText = 'position:absolute;inset:0;pointer-events:none;touch-action:none;z-index:2';
     container.appendChild(overlay);
     let individual = null, individuals = [], mode = null, start = null, preview = null;
+    let masks = [], showMasks = true;
+    const maskPaths = new WeakMap();
 
     function contentRect() {
         const rect = video.getBoundingClientRect();
@@ -25,6 +27,53 @@
         const y = (event.clientY - rect.top) / rect.height;
         return x >= 0 && x <= 1 && y >= 0 && y <= 1 ? {x, y} : null;
     }
+    function maskPath(row) {
+        if (maskPaths.has(row)) return maskPaths.get(row);
+        const height = row.size[0];
+        const path = [];
+        const rectangle = (x, y, width, height) => {
+            if (width && height) path.push(`M${x} ${y}h${width}v${height}h${-width}z`);
+        };
+        let position = 0;
+        row.counts.forEach((length, index) => {
+            if (index % 2 && length) {
+                let x = Math.floor(position / height), remaining = length;
+                const y = position % height, first = Math.min(remaining, height - y);
+                rectangle(x, y, 1, first);
+                remaining -= first;
+                x++;
+                const columns = Math.floor(remaining / height);
+                rectangle(x, 0, columns, height);
+                rectangle(x + columns, 0, 1, remaining % height);
+            }
+            position += length;
+        });
+        const result = path.join('');
+        maskPaths.set(row, result);
+        return result;
+    }
+    function paintMasks(rect, outer, toleranceMs) {
+        // These are original-frame proposals, not tracking/interpolated masks.
+        if (!showMasks || mode || !video.paused || video.seeking || video.readyState < 2) return;
+        for (const row of masks) {
+            if (Math.abs(video.currentTime * 1000 - row.time_s * 1000) >= toleranceMs) continue;
+            const path = maskPath(row);
+            if (!path) continue;
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', `0 0 ${row.size[1]} ${row.size[0]}`);
+            svg.setAttribute('preserveAspectRatio', 'none');
+            svg.style.cssText = 'position:absolute;pointer-events:none;opacity:0.35';
+            svg.style.left = `${rect.left - outer.left}px`;
+            svg.style.top = `${rect.top - outer.top}px`;
+            svg.style.width = `${rect.width}px`;
+            svg.style.height = `${rect.height}px`;
+            const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            shape.setAttribute('d', path);
+            shape.setAttribute('fill', row.individual_id === individual?.id ? '#fbbf24' : '#9e9e9e');
+            svg.appendChild(shape);
+            overlay.appendChild(svg);
+        }
+    }
     function repaint() {
         const rect = contentRect(), outer = container.getBoundingClientRect();
         overlay.replaceChildren();
@@ -32,9 +81,10 @@
         const displayed = Math.round(video.currentTime * 1000);
         const rate = __FRAME_RATE__;
         const toleranceMs = rate > 0 ? 500 / rate : 10;
+        paintMasks(rect, outer, toleranceMs);
         const matching = individuals.filter(row => row.anchor_x != null && row.anchor_y != null &&
             row.anchor_width > 0 && row.anchor_height > 0 && video.paused &&
-            Math.abs(displayed - row.first_seen_offset_ms) < toleranceMs);
+            Math.abs(displayed - (row.first_seen_playback_ms ?? row.first_seen_offset_ms)) < toleranceMs);
         if (preview && individual) matching.push({...individual, ...{
             anchor_x: preview.x, anchor_y: preview.y,
             anchor_width: preview.width, anchor_height: preview.height,
@@ -153,7 +203,7 @@
     overlay.addEventListener('pointercancel', () => setMode(__MODE__));
     const observer = new ResizeObserver(repaint);
     observer.observe(container);
-    for (const event of ['timeupdate', 'seeked', 'pause', 'play', 'loadedmetadata']) {
+    for (const event of ['timeupdate', 'seeking', 'seeked', 'pause', 'play', 'loadedmetadata', 'loadeddata']) {
         video.addEventListener(event, repaint);
     }
     const transforms = new MutationObserver(repaint);
@@ -164,7 +214,9 @@
             individual = state.individual || (Array.isArray(state) ? null : state);
             individuals = state.individuals || (Array.isArray(state) ? state : (individual ? [individual] : []));
             if (individual && !individuals.some(row => row.id === individual.id)) individuals.push(individual);
-            identities.set(__PLAYER_ID__, state);
+            masks = state.masks ?? masks;
+            showMasks = state.show_masks ?? showMasks;
+            identities.set(__PLAYER_ID__, {...state, masks, show_masks: showMasks});
             setMode(__MODE__);
         },
         setMode,

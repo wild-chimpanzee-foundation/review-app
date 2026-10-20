@@ -3,9 +3,7 @@
 from datetime import datetime
 
 import pytest
-from review_app.backend.db import migrations
-from review_app.backend.db.models import Behavior, DistanceSampleBehavior
-from sqlalchemy import text
+from review_app.backend.db.models import Behavior
 
 
 @pytest.fixture
@@ -71,63 +69,3 @@ def test_visibility_skips_clear_behaviors_for_carrier_and_infant(behavior_data, 
         labeled_by="alice",
     )
     assert sample_behaviors(data)[1000] == sample_behaviors(data, infant)[1000] == []
-
-
-@pytest.mark.parametrize("existing_fallback", [False, True])
-def test_v27_repairs_legacy_behaviors_without_changing_other_evidence(
-    behavior_data, existing_fallback
-):
-    data, dp = behavior_data, behavior_data["dp"]
-    parent = data["individual"]["id"]
-    for offset in (1000, 3000):
-        dp.save_distance_sample(
-            parent,
-            offset,
-            reference_frame_id=data["frame"]["id"],
-            behavior_ids=[data["behavior_id"], data["running_id"]],
-            labeled_by="alice",
-        )
-    skipped = dp.save_distance_sample(
-        parent, 5000, skip_reason="individual absent", labeled_by="alice"
-    )
-    with dp.Session.begin() as session:
-        # Simulate v26: zero behaviors on a visible sample, behaviors on a skip.
-        session.execute(
-            text("""
-            DELETE FROM distance_sample_behaviors WHERE sample_id IN (
-                SELECT id FROM distance_samples WHERE offset_ms = 1000
-            )
-        """)
-        )
-        session.add(
-            DistanceSampleBehavior(sample_id=skipped["id"], behavior_id=data["behavior_id"])
-        )
-        if not existing_fallback:
-            session.query(Behavior).filter_by(key="unidentified").delete()
-        session.execute(text("UPDATE _schema_version SET version = 26"))
-    tables = (
-        "distance_samples",
-        "distance_individuals",
-        "distance_video_reviews",
-        "distance_review_progress",
-        "individual_observations",
-        "observation_tags",
-    )
-    with dp.engine.connect() as conn:
-        before = {table: conn.exec_driver_sql(f"SELECT * FROM {table}").all() for table in tables}
-    migrations.run_migrations(dp.engine)
-    migrations.run_migrations(dp.engine)
-    with dp.engine.connect() as conn:
-        for table in tables:
-            assert conn.exec_driver_sql(f"SELECT * FROM {table}").all() == before[table]
-        fallback = conn.exec_driver_sql(
-            "SELECT id FROM behaviors WHERE key = 'unidentified'"
-        ).scalar_one()
-        if existing_fallback:
-            assert fallback == data["unidentified_id"]
-        assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
-    assert sample_behaviors(data) == {
-        1000: [fallback],
-        3000: sorted([data["behavior_id"], data["running_id"]]),
-        5000: [],
-    }

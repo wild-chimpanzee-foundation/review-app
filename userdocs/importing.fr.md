@@ -1,6 +1,6 @@
 # Importer les résultats du modèle
 
-Les importations se font sur la page **Import de modèle**, qui comporte des onglets séparés pour les annotations du modèle, les annotations historiques/manuelles, les métadonnées et les bundles.
+Les importations se font sur la page **Import de modèle**, qui comporte des onglets séparés pour les annotations du modèle, les paquets Distance IA, les annotations historiques/manuelles et les métadonnées. Les bundles de projet disposent d’un parcours d’import distinct.
 
 ![La page Import / Export avec l'onglet d'import des sorties de l'IA sélectionné](img/importing.jpg)
 
@@ -23,6 +23,47 @@ Un modèle de CSV téléchargeable est disponible sur la page d'import si vous n
 
 !!! note
     Les lignes correspondant à des espèces laissées non mappées sont **ignorées** lors de l'import, afin que les données importées correspondent exactement à ce qui était affiché dans l'aperçu.
+
+## Paquets Distance IA
+
+Utilisez **Import de modèle → Distance IA** pour charger un ZIP `distance-ai` version 1 (32 Mio maximum). Créez/réanalysez d’abord le projet pour enregistrer ses vidéos, puis marquez les clips de référence comme **Vidéo de référence**. La structure appariée `<déploiement>/videos/` et `<déploiement>/references/` applique automatiquement cette étiquette.
+
+1. Chargez le ZIP pour valider et prévisualiser les nombres d’enregistrements, les correspondances vidéo, les conflits d’étalonnage et jusqu’à 20 prédictions. L’aperçu n’écrit rien.
+2. Tous les individus importés sont des brouillons IA couvrant la vidéo entière. L’intervalle dominant et la phase sont déduits des prédictions pour compléter les arrêts manquants, du début à la fin. Les temps fournis restent exacts ; le léger décalage dû aux images n’ajoute pas d’arrêts voisins. Une prédiction manquante pour un individu recommande **Absent**, toujours en attente de confirmation humaine. Sans au moins deux prédictions sur une même piste de la vidéo, l’intervalle ne peut pas être déduit. Seuls les brouillons IA intacts peuvent être remplacés, après confirmation.
+3. Cliquez sur **Importer le paquet Distance IA**. La création des individus et échantillons en attente, le remplacement des brouillons intacts et l’import des références et de la provenance sont atomiques : une erreur laisse le projet inchangé.
+4. Les images de référence préparées deviennent disponibles dans Distance. **Voir les prédictions importées** affiche une exécution enregistrée (100 lignes maximum).
+
+### Contenu du paquet
+
+Les trois CSV et `manifest.json` doivent être à la racine du ZIP. Un CSV sans enregistrements peut contenir uniquement son en-tête.
+
+```json
+{
+  "format": "distance-ai",
+  "version": 1,
+  "source_id": "my-pipeline",
+  "run_id": "run-001",
+  "model": {"name": "my-distance-model", "version": null},
+  "timing_basis": "video_playback_seconds"
+}
+```
+
+Utilisez `null` si la version du modèle est inconnue. Les identifiants source/exécution sont conservés dans la provenance. Le contenu du paquet identifie l’import : réimporter un paquet identique ne change rien, même après des corrections humaines, des suppressions ou un import plus récent. Les différences de compression ZIP ou de documentation ne comptent pas. Un contenu modifié constitue un nouvel import et suit les règles de remplacement ci-dessus, même avec le même `run_id`. Consulter un ancien paquet ne change ni les brouillons ni leur calendrier.
+
+| Fichier | Colonnes |
+|---|---|
+| `reference_frames.csv` | `reference_id`, `video_path`, `time_s`, `known_distance_m`, `mask_path` facultatif |
+| `individuals.csv` | `individual_id`, `video_path`, `species` |
+| `predictions.csv` | `prediction_id`, `individual_id`, `time_s`, `predicted_distance_m`, `suggested_reference_id` facultatif, `mask_path` facultatif |
+
+- Les identifiants sont des chaînes stables, uniques dans leur CSV. Les identifiants d’individu et de référence des prédictions renvoient aux autres CSV.
+- `video_path` est un chemin exact relatif à la racine du projet, sans correspondance approximative ou par seul nom de fichier. Les chemins ambigus entre plusieurs racines doivent être résolus. Une référence suggérée doit appartenir au même déploiement que l’animal.
+- `time_s` est un temps de lecture précis depuis le début de la vidéo, **pas une heure de la caméra**. Les distances doivent être finies et positives. `species` est un nom scientifique déjà présent dans le vocabulaire ; ajoutez ou mappez les espèces inconnues avant l’import.
+- `known_distance_m` est la distance d’étalonnage ; `predicted_distance_m` est l’estimation pour l’animal. Elles peuvent différer. Une image préparée à la même milliseconde est réutilisée uniquement si sa distance et sa position précise correspondent ; aucun étalonnage contradictoire n’est écrasé.
+- Les champs facultatifs peuvent être absents ou vides. Chaque chemin de masque est relatif au ZIP et désigne un objet JSON COCO RLE : `size: [hauteur, largeur]` aux dimensions de l’image d’origine, et `counts` sous forme de liste d’entiers ou de chaîne compressée, dans l’ordre par colonnes. Les vidéos ne sont pas incluses.
+
+!!! warning "Les prédictions ne sont pas des annotations validées"
+    Les individus importés sont des individus Distance ordinaires ; leurs prédictions sont des échantillons **en attente**, pas des réponses humaines. Les suggestions sont préremplies pour confirmation ou correction. Les valeurs IA d’origine (temps, estimation, référence suggérée et masque) restent conservées après confirmation. Les cadres d’identification proviennent du premier masque exploitable ; sans masque, aucun cadre n’est inventé. Les absences déduites sont des recommandations IA, pas des absences confirmées ni un achèvement humain. Les échantillons en attente ne comptent pas dans la progression ou les distances validées du graphique. La date/heure absolue reste inconnue. Activez « Afficher les masques animaux IA » pour les superposer sur leurs images de prédiction exactes ; ils sont masqués pendant la lecture, la recherche et le dessin des cadres. Seuls les brouillons IA intacts peuvent être remplacés ; le travail humain n’est jamais réinitialisé par l’import.
 
 ## Annotations historiques / manuelles
 

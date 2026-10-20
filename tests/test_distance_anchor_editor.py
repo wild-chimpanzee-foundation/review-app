@@ -28,6 +28,7 @@ class Element {
         for (const callback of listeners.get(this)?.[name] || []) callback(event);
     }
     setPointerCapture() {}
+    setAttribute(name, value) { (this.attributes ||= {})[name] = value; }
     getBoundingClientRect() {
         if (this.tagName === 'SPAN') return {width:this.textContent.length * 8 + 10, height:20};
         return this.rect;
@@ -44,7 +45,8 @@ video.addEventListener = Element.prototype.addEventListener;
 video.dispatch = Element.prototype.dispatch;
 const elements = {overlay: null};
 global.window = {};
-global.document = {body: new Element('body'), createElement(tag) { return new Element(tag); }};
+global.document = {body: new Element('body'), createElement(tag) { return new Element(tag); },
+    createElementNS(_namespace, tag) { return new Element(tag); }};
 global.getElement = () => ({$el:video});
 global.emitEvent = (_name, payload) => { emitted.push(payload); };
 global.ResizeObserver = class { observe() {} disconnect() {} };
@@ -323,3 +325,45 @@ async def test_image_filters_copies_current_player_brightness_and_contrast(monke
     assert actual == {"brightness": 1.35, "contrast": 0.8}
     assert "vp-brightness-" in evaluate.await_args.args[0]
     assert "vp-contrast-" in evaluate.await_args.args[0]
+
+
+def test_animal_mask_column_major_geometry_and_frame_visibility():
+    result = run_editor(
+        {"left": 0, "top": 0, "width": 400, "height": 300},
+        """
+        video._distanceAnchor.configure({individual:{id:'one'}, individuals:[],
+            masks:[{individual_id:'one', time_s:1.000000001, size:[2,3], counts:[1,3,2]}]});
+        video._distanceAnchor.setMode(null);
+        const overlay = container.children[0];
+        const svg = overlay.children[0];
+        const snapshot = {viewBox:svg.attributes.viewBox,
+            path:svg.children[0].attributes.d, fill:svg.children[0].attributes.fill,
+            left:svg.style.left, top:svg.style.top, width:svg.style.width, height:svg.style.height};
+        video.currentTime = 1.04; video.dispatch('seeked');
+        snapshot.adjacent = overlay.children.length;
+        video.currentTime = 1; video.seeking = true; video.dispatch('seeking');
+        snapshot.seeking = overlay.children.length;
+        video.seeking = false; video.paused = false; video.dispatch('play');
+        snapshot.playing = overlay.children.length;
+        video.paused = true; video.dispatch('pause');
+        snapshot.restored = overlay.children.length;
+        video._distanceAnchor.configure({individual:{id:'one'}, individuals:[], show_masks:false});
+        snapshot.hidden = overlay.children.length;
+        console.log(JSON.stringify(snapshot));
+        """,
+    )
+    actual = json.loads(result.stdout)
+    assert actual == {
+        "viewBox": "0 0 3 2",
+        "path": "M0 1h1v1h-1zM1 0h1v2h-1z",
+        "fill": "#fbbf24",
+        "left": "0px",
+        "top": "37.5px",
+        "width": "400px",
+        "height": "225px",
+        "adjacent": 0,
+        "seeking": 0,
+        "playing": 0,
+        "restored": 1,
+        "hidden": 0,
+    }

@@ -6,6 +6,7 @@ when this package was a single import_service.py module.
 
 from review_app.backend.provider.import_service._annotations_csv import AnnotationsCsvMixin
 from review_app.backend.provider.import_service._bundles import BundleMixin
+from review_app.backend.provider.import_service._distance_ai import DistanceAIImportMixin
 from review_app.backend.provider.import_service._historic_csv import HistoricCsvMixin
 from review_app.backend.provider.import_service._metadata_csv import MetadataCsvMixin
 from review_app.backend.provider.import_service._model_csv import ModelCsvMixin
@@ -13,6 +14,7 @@ from review_app.backend.provider.import_service._shared import BLANK_SENTINEL, I
 
 
 class ImportMixin(
+    DistanceAIImportMixin,
     ModelCsvMixin,
     MetadataCsvMixin,
     AnnotationsCsvMixin,

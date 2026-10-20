@@ -165,6 +165,7 @@ def save_distance_sample(
             individual_number=last_number + 1,
             species_id=individual.species_id,
             first_seen_offset_ms=individual.first_seen_offset_ms,
+            first_seen_playback_ms=individual.first_seen_playback_ms,
             anchor_x=individual.anchor_x,
             anchor_y=individual.anchor_y,
             anchor_width=individual.anchor_width,
@@ -203,7 +204,13 @@ def save_distance_sample(
         if infant and child.individual_id == infant.id:
             continue
         removed_children.append(child.individual_id)
-        session.delete(child)
+        if child.ai_original:
+            child.status = "pending"
+            child.skip_reason = child.reference_frame_id = child.distance_m = None
+            child.carried_by_individual_id = child.labeled_by = child.labeled_at = None
+            session.query(DistanceSampleBehavior).filter_by(sample_id=child.id).delete()
+        else:
+            session.delete(child)
     session.flush()
     for child_id in removed_children:
         if deferred_completion_ids is None:
@@ -236,7 +243,8 @@ def save_distance_sample(
             reopen_individual_review(session, target)
         else:
             deferred_completion_ids.add(target.id)
-        target.updated_at = now
+        # Confirming a sample also adopts its proposed identity; retain ai_original.
+        target.labeled_by, target.labeled_at, target.updated_at = labeled_by, now, now
         return row
 
     # Behavior corrections retain carrying for annotated and skipped evidence.

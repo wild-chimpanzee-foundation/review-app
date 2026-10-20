@@ -5,7 +5,10 @@ from typing import Callable
 
 from nicegui import ui
 
-from review_app.app.pages.distance_review.reference_media import frame_time
+from review_app.app.pages.distance_review.reference_media import (
+    frame_time,
+    individual_frame_offset,
+)
 from review_app.app.pages.review.annotations import _shortcut_badge
 from review_app.app.translations import t
 
@@ -233,7 +236,7 @@ def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
         )
         with ui.row().classes("w-full items-center gap-xs no-wrap"):
             ui.label(
-                t("distance_first_seen_at", time=frame_time(row["first_seen_offset_ms"]))
+                t("distance_first_seen_at", time=frame_time(individual_frame_offset(row)))
             ).classes("text-caption text-grey-6 col")
             ui.button(icon="person_pin", on_click=lambda: context.on_first_seen(row["id"])).props(
                 "flat round dense size=sm"

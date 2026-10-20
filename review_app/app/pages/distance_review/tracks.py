@@ -27,7 +27,11 @@ def track_options(
     preview=None,
 ) -> dict:
     """Build one chart with meter-scaled distances and a proportional status band."""
-    by_sample = {(row["individual_id"], row["offset_ms"]): row for row in samples}
+    by_sample = {
+        (row["individual_id"], row["offset_ms"]): row
+        for row in samples
+        if row.get("status") != "pending"
+    }
     preview_key = None
     if preview and preview["individual_id"] == active_id and preview["offset_ms"] in offsets:
         preview_key = (preview["individual_id"], preview["offset_ms"])

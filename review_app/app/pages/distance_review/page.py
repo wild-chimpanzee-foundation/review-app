@@ -38,8 +38,10 @@ from review_app.app.pages.distance_review.individuals import (
 )
 from review_app.app.pages.distance_review.player import (
     anchor_mode,
+    animal_mask_overlays,
     capture_offset,
     configure_anchor,
+    configure_masks,
     frame_tolerance_ms,
     image_filters,
     install_anchor_editor,
@@ -52,7 +54,11 @@ from review_app.app.pages.distance_review.player import (
     stop_player,
     switch_source,
 )
-from review_app.app.pages.distance_review.reference_media import frame_time, reference_frame_offset
+from review_app.app.pages.distance_review.reference_media import (
+    frame_time,
+    individual_frame_offset,
+    reference_frame_offset,
+)
 from review_app.app.pages.distance_review.reference_probe import ReferenceProbeCache
 from review_app.app.pages.distance_review.reference_views import (
     ReferenceViewsContext,
@@ -92,6 +98,7 @@ from review_app.app.state import (
 from review_app.app.translations import t
 from review_app.app.utils import get_or_create_data_provider
 from review_app.backend.distance_timing import (
+    imported_sample_positions,
     sample_camera_time,
     sample_frame_time,
 )
@@ -175,6 +182,8 @@ class DistanceReviewPage:
         self.review: dict | None = None
         self.offsets: list[int] = []
         self.samples: list[dict] = []
+        self.animal_masks: list[dict] = []
+        self.show_animal_masks = True
         self.sample_offset: int | None = None
         self._graph_preview_key: tuple[str, str, int] | None = None
         self.behavior_options: dict[str, str] = {}
@@ -230,7 +239,7 @@ class DistanceReviewPage:
 
     def reset_sample_values(self) -> None:
         """Restore evidence, falling back to the persisted creation-time carrying choice."""
-        source = self.sample or self.reference_sample
+        source = self.sample or self.prior_sample
         children = [
             row
             for row in self.samples
@@ -288,6 +297,7 @@ class DistanceReviewPage:
                 for row in self.samples
                 if row["individual_id"] == self.individual_id
                 and row["offset_ms"] == self.sample_offset
+                and row.get("status") != "pending"
             ),
             None,
         )
@@ -322,7 +332,9 @@ class DistanceReviewPage:
 
     def reviewed_offsets(self) -> set[int]:
         return {
-            row["offset_ms"] for row in self.samples if row["individual_id"] == self.individual_id
+            row["offset_ms"]
+            for row in self.samples
+            if row["individual_id"] == self.individual_id and row.get("status") != "pending"
         }
 
     @property
@@ -331,12 +343,33 @@ class DistanceReviewPage:
         return bool(self.sample and self.sample.get("carried_by_individual_id"))
 
     @property
+    def ai_prefill(self) -> dict | None:
+        return next(
+            (
+                row.get("suggestion")
+                for row in self.samples
+                if row["individual_id"] == self.individual_id
+                and row["offset_ms"] == self.sample_offset
+                and row.get("status") == "pending"
+            ),
+            None,
+        )
+
+    @property
     def reference_sample(self) -> dict | None:
-        """Restore saved evidence, or the last known distance when resuming a new stop."""
+        """Saved evidence wins; otherwise use this frame's AI choice, then prior evidence."""
         if self.sample and (
             self.sample.get("reference_frame_id") or self.sample.get("skip_reason")
         ):
             return self.sample
+        if self.ai_prefill and (
+            self.ai_prefill.get("reference_frame_id") or self.ai_prefill.get("skip_reason")
+        ):
+            return self.ai_prefill
+        return self.prior_sample
+
+    @property
+    def prior_sample(self) -> dict | None:
         return max(
             (
                 row
@@ -367,6 +400,12 @@ class DistanceReviewPage:
             state["offsets"],
             state["samples"],
         )
+        masks = animal_mask_overlays(self.samples)
+        if self.animal_player and (masks or getattr(self, "animal_masks", [])):
+            configure_masks(
+                self.animal_player, masks, enabled=getattr(self, "show_animal_masks", True)
+            )
+        self.animal_masks = masks
         if self.review and self.video.get("video_path"):
             await self.load_sample_timing()
         if resume:
@@ -390,6 +429,10 @@ class DistanceReviewPage:
         self.animal_frame_rate = self.animal_frame_rates[path]
 
     def sample_frame_offset(self, offset_ms: int) -> float:
+        if self.review and self.review.get("alignment_mode") == "imported":
+            return imported_sample_positions(
+                self.review["imported_sample_times_s"], self.video["duration_sec"]
+            )[offset_ms]
         if self.review and self.review.get("alignment_mode") == "simplified":
             # Keep the selected even frame's phase in both directions. Legacy
             # parity-only reviews retain their original playback grid.
@@ -423,7 +466,7 @@ class DistanceReviewPage:
 
     def sample_seek_offset(self, offset_ms: int) -> float:
         frame_ms = self.sample_frame_offset(offset_ms)
-        if self.review and self.review.get("alignment_mode") == "simplified":
+        if self.review and self.review.get("alignment_mode") in {"simplified", "imported"}:
             return frame_ms
         # Seek ten microseconds inside the chosen frame to avoid browser rounding
         # to its predecessor. This does not move to a later frame.
@@ -463,6 +506,7 @@ class DistanceReviewPage:
         self.selected_frame_id = None
         self.review = None
         self.offsets, self.samples = [], []
+        self.animal_masks = []
         self.sample_offset = None
         self._graph_preview_key = None
         self.animal_frame_rate = None
@@ -823,11 +867,24 @@ class DistanceReviewPage:
                 self.individual,
                 individuals=self.individuals,
                 frame_rate=self.animal_frame_rate,
+                masks=getattr(self, "animal_masks", []),
+                show_masks=getattr(self, "show_animal_masks", True),
             )
+            if getattr(self, "animal_masks", []):
+                ui.checkbox(
+                    t("distance_show_animal_masks"),
+                    value=getattr(self, "show_animal_masks", True),
+                    on_change=lambda event: self.set_animal_mask_visibility(event.value),
+                ).tooltip(t("distance_animal_masks_help"))
             if self.sample_offset is not None:
                 self.seek_sample()
             self.render_sample_navigation()
             self.render_tracks()
+
+    def set_animal_mask_visibility(self, visible: bool) -> None:
+        self.show_animal_masks = visible
+        if self.animal_player:
+            configure_masks(self.animal_player, self.animal_masks, enabled=visible)
 
     @ui.refreshable
     def render_tracks(self) -> None:
@@ -1081,14 +1138,18 @@ class DistanceReviewPage:
         self.individual_id = individual_id
         await self.reload_review()
         identifying_offset = (
-            self.individual["first_seen_offset_ms"]
+            individual_frame_offset(self.individual)
             if first_seen_offset_ms is None
             else first_seen_offset_ms
         )
         # Inspection can be off-grid; retain the creation workflow's next-sample
         # selection so returning to annotation targets a scheduled stop.
         self.sample_offset = next(
-            (offset for offset in self.offsets if offset >= identifying_offset),
+            (
+                offset
+                for offset in self.offsets
+                if self.sample_frame_offset(offset) >= identifying_offset
+            ),
             self.offsets[-1] if self.offsets else None,
         )
         if self.animal_player:
@@ -1105,14 +1166,17 @@ class DistanceReviewPage:
         if self.busy:
             return
         payload = event.args
-        if not any(row["id"] == payload["individual_id"] for row in self.individuals):
+        individual = next(
+            (row for row in self.individuals if row["id"] == payload["individual_id"]), None
+        )
+        if individual is None:
             return
         self.busy = True
         try:
             await run.io_bound(
                 self.dp.set_distance_individual_anchor,
                 payload["individual_id"],
-                payload["offset_ms"],
+                individual["first_seen_offset_ms"],
                 anchor=payload["anchor"],
                 labeled_by=get_annotator_name(),
             )
@@ -1256,12 +1320,19 @@ class DistanceReviewPage:
     def render_timing(self) -> None:
         if not self.review:
             return
+        if self.review.get("alignment_mode") == "imported":
+            ui.label(t("distance_ai_schedule_active")).classes("text-caption text-grey-6").tooltip(
+                self.clock_description()
+            )
+            return
         ui.button(
             icon="verified",
             on_click=self.clock_dialog,
         ).props("flat round dense").tooltip(self.clock_description())
 
     def clock_description(self) -> str:
+        if self.review.get("alignment_mode") == "imported":
+            return t("distance_ai_schedule_source", source=self.review["verified_by"])
         if (
             self.review.get("alignment_mode") == "simplified"
             and self.review.get("recorded_start") is None
@@ -1302,6 +1373,9 @@ class DistanceReviewPage:
     @stable_client
     async def clock_dialog(self) -> None:
         if self.busy or not self.video:
+            return
+        if self.review and self.review.get("alignment_mode") == "imported":
+            ui.notify(t("distance_ai_schedule_active"))
             return
         video = self.video
         video_id = video["video_id"]
@@ -1399,6 +1473,18 @@ class DistanceReviewPage:
                 else t("distance_sample_relative_time", offset=frame_time(self.sample_offset))
             )
             ui.label(label).classes("text-caption text-weight-medium")
+            if self.ai_prefill and not self.sample:
+                distance = self.ai_prefill.get("distance_m")
+                label = (
+                    t("distance_ai_absent_prefill")
+                    if self.ai_prefill.get("skip_reason") == "individual absent"
+                    else t(
+                        "distance_ai_prefill",
+                        estimate=self.ai_prefill["predicted_distance_m"],
+                        reference=f"{distance:g} m" if distance is not None else "—",
+                    )
+                )
+                ui.label(label).classes("text-caption text-info")
             if not self.individual:
                 ui.label(t("distance_sample_browse_only")).classes("text-caption text-grey-6")
             if self.sample_seek_offset(self.sample_offset) > 0 and self.animal_player:
@@ -1444,7 +1530,7 @@ class DistanceReviewPage:
         )
         key = (
             "distance_unreviewed"
-            if not sample
+            if not sample or sample.get("status") == "pending"
             else ("distance_skipped" if sample["status"] == "skipped" else "distance_reviewed")
         )
         return t(key)
@@ -1591,6 +1677,7 @@ class DistanceReviewPage:
         target_offsets = set(offsets)
         overwrites = any(
             sample["offset_ms"] in target_offsets
+            and sample.get("status") != "pending"
             and (
                 sample["individual_id"] in affected_ids
                 or sample.get("carried_by_individual_id") == individual_id

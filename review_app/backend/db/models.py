@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -245,6 +246,22 @@ class VideoAssignment(Base):
     assigned_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 
+class DistanceImport(Base):
+    """Immutable source package; review drafts live in the normal Distance tables."""
+
+    __tablename__ = "distance_imports"
+    __table_args__ = (UniqueConstraint("project_id", "content_hash"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(
+        String, ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    content_hash: Mapped[str] = mapped_column(String)
+    manifest: Mapped[dict] = mapped_column(JSON)
+    payload: Mapped[dict] = mapped_column(JSON)
+    imported_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class ReferenceVideo(Base):
     __tablename__ = "reference_videos"
     __table_args__ = (
@@ -277,6 +294,10 @@ class ReferenceFrame(Base):
     # Keep the precise seek position: rounding can land in the preceding frame.
     playback_offset_ms: Mapped[float | None] = mapped_column(Float)
     distance_m: Mapped[float] = mapped_column(Float)
+    mask: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    import_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("distance_imports.id", ondelete="SET NULL")
+    )
 
 
 class DistanceIndividual(Base):
@@ -308,11 +329,16 @@ class DistanceIndividual(Base):
     video_id: Mapped[str] = mapped_column(
         String, ForeignKey("videos.video_id", ondelete="CASCADE")
     )
+    import_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("distance_imports.id", ondelete="SET NULL")
+    )
+    ai_original: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     individual_number: Mapped[int] = mapped_column(Integer)
     species_id: Mapped[str] = mapped_column(String, ForeignKey("species.id"))
     age: Mapped[str | None] = mapped_column(String)
     sex: Mapped[str | None] = mapped_column(String)
     first_seen_offset_ms: Mapped[int] = mapped_column(Integer)
+    first_seen_playback_ms: Mapped[float | None] = mapped_column(Float)
     # Creation-time default only; actual carrying remains sample-specific.
     initial_carrier_individual_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("distance_individuals.id", ondelete="SET NULL")
@@ -340,6 +366,12 @@ class DistanceVideoReview(Base):
     # Camera wall-clock time, deliberately independent of file creation metadata.
     recorded_start: Mapped[datetime | None] = mapped_column(DateTime)
     alignment_mode: Mapped[str] = mapped_column(String, default="exact", server_default="exact")
+    imported_sample_times_s: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    import_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("distance_imports.id", ondelete="SET NULL")
+    )
+    # Sticky once human work starts, even if that work is subsequently deleted.
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)
     clock_anchor_offset_ms: Mapped[int | None] = mapped_column(Integer)
     clock_anchor_playback_ms: Mapped[float | None] = mapped_column(Float)
     opening_even_second: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
@@ -368,6 +400,9 @@ class DistanceSample(Base):
         UniqueConstraint("individual_id", "offset_ms", name="uq_distance_sample_offset"),
         CheckConstraint("offset_ms >= 0", name="ck_distance_sample_offset"),
         CheckConstraint(
+            "(status = 'pending' AND reference_frame_id IS NULL AND distance_m IS NULL "
+            "AND skip_reason IS NULL AND labeled_at IS NULL AND labeled_by IS NULL "
+            "AND carried_by_individual_id IS NULL) OR "
             "(status = 'annotated' AND reference_frame_id IS NOT NULL "
             "AND distance_m IS NOT NULL AND distance_m > 0 "
             "AND skip_reason IS NULL) OR "
@@ -387,6 +422,7 @@ class DistanceSample(Base):
         String, ForeignKey("distance_individuals.id", ondelete="CASCADE")
     )
     offset_ms: Mapped[int] = mapped_column(Integer)
+    ai_original: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String)
     skip_reason: Mapped[str | None] = mapped_column(String)
     # Restrict deletion of selected frames so existing annotation evidence survives.

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from nicegui import ui
 
+from review_app.backend.distance_ai_package import mask_counts
 from review_app.backend.distance_timing import SAMPLE_STOP_TOLERANCE_MS
 
 
@@ -234,6 +235,8 @@ def install_anchor_editor(
     individuals=None,
     frame_rate: float | None = None,
     initial_mode: str | None = None,
+    masks: list[dict] | None = None,
+    show_masks: bool = True,
 ) -> None:
     if initial_mode not in ("box", None):
         raise ValueError("Anchor editor only supports bounding boxes")
@@ -249,6 +252,8 @@ def install_anchor_editor(
                 {
                     "individual": individual,
                     "individuals": individuals or ([individual] if individual else []),
+                    "masks": masks or [],
+                    "show_masks": show_masks,
                 },
                 default=str,
             ),
@@ -259,15 +264,44 @@ def install_anchor_editor(
 
 
 def configure_anchor(player, individual: dict | None, *, individuals=None) -> None:
-    state = {
-        "individual": individual,
-        "individuals": individuals or ([individual] if individual else []),
-    }
+    _configure_anchor_state(
+        player,
+        {
+            "individual": individual,
+            "individuals": individuals or ([individual] if individual else []),
+        },
+    )
+
+
+def animal_mask_overlays(samples: list[dict]) -> list[dict]:
+    """Use original per-prediction masks, including after human confirmation."""
+    overlays = []
+    for sample in samples:
+        original = sample.get("ai_original") or {}
+        mask = original.get("mask")
+        if mask is not None:
+            overlays.append(
+                {
+                    "individual_id": sample["individual_id"],
+                    "time_s": original["time_s"],
+                    "size": mask["size"],
+                    "counts": mask_counts(mask),
+                }
+            )
+    return overlays
+
+
+def configure_masks(player, masks: list[dict], *, enabled: bool = True) -> None:
+    _configure_anchor_state(player, {"masks": masks, "show_masks": enabled})
+
+
+def _configure_anchor_state(player, updates: dict) -> None:
     ui.run_javascript(
         f"""const component = getElement({player.id});
         if (component) {{
-            const state = {json.dumps(state, default=str)};
-            (window.__distanceIndividuals ||= new Map()).set({player.id}, state);
+            const states = window.__distanceIndividuals ||= new Map();
+            const state = {{...states.get({player.id}), ...{json.dumps(updates, default=str)}}};
+            states.set({player.id}, state);
             component.$el?._distanceAnchor?.configure(state);
         }}"""
     )
