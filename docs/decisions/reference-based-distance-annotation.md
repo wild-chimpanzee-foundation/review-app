@@ -289,10 +289,15 @@ files. In multi-root projects, unresolved external paths are ambiguous and must
 not match by camera label alone. Apply this scope to both discovery and writes.
 No separate deployment table is needed.
 
-Paired `references/` and `videos/` folders share their deployment's camera label.
-At an imported deployment root, use the root's name; below it, use relative folder
-paths. Legacy folder-derived labels are repaired explicitly during Distance setup
-or **Refresh references**, not as a side effect of queue queries. Repair only old
+Paired `references/` and `videos/` folders support both
+`cam_a/{videos,references}/clip.mp4` and `{videos,references}/cam_a/clip.mp4`.
+In either layout, the category folder is omitted from the camera label, so both
+clips have camera ID `cam_a`. Category folders must be paired inside the import
+root; importing only `references/` does not infer reference roles from its name.
+At an imported deployment root with clips directly in the category folders, use
+the root's name; below it, use relative folder paths. Legacy folder-derived labels
+are repaired explicitly during Distance setup or **Refresh references**, not as a
+side effect of queue queries. Repair only old
 inferred labels, preserving explicit assignments, identities, and saved evidence.
 
 Discovery reuses durable reference records by project and normalized path,

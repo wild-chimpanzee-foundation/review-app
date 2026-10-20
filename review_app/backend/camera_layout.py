@@ -6,27 +6,31 @@ from pathlib import Path
 from review_app.backend.path_matching import normalize_path_str
 
 
-def _paired_deployment(path: Path, scan_dir: Path) -> Path | None:
-    parent = path.parent
-    deployment = parent.parent
-    if (
-        parent.name in {"videos", "references"}
-        and deployment.is_relative_to(scan_dir)
-        and (deployment / "videos").is_dir()
-        and (deployment / "references").is_dir()
-    ):
-        return deployment
+def _paired_layout(path: Path, scan_dir: Path) -> tuple[Path, str] | None:
+    # Support both cam_a/{videos,references}/clip and {videos,references}/cam_a/clip.
+    for category in (path.parent, path.parent.parent):
+        deployment = category.parent
+        if (
+            category.name in {"videos", "references"}
+            and deployment.is_relative_to(scan_dir)
+            and (deployment / "videos").is_dir()
+            and (deployment / "references").is_dir()
+        ):
+            camera = deployment / path.parent.relative_to(category)
+            return camera, category.name
     return None
 
 
 def is_reference_video_path(path: Path, scan_dir: Path) -> bool:
     """Recognize references only inside an explicit paired deployment layout."""
-    return path.parent.name == "references" and _paired_deployment(path, scan_dir) is not None
+    layout = _paired_layout(path, scan_dir)
+    return layout is not None and layout[1] == "references"
 
 
 def camera_id_for_path(path: Path, scan_dir: Path) -> str:
     # A lone folder called "videos" or "references" can be an ordinary camera.
-    parent = _paired_deployment(path, scan_dir) or path.parent
+    layout = _paired_layout(path, scan_dir)
+    parent = layout[0] if layout else path.parent
     relative = parent.relative_to(scan_dir)
     if relative != Path("."):
         return normalize_path_str(str(relative))
