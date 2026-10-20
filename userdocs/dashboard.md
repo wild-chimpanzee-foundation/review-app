@@ -9,7 +9,7 @@ The **Dashboard** (also called the Overview) is the app's landing page — openi
 
 ## Quick-review buttons
 
-At the top right are shortcuts that open the review screen with filters already applied:
+At the top right are shortcuts that open the Species screen with filters already applied:
 
 - **Review unannotated** — jumps to videos that still need annotating.
 - **Review later** — only shown when you have videos bookmarked with *Review later*; opens just those.
@@ -41,8 +41,8 @@ A stacked bar breaks the whole project into **blank**, **not blank**, and **unla
 
 Two side-by-side panels:
 
-- **Species observations** — every species recorded so far, with observation counts. Click a species to open the review screen filtered to it.
-- **Behavior distribution** — behaviors recorded across the project, with counts and a percentage bar. Click a behavior to filter the review screen to it.
+- **Species observations** — every species recorded so far, with observation counts. Click a species to open the Species screen filtered to it.
+- **Behavior distribution** — behaviors recorded across the project, with counts and a percentage bar. Click a behavior to filter the Species screen to it.
 
 ## Camera summary
 

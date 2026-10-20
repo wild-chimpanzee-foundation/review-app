@@ -58,7 +58,7 @@ A summary table shows each annotator's cameras, videos, and hours. The same pane
 - **Bundle export** — download a per-annotator `.zip` project bundle to hand off.
 - **Video ZIP export** — package each annotator's assigned video files into ZIPs in an output folder you choose.
 
-Assignments show up on the [Dashboard](dashboard.md#assignment-summary) and as an annotator filter on the review screen.
+Assignments show up on the [Dashboard](dashboard.md#assignment-summary) and as an annotator filter on the Species screen.
 
 ### Users / annotators
 

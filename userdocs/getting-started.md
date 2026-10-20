@@ -110,10 +110,10 @@ You may also want to tune the **confidence thresholds** that decide how AI predi
 
 ## Your first review
 
-The first time you open the **Review** screen, a short guided tour points out the video player, the queue, the filters, and the annotation controls.
+The first time you open the **Species** screen, a short guided tour points out the video player, the queue, the filters, and the annotation controls.
 
-![The first-run guided tour on the review screen](img/onboarding-tour.jpg)
+![The first-run guided tour on the Species screen](img/onboarding-tour.jpg)
 
-Step through it with **Next**, or click **Skip tour** to dismiss it — either way it won't show again. From here you're ready to start annotating; see [Reviewing videos](reviewing.md) for the full walkthrough.
+Step through it with **Next**, or click **Skip tour** to dismiss it — either way it won't show again. From here you're ready to start annotating; see [Species](reviewing.md) for the full walkthrough.
 
 Next: [Dashboard](dashboard.md)

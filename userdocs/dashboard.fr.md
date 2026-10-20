@@ -9,7 +9,7 @@ Le **tableau de bord** (aussi appelé Vue d'ensemble) est la page d'accueil de l
 
 ## Boutons de révision rapide
 
-En haut à droite se trouvent des raccourcis qui ouvrent l'écran de révision avec des filtres déjà appliqués :
+En haut à droite se trouvent des raccourcis qui ouvrent l'écran Espèces avec des filtres déjà appliqués :
 
 - **Revoir les non annotées** — ouvre les vidéos qui restent à annoter.
 - **Revoir plus tard** — affiché uniquement si vous avez des vidéos marquées *Revoir plus tard* ; n'ouvre que celles-ci.
@@ -41,8 +41,8 @@ Une barre empilée répartit l'ensemble du projet entre vidéos **vides**, **non
 
 Deux panneaux côte à côte :
 
-- **Observations d'espèces** — chaque espèce enregistrée jusqu'ici, avec le nombre d'observations. Cliquez sur une espèce pour ouvrir l'écran de révision filtré sur celle-ci.
-- **Répartition des comportements** — les comportements enregistrés dans le projet, avec décomptes et barre de pourcentage. Cliquez sur un comportement pour filtrer l'écran de révision dessus.
+- **Observations d'espèces** — chaque espèce enregistrée jusqu'ici, avec le nombre d'observations. Cliquez sur une espèce pour ouvrir l'écran Espèces filtré sur celle-ci.
+- **Répartition des comportements** — les comportements enregistrés dans le projet, avec décomptes et barre de pourcentage. Cliquez sur un comportement pour filtrer l'écran Espèces dessus.
 
 ## Récapitulatif par caméra
 

@@ -340,6 +340,7 @@ async def render_filter_drawer_body(page):
                     "selected_tags": list(selected_tag_keys),
                 }
                 update_filters(**new_filters)
+                page.update_filter_count()
                 new_queue = await run.io_bound(
                     dp.get_video_queue,
                     {

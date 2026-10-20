@@ -40,4 +40,4 @@ If your CSV is the app's own exported format (detected via `video_path`/`video_i
 
 For distributing work across multiple annotators, you can import several files at once, or a single `.zip` bundle containing `species.csv`, `tags.csv`, `model_annotations.csv`, and `metadata.csv`.
 
-Next: [Reviewing videos](reviewing.md)
+Next: [Species](reviewing.md)

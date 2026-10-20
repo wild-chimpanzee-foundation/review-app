@@ -1,10 +1,10 @@
-# Revoir les vidéos
+# Espèces
 
-![L'écran de révision : tiroir de filtres, lecteur vidéo, prédictions de l'IA et panneau d'annotation manuelle](img/reviewing.jpg)
+![L'écran Espèces : tiroir de filtres, lecteur vidéo, prédictions de l'IA et panneau d'annotation manuelle](img/reviewing.jpg)
 
 ## Disposition
 
-L'écran de revue comprend :
+L'écran Espèces comprend :
 
 - Un en-tête avec le sélecteur de projet et la navigation.
 - Un panneau latéral gauche avec des filtres (espèce, caméra, étiquettes, statut d'annotation, annotateur, etc.) — entièrement masquable.

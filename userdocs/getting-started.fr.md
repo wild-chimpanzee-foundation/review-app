@@ -110,10 +110,10 @@ Vous pouvez aussi ajuster les **seuils de confiance** qui déterminent comment l
 
 ## Votre première revue
 
-La première fois que vous ouvrez l'écran **Revue**, une courte visite guidée met en évidence le lecteur vidéo, la file d'attente, les filtres et les contrôles d'annotation.
+La première fois que vous ouvrez l'écran **Espèces**, une courte visite guidée met en évidence le lecteur vidéo, la file d'attente, les filtres et les contrôles d'annotation.
 
-![La visite guidée au premier lancement de l'écran de revue](img/onboarding-tour.jpg)
+![La visite guidée au premier lancement de l'écran Espèces](img/onboarding-tour.jpg)
 
-Parcourez-la avec **Suivant**, ou cliquez sur **Passer le tour** pour la fermer — dans tous les cas, elle ne réapparaîtra pas. À partir de là, vous êtes prêt à annoter ; voir [Revoir les vidéos](reviewing.md) pour le guide complet.
+Parcourez-la avec **Suivant**, ou cliquez sur **Passer le tour** pour la fermer — dans tous les cas, elle ne réapparaîtra pas. À partir de là, vous êtes prêt à annoter ; voir [Espèces](reviewing.md) pour le guide complet.
 
 Suite : [Tableau de bord](dashboard.md)

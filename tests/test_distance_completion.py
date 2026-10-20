@@ -89,8 +89,8 @@ async def test_warning_lists_all_reviewed_species_and_only_ignore_finishes(
     await user.should_see("Deer: 2 recorded")
     await user.should_see("Fox: 1 recorded")
     user.find("Finish distance review").click()
-    await user.should_see("Deer: 2 recorded in Review; 1 in Distance")
-    await user.should_see("Fox: 1 recorded in Review; 0 in Distance")
+    await user.should_see("Deer: 2 recorded in Species; 1 in Distance")
+    await user.should_see("Fox: 1 recorded in Species; 0 in Distance")
     page.dp.finish_distance_video.assert_not_called()
     user.find(action).click()
     if action == "Ignore and finish":

@@ -298,6 +298,7 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     user: User, drawer_page, empty_queue, monkeypatch
 ):
     from review_app.app import entry_point
+    from review_app.app.components.review_layout import ReviewLayout
 
     monkeypatch.setattr(entry_point, "get_active_project_id", lambda: None)
     monkeypatch.setattr("review_app.app.update_checker.check_for_update", lambda: None)
@@ -320,31 +321,25 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
         page.right_drawer = ui.right_drawer(value=True).props(
             "behavior=desktop width=400 mini-width=72"
         )
-        left_drawer, _ = entry_point.shared_header(show_drawer=True, distance_interface=True)
+        page.layout = ReviewLayout(page.right_drawer, scope="distance", compact_details=True)
+        left_drawer, _ = entry_point.shared_header(show_drawer=True, review_layout=page.layout)
         with page.right_drawer:
-            page.render_sidebar_toggle()
             draft = ui.input("Unsaved draft", value="keep me")
         with ui.column() as workspace:
             page.render_workspace()
     header = next(
         element for element in page.client.elements.values() if isinstance(element, ui.header)
     )
-    toggle = next(
-        element
-        for element in page.right_drawer.descendants()
-        if element.props.get("data-testid") == "distance-toggle-annotations"
-    )
-    filters = next(
-        element for element in header.descendants() if element.props.get("icon") == "filter_list"
-    )
+    layout = page.layout
+    toggle, filters = layout.buttons["details"], layout.buttons["filters"]
+    navigation = layout.buttons["navigation"]
     assert toggle not in list(header.descendants())
-    assert toggle in list(page.right_drawer.descendants())
-    assert "distance-sidebar-toggle-row" in toggle.parent_slot.parent.classes
+    assert toggle not in list(page.right_drawer.descendants())
+    assert toggle in list(layout.toolbar.descendants())
     assert toggle not in list(workspace.descendants())
-    assert toggle.props["flat"] and toggle.props["color"] == "primary"
-    assert toggle.text == "Collapse sidebar" and not toggle.props.get("round", False)
-    assert toggle.props["icon"] == "chevron_right"
-    assert toggle.props["aria-label"] == "Expand/collapse annotations"
+    assert toggle.props["flat"]
+    assert toggle.props["aria-pressed"] == "true"
+    assert toggle.props["aria-label"] == "Annotation details"
 
     def click(button):
         interaction = user.find(ui.button)
@@ -355,39 +350,61 @@ async def test_annotation_sidebar_toggle_preserves_players_and_drafts(
     assert page.render_animal.call_count == expected_renders
     click(toggle)
     assert page.right_drawer.value is True and page.right_drawer.props["mini"] is True
-    assert toggle.props["icon"] == "chevron_left"
-    assert toggle.text == "" and toggle.props["round"] is True
+    assert toggle.props["aria-pressed"] == "false"
     assert left_drawer.value is True
     click(filters)
     assert left_drawer.value is False and page.right_drawer.props["mini"] is True
     click(filters)
     click(toggle)
     assert page.right_drawer.value is True and not page.right_drawer.props.get("mini", False)
-    assert toggle.props["icon"] == "chevron_right"
-    assert toggle.text == "Collapse sidebar" and not toggle.props.get("round", False)
+    assert toggle.props["aria-pressed"] == "true"
     assert left_drawer.value is True
-    click(
-        next(
-            element
-            for element in header.descendants()
-            if element.props.get("icon") == "visibility_off"
-        )
-    )
+    click(navigation)
     assert header.value is False
-    restore = next(
-        element
-        for element in page.client.elements.values()
-        if "distance-header-restore" in element.classes
-    )
-    click(restore)
+    assert layout.toolbar.visible and navigation.visible
+    click(navigation)
     assert header.value is True
-    assert toggle in list(page.right_drawer.descendants())
+    # Focus restores a customized layout, not an unconditional "show everything".
+    click(filters)
+    click(layout.focus_button)
+    assert not header.value and not left_drawer.value
+    assert page.right_drawer.value and page.right_drawer.props["mini"]
+    assert layout.focus_button.text == "Exit focus" and layout.toolbar.visible
+    click(layout.focus_button)
+    assert header.value and page.right_drawer.value and not left_drawer.value
+    assert not page.right_drawer.props["mini"]
+    assert filters.props["aria-pressed"] == "false"
     assert draft.value == "keep me"
     assert (page.animal_player, page.reference_player) == players
     assert page.individual_id == active_id and page.sample_offset == 1000
     assert page.sample_values == values
     assert page.render_animal.call_count == expected_renders
     assert page.render_references.call_count == expected_renders
+
+
+async def test_filter_edits_update_layout_badge(user: User, drawer_page):
+    from review_app.app.components.review_layout import ReviewLayout
+
+    holder, _, _ = drawer_page
+    await user.open("/distance-drawer-test")
+    page = holder["page"]
+    page.change_queue = AsyncMock()
+    with user:
+        page.layout = ReviewLayout(
+            ui.right_drawer(value=True), scope="distance", compact_details=True
+        )
+        drawer, header = ui.left_drawer(value=True), ui.header()
+        page.layout.attach(drawer, header)
+        with drawer:
+            page.render_filters()
+        page.update_filter_count()
+    assert not page.layout.filter_badge.visible
+    user.find("Distance review status").click()
+    user.find("In progress").click()
+    assert page.status_filter == "in_progress"
+    assert page.layout.filter_badge.visible and page.layout.filter_badge.text == "1"
+    user.find("Distance review status").clear()
+    assert page.status_filter is None and not page.layout.filter_badge.visible
 
 
 async def test_compact_rail_keeps_add_individuals_and_guarded_finish(user: User, drawer_page):

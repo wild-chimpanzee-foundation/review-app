@@ -11,6 +11,7 @@ from pathlib import Path
 from nicegui import app, run, ui
 from sqlalchemy.exc import IntegrityError
 
+from review_app.app.components.review_layout import ReviewLayout
 from review_app.app.config import get_user_data_dir
 from review_app.app.pages.distance_review.anchor_dialogs import (
     AnchorDialogContext,
@@ -154,6 +155,7 @@ class DistanceReviewPage:
         self.animal_frame_rates: dict[Path, float | None] = {}
         self.client.on_delete(self.release_media)
         self.right_drawer = None
+        self.layout: ReviewLayout | None = None
         self.individuals: list[dict] = []
         self.saved_species_options: dict[str, str] = {}
         self.individual_attributes_lock = asyncio.Lock()
@@ -633,12 +635,22 @@ class DistanceReviewPage:
         ]
         return next((value for value in candidates if value in self.species_options), None)
 
+    def update_filter_count(self) -> None:
+        if self.layout is not None:
+            self.layout.set_filter_count(
+                sum(
+                    bool(value)
+                    for value in (self.species_filter, self.camera_filter, self.status_filter)
+                )
+            )
+
     def render_filters(self) -> None:
         def update(name, event):
             if self.busy:
                 event.sender.set_value(getattr(self, name))
                 return
             setattr(self, name, event.value)
+            self.update_filter_count()
             return self.change_queue()
 
         with ui.card().classes("full-width q-mb-md"):
@@ -669,31 +681,6 @@ class DistanceReviewPage:
                 clearable=True,
                 on_change=lambda e: update("status_filter", e),
             ).props("dense outlined").classes("w-full")
-
-    def render_sidebar_toggle(self) -> None:
-        def update_button():
-            compact = self.right_drawer.props.get("mini", False)
-            button.set_icon("chevron_left" if compact else "chevron_right")
-            button.set_text("" if compact else t("distance_collapse_sidebar"))
-            button.props(
-                "round" if compact else "no-caps", remove="no-caps" if compact else "round"
-            )
-
-        def toggle():
-            self.right_drawer.props["mini"] = not self.right_drawer.props.get("mini", False)
-            self.right_drawer.update()
-            update_button()
-
-        with ui.row().classes("distance-sidebar-toggle-row"):
-            button = (
-                ui.button(on_click=toggle)
-                .props(
-                    'flat dense color=primary data-testid="distance-toggle-annotations" '
-                    f'aria-label="{t("distance_toggle_annotations")}"'
-                )
-                .tooltip(t("distance_toggle_annotations"))
-            )
-            update_button()
 
     @ui.refreshable
     def render_sidebar(self) -> None:
@@ -2274,10 +2261,11 @@ async def setup_distance_review() -> None:
         .props("behavior=desktop width=400 mini-width=72")
         .classes("q-pa-sm review-sidebar")
     )
+    layout = ReviewLayout(right_drawer, scope="distance", compact_details=True)
     left_drawer, _ = shared_header(
         show_drawer=True,
         distance_shortcuts=True,
-        distance_interface=True,
+        review_layout=layout,
     )
     left_drawer.props("behavior=desktop").classes("review-sidebar distance-filter")
     # Register styles before the first await: NiceGUI may send the initial page
@@ -2306,10 +2294,11 @@ async def setup_distance_review() -> None:
     with left_drawer:
         page.render_filters()
     page.right_drawer = right_drawer
+    page.layout = layout
+    page.update_filter_count()
     with ui.column().classes("distance-workspace"):
         page.render_workspace()
     with page.right_drawer, ui.column().classes("distance-sidebar"):
-        page.render_sidebar_toggle()
         page.render_sidebar()
     ui.run_javascript("""
         const header = document.querySelector('.q-header');

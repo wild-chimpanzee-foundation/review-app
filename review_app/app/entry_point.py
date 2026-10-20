@@ -7,6 +7,7 @@ import sys
 import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from review_app.app.media import set_media_dirs, setup_media_route
 from review_app.app.project_picker import build_project_picker
@@ -27,6 +28,9 @@ from review_app.app.translations import t
 from review_app.app.utils import backup_before_update_with_progress, ignore_deleted_client
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.local_data_provider import LocalDataProvider
+
+if TYPE_CHECKING:
+    from review_app.app.components.review_layout import ReviewLayout
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +102,7 @@ def shared_header(
     show_drawer: bool = False,
     *,
     distance_shortcuts: bool = False,
-    distance_interface: bool = False,
+    review_layout: "ReviewLayout | None" = None,
 ):
     from nicegui import ui
 
@@ -205,14 +209,10 @@ def shared_header(
     header = ui.header().classes("bg-primary text-white")
     with header:
         with ui.row().classes("w-full items-center q-px-md no-wrap gap-2"):
-            if show_drawer:
+            if show_drawer and review_layout is None:
                 ui.button(icon="filter_list", on_click=toggle_drawer).props(
                     "flat round color=white"
                 ).tooltip(t("filters_label"))
-            if distance_interface:
-                ui.button(icon="visibility_off", on_click=header.hide).props(
-                    "flat round color=white"
-                ).tooltip(t("distance_hide_header"))
             _active_pid = get_active_project_id()
             if _active_pid:
                 _header_dp = get_data_provider()
@@ -349,12 +349,8 @@ def shared_header(
                                     ui.icon("logout", size="xs").style("width: 18px")
                                     ui.label(t("login_logout"))
 
-    if distance_interface:
-        ui.button(t("distance_restore_header"), icon="visibility", on_click=header.show).classes(
-            "distance-header-restore"
-        ).style("position:fixed;top:8px;left:8px;z-index:2100").bind_visibility_from(
-            header, "value", backward=lambda visible: not visible
-        )
+    if review_layout is not None:
+        review_layout.attach(drawer, header)
     return drawer, toggle_drawer
 
 

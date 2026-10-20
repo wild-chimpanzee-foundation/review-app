@@ -1,10 +1,10 @@
-# Reviewing Videos
+# Species
 
-![The review screen: filters drawer, video player, AI predictions and the manual annotation panel](img/reviewing.jpg)
+![The Species screen: filters drawer, video player, AI predictions and the manual annotation panel](img/reviewing.jpg)
 
 ## Layout
 
-The review screen has:
+The Species screen has:
 
 - A header with the project switcher and navigation.
 - A left drawer with filters (species, camera, tags, annotation status, annotator, etc.) — fully toggleable.

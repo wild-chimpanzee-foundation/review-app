@@ -58,7 +58,7 @@ Un tableau récapitulatif montre les caméras, vidéos et heures de chaque annot
 - **Export par bundle** — télécharger un bundle de projet `.zip` par annotateur à transmettre.
 - **Export ZIP vidéo** — regrouper les fichiers vidéo affectés à chaque annotateur dans des ZIP, dans un dossier de sortie de votre choix.
 
-Les affectations apparaissent sur le [tableau de bord](dashboard.md#recapitulatif-des-affectations) et comme filtre d'annotateur sur l'écran de révision.
+Les affectations apparaissent sur le [tableau de bord](dashboard.md#recapitulatif-des-affectations) et comme filtre d'annotateur sur l'écran Espèces.
 
 ### Utilisateurs / annotateurs
 

@@ -14,6 +14,28 @@ class TestTranslationKeyParity:
         assert not missing_in_fr, f"Keys missing in French: {missing_in_fr}"
         assert not missing_in_en, f"Keys missing in English: {missing_in_en}"
 
+    def test_species_screen_name_is_consistent(self):
+        for lang, name in (("en", "Species"), ("fr", "Espèces")):
+            entries = TRANSLATIONS[lang]
+            assert entries["nav_review"] == name
+            assert entries["shortcut_review"] == name
+            for key in (
+                "shortcuts_review",
+                "tour_step_1_title",
+                "tour_step_2_title",
+                "info_queue_title",
+                "info_model_import_body",
+                "import_connection_interrupted",
+                "settings_tags_no_custom",
+                "distance_reference_tag_help",
+                "distance_reference_format",
+                "distance_clock_reset_warning",
+                "distance_review_species_title",
+                "distance_possible_omissions_help",
+                "distance_possible_omission",
+            ):
+                assert name in entries[key], f"Old screen name in {lang}/{key}"
+
     def test_no_empty_translations(self):
         for lang, entries in TRANSLATIONS.items():
             for key, value in entries.items():

@@ -7,6 +7,7 @@ from urllib.parse import quote
 from nicegui import run, ui
 
 from review_app.app.components.inat_logo import inat_logo_svg
+from review_app.app.components.review_layout import ReviewLayout
 from review_app.app.components.video_tools import VideoToolsWarning
 from review_app.app.onboarding import show_info_dialog, show_tour_if_needed
 from review_app.app.pages.review.annotations import _shortcut_badge, render_annotation_section_body
@@ -61,6 +62,18 @@ class ReviewPage:
         self._default_tags: list[str] = []
         self._is_transcoding = False
         self._navigation_controls: list = []
+        self.layout: ReviewLayout | None = None
+
+    def update_filter_count(self) -> None:
+        if self.layout is not None:
+            # Sorting is not a filter; assigned_to duplicates the assigned-to-me choice.
+            excluded = {"selected_sort", "selected_sort_direction", "assigned_to"}
+            count = sum(
+                bool(value) and value != "All"
+                for key, value in get_filters().items()
+                if key not in excluded
+            )
+            self.layout.set_filter_count(count)
 
     def set_transcoding(self, active: bool) -> None:
         self._is_transcoding = active
@@ -455,8 +468,8 @@ async def _render_video_section_body(page: ReviewPage):
             if page._is_transcoding:
                 page.set_transcoding(True)
 
-    with ui.column().classes("w-full").style("max-width: 1280px"):
-        with ui.card().classes("full-width q-mb-md"):
+    with ui.column().classes("w-full min-w-0 gap-1 review-video-section"):
+        with ui.card().classes("full-width q-pa-none gap-1 review-video-panel"):
             transcoded_str = video.get("transcoded_path")
             transcoded_path = Path(transcoded_str) if transcoded_str else None
             cache_status = await run.io_bound(inspect_transcoded_cache, transcoded_path)
@@ -773,6 +786,15 @@ async def setup_review():
         """
         <style>
             .review-sidebar { background: transparent; }
+            .review-video-section > .q-card.review-video-panel {
+                border: 0;
+                border-radius: 0;
+                box-shadow: none !important;
+                background: transparent !important;
+            }
+            .review-video-panel [id^=vp-wrap-]:not(.vp-fs-active) .vp-video-container {
+                border: 0 !important;
+            }
             .review-queue-header {
                 display: grid;
                 grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
@@ -844,21 +866,26 @@ async def setup_review():
     with right_drawer:
         page.render_annotation_sidebar()
 
-    left_drawer, toggle_mini = shared_header(show_drawer=True)
+    page.layout = ReviewLayout(right_drawer, details_always_visible=True)
+    left_drawer, _ = shared_header(show_drawer=True, review_layout=page.layout)
+    page.update_filter_count()
     assert left_drawer is not None
     left_drawer.classes("review-sidebar")
 
     with left_drawer:
         await page.render_filter_drawer()
 
-    with ui.column().classes("w-full q-pa-xs"):
-        with ui.element("div").style("width: 100%; max-width: 1280px; margin: 0 auto"):
-            await page.render_video_section()
+    with ui.column().classes("w-full min-w-0 gap-1 review-workspace"):
+        await page.render_video_section()
 
     ui.run_javascript("document.activeElement?.blur()")
     ui.run_javascript("""
         const h = document.querySelector('.q-header');
-        if (h) document.documentElement.style.setProperty('--q-header-offset', h.offsetHeight + 'px');
+        if (h) {
+            const measureHeader = () => document.documentElement.style.setProperty('--q-header-offset', h.offsetHeight + 'px');
+            measureHeader();
+            new ResizeObserver(measureHeader).observe(h);
+        }
     """)
 
     if queue_ids:

@@ -40,4 +40,4 @@ Si votre CSV est au format d'export propre à l'application (détecté via les c
 
 Pour répartir le travail entre plusieurs annotateurs, vous pouvez importer plusieurs fichiers à la fois, ou un seul bundle `.zip` contenant `species.csv`, `tags.csv`, `model_annotations.csv` et `metadata.csv`.
 
-Suite : [Revoir les vidéos](reviewing.md)
+Suite : [Espèces](reviewing.md)
