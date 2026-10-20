@@ -172,11 +172,17 @@ def render_sample_actions(context: SampleControlsContext) -> None:
                 ui.label(t("distance_confirm_sample")).classes("text-center col")
                 _shortcut_badge("↵ Enter")
         confirm.set_enabled(bool(valid_choice and context.animal_player and not context.busy))
-        ui.button(
-            t("distance_apply_to_end"),
-            icon="playlist_add_check",
-            on_click=context.on_apply_to_end,
-        ).props('outline dense data-distance-action="apply-to-end"').set_enabled(
+        with (
+            ui.button(
+                t("distance_apply_to_end"),
+                icon="playlist_add_check",
+                on_click=context.on_apply_to_end,
+            )
+            .props('outline dense data-distance-action="apply-to-end"')
+            .classes("distance-apply-to-end")
+        ) as apply_to_end:
+            _shortcut_badge("Ctrl+Enter")
+        apply_to_end.set_enabled(
             bool(
                 context.remaining_offsets
                 and valid_choice

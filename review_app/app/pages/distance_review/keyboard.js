@@ -3,11 +3,12 @@ if (window.__distanceKeys) window.__distanceKeys.abort();
 window.__distanceKeys = new AbortController();
 window.addEventListener('keydown', event => {
     const typing = event.target.closest('input, textarea, select, [contenteditable=true], [role=combobox]');
-    if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || event.isComposing || typing) return;
+    const applyToEnd = event.ctrlKey && event.key === 'Enter' && !event.shiftKey;
+    if ((event.ctrlKey && !applyToEnd) || event.metaKey || event.altKey || event.repeat || event.isComposing || typing) return;
 
     const clockDialog = document.querySelector('.q-dialog[aria-modal=true][data-distance-clock-dialog="true"]');
     if (clockDialog) {
-        if (event.shiftKey) return;
+        if (event.shiftKey || event.ctrlKey) return;
         const step = {ArrowLeft: -1, ArrowRight: 1}[event.key];
         const action = step !== undefined
             ? clockDialog.querySelector(`[data-distance-clock-step="${step}"]`)
@@ -75,7 +76,7 @@ window.addEventListener('keydown', event => {
         return;
     }
     if (event.key === 'Tab' && event.shiftKey) return;
-    const action = {
+    const action = applyToEnd ? 'apply-to-end' : {
         ArrowDown: 'distance-down', ArrowUp: 'distance-up',
         Enter: 'confirm', a: 'add', A: 'add', n: 'next', N: 'next', p: 'previous', P: 'previous',
         Tab: 'next-reference',

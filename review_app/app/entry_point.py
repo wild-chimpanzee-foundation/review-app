@@ -153,6 +153,7 @@ def shared_header(
             "A", t("distance_add_individual" if distance_shortcuts else "shortcut_add_species")
         )
         if distance_shortcuts:
+            _shortcut_row("Ctrl+Enter", t("distance_apply_to_end"))
             _shortcut_row("← / →", t("distance_sample_shortcut"))
             _shortcut_row("↑ / ↓", t("distance_reference_shortcut"))
             _shortcut_row("Tab", t("distance_cycle_references"))

@@ -1580,6 +1580,20 @@ class DistanceReviewPage:
                 self.refresh_sample_ui()
                 self.render_sample_navigation.refresh()
 
+        affected_ids = {individual_id, assignment["infant_id"]}
+        target_offsets = set(offsets)
+        overwrites = any(
+            sample["offset_ms"] in target_offsets
+            and (
+                sample["individual_id"] in affected_ids
+                or sample.get("carried_by_individual_id") == individual_id
+            )
+            for sample in self.samples
+        )
+        if not overwrites:
+            await apply()
+            return
+
         await open_apply_to_end_dialog(
             ApplyToEndDialogContext(
                 assignment=assignment,

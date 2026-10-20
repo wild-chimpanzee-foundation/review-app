@@ -10,6 +10,7 @@ from nicegui import ui
 from nicegui.testing import User
 from review_app.app.pages.distance_review import page as page_module
 from review_app.app.pages.distance_review.page import DistanceReviewPage
+from review_app.backend.db.models import DistanceSample
 
 pytest_plugins = ["nicegui.testing.user_plugin"]
 
@@ -76,6 +77,22 @@ def action_button(page):
     )
 
 
+async def test_sample_action_shortcuts_render_as_styled_badges(user: User, bulk_page):
+    holder, _ = bulk_page
+    await user.open("/distance-apply-to-end-test")
+    page = holder["page"]
+    for action, shortcut in (("confirm", "↵ Enter"), ("apply-to-end", "Ctrl+Enter")):
+        button = next(
+            element
+            for element in page.client.elements.values()
+            if element.props.get("data-distance-action") == action
+        )
+        badge = next(element for element in button.descendants() if isinstance(element, ui.badge))
+        assert badge.text == shortcut and badge.visible
+        assert badge.props["color"] == "grey-9" and "text-caption" in badge.classes
+    assert action_button(page).text == "Apply to end"
+
+
 @pytest.mark.parametrize("choice", ["distance", "individual absent", "midpoint not visible"])
 async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sample(
     user: User, bulk_page, choice
@@ -132,6 +149,53 @@ async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sampl
         assert row["skip_reason"] == (None if choice == "distance" else choice)
         assert row["reference_frame_id"] == (
             data["bulk_frame"]["id"] if choice == "distance" else None
+        )
+
+
+@pytest.mark.parametrize("selected_infant", [False, True])
+async def test_only_affected_saved_samples_require_overwrite_confirmation(
+    user: User, bulk_page, selected_infant
+):
+    holder, data = bulk_page
+    dp, individual_id = data["dp"], data["individual"]["id"]
+    with dp.Session.begin() as session:
+        for sample in (
+            session.query(DistanceSample)
+            .filter(
+                DistanceSample.individual_id == individual_id, DistanceSample.offset_ms >= 3000
+            )
+            .all()
+        ):
+            session.delete(sample)
+    infant = dp.create_distance_individual(
+        data["videos"][0], data["species_id"], 0, age="Infant", anchor=data["anchor"]
+    )
+    dp.save_distance_sample(
+        infant["id"], 5000, skip_reason="individual absent", labeled_by="alice"
+    )
+    await user.open("/distance-apply-to-end-test")
+    page = holder["page"]
+    before = list(page.samples)
+    if selected_infant:
+        page.sample_values.update(carries=True, infant_id=infant["id"])
+    assert action_button(page).text == "Apply to end"
+    user.find("Apply to end").click()
+    if selected_infant:
+        await user.should_see("Apply and overwrite")
+        await user.should_see("This overwrites all existing annotations and skips", kind=ui.label)
+        assert page.samples == before
+    else:
+        await user.should_see("Applied selection to 4 samples.")
+        await wait_until(lambda: not page.busy)
+        await user.should_not_see("Apply and overwrite")
+        await user.should_not_see("This overwrites all existing annotations and skips")
+        assert page.sample_offset == 9000
+        assert len([row for row in page.samples if row["individual_id"] == individual_id]) == 5
+        assert [row for row in page.samples if row["individual_id"] == infant["id"]] == [
+            row for row in before if row["individual_id"] == infant["id"]
+        ]
+        assert next(row for row in page.samples if row["offset_ms"] == 1000) == next(
+            row for row in before if row["offset_ms"] == 1000
         )
 
 
@@ -203,9 +267,8 @@ async def test_final_sample_can_be_overwritten_and_corrected(user: User, bulk_pa
     page.render_sample_actions.refresh()
     assert action_button(page).enabled
     user.find("Apply to end").click()
-    await user.should_see("Apply Absent to 1 samples")
-    user.find("Apply and overwrite").click()
     await user.should_see("Applied selection to 1 samples.")
+    await user.should_not_see("Apply and overwrite")
     await wait_until(lambda: not page.busy)
     assert page.sample_offset == 9000
     page_module.seek_paused.assert_called_once_with(

@@ -65,9 +65,10 @@
         .distance-sample-fields {grid-template-columns:auto minmax(0,1fr)}
         .distance-behavior-field {grid-column:1/-1}
         .distance-carry-toggle {width:auto}
-        .distance-confirm .q-badge {display:none}
     }
     .distance-actions {gap:4px;width:100%;align-items:center}
+    .distance-actions .q-badge {flex-shrink:0;white-space:nowrap}
+    .distance-apply-to-end .q-badge {margin-left:8px}
     .distance-confirm {flex:1;min-width:min(100%,240px);min-height:36px;font-weight:700}
     .distance-queue {width:100%;gap:0}
     .distance-queue-header {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;
