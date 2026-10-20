@@ -6,6 +6,9 @@ window.addEventListener('keydown', event => {
     const applyToEnd = event.ctrlKey && event.key === 'Enter' && !event.shiftKey;
     if ((event.ctrlKey && !applyToEnd) || event.metaKey || event.altKey || event.repeat || event.isComposing || typing) return;
 
+    // These panels handle keys locally, including confirmations over the clock dialog.
+    if (event.target.closest('[data-distance-dialog-keyboard="true"]')) return;
+
     const clockDialog = document.querySelector('.q-dialog[aria-modal=true][data-distance-clock-dialog="true"]');
     if (clockDialog) {
         if (event.shiftKey || event.ctrlKey) return;

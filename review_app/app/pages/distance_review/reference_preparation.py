@@ -8,6 +8,7 @@ from typing import Callable
 from nicegui import run, ui
 from sqlalchemy.exc import IntegrityError
 
+from review_app.app.pages.distance_review.dialog_keyboard import keyboard_dialog_card
 from review_app.app.pages.distance_review.player import (
     capture_offset,
     playback_shortcuts,
@@ -55,7 +56,7 @@ async def open_reference_preparation(context: ReferencePreparationContext) -> No
     with (
         context.client,
         ui.dialog() as dialog,
-        ui.card().classes("distance-dialog distance-player") as panel,
+        keyboard_dialog_card().classes("distance-dialog distance-player") as panel,
     ):
         with ui.row().classes("w-full items-center"):
             ui.label(t("distance_prepare_reference")).classes("text-h6")
@@ -110,7 +111,7 @@ async def open_reference_preparation(context: ReferencePreparationContext) -> No
                     format="%.0f",
                 )
                 .classes("flex-1")
-                .props("dense outlined")
+                .props("dense outlined autofocus")
             )
 
             @context.guard
@@ -167,7 +168,9 @@ async def open_reference_preparation(context: ReferencePreparationContext) -> No
                     for button in step_buttons:
                         button.set_enabled(frame_rate is not None)
 
-            save = ui.button(t("distance_save_frame"), icon="bookmark_add", on_click=save_frame)
+            save = ui.button(
+                t("distance_save_frame"), icon="bookmark_add", on_click=save_frame
+            ).props('data-distance-dialog-action="confirm"')
             distance.on("keydown.enter", save_frame)
 
         def inspect_frame(frame: dict) -> None:

@@ -9,6 +9,7 @@ from typing import Callable
 from nicegui import run, ui
 
 from review_app.app import config as app_config
+from review_app.app.pages.distance_review.dialog_keyboard import keyboard_dialog_card
 from review_app.app.pages.distance_review.player import (
     capture_offset,
     playback_shortcuts,
@@ -412,17 +413,20 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
                         return
                     reset_tracks = review is not None
                     if reset_tracks:
-                        with ui.dialog() as confirmation, ui.card().classes("distance-dialog"):
+                        with (
+                            ui.dialog() as confirmation,
+                            keyboard_dialog_card().classes("distance-dialog"),
+                        ):
                             ui.label(t("distance_clock_reset_title")).classes("text-h6")
                             ui.label(t("distance_clock_reset_warning"))
                             with ui.row().classes("w-full justify-end"):
                                 ui.button(
                                     t("cancel"), on_click=lambda: confirmation.submit(False)
-                                ).props("flat")
+                                ).props("flat autofocus")
                                 ui.button(
                                     t("distance_clock_reset_confirm"),
                                     on_click=lambda: confirmation.submit(True),
-                                ).props("color=negative")
+                                ).props('color=negative data-distance-dialog-action="confirm"')
                         confirmed = await confirmation
                         confirmation.delete()
                         if not confirmed or not dialog.value or not context.is_current():

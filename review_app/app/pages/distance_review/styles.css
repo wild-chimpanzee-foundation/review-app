@@ -75,7 +75,8 @@
         align-items:center;width:100%;gap:8px}
     .distance-queue-text {overflow-wrap:anywhere;min-width:0}
     .distance-animal-timing {width:100%;gap:4px;flex-wrap:wrap}
-    .distance-behavior-option:focus-visible {outline:2px solid var(--q-primary)!important;outline-offset:-2px;border-radius:4px}
+    .distance-behavior-option:focus-visible,
+    [data-distance-dialog-keyboard] :is(button,[role="checkbox"]):focus-visible {outline:2px solid var(--q-primary)!important;outline-offset:-2px;border-radius:4px}
     .distance-dialog {width:760px;max-width:95vw!important;max-height:90vh;overflow:auto}
     .distance-dialog .vp-video-container {height:clamp(200px,34vh,430px)}
     .vp-fs-active {position:fixed!important;inset:0;z-index:9999;background:#f8fafc;overflow:auto;padding:16px}

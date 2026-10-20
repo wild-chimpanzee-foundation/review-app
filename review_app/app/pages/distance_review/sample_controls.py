@@ -5,6 +5,7 @@ from typing import Callable
 
 from nicegui import ui
 
+from review_app.app.pages.distance_review.dialog_keyboard import keyboard_dialog_card
 from review_app.app.pages.distance_review.reference_media import frame_time
 from review_app.app.pages.distance_review.session import SampleSelection
 from review_app.app.pages.review.annotations import _shortcut_badge
@@ -242,7 +243,7 @@ class ApplyToEndDialogContext:
 
 
 async def open_apply_to_end_dialog(context: ApplyToEndDialogContext) -> None:
-    with ui.dialog() as dialog, ui.card().classes("w-full").style("max-width:480px"):
+    with ui.dialog() as dialog, keyboard_dialog_card().classes("w-full").style("max-width:480px"):
         ui.label(t("distance_apply_to_end")).classes("text-h6")
         ui.label(
             t(
@@ -270,5 +271,7 @@ async def open_apply_to_end_dialog(context: ApplyToEndDialogContext) -> None:
 
         with ui.row().classes("w-full justify-end"):
             ui.button(t("cancel"), on_click=dialog.close).props("flat")
-            confirm_button = ui.button(t("distance_apply_and_overwrite"), on_click=confirm)
+            confirm_button = ui.button(t("distance_apply_and_overwrite"), on_click=confirm).props(
+                'autofocus data-distance-dialog-action="confirm"'
+            )
     dialog.open()

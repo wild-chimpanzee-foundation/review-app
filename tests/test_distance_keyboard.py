@@ -144,6 +144,90 @@ def test_behavior_arrows_move_focus_and_leave_space_escape_and_tab_native():
     ]
 
 
+def test_generic_dialog_arrows_and_enter_respect_focus_and_native_controls():
+    source = Path(player_module.__file__).with_name("dialog_keyboard.js").read_text()
+    result = run_javascript(
+        """
+        let focused, clicked, prevented;
+        const controls = [0, 1, 2, 3].map(index => ({
+            disabled: index === 1, tabIndex: 0,
+            getAttribute() {return null;},
+            getClientRects() {return index === 3 ? [] : [{}];},
+            contains(element) {return element === this;},
+            focus() {focused = index; document.activeElement = this;},
+            scrollIntoView() {},
+            click() {clicked = index;}
+        }));
+        const panel = {
+            querySelectorAll() {return controls;},
+            querySelector() {return controls[2];},
+            contains(control) {return controls.includes(control);}
+        };
+        global.document = {};
+        const handle = """
+        + source
+        + """;
+        const cases = [
+            ['ArrowLeft', 2, {}], ['ArrowRight', 0, {}], ['ArrowRight', 2, {}],
+            ['ArrowUp', 0, {}], ['ArrowDown', 0, {}],
+            ['Enter', 0, {}], ['Enter', 2, {}], ['Enter', -1, {}],
+            ['Enter', 1, {}], ['Enter', 3, {}],
+            ['ArrowDown', 2, {editable:true}], ['Enter', 2, {editable:true}],
+            ['ArrowRight', 2, {player:true}], ['Enter', 2, {repeat:true}],
+            ['ArrowLeft', 2, {shiftKey:true}], ['Enter', 2, {ctrlKey:true}],
+            ['Tab', 2, {}], ['Escape', 2, {}], [' ', 2, {}],
+        ];
+        const results = cases.map(([key, index, flags]) => {
+            focused = index; clicked = null; prevented = false;
+            document.activeElement = controls[index];
+            handle({key, ...flags, currentTarget:panel, target:{closest(selector) {
+                if (selector.startsWith('input')) return flags.editable || null;
+                if (selector.startsWith('[id^=')) return flags.player || null;
+                return controls[index] || null;
+            }}, preventDefault() {prevented = true;}, stopPropagation() {}});
+            return [focused, clicked, prevented];
+        });
+        console.log(JSON.stringify(results));
+        """
+    )
+    assert result == [
+        [0, None, True],
+        [2, None, True],
+        [0, None, True],
+        [2, None, True],
+        [2, None, True],
+        [0, 0, True],
+        [2, 2, True],
+        [-1, 2, True],
+        [1, None, True],
+        [3, None, True],
+        *[[2, None, False]] * 9,
+    ]
+
+
+def test_nested_confirmation_keys_never_reach_background_clock_or_sample_actions():
+    source = Path(player_module.__file__).with_name("keyboard.js").read_text()
+    result = run_javascript(
+        """
+        let handler;
+        global.window = {addEventListener(type, callback) {handler = callback;}};
+        global.document = {querySelector() {throw Error('Background dialog or sample action');}};
+        """
+        + source
+        + """
+        const results = ['Enter', 'ArrowLeft', 'ArrowRight', 'Escape', 'Tab'].map(key => {
+            let prevented = false;
+            handler({key, target:{closest(selector) {
+                return selector.includes('data-distance-dialog-keyboard') ? {} : null;
+            }}, preventDefault() {prevented = true;}, stopPropagation() {}});
+            return prevented;
+        });
+        console.log(JSON.stringify(results));
+        """
+    )
+    assert result == [False] * 5
+
+
 def test_ctrl_enter_applies_to_end_without_bypassing_shortcut_guards():
     source = Path(player_module.__file__).with_name("keyboard.js").read_text()
     result = run_javascript(

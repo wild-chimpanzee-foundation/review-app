@@ -22,6 +22,7 @@ from review_app.app.pages.distance_review.clock_dialog import (
     ClockDialogContext,
     open_clock_alignment_dialog,
 )
+from review_app.app.pages.distance_review.dialog_keyboard import keyboard_dialog_card
 from review_app.app.pages.distance_review.individuals import (
     IndividualViewsContext,
 )
@@ -1927,7 +1928,10 @@ class DistanceReviewPage:
         if not discrepancies:
             await self.complete_video()
             return
-        with ui.dialog() as dialog, ui.card().classes("w-full").style("max-width:520px"):
+        with (
+            ui.dialog() as dialog,
+            keyboard_dialog_card().classes("w-full").style("max-width:520px"),
+        ):
             ui.label(t("distance_possible_omissions_title")).classes("text-h6")
             ui.label(t("distance_possible_omissions_help"))
             for row in discrepancies:
@@ -1946,9 +1950,11 @@ class DistanceReviewPage:
                 await self.complete_video(dialog)
 
             with ui.row().classes("w-full justify-end"):
-                ui.button(t("distance_return_to_annotation"), on_click=dialog.close).props("flat")
+                ui.button(t("distance_return_to_annotation"), on_click=dialog.close).props(
+                    "flat autofocus"
+                )
                 ui.button(t("distance_ignore_and_finish"), on_click=ignore_and_finish).props(
-                    "color=warning"
+                    'color=warning data-distance-dialog-action="confirm"'
                 )
         dialog.open()
 

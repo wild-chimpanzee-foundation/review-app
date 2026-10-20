@@ -493,6 +493,10 @@ async def test_simplified_button_confirms_even_frame_and_requires_reset(
     seek_clock_test_player(user, 5120.125)
     user.find("Frame shows an even camera second.").click()
     await user.should_see("Reset Distance review for this video?")
+    cancel = next(iter(user.find("Cancel").elements))
+    assert cancel.props["autofocus"]  # Destructive reset never defaults to confirmation.
+    reset = next(iter(user.find("Delete Distance tracks and realign").elements))
+    assert reset.props["data-distance-dialog-action"] == "confirm"
     assert snapshot(data["dp"]) == before
     if not confirm:
         user.find("Cancel").click()

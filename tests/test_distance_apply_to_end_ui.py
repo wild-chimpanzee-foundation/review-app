@@ -114,6 +114,15 @@ async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sampl
         f"Apply {label} to 4 samples for individual #1, from 00:03.000 to the end?"
     )
     await user.should_see("This overwrites all existing annotations and skips", kind=ui.label)
+    confirm = next(iter(user.find("Apply and overwrite").elements))
+    assert confirm.props["autofocus"]
+    assert confirm.props["data-distance-dialog-action"] == "confirm"
+    panel = next(
+        element
+        for element in page.client.elements.values()
+        if element.props.get("data-distance-dialog-keyboard") == "true"
+    )
+    assert any(listener.type == "keydown.capture" for listener in panel._event_listeners.values())
     assert page.samples == before
     user.find("Apply and overwrite").click()
     await user.should_see("Applied selection to 4 samples.")

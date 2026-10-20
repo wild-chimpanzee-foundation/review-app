@@ -10,6 +10,7 @@ from review_app.app.pages.distance_review.anchor_drawing import (
     FixedFrameAnchorContext,
     render_fixed_frame_anchor_preview,
 )
+from review_app.app.pages.distance_review.dialog_keyboard import keyboard_dialog_card
 from review_app.app.pages.distance_review.reference_media import frame_time
 from review_app.app.translations import t
 
@@ -51,7 +52,7 @@ async def open_redraw_anchor_dialog(context: AnchorDialogContext) -> None:
     offset_ms = row["first_seen_offset_ms"]
     draft = dict(row)
     geometry = None
-    with ui.dialog() as dialog, ui.card().classes("distance-dialog distance-player"):
+    with ui.dialog() as dialog, keyboard_dialog_card().classes("distance-dialog distance-player"):
         ui.label(t("distance_redraw_box")).classes("text-h6")
         ui.label(t("distance_redraw_box_help", number=row["individual_number"])).classes(
             "text-caption text-grey-6"
@@ -86,8 +87,10 @@ async def open_redraw_anchor_dialog(context: AnchorDialogContext) -> None:
                     save_button.set_enabled(geometry is not None)
 
         with ui.row().classes("w-full justify-end"):
-            ui.button(t("cancel"), on_click=dialog.close).props("flat")
-            save_button = ui.button(t("save"), on_click=save)
+            ui.button(t("cancel"), on_click=dialog.close).props("flat autofocus")
+            save_button = ui.button(t("save"), on_click=save).props(
+                'data-distance-dialog-action="confirm"'
+            )
             save_button.set_enabled(False)
     dialog.open()
 
@@ -96,14 +99,18 @@ async def open_create_individual_dialog(context: AnchorDialogContext) -> None:
     row = context.row
     offset_ms = row["first_seen_offset_ms"]
     anchor = None
-    with ui.dialog() as dialog, ui.card().classes("distance-dialog distance-player"):
+    with ui.dialog() as dialog, keyboard_dialog_card().classes("distance-dialog distance-player"):
         ui.label(t("distance_add_individual")).classes("text-h6")
-        species = ui.select(
-            context.species_options,
-            value=context.default_species,
-            label=t("species_label"),
-            with_input=True,
-        ).classes("w-full")
+        species = (
+            ui.select(
+                context.species_options,
+                value=context.default_species,
+                label=t("species_label"),
+                with_input=True,
+            )
+            .classes("w-full")
+            .props("autofocus")
+        )
         with ui.row().classes("w-full no-wrap gap-2"):
             age = (
                 ui.select(
@@ -188,6 +195,8 @@ async def open_create_individual_dialog(context: AnchorDialogContext) -> None:
 
         with ui.row().classes("w-full justify-end"):
             ui.button(t("cancel"), on_click=dialog.close).props("flat")
-            create_button = ui.button(t("distance_create_individual"), on_click=create)
+            create_button = ui.button(t("distance_create_individual"), on_click=create).props(
+                'data-distance-dialog-action="confirm"'
+            )
             create_button.set_enabled(False)
     dialog.open()
