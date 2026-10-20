@@ -185,6 +185,8 @@ class DistanceReviewPage:
     def selected_frame_id(self, value: str | None) -> None:
         visibility_ids = {choice["id"] for choice in SKIP_CHOICES}
         self._selection = SampleSelection.from_legacy_id(value, visibility_ids)
+        if value in visibility_ids:
+            self.sample_values["behavior_ids"] = []
 
     def media_url(self, path: Path) -> str:
         """Keep media routes alive across player refreshes and independent of other tabs."""
@@ -246,7 +248,9 @@ class DistanceReviewPage:
                 "_new",
             )
         self.sample_values = {
-            "behavior_ids": list(source.get("behavior_ids", [])) if source else [],
+            "behavior_ids": list(source.get("behavior_ids", []))
+            if source and not source.get("skip_reason")
+            else [],
             "carries": infant_id != "_new",
             "infant_id": infant_id,
         }

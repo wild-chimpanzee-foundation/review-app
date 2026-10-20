@@ -223,7 +223,13 @@ def test_confirmation_persists_provenance_behaviors_and_durable_sample_identity(
     assert saved["behavior_ids"] == [data["behavior_id"]]
     assert saved["labeled_by"] == "alice" and saved["labeled_at"] is not None
     edited = confirm(data, behavior_ids=[])
-    assert edited["id"] == row["id"] and state(data)["samples"][0]["behavior_ids"] == []
+    assert edited["id"] == row["id"]
+    fallback = next(
+        bid
+        for bid, name in data["dp"].get_distance_behavior_options().items()
+        if name == "Unidentified"
+    )
+    assert state(data)["samples"][0]["behavior_ids"] == [fallback]
     assert (
         data["dp"].list_distance_individuals(data["videos"][0])[0]["review_status"]
         == "in_progress"
@@ -324,7 +330,7 @@ def test_new_carried_infant_inherits_anchor_and_only_precreation_samples_are_abs
     }
     assert child[1000]["skip_reason"] == "individual absent"
     assert child[3000]["skip_reason"] == "midpoint not visible"
-    assert child[3000]["behavior_ids"] == [data["behavior_id"]]
+    assert child[3000]["behavior_ids"] == []
     assert 5000 not in child
     # Once carrying is untoggled, later parent writes do not create infant evidence.
     dp.save_distance_sample(
@@ -397,7 +403,10 @@ def test_carrier_corrections_sync_infant_evidence_preserve_behavior_and_remove_s
         if row["individual_id"] == infant_id and row["offset_ms"] == 1000
     )
     assert child["reference_frame_id"] == other_frame["id"] and child["distance_m"] == 10.0
-    assert child["behavior_ids"] == []
+    fallback = next(
+        bid for bid, name in dp.get_distance_behavior_options().items() if name == "Unidentified"
+    )
+    assert child["behavior_ids"] == [fallback]
     assert child["carried_by_individual_id"] == data["individual"]["id"]
     dp.save_distance_sample(
         data["individual"]["id"], 1000, skip_reason="individual absent", labeled_by="bob"

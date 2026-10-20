@@ -9,6 +9,7 @@ from typing import IO, Any
 import pandas as pd
 from sqlalchemy import text
 
+from review_app.backend.db.distance_behaviors import ensure_unidentified_behavior
 from review_app.backend.errors import DataImportError, SpeciesError
 from review_app.backend.provider.base import ProviderBase
 
@@ -411,6 +412,7 @@ class SpeciesMixin(ProviderBase):
                     ),
                     behavior_rows,
                 )
+            ensure_unidentified_behavior(conn)
 
     def _build_species_variant_map(self) -> dict[str, str]:
         """Return {lowercase_variant -> scientific_name} for all species names/aliases.

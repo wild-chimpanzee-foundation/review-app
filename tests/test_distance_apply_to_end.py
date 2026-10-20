@@ -5,6 +5,7 @@ from datetime import datetime
 
 import pytest
 from review_app.backend.db.models import (
+    Behavior,
     DistanceIndividual,
     DistanceIndividualTag,
     DistanceReviewProgress,
@@ -29,6 +30,8 @@ def apply_data(distance_data):
     data["dp"].verify_distance_recording_time(
         data["videos"][0], datetime(2026, 10, 12, 16, 2, 49), "alice"
     )
+    with data["dp"].Session() as session:
+        data["unidentified_id"] = session.query(Behavior.id).filter_by(key="unidentified").scalar()
     return data
 
 
@@ -123,17 +126,23 @@ def test_overwrites_every_state_inclusively_with_unsaved_choice_and_behaviors(ap
         if offset in before:
             assert row["id"] == before[offset]["id"]
         assert row["individual_id"] == parent and row["labeled_by"] == "bob"
-        assert row["behavior_ids"] == [data["behavior_id"]]
+        assert row["behavior_ids"] == ([data["behavior_id"]] if choice == "distance" else [])
         assert row["carried_by_individual_id"] is None
         assert row["status"] == ("annotated" if choice == "distance" else "skipped")
         assert row["skip_reason"] == (None if choice == "distance" else choice)
         assert row["reference_frame_id"] == (new_frame["id"] if choice == "distance" else None)
         assert row["distance_m"] == (7.25 if choice == "distance" else None)
     assert dp.list_distance_individuals(video)[0]["tag_ids"] == [tag_id]
-    # Omitted behaviors mean an empty choice, not "preserve existing".
+    # Omitted behaviors use Unidentified for visible samples, not "preserve existing".
     apply(data, 7000, **fields)
-    assert samples(data)[5000]["behavior_ids"] == [data["behavior_id"]]
-    assert samples(data)[7000]["behavior_ids"] == samples(data)[9000]["behavior_ids"] == []
+    assert samples(data)[5000]["behavior_ids"] == (
+        [data["behavior_id"]] if choice == "distance" else []
+    )
+    assert (
+        samples(data)[7000]["behavior_ids"]
+        == samples(data)[9000]["behavior_ids"]
+        == ([data["unidentified_id"]] if choice == "distance" else [])
+    )
 
 
 def test_other_individuals_videos_ordinary_review_and_active_selection_are_untouched(apply_data):
@@ -221,13 +230,17 @@ def test_one_persistent_new_or_reused_infant_receives_evidence_and_behaviors(
             "labeled_by",
         ):
             assert child[key] == parent[key]
-        assert child["behavior_ids"] == [data["behavior_id"]]
+        assert child["behavior_ids"] == ([data["behavior_id"]] if choice == "distance" else [])
         assert child["carried_by_individual_id"] == data["individual"]["id"]
     # Repeating the operation uses the same identity and replaces behaviors too.
     apply(data, 5000, infant_id=infant_id, **fields)
     assert len(dp.list_distance_individuals(data["videos"][0])) == 2
-    assert samples(data, infant_id)[3000]["behavior_ids"] == [data["behavior_id"]]
-    assert samples(data, infant_id)[5000]["behavior_ids"] == []
+    assert samples(data, infant_id)[3000]["behavior_ids"] == (
+        [data["behavior_id"]] if choice == "distance" else []
+    )
+    assert samples(data, infant_id)[5000]["behavior_ids"] == (
+        [data["unidentified_id"]] if choice == "distance" else []
+    )
 
 
 @pytest.mark.parametrize("reason", ["individual absent", "midpoint not visible"])
@@ -496,8 +509,8 @@ def test_bulk_reopens_finished_video_and_ordinary_corrections_still_work(apply_d
         parent, 5000, reference_frame_id=frame["id"], infant_id=infant, labeled_by="alice"
     )
     assert samples(data, infant)[5000]["distance_m"] == 9.75
-    assert samples(data, infant)[5000]["behavior_ids"] == []
-    assert samples(data)[5000]["behavior_ids"] == []
+    assert samples(data, infant)[5000]["behavior_ids"] == [data["unidentified_id"]]
+    assert samples(data)[5000]["behavior_ids"] == [data["unidentified_id"]]
     dp.save_distance_sample(parent, 5000, skip_reason="midpoint not visible", labeled_by="alice")
     assert 5000 not in samples(data, infant)
     assert samples(data)[5000]["skip_reason"] == "midpoint not visible"

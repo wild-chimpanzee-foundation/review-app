@@ -7,6 +7,7 @@ import math
 from sqlalchemy import func
 
 from review_app.backend.camera_layout import deployment_key
+from review_app.backend.db.distance_behaviors import ensure_unidentified_behavior
 from review_app.backend.db.models import (
     Behavior,
     DistanceIndividual,
@@ -114,6 +115,10 @@ def save_distance_sample(
         bid for (bid,) in session.query(Behavior.id).filter(Behavior.id.in_(behaviors))
     }:
         raise ValueError("Behavior not found")
+    if skipping:
+        behaviors = set()
+    elif not behaviors:
+        behaviors = {ensure_unidentified_behavior(session.connection())}
     infant = None
     if infant_id:
         infant = session.get(DistanceIndividual, infant_id)

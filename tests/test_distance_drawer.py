@@ -56,7 +56,7 @@ async def wait_for_saved(page, expected=lambda: True):
         fields_ready = all(
             element.enabled
             for element in page.client.elements.values()
-            if isinstance(element, ui.select)
+            if isinstance(element, ui.select) and "distance-behavior-field" not in element.classes
         )
         if (
             not page.busy
@@ -724,7 +724,7 @@ async def test_carried_infant_locks_distance_but_allows_behavior_corrections(
     )
     assert not bulk.enabled
 
-    # Confirm may update behaviors but must retain the exact carrier evidence.
+    # Only visible samples allow behaviors; confirming always retains carrier evidence.
     page.sample_values["behavior_ids"] = [data["behavior_id"]]
     await page.commit_sample()
     saved = next(
@@ -733,7 +733,7 @@ async def test_carried_infant_locks_distance_but_allows_behavior_corrections(
         if row["individual_id"] == pair["infant_id"] and row["offset_ms"] == 1000
     )
     assert saved["carried_by_individual_id"] == data["individual"]["id"]
-    assert saved["behavior_ids"] == [data["behavior_id"]]
+    assert saved["behavior_ids"] == ([] if skip_reason else [data["behavior_id"]])
     assert saved["reference_frame_id"] == pair["reference_frame_id"]
     assert saved["skip_reason"] == skip_reason
     assert page.sample_offset == 3000
@@ -1446,6 +1446,51 @@ async def test_accepting_reference_plays_to_next_frame_with_distance_preselected
     await wait_for_saved(page, lambda: page.sample_offset == 5000)
     saved = dp.get_distance_review_state(data["videos"][0], "alice")["samples"]
     assert all(row["behavior_ids"] == [behavior_id] for row in saved if row["offset_ms"] == 3000)
+
+
+@pytest.mark.parametrize("reason", ["individual absent", "midpoint not visible"])
+async def test_visibility_selection_clears_and_disables_behavior_draft(
+    user: User, drawer_page, reason
+):
+    holder, data, _ = drawer_page
+    dp = data["dp"]
+    dp.verify_distance_recording_time(
+        data["videos"][0], datetime(2026, 10, 12, 16, 2, 49), "alice"
+    )
+    await user.open("/distance-drawer-test")
+    page = holder["page"]
+    await page.reload_review()
+    page.sample_offset = 1000
+    page.frames = [data["frame"]]
+    page.selected_frame_id = data["frame"]["id"]
+    page.sample_values["behavior_ids"] = [data["behavior_id"]]
+    del page.render_samples
+    with user:
+        page.render_samples()
+
+    def behavior_select():
+        return next(
+            element
+            for element in page.client.elements.values()
+            if isinstance(element, ui.select) and element.props.get("label") == "Sample behaviors"
+        )
+
+    assert behavior_select().enabled
+    assert behavior_select().props["multiple"]
+    with user:
+        page.preview_frame({"id": reason})
+    await user.should_see(
+        f"Selected: {'Absent' if reason == 'individual absent' else 'Not visible'}"
+    )
+    assert page.sample_values["behavior_ids"] == []
+    assert behavior_select().value == []
+    assert not behavior_select().enabled
+    assert dp.get_distance_review_state(data["videos"][0], "alice")["samples"] == []
+    with user:
+        page.preview_frame(data["frame"])
+    await user.should_see("Selected reference: 5 m")
+    assert behavior_select().enabled
+    assert page.sample_values["behavior_ids"] == []
 
 
 async def test_sample_details_and_skip_actions_render_with_reference_distances(

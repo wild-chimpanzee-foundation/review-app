@@ -5,6 +5,8 @@ from typing import Callable
 
 from sqlalchemy import text
 
+from review_app.backend.db.distance_behaviors import ensure_unidentified_behavior
+
 logger = logging.getLogger(__name__)
 
 # Each entry is (version: int, sql: str | list[str] | Callable[[conn], None]).
@@ -703,6 +705,26 @@ def _migration_v26(conn) -> None:
     """)
 
 
+def _migration_v27(conn) -> None:
+    """Give visible samples a behavior; visibility skips must have none."""
+    behavior_id = ensure_unidentified_behavior(conn)
+    conn.execute(
+        text("""
+            INSERT INTO distance_sample_behaviors (sample_id, behavior_id)
+            SELECT sample.id, :behavior_id FROM distance_samples AS sample
+            WHERE sample.status = 'annotated' AND NOT EXISTS (
+                SELECT 1 FROM distance_sample_behaviors WHERE sample_id = sample.id
+            )
+        """),
+        {"behavior_id": behavior_id},
+    )
+    conn.exec_driver_sql("""
+        DELETE FROM distance_sample_behaviors WHERE sample_id IN (
+            SELECT id FROM distance_samples WHERE status = 'skipped'
+        )
+    """)
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -846,6 +868,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (24, _migration_v24),
     (25, _migration_v25),
     (26, _migration_v26),
+    (27, _migration_v27),
 ]
 
 # Frozen upgrade DDL. Keep independent of evolving ORM metadata.

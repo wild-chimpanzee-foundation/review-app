@@ -73,14 +73,23 @@ def render_sample_controls(context: SampleControlsContext) -> None:
                 'flat dense no-caps icon-right=arrow_forward data-distance-action="select-carrier"'
             ).tooltip(t("distance_carried_distance_help")).set_enabled(not context.busy)
         values = context.values
+        skipping = bool(
+            _selected_skip(context) or (context.carrier and context.sample["skip_reason"])
+        )
         with ui.element("div").classes("distance-sample-fields"):
-            ui.select(
-                context.behavior_options,
-                value=values["behavior_ids"],
-                multiple=True,
-                label=t("distance_behaviors"),
-                on_change=lambda e: values.update(behavior_ids=list(e.value or [])),
-            ).classes("distance-behavior-field").props("dense outlined use-chips")
+            behaviors = (
+                ui.select(
+                    context.behavior_options,
+                    value=values["behavior_ids"],
+                    multiple=True,
+                    label=t("distance_behaviors"),
+                    on_change=lambda e: values.update(behavior_ids=list(e.value or [])),
+                )
+                .classes("distance-behavior-field")
+                .props("dense outlined use-chips")
+                .tooltip(t("distance_behaviors_help"))
+            )
+            behaviors.set_enabled(not skipping)
             carries = (
                 ui.checkbox(
                     t("distance_carries_infant"),

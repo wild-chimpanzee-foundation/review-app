@@ -116,7 +116,9 @@ async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sampl
     assert page.sample_offset == 9000
     assert page.individual_id == data["individual"]["id"]
     assert page.selected_frame_id == (data["bulk_frame"]["id"] if choice == "distance" else choice)
-    assert page.sample_values["behavior_ids"] == [data["behavior_id"]]
+    assert page.sample_values["behavior_ids"] == (
+        [data["behavior_id"]] if choice == "distance" else []
+    )
     assert action_button(page).enabled  # Reviewed samples can always be overwritten again.
     page_module.seek_paused.assert_called_once_with(
         page.animal_player, page.sample_seek_offset(9000)
@@ -126,7 +128,7 @@ async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sampl
     for row in rows:
         if row["offset_ms"] < 3000:
             continue
-        assert row["behavior_ids"] == [data["behavior_id"]]
+        assert row["behavior_ids"] == ([data["behavior_id"]] if choice == "distance" else [])
         assert row["skip_reason"] == (None if choice == "distance" else choice)
         assert row["reference_frame_id"] == (
             data["bulk_frame"]["id"] if choice == "distance" else None
@@ -252,7 +254,7 @@ async def test_carrying_bulk_choice_uses_one_infant_and_restores_saved_metadata(
     infant_id = infant_ids.pop()
     assert (infant_id != infant["id"]) == new_infant
     for row in children:
-        assert row["behavior_ids"] == [data["behavior_id"]]
+        assert row["behavior_ids"] == ([data["behavior_id"]] if choice == "distance" else [])
         assert row["skip_reason"] == (None if choice == "distance" else choice)
     assert page.sample_values["infant_id"] == infant_id
     assert page.sample_values["carries"]

@@ -579,7 +579,7 @@ async def test_arrow_selected_skip_is_confirmed_and_plays_to_next_sample(distanc
     saved = page.dp.save_distance_sample.call_args.kwargs
     assert saved["skip_reason"] == reason
     assert saved["reference_frame_id"] is None
-    assert saved["behavior_ids"] == ["walking"]
+    assert saved["behavior_ids"] == []
     assert saved["infant_id"] is None and not saved["create_infant"]
     assert page.samples[0]["skip_reason"] == reason
     page_module.play_to_sample.assert_awaited_once_with(page.animal_player, 1000.01, 3000.01)
@@ -822,6 +822,27 @@ def test_saved_frame_metadata_stays_individual_specific(
     page.individual_id = "other"
     page.reset_sample_values()
     assert page.sample_values["behavior_ids"] == []
+
+
+async def test_confirmed_multiple_behaviors_prefill_without_saving_new_sample(distance_page):
+    page = distance_page
+    del page.restore_sample
+    page.samples = [
+        {
+            "individual_id": "adult",
+            "offset_ms": 1000,
+            "reference_frame_id": "frame",
+            "reference_video_id": None,
+            "behavior_ids": ["walking", "resting"],
+        }
+    ]
+    await page.choose_sample(3000)
+    assert page.sample_values["behavior_ids"] == ["walking", "resting"]
+    page.sample_values["behavior_ids"].clear()
+    await page.choose_sample(5000)
+    assert page.sample_values["behavior_ids"] == ["walking", "resting"]
+    assert page.samples[0]["behavior_ids"] == ["walking", "resting"]
+    page.dp.save_distance_sample.assert_not_called()
 
 
 async def test_saving_new_infant_preselects_created_identity_for_next_sample(
