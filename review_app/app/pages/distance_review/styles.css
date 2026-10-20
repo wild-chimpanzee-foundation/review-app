@@ -34,8 +34,9 @@
     .distance-choice-navigation {gap:0}
     .distance-frames {flex-wrap:nowrap;overflow-x:auto;width:100%;min-width:0;padding:0;gap:4px;scrollbar-width:thin}
     .distance-frames .q-btn, .distance-visibility-choices .q-btn {flex-shrink:0}
+    .distance-frames .distance-unconfigured:before {border-style:dashed}
     .distance-reference-browser {width:100%;min-width:0;flex-wrap:nowrap;align-items:center;gap:8px}
-    .distance-reference-browser-label {flex-shrink:0;max-width:160px;gap:0}
+    .distance-reference-browser > .q-btn {flex-shrink:0}
     .distance-reference-clips {flex:1;min-width:0;flex-wrap:nowrap;overflow-x:auto;gap:4px;padding:0;scrollbar-width:thin}
     .distance-reference-clip {width:102px;flex-shrink:0;padding:2px;border:2px solid transparent;border-radius:6px}
     .distance-reference-clip.active {border-color:var(--q-primary);background:rgba(128,128,128,.12)}

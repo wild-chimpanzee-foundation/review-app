@@ -1,6 +1,7 @@
 """Reference preparation restores saved frames and prefills whole-number distances."""
 
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -10,6 +11,7 @@ from nicegui.testing import User
 from review_app.app.pages.distance_review import page as page_module
 from review_app.app.pages.distance_review import reference_preparation as preparation_module
 from review_app.app.pages.distance_review.page import DistanceReviewPage
+from sqlalchemy.exc import SQLAlchemyError
 
 pytest_plugins = ["nicegui.testing.user_plugin"]
 
@@ -117,6 +119,33 @@ async def test_loading_displays_saved_frames_and_opens_at_latest_annotation(
     assert len(data["dp"].list_reference_frames(data["reference"]["id"])) == 2
 
 
+async def test_explicit_edit_updates_position_without_creating_another_frame(
+    user: User, preparation_page
+):
+    holder, data, capture, seek, _ = preparation_page
+    capture.return_value = 333.334
+    await user.open("/reference-preparation-test")
+    edit = next(
+        button
+        for button in user.find(ui.button).elements
+        if button.props.get("data-edit-reference") == data["frame"]["id"]
+    )
+    edit.mark("edit-reference")
+    user.find(marker="edit-reference").click()
+    await user.should_see("Update reference frame")
+    number = next(iter(user.find(ui.number).elements))
+    assert not number.enabled
+    assert number.value == 5
+    seek.reset_mock()
+    user.find("Update reference frame").click()
+    await wait_for(lambda: number.enabled)
+    frames = data["dp"].list_reference_frames(data["reference"]["id"])
+    assert frames == [{**data["frame"], "offset_ms": 333, "playback_offset_ms": 333.334}]
+    assert holder["page"].frames == frames
+    await user.should_see("5 m · 00:00.333")
+    seek.assert_not_called()
+
+
 async def test_new_reference_starts_at_first_frame_with_one_meter(user: User, preparation_page):
     _, data, _, seek, _ = preparation_page
     data["reference"] = data["dp"].register_reference_video(
@@ -163,3 +192,81 @@ async def test_loading_preserves_saved_distances_and_opens_at_saved_position(
     await user.should_see(f"{distance:g} m · {preparation_module.frame_time(offset)}")
     assert next(iter(user.find(ui.number).elements)).value == expected_distance
     seek.assert_called_once_with(next(iter(user.find(ui.video).elements)), offset)
+
+
+def delete_button(user, frame_id):
+    button = next(
+        button
+        for button in user.find(ui.button).elements
+        if button.props.get("data-delete-reference") == frame_id
+    )
+    assert button.props["color"] == "negative"
+    button.mark("delete-reference")
+    return user.find(marker="delete-reference")
+
+
+async def test_cancel_reference_deletion_preserves_mapping(user: User, preparation_page):
+    _, data, _, _, _ = preparation_page
+    await user.open("/reference-preparation-test")
+    delete_button(user, data["frame"]["id"]).click()
+    await user.should_see("Delete the 5 m reference mapping?")
+    await user.should_see("All saved animal samples using this mapping")
+    await user.should_see("Saved animal samples to clear: 0")
+    user.find("Cancel").click()
+    await user.should_not_see("Delete the 5 m reference mapping?")
+    assert data["dp"].list_reference_frames(data["reference"]["id"]) == [data["frame"]]
+
+
+async def test_delete_reference_clears_saved_sample_and_current_selection(
+    user: User, preparation_page
+):
+    holder, data, _, seek, _ = preparation_page
+    dp, video_id = data["dp"], data["videos"][0]
+    dp.verify_distance_recording_time(video_id, datetime(2026, 10, 12, 16, 2, 49), "alice")
+    dp.save_distance_sample(
+        data["individual"]["id"], 1000, reference_frame_id=data["frame"]["id"], labeled_by="alice"
+    )
+    await user.open("/reference-preparation-test")
+    page = holder["page"]
+    page.queue = [{"video_id": video_id, "camera_id": "cam_x"}]
+    page.individual_id, page.sample_offset = data["individual"]["id"], 1000
+    await page.reload_individuals()
+    assert page.samples
+    page.frames = [data["frame"]]
+    page.selected_frame_id = data["frame"]["id"]
+    edit = next(
+        button
+        for button in user.find(ui.button).elements
+        if button.props.get("data-edit-reference") == data["frame"]["id"]
+    )
+    edit.mark("edit-before-delete")
+    user.find(marker="edit-before-delete").click()
+    await user.should_see("Update reference frame")
+    seek.reset_mock()
+    delete_button(user, data["frame"]["id"]).click()
+    await user.should_see("Delete the 5 m reference mapping?")
+    await user.should_see("Saved animal samples to clear: 1")
+    user.find("Delete mapping and clear affected annotations").click()
+    await user.should_not_see("Delete the 5 m reference mapping?")
+    await user.should_not_see("Prepared reference frames")
+    await user.should_see("Save current frame")
+    assert next(iter(user.find(ui.number).elements)).enabled
+    assert page.selected_frame_id is None
+    assert page.frames == [] and page.samples == []
+    assert dp.get_distance_review_state(video_id, "alice")["samples"] == []
+    assert page.individual["review_status"] == "in_progress"
+    seek.assert_not_called()
+
+
+async def test_failed_reference_deletion_preserves_mapping_for_retry(
+    user: User, preparation_page, monkeypatch
+):
+    _, data, _, _, _ = preparation_page
+    monkeypatch.setattr(data["dp"], "delete_reference_frame", Mock(side_effect=SQLAlchemyError()))
+    await user.open("/reference-preparation-test")
+    delete_button(user, data["frame"]["id"]).click()
+    await user.should_see("Delete the 5 m reference mapping?")
+    user.find("Delete mapping and clear affected annotations").click()
+    await user.should_see("Could not delete the reference mapping. Please try again.")
+    assert data["dp"].list_reference_frames(data["reference"]["id"]) == [data["frame"]]
+    await user.should_see("Delete the 5 m reference mapping?")

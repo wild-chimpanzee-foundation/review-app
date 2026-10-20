@@ -8,10 +8,11 @@ migration consolidation, development-database recovery, and validation status.
 
 ## Approach
 
-Annotators estimate an animal's distance by selecting a prepared reference frame
-showing a patrol team member at a known distance. The chosen frame supplies the
-sample's exact distance in meters, including fractional distances. There is no
-free-form distance-entry field during animal annotation.
+Annotators estimate an animal's distance by selecting a reference frame showing
+a patrol team member at a known distance. Reference frames can be calibrated on
+demand during review; upfront preparation is optional. The chosen frame supplies
+the sample's exact distance in meters, including existing fractional distances.
+There is no free-form distance-entry field during animal annotation.
 
 Distance identities, samples, queue, and completion are independent of ordinary
 Review. Ordinary species/count annotations provide context and omission warnings;
@@ -23,8 +24,8 @@ they do not create or synchronize Distance observations automatically.
 
 1. Import reference clips in a deployment's paired `references/` and `videos/`
    layout to tag them **Reference Video** automatically, or tag other reference
-   clips manually in ordinary Review. Open **Distance** and prepare their
-   known-distance frames for the deployment.
+   clips manually in ordinary Review. Open **Distance**; reference distances may
+   initially have no configured frame positions.
 2. Align in the independent clock dialog. The default Simplified workflow opens
    near the video midpoint: select any frame showing an even camera second.
    It shows the expected timestamp as an estimate; correcting that time is optional.
@@ -35,8 +36,10 @@ they do not create or synchronize Distance observations automatically.
    or after first sighting remain unreviewed. Creation retains the identifying
    frame while selecting the first scheduled sample at/after it, or the final
    sample when first sighting is later than the last stop.
-4. At each scheduled sample, select a prepared reference, **Not visible**, or
-   **Absent**; set sample behaviors and any carried infant, then confirm.
+4. At each scheduled sample, select a reference distance, **Not visible**, or
+   **Absent**; set sample behaviors and any carried infant, then confirm. If a
+   distance is not yet configured, first pause its reference video on the matching
+   frame and click that distance button to save the reference mapping.
 5. Saving plays the consecutive interval and pauses at the next scheduled sample,
    even if that sample was already reviewed. Confirming/skipping the final sample
    retains it and shows **End of video**; it never switches individuals, returns
@@ -179,8 +182,10 @@ samples remain editable; a missing sample row means unreviewed, not absent.
   switches; keep its prior image until the next source has loaded and sought.
   Pages own independent media URLs, released when their client is deleted.
 - **Absent** and **Not visible** dim the reference image, including restored
-  saved choices. Browsing clips preserves dimming; selecting a distance
-  restores the image without recreating the player or changing image settings.
+  saved choices. Switching clips preserves dimming. Playing, seeking, scrolling,
+  or successfully stepping the reference video clears the visibility selection
+  and restores color without changing saved annotations or image settings.
+  Programmatic sample restoration does not clear a restored visibility choice.
 
 ### Apply to end
 
@@ -306,6 +311,56 @@ prepared frames. Untagging hides unused clips, while references used by the
 current video's samples remain visible as saved evidence, labeled no longer
 tagged. Use available playback conversions for clips/thumbnails.
 
+### Reference metadata caching
+
+Each Distance page keeps a 64-entry LRU cache of successful reference-video probe
+results, keyed by resolved path and validated against nanosecond modification time
+and file size on every lookup. Failed probes and files changed during probing are
+not cached. Initial reference loading and later switches share this cache; frame
+mappings remain freshly queried so edits/deletions are never hidden by caching.
+
+### On-demand reference calibration
+
+The default workflow offers whole-meter buttons from **1–15 m** below the current
+reference video (`DISTANCE_REFERENCE_METERS` in `review_app/app/config.py`).
+Existing saved distances outside this range, fractional distances, and repeated
+legacy reference frames remain accessible without conversion or deletion.
+**+ Add distance** beside the buttons opens a small whole-meter input for any
+additional distance, including values above 15 m. It suggests the next meter after
+the highest default or configured distance (initially 16 m). Enter saves the
+current reference frame and adds its persistent button without saving animal
+evidence. Existing distances are selected rather than overwritten; failed saves
+keep the input open for retry.
+
+- Unconfigured buttons show a **plus** and dashed outline. Pause/scrub the
+  reference video (or use its ±1/5-frame controls), then click a distance to save
+  the displayed frame's precise playback position and rounded millisecond ID.
+- Configured buttons show a **check**. Clicking seeks to the saved frame and
+  selects that distance as an unsaved animal-sample choice; it never overwrites
+  the reference position. Keyboard distance navigation only visits configured
+  references and visibility choices, so it cannot accidentally calibrate frames.
+- First-time configuration also selects the new distance as an unsaved choice.
+  Neither configuring nor selecting a reference saves animal evidence. The usual
+  **Confirm selection and advance** or **Apply to end** action is still required.
+- Missing distances do not block starting a review. Mappings persist per reference
+  video across animals and sessions; no database rows are created for unknown
+  distances. Concurrent first-time configuration reuses an existing distance
+  mapping rather than replacing it. Failed saves leave the distance unconfigured.
+- The preparation dialog remains available for additional distances and upfront
+  calibration. Its explicit **Edit reference frame** action selects an existing
+  mapping; **Update reference frame** saves a replacement position while retaining
+  the mapping's ID and distance, including links from existing animal samples.
+  Canceling an edit leaves the mapping unchanged. Refresh reloads saved mappings
+  without rebuilding the reference player.
+- Each prepared frame has a red delete action. Its confirmation shows the current
+  count of saved animal samples that will be cleared, across all videos. It warns
+  that deleting the distance-to-frame mapping clears those samples, including
+  behaviors and carrying links, and reopens affected individual/video reviews.
+  Individuals, clock alignment, unrelated evidence, and the reference video remain
+  intact. Deletion and evidence clearing are transactional; used mappings cannot
+  be deleted through the provider without explicit `clear_samples=True`.
+  Canceling or a failed deletion preserves the mapping and annotations.
+
 Reference preparation uses an independent dialog player with ±1/5/20-frame
 controls and reported FPS. New clips start at playback zero and 1 m. Open existing
 clips at the latest prepared frame; show saved distances/timestamps and suggest
@@ -343,7 +398,8 @@ alongside rounded millisecond frame identities; never round saved meter values.
   visibility choices in a compact toolbar. Behavior, carrying, and infant identity
   use an auto-fitting field grid: share a row when space permits and wrap in
   narrower panels. Show saved/selected summaries inline and use a compact
-  horizontal reference-thumbnail browser with its label/navigation alongside it.
+  horizontal reference-thumbnail browser flanked by **Shift+Tab** (previous) and
+  **Tab** (next) controls; omit the redundant reference-clip label.
   **Confirm selection and advance** and **Apply to end** sit together immediately
   above the clip picker, below the sample fields/summary; they are not in the
   sidebar. **Finish video** remains in the sidebar. Actions wrap when necessary;
@@ -370,7 +426,8 @@ alongside rounded millisecond frame identities; never round saved meter values.
   sidebar and compact rail. **J/K:** next/previous individual with wrapping.
   **A:** add an individual after alignment; it does not open clock setup.
   **P/N:** previous/next video, respecting completion guards for forward moves.
-  **Tab:** cycle reference clips, retaining visibility or matching/nearest distance.
+  **Tab / Shift+Tab:** next/previous reference clip with wrapping, retaining
+  visibility or matching/nearest distance.
 - Focused playback supports **Space**, **Shift+Left/Right** five-second inspection,
   **S/D** speed, **[/]** brightness, **{/}** contrast, **Z** reset zoom, **R** reset
   filters, **F/Escape** fullscreen. Clock-dialog arrows step frames and Enter

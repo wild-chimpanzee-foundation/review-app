@@ -1,6 +1,7 @@
 const video = __VIDEO__;
 if (!video) return false;
 video._distanceSourceSwitch?.cancel();
+let revealing = false;
 video._distancePlayback = (video._distancePlayback || 0) + 1;
 video.pause();
 
@@ -34,7 +35,8 @@ const finish = success => {
 };
 const watchdog = setTimeout(() => finish(false), 15000);
 const reveal = () => {
-    if (!sought || video.seeking || video.readyState < 2) return;
+    if (!sought || video.seeking || video.readyState < 2 || revealing) return;
+    revealing = true;
     // Let the browser paint the decoded target frame before removing its cover.
     requestAnimationFrame(() => requestAnimationFrame(() => finish(true)));
 };

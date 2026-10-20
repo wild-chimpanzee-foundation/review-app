@@ -7,6 +7,7 @@ from typing import Callable
 
 from nicegui import ui
 
+from review_app.app.config import DISTANCE_REFERENCE_METERS
 from review_app.app.pages.distance_review.reference_media import frame_time
 from review_app.app.translations import t
 
@@ -30,9 +31,12 @@ class ReferenceViewsContext:
     refresh_references: Callable
     seek_reference: Callable
     reference_load_failed: Callable
-    cycle_reference: Callable
+    cycle_reference: Callable[[int], object]
     open_reference: Callable[[dict], object]
     preview_frame: Callable[[dict], object]
+    configure_distance: Callable[[float], object]
+    add_distance: Callable
+    step_reference: Callable[[int], object]
     move_distance: Callable[[int], object]
     reference_thumbnail_path: Callable[[dict], Path | None]
     load_reference_thumbnail: Callable[[dict, object], object]
@@ -59,13 +63,6 @@ def render_references(context: ReferenceViewsContext) -> None:
                 "text-subtitle1 ellipsis col min-w-0"
             ).tooltip(t("distance_references"))
             ui.space()
-            ui.button(icon="bookmark_add", on_click=context.prepare_reference).props(
-                "flat round dense"
-            ).tooltip(t("distance_prepare_reference")).bind_enabled_from(
-                context.busy_state,
-                "busy",
-                backward=lambda busy: bool(context.reference and not busy),
-            )
             ui.button(icon="refresh", on_click=context.refresh_references).props(
                 "flat round dense"
             ).tooltip(t("distance_refresh_references")).bind_enabled_from(
@@ -101,19 +98,17 @@ def render_reference_controls(context: ReferenceViewsContext) -> None:
         context.render_samples()
         context.render_actions()
         with ui.row().classes("distance-reference-browser"):
-            with ui.column().classes("distance-reference-browser-label"):
-                ui.label(t("distance_reference_clip")).classes("text-caption text-grey-6")
-                ui.button(
-                    t("distance_cycle_references"),
-                    icon="skip_next",
-                    on_click=context.cycle_reference,
-                ).props(
-                    'flat dense size=sm data-distance-action="next-reference"'
-                ).bind_enabled_from(
-                    context.busy_state,
-                    "busy",
-                    backward=lambda busy: len(context.references) > 1 and not busy,
-                )
+            ui.button(
+                t("distance_previous_reference_shortcut"),
+                icon="skip_previous",
+                on_click=lambda: context.cycle_reference(-1),
+            ).props('flat dense size=sm data-distance-action="previous-reference"').tooltip(
+                t("distance_previous_reference")
+            ).bind_enabled_from(
+                context.busy_state,
+                "busy",
+                backward=lambda busy: len(context.references) > 1 and not busy,
+            )
             with ui.row().classes("distance-reference-clips"):
                 for reference in context.references:
                     name = context.reference_name(reference)
@@ -140,6 +135,13 @@ def render_reference_controls(context: ReferenceViewsContext) -> None:
                             )
                         if thumbnail and not thumbnail.is_file():
                             asyncio.create_task(context.load_reference_thumbnail(reference, image))
+            ui.button("Tab", icon="skip_next", on_click=lambda: context.cycle_reference(1)).props(
+                'flat dense size=sm data-distance-action="next-reference"'
+            ).tooltip(t("distance_cycle_references")).bind_enabled_from(
+                context.busy_state,
+                "busy",
+                backward=lambda busy: len(context.references) > 1 and not busy,
+            )
 
 
 def render_frames(context: ReferenceViewsContext) -> None:
@@ -156,8 +158,24 @@ def render_frames(context: ReferenceViewsContext) -> None:
                 else "distance-reference-dimmed"
             ),
         )
-    if not context.frames:
-        ui.label(t("distance_no_prepared_frames")).classes("text-caption text-grey-6")
+    if context.reference and context.reference_player:
+        ui.label(t("distance_on_demand_help")).classes("text-caption text-grey-6")
+        with ui.row().classes("items-center gap-1"):
+            ui.label(t("distance_frame_steps")).classes("text-caption text-grey-6")
+            for delta in (-5, -1, 1, 5):
+                ui.button(
+                    f"{delta:+d}",
+                    on_click=lambda _e, delta=delta: context.step_reference(delta),
+                ).props(f'flat dense data-reference-frame-step="{delta}"').bind_enabled_from(
+                    context.busy_state, "busy", backward=lambda busy: not busy
+                )
+            ui.button(icon="bookmark_add", on_click=context.prepare_reference).props(
+                'flat round dense data-distance-action="edit-reference"'
+            ).tooltip(t("distance_prepare_reference")).bind_enabled_from(
+                context.busy_state,
+                "busy",
+                backward=lambda busy: bool(context.reference and not busy),
+            )
     choices = distance_choices(context)
     with ui.element("div").classes("distance-choice-toolbar"):
         with ui.row().classes("distance-choice-navigation items-center gap-1 no-wrap"):
@@ -183,24 +201,50 @@ def render_frames(context: ReferenceViewsContext) -> None:
             )
             ui.icon("keyboard", size="xs").classes("text-grey-6").tooltip(t("distance_arrow_help"))
         with ui.row().classes("distance-frames") as distance_strip:
-            for frame in sorted(
-                context.frames, key=lambda row: (row["distance_m"], row["offset_ms"])
-            ):
-                ui.button(
-                    f"{frame['distance_m']:g} m",
-                    on_click=lambda _e, frame=frame: context.preview_frame(frame),
-                ).props(
-                    (
-                        "dense unelevated"
-                        if frame["id"] == context.selection_id
-                        else "dense outline"
+            configured = {frame["distance_m"] for frame in context.frames}
+            meters = sorted(
+                configured | (set(DISTANCE_REFERENCE_METERS) if context.reference else set())
+            )
+            for distance in meters:
+                frames = [frame for frame in context.frames if frame["distance_m"] == distance]
+                if not frames:
+                    ui.button(
+                        f"{distance:g} m",
+                        icon="add",
+                        on_click=lambda _e, distance=distance: context.configure_distance(
+                            distance
+                        ),
+                    ).props(
+                        f'dense outline data-reference-distance="{distance:g}" '
+                        'data-reference-state="unconfigured"'
+                    ).classes("distance-unconfigured").tooltip(
+                        t("distance_set_reference")
+                    ).bind_enabled_from(
+                        context.busy_state,
+                        "busy",
+                        backward=lambda busy: bool(
+                            context.reference_player and not busy and not context.distance_locked
+                        ),
                     )
-                    + f' aria-pressed="{str(frame["id"] == context.selection_id).lower()}"'
-                ).tooltip(frame_time(frame["offset_ms"])).bind_enabled_from(
-                    context.busy_state,
-                    "busy",
-                    backward=lambda busy: not busy and not context.distance_locked,
-                )
+                for frame in sorted(frames, key=lambda row: row["offset_ms"]):
+                    ui.button(
+                        f"{frame['distance_m']:g} m",
+                        icon="check",
+                        on_click=lambda _e, frame=frame: context.preview_frame(frame),
+                    ).props(
+                        (
+                            "dense unelevated"
+                            if frame["id"] == context.selection_id
+                            else "dense outline"
+                        )
+                        + f' aria-pressed="{str(frame["id"] == context.selection_id).lower()}"'
+                        + f' data-reference-distance="{distance:g}" '
+                        'data-reference-state="configured"'
+                    ).tooltip(frame_time(frame["offset_ms"])).bind_enabled_from(
+                        context.busy_state,
+                        "busy",
+                        backward=lambda busy: not busy and not context.distance_locked,
+                    )
         ui.run_javascript(
             Path(__file__)
             .with_name("distance_choice_scroll.js")
@@ -208,6 +252,18 @@ def render_frames(context: ReferenceViewsContext) -> None:
             .replace("__STRIP_ID__", str(distance_strip.id))
         )
         with ui.row().classes("distance-visibility-choices gap-1 no-wrap"):
+            ui.button(t("distance_add_distance"), icon="add", on_click=context.add_distance).props(
+                'dense outline data-distance-action="add-distance"'
+            ).bind_enabled_from(
+                context.busy_state,
+                "busy",
+                backward=lambda busy: bool(
+                    context.reference
+                    and context.reference_player
+                    and not busy
+                    and not context.distance_locked
+                ),
+            )
             for choice in context.skip_choices:
                 ui.button(
                     t(choice["label"]),

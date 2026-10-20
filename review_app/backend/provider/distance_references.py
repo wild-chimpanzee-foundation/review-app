@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
+import uuid
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, literal, or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from review_app.backend.camera_layout import deployment_key
@@ -24,6 +25,7 @@ from review_app.backend.db.models import (
     VideoTag,
 )
 from review_app.backend.path_matching import normalize_path_str
+from review_app.backend.provider.distance_review import reopen_individual_review
 
 
 def _record(row) -> dict:
@@ -217,15 +219,7 @@ def add_reference_frame(
     *,
     playback_offset_ms: float | None = None,
 ) -> dict:
-    _offset(offset_ms)
-    if playback_offset_ms is not None and (
-        isinstance(playback_offset_ms, bool)
-        or not isinstance(playback_offset_ms, (int, float))
-        or not math.isfinite(playback_offset_ms)
-        or playback_offset_ms < 0
-        or math.floor(playback_offset_ms + 0.5) != offset_ms
-    ):
-        raise ValueError("Playback position must round to the reference frame offset")
+    _validate_reference_position(offset_ms, playback_offset_ms)
     if (
         isinstance(distance_m, bool)
         or not isinstance(distance_m, (int, float))
@@ -244,6 +238,106 @@ def add_reference_frame(
     session.add(row)
     session.flush()
     return _record(row)
+
+
+def _validate_reference_position(offset_ms: int, playback_offset_ms: float | None) -> None:
+    _offset(offset_ms)
+    if playback_offset_ms is not None and (
+        isinstance(playback_offset_ms, bool)
+        or not isinstance(playback_offset_ms, (int, float))
+        or not math.isfinite(playback_offset_ms)
+        or playback_offset_ms < 0
+        or math.floor(playback_offset_ms + 0.5) != offset_ms
+    ):
+        raise ValueError("Playback position must round to the reference frame offset")
+
+
+def configure_reference_distance(
+    session,
+    reference_video_id: str,
+    offset_ms: int,
+    distance_m: float,
+    *,
+    playback_offset_ms: float | None = None,
+) -> dict:
+    """Fill an unknown distance without replacing an existing mapping.
+
+    The conditional insert is one SQLite write statement so simultaneous first
+    clicks cannot create two mappings for the same distance. Legacy prepared
+    frames (including repeated distances) remain untouched.
+    """
+    _validate_reference_position(offset_ms, playback_offset_ms)
+    if (
+        isinstance(distance_m, bool)
+        or not isinstance(distance_m, (int, float))
+        or not math.isfinite(distance_m)
+        or distance_m <= 0
+    ):
+        raise ValueError("Reference distance must be a finite positive number")
+    if session.get(ReferenceVideo, reference_video_id) is None:
+        raise ValueError("Reference video not found")
+    existing = session.query(ReferenceFrame).filter_by(
+        reference_video_id=reference_video_id, distance_m=distance_m
+    )
+    session.execute(
+        sqlite_insert(ReferenceFrame).from_select(
+            ["id", "reference_video_id", "offset_ms", "distance_m", "playback_offset_ms"],
+            select(
+                literal(str(uuid.uuid4())),
+                literal(reference_video_id),
+                literal(offset_ms),
+                literal(distance_m),
+                literal(playback_offset_ms),
+            ).where(~existing.exists()),
+        )
+    )
+    return _record(existing.order_by(ReferenceFrame.offset_ms).first())
+
+
+def update_reference_frame_position(
+    session,
+    frame_id: str,
+    offset_ms: int,
+    *,
+    playback_offset_ms: float | None = None,
+) -> dict:
+    """Explicitly correct a reference position, retaining its identity and meters."""
+    _validate_reference_position(offset_ms, playback_offset_ms)
+    row = session.get(ReferenceFrame, frame_id)
+    if row is None:
+        raise ValueError("Reference frame not found")
+    row.offset_ms = offset_ms
+    row.playback_offset_ms = playback_offset_ms
+    session.flush()
+    return _record(row)
+
+
+def count_reference_frame_samples(session, frame_id: str) -> int:
+    """Count all saved samples that deleting this mapping would clear."""
+    if session.get(ReferenceFrame, frame_id) is None:
+        raise ValueError("Reference frame not found")
+    return session.query(DistanceSample).filter_by(reference_frame_id=frame_id).count()
+
+
+def delete_reference_frame(session, frame_id: str, *, clear_samples: bool = False) -> int:
+    """Remove a mapping, clearing its saved evidence only after explicit confirmation."""
+    if not isinstance(clear_samples, bool):
+        raise ValueError("Confirm whether to clear saved annotations")
+    frame = session.get(ReferenceFrame, frame_id)
+    if frame is None:
+        raise ValueError("Reference frame not found")
+    samples = session.query(DistanceSample).filter_by(reference_frame_id=frame_id).all()
+    if samples and not clear_samples:
+        raise ValueError("Confirm deletion to clear saved annotations using this reference frame")
+    individual_ids = {sample.individual_id for sample in samples}
+    for sample in samples:
+        session.delete(sample)
+    session.flush()
+    for individual_id in individual_ids:
+        reopen_individual_review(session, session.get(DistanceIndividual, individual_id))
+    session.delete(frame)
+    session.flush()
+    return len(samples)
 
 
 def list_reference_frames(session, reference_video_id: str) -> list[dict]:

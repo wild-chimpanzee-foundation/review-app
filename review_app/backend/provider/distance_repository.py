@@ -26,11 +26,15 @@ from review_app.backend.provider.distance_identities import (
 )
 from review_app.backend.provider.distance_references import (
     add_reference_frame,
+    configure_reference_distance,
+    count_reference_frame_samples,
+    delete_reference_frame,
     get_distance_reference_videos,
     get_distance_video_queue,
     list_reference_frames,
     list_reference_videos,
     register_reference_video,
+    update_reference_frame_position,
 )
 from review_app.backend.provider.distance_review import (
     finish_individual,
@@ -142,6 +146,43 @@ class DistanceMixin(ProviderBase):
                 distance_m,
                 playback_offset_ms=playback_offset_ms,
             )
+
+    def configure_reference_distance(
+        self,
+        reference_video_id: str,
+        offset_ms: int,
+        distance_m: float,
+        *,
+        playback_offset_ms: float | None = None,
+    ) -> dict:
+        with self.Session.begin() as session:
+            return configure_reference_distance(
+                session,
+                reference_video_id,
+                offset_ms,
+                distance_m,
+                playback_offset_ms=playback_offset_ms,
+            )
+
+    def update_reference_frame_position(
+        self,
+        frame_id: str,
+        offset_ms: int,
+        *,
+        playback_offset_ms: float | None = None,
+    ) -> dict:
+        with self.Session.begin() as session:
+            return update_reference_frame_position(
+                session, frame_id, offset_ms, playback_offset_ms=playback_offset_ms
+            )
+
+    def count_reference_frame_samples(self, frame_id: str) -> int:
+        with self.Session() as session:
+            return count_reference_frame_samples(session, frame_id)
+
+    def delete_reference_frame(self, frame_id: str, *, clear_samples: bool = False) -> int:
+        with self.Session.begin() as session:
+            return delete_reference_frame(session, frame_id, clear_samples=clear_samples)
 
     def list_reference_frames(self, reference_video_id: str) -> list[dict]:
         with self.Session() as session:

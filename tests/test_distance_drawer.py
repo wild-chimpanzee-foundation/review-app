@@ -1563,9 +1563,11 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
     )
     assert "5 m" in labels(distance_strip)
     selected_button = next(
-        element for element in distance_strip.descendants() if isinstance(element, ui.button)
+        element
+        for element in distance_strip.descendants()
+        if isinstance(element, ui.button) and element.props.get("aria-pressed") == "true"
     )
-    assert selected_button.props["aria-pressed"] == "true"
+    assert selected_button.text == "5 m"
     assert not any(isinstance(element, ui.scroll_area) for element in reference_area.descendants())
     assert any(
         f"getHtmlElement({distance_strip.id})" in call.args[0]
@@ -1583,7 +1585,9 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
     siblings = distance_strip.parent_slot.children
     assert siblings.index(distance_strip) < siblings.index(visibility_row)
     visibility_buttons = [
-        element for element in visibility_row.descendants() if isinstance(element, ui.button)
+        element
+        for element in visibility_row.descendants()
+        if isinstance(element, ui.button) and element.props.get("color") == "grey-7"
     ]
     assert len(visibility_buttons) == 2
     assert all(button.props["color"] == "grey-7" for button in visibility_buttons)
@@ -1605,7 +1609,8 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
         for element in reference_area.descendants()
         if "distance-reference-browser" in element.classes
     )
-    assert "Reference clip" in labels(browser)
+    assert "Reference clip" not in labels(browser)
+    assert {"Shift+Tab", "Tab"} <= labels(browser)
     assert any("distance-reference-clips" in element.classes for element in browser.descendants())
     actions = next(
         element
@@ -1631,7 +1636,7 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
     selected_buttons = [
         element
         for element in refreshed_strip.descendants()
-        if isinstance(element, ui.button) and element.props["aria-pressed"] == "true"
+        if isinstance(element, ui.button) and element.props.get("aria-pressed") == "true"
     ]
     assert [button.text for button in selected_buttons] == ["7.25 m"]
     assert any(

@@ -298,6 +298,8 @@ def test_arrow_keys_capture_navigation_and_preserve_fields_dialogs_and_shift_see
             ['ArrowUp', {disabled:true}], ['ArrowRight', {ctrlKey:true}], ['7', {}],
             ['Tab', {}], ['Tab', {editable:true}], ['Tab', {dialog:true}], ['Tab', {disabled:true}],
             ['Tab', {shiftKey:true}], [' ', {}],
+            ['Tab', {shiftKey:true, editable:true}], ['Tab', {shiftKey:true, dialog:true}],
+            ['Tab', {shiftKey:true, disabled:true}],
         ];
         const results = cases.map(([key, flags]) => {
             settings = flags; clicked = null; prevented = false; stopped = false; emitted = null;
@@ -328,8 +330,11 @@ def test_arrow_keys_capture_navigation_and_preserve_fields_dialogs_and_shift_see
         [None, False, False, None],
         [None, False, False, None],
         [None, True, True, None],
+        ["previous-reference", True, True, None],
         [None, False, False, None],
         [None, False, False, None],
+        [None, False, False, None],
+        [None, True, True, None],
     ]
 
 

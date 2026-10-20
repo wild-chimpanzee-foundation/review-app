@@ -10,6 +10,10 @@ APP_NAME = "VideoAnnotation"
 # Existing reviews keep their saved timing until an explicitly confirmed reset.
 DISTANCE_CLOCK_ALIGNMENT_MODE: Literal["simplified", "exact"] = "simplified"
 
+# Unconfigured distances offered during reference calibration; legacy saved
+# distances outside this range remain available.
+DISTANCE_REFERENCE_METERS: tuple[int, ...] = tuple(range(1, 16))
+
 VIDEO_EXTENSIONS: frozenset[str] = frozenset(
     {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm", ".m4v"}
 )

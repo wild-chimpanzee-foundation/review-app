@@ -78,11 +78,10 @@ window.addEventListener('keydown', event => {
         emitEvent(window.__distanceSampleNavigationEvent, {direction: sampleDirection});
         return;
     }
-    if (event.key === 'Tab' && event.shiftKey) return;
     const action = applyToEnd ? 'apply-to-end' : {
         ArrowDown: 'distance-down', ArrowUp: 'distance-up',
         Enter: 'confirm', a: 'add', A: 'add', n: 'next', N: 'next', p: 'previous', P: 'previous',
-        Tab: 'next-reference', r: 'replay', R: 'replay',
+        Tab: event.shiftKey ? 'previous-reference' : 'next-reference', r: 'replay', R: 'replay',
     }[event.key];
     if (!action) return;
     const clockButton = action === 'confirm'

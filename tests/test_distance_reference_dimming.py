@@ -148,7 +148,13 @@ async def test_visibility_choice_dims_and_distance_restores_without_player_inter
     page_module.play_to_sample.assert_not_awaited()
     assert dict(player.style) == original_style
 
-    user.find("5 m").click()
+    five_meters = next(
+        button
+        for button in user.find(ui.button).elements
+        if button.props.get("data-reference-distance") == "5"
+    )
+    five_meters.mark("five-meters")
+    user.find(marker="five-meters").click()
     await assert_dimmed(page, False)
     assert page.selected_frame_id == "frame"
     assert page.reference_player is player
@@ -260,6 +266,120 @@ async def test_auto_advance_restores_or_carries_visibility_after_playback(
     page_module.play_to_sample.assert_awaited_once()
     page_module.switch_source.assert_not_awaited()
     page_module.stop_player.assert_not_called()
+    assert page.reference_player is player
+    reference_page["render"].assert_called_once()
+
+
+@pytest.mark.parametrize("choice", SKIP_CHOICES, ids=lambda choice: choice["id"])
+@pytest.mark.parametrize("event", ["play", "seeking", "wheel"])
+async def test_reference_browsing_unsets_visibility_without_changing_saved_samples(
+    user: User, reference_page, choice, event
+):
+    await user.open("/distance-reference-dimming-test")
+    page = reference_page["page"]
+    player = page.reference_player
+    page.samples = [sample(1000, choice["id"])]
+    saved_samples = list(page.samples)
+    player.style("filter:brightness(1.4) contrast(0.7)")
+    original_style = dict(player.style)
+    user.find(page_module.t(choice["label"])).click()
+    await assert_dimmed(page, True)
+    player.mark("reference-media")
+    user.find(marker="reference-media").trigger(event)
+    await assert_dimmed(page, False)
+    assert page.selected_frame_id is None
+    assert page.selected_skip_reason is None
+    assert page.samples == saved_samples
+    assert page.reference_player is player
+    assert dict(player.style) == original_style
+    reference_page["render"].assert_called_once()
+    page.dp.save_distance_sample.assert_not_called()
+    page_module.stop_player.assert_not_called()
+    with page.client:
+        page.render_frames.refresh()
+    await assert_dimmed(page, False)
+    user.find(page_module.t(choice["label"])).click()
+    await assert_dimmed(page, True)
+
+
+async def test_programmatic_reference_seeking_keeps_restored_visibility(
+    user: User, reference_page
+):
+    await user.open("/distance-reference-dimming-test")
+    page = reference_page["page"]
+    user.find("Absent").click()
+    await assert_dimmed(page, True)
+    page.busy = True  # Source switches and scheduled-sample restoration own the player.
+    page.reference_player.mark("busy-reference")
+    user.find(marker="busy-reference").trigger("seeking")
+    await asyncio.sleep(0.05)
+    assert page.selected_skip_reason == "individual absent"
+    await assert_dimmed(page, True)
+    page.busy = False
+
+
+@pytest.mark.parametrize("fails", [False, True])
+async def test_reference_frame_steps_unset_visibility_only_after_success(
+    user: User, reference_page, monkeypatch, fails
+):
+    monkeypatch.setattr(page_module, "_probe_frame_rate", Mock(return_value=25))
+    step = AsyncMock(side_effect=TimeoutError() if fails else None)
+    monkeypatch.setattr(page_module, "step_frames", step)
+    await user.open("/distance-reference-dimming-test")
+    page = reference_page["page"]
+    user.find("Absent").click()
+    await assert_dimmed(page, True)
+    await page.step_reference_frames(1)
+    step.assert_awaited_once_with(page.reference_player, 1, 25)
+    await assert_dimmed(page, fails)
+    assert page.selected_frame_id == ("individual absent" if fails else None)
+    page.dp.save_distance_sample.assert_not_called()
+
+
+async def test_reference_cycle_controls_flank_thumbnails_and_wrap_in_both_directions(
+    user: User, reference_page, tmp_path
+):
+    await user.open("/distance-reference-dimming-test")
+    page = reference_page["page"]
+    player = page.reference_player
+    path = tmp_path / "third.mp4"
+    path.touch()
+    page.references.append({"id": "third", "video_path": str(path), "is_tagged": True})
+    with page.client:
+        page.render_reference_controls.refresh()
+    previous = next(
+        button
+        for button in user.find(ui.button).elements
+        if button.props.get("data-distance-action") == "previous-reference"
+    )
+    following = next(
+        button
+        for button in user.find(ui.button).elements
+        if button.props.get("data-distance-action") == "next-reference"
+    )
+    assert previous.text == "Shift+Tab" and following.text == "Tab"
+    assert previous.parent_slot is following.parent_slot
+    controls = [
+        child for child in previous.parent_slot.children if not isinstance(child, ui.tooltip)
+    ]
+    assert controls[0] is previous and controls[-1] is following
+    assert "distance-reference-clips" in controls[1].classes
+    await user.should_not_see("Reference clip")
+    previous.mark("previous-reference")
+    user.find(marker="previous-reference").click()
+    for _ in range(100):
+        if page.reference["id"] == "third" and not page.busy:
+            break
+        await asyncio.sleep(0.01)
+    assert page.reference["id"] == "third"
+    await page.cycle_reference()
+    assert page.reference["id"] == "first"
+    await page.cycle_reference(-1)
+    assert page.reference["id"] == "third"
+    page.busy = True
+    await page.cycle_reference(-1)
+    assert page.reference["id"] == "third"
+    page.busy = False
     assert page.reference_player is player
     reference_page["render"].assert_called_once()
 

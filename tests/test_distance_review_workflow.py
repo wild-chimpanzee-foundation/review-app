@@ -93,6 +93,7 @@ def distance_page(monkeypatch):
     page.review = None
     page.animal_frame_rate = 25
     page.animal_frame_rates = {}
+    page.reference_probe_cache = page_module.ReferenceProbeCache()
     page.queue, page.index = [{"video_id": "current", "duration_sec": 10}], 0
     page.selected_frame_id = "frame"
     page.frames = [{"id": "frame", "distance_m": 7.25, "offset_ms": 500}]
@@ -1233,6 +1234,32 @@ async def test_switching_reference_only_seeks_animal_for_manual_selection(
         page.render_references.refresh.assert_called_once()
 
 
+async def test_reference_switch_caches_probe_but_refreshes_mappings_without_timing_logs(
+    distance_page, monkeypatch, tmp_path, caplog
+):
+    page = distance_page
+    path = tmp_path / "reference.mp4"
+    path.touch()
+    reference = {"id": "reference", "video_path": str(path)}
+    page.references = [reference]
+    page.reference_player = object()
+    page.media_url = Mock(return_value="/reference.mp4")
+    page.render_reference_controls = SimpleNamespace(refresh=Mock())
+    first = {"id": "first-frame", "distance_m": 5, "offset_ms": 1000}
+    second = {"id": "second-frame", "distance_m": 6, "offset_ms": 2000}
+    page.dp.list_reference_frames = Mock(side_effect=[[first], [first, second]])
+    probe = Mock(return_value=SimpleNamespace(is_valid=True, is_web_safe=True, duration_sec=10))
+    monkeypatch.setattr(page_module, "_probe_video", probe)
+    monkeypatch.setattr(page_module, "switch_source", AsyncMock(return_value=True))
+    with caplog.at_level("INFO", logger=page_module.__name__):
+        await page.open_reference(reference)
+        await page.open_reference(reference, restoring=True)
+    probe.assert_called_once_with(path.resolve())
+    assert page.dp.list_reference_frames.call_count == 2
+    assert page.frames == [first, second]
+    assert "Distance reference" not in caplog.text
+
+
 @pytest.mark.parametrize("timeout", [False, True])
 async def test_failed_reference_switch_invalidates_confirmation_and_allows_retry(
     distance_page, monkeypatch, tmp_path, timeout
@@ -1323,6 +1350,8 @@ async def test_reference_refresh_preserves_player_until_reference_is_removed(
     calls = Mock()
     page.dp.repair_distance_camera_layout = calls.repair
     page.dp.get_distance_reference_videos = calls.references
+    page.dp.list_reference_frames = calls.frames
+    calls.frames.return_value = list(page.frames)
     calls.references.return_value = [reference] if present else []
     page.render_reference_controls = SimpleNamespace(refresh=Mock())
     page.render_references = SimpleNamespace(refresh=Mock())
@@ -1332,7 +1361,7 @@ async def test_reference_refresh_preserves_player_until_reference_is_removed(
     assert calls.method_calls == [
         ("repair", (page.project_id,), {}),
         ("references", ("current",), {}),
-    ]
+    ] + ([("frames", (reference["id"],), {})] if present else [])
     if present:
         assert page.reference_player is original_player
         stop.assert_not_called()

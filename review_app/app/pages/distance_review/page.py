@@ -3,16 +3,17 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import uuid
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 
 from nicegui import app, run, ui
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from review_app.app.components.review_layout import ReviewLayout
-from review_app.app.config import get_user_data_dir
+from review_app.app.config import DISTANCE_REFERENCE_METERS, get_user_data_dir
 from review_app.app.pages.distance_review.anchor_dialogs import (
     AnchorDialogContext,
     open_create_individual_dialog,
@@ -47,10 +48,12 @@ from review_app.app.pages.distance_review.player import (
     play_to_sample,
     playback_shortcuts,
     seek_paused,
+    step_frames,
     stop_player,
     switch_source,
 )
 from review_app.app.pages.distance_review.reference_media import frame_time, reference_frame_offset
+from review_app.app.pages.distance_review.reference_probe import ReferenceProbeCache
 from review_app.app.pages.distance_review.reference_views import (
     ReferenceViewsContext,
 )
@@ -93,7 +96,7 @@ from review_app.backend.distance_timing import (
     sample_frame_time,
 )
 from review_app.backend.path_matching import normalize_path_str
-from review_app.backend.provider.video import _probe_frame_rate, _probe_video
+from review_app.backend.provider.video import ProbeResult, _probe_frame_rate, _probe_video
 from review_app.backend.transcoding import inspect_transcoded_cache
 from review_app.backend.utils import generate_thumbnail
 
@@ -152,6 +155,7 @@ class DistanceReviewPage:
         self.client = ui.context.client
         self.media_urls: dict[Path, str] = {}
         self.thumbnail_tasks: dict[Path, asyncio.Task] = {}
+        self.reference_probe_cache = ReferenceProbeCache()
         self.animal_frame_rate: float | None = None
         self.animal_frame_rates: dict[Path, float | None] = {}
         self.client.on_delete(self.release_media)
@@ -494,7 +498,7 @@ class DistanceReviewPage:
                 if reference:
                     path = reference_path(reference)
                     if path.is_file():
-                        probe = await run.io_bound(_probe_video, path)
+                        probe = await self.probe_reference(path)
                         if probe.is_valid and probe.is_web_safe and probe.duration_sec:
                             self.reference = reference
                             self.reference_duration = probe.duration_sec
@@ -509,7 +513,7 @@ class DistanceReviewPage:
                 reference = self.references[0]
                 path = reference_path(reference)
                 if path.is_file():
-                    probe = await run.io_bound(_probe_video, path)
+                    probe = await self.probe_reference(path)
                     if probe.is_valid and probe.is_web_safe and probe.duration_sec:
                         self.reference = reference
                         self.reference_duration = probe.duration_sec
@@ -1982,6 +1986,9 @@ class DistanceReviewPage:
             cycle_reference=self.cycle_reference,
             open_reference=self.open_reference,
             preview_frame=self.preview_frame,
+            configure_distance=self.configure_reference_distance,
+            add_distance=self.add_reference_distance_dialog,
+            step_reference=self.step_reference_frames,
             move_distance=self.move_distance,
             reference_thumbnail_path=self.reference_thumbnail_path,
             load_reference_thumbnail=self.load_reference_thumbnail,
@@ -2004,6 +2011,14 @@ class DistanceReviewPage:
             "loadedmetadata", lambda: self.seek_reference() if not self.busy else None
         )
         self.reference_player.on("error", self.reference_load_failed)
+        player = self.reference_player
+
+        def on_browse():
+            if self.reference_player is player and not self.busy:
+                self.clear_reference_visibility_selection()
+
+        for event in ("play", "seeking", "wheel"):
+            player.on(event, on_browse)
         selected = next(
             (frame for frame in self.frames if frame["id"] == self.selected_frame_id), None
         )
@@ -2044,7 +2059,7 @@ class DistanceReviewPage:
         if thumbnail.is_file() and not image.is_deleted:
             image.set_source(str(thumbnail))
 
-    async def cycle_reference(self) -> None:
+    async def cycle_reference(self, delta: int = 1) -> None:
         if self.busy or len(self.references) < 2:
             return
         position = next(
@@ -2055,7 +2070,7 @@ class DistanceReviewPage:
             ),
             -1,
         )
-        await self.open_reference(self.references[(position + 1) % len(self.references)])
+        await self.open_reference(self.references[(position + delta) % len(self.references)])
 
     def distance_choices(self) -> list[dict]:
         choices = {frame["distance_m"]: frame for frame in reversed(self.frames)}
@@ -2082,6 +2097,149 @@ class DistanceReviewPage:
     @ui.refreshable
     def render_frames(self) -> None:
         render_reference_frames(self._reference_views_context())
+
+    def clear_reference_visibility_selection(self) -> None:
+        """Browsing discards a visibility choice without changing saved evidence."""
+        if not self.selected_skip_reason:
+            return
+        self.selected_frame_id = None
+        self._graph_preview_key = None
+        self.render_frames.refresh()
+        self.refresh_sample_ui()
+
+    @stable_client
+    async def step_reference_frames(self, delta: int) -> None:
+        if self.busy or not self.reference or not self.reference_player:
+            return
+        reference, player = self.reference, self.reference_player
+        self.busy = True
+        try:
+            path = reference_path(reference)
+            if path not in self.animal_frame_rates:
+                self.animal_frame_rates[path] = await run.io_bound(_probe_frame_rate, path)
+            if self.reference != reference or self.reference_player is not player:
+                return
+            rate = self.animal_frame_rates[path]
+            if rate is None:
+                ui.notify(t("distance_frame_rate_unavailable"), type="warning")
+                return
+            await step_frames(player, delta, rate)
+            if self.reference == reference and self.reference_player is player:
+                self.clear_reference_visibility_selection()
+        except (ValueError, TimeoutError):
+            ui.notify(t("distance_player_not_ready"), type="warning")
+        finally:
+            self.busy = False
+
+    @stable_client
+    async def add_reference_distance_dialog(self) -> None:
+        if self.busy or self.distance_locked or not self.reference or not self.reference_player:
+            return
+        reference, player = self.reference, self.reference_player
+        suggested = (
+            math.floor(
+                max([*DISTANCE_REFERENCE_METERS, *(frame["distance_m"] for frame in self.frames)])
+            )
+            + 1
+        )
+        saving = False
+        with ui.dialog() as dialog, keyboard_dialog_card():
+            ui.label(t("distance_add_distance")).classes("text-h6")
+            ui.label(t("distance_add_distance_help")).classes("text-caption text-grey-6")
+            distance = ui.number(
+                t("distance_known_distance"), value=suggested, min=1, step=1
+            ).props("dense outlined autofocus")
+
+            async def save_distance():
+                nonlocal saving
+                if (
+                    saving
+                    or not dialog.value
+                    or self.busy
+                    or self.distance_locked
+                    or self.reference != reference
+                    or self.reference_player is not player
+                ):
+                    return
+                if distance.value is None:
+                    ui.notify(t("distance_enter_distance"), type="warning")
+                    return
+                value = float(distance.value)
+                if not value.is_integer() or value < 1:
+                    ui.notify(t("distance_whole_distance_required"), type="warning")
+                    return
+                saving = True
+                save.set_enabled(False)
+                distance.set_enabled(False)
+                try:
+                    await self.configure_reference_distance(value)
+                    if self.reference == reference and any(
+                        frame["distance_m"] == value for frame in self.frames
+                    ):
+                        dialog.close()
+                finally:
+                    saving = False
+                    if not dialog.is_deleted:
+                        save.set_enabled(True)
+                        distance.set_enabled(True)
+
+            distance.on("keydown.enter", save_distance)
+            with ui.row().classes("w-full justify-end"):
+                ui.button(t("cancel"), on_click=dialog.close).props("flat")
+                save = ui.button(t("distance_save_frame"), on_click=save_distance).props(
+                    'data-distance-dialog-action="confirm"'
+                )
+        dialog.on_value_change(lambda event: dialog.delete() if not event.value else None)
+        dialog.open()
+
+    @stable_client
+    async def configure_reference_distance(self, distance_m: float) -> None:
+        if self.busy or self.distance_locked or not self.reference or not self.reference_player:
+            return
+        existing = next((row for row in self.frames if row["distance_m"] == distance_m), None)
+        if existing:
+            self.preview_frame(existing)
+            return
+        reference, player = self.reference, self.reference_player
+        self.busy = True
+        frame = None
+        try:
+            playback_offset = await capture_offset(player, exact=True)
+            if self.reference != reference or self.reference_player is not player:
+                return
+            frame = await run.io_bound(
+                self.dp.configure_reference_distance,
+                reference["id"],
+                math.floor(playback_offset + 0.5),
+                distance_m,
+                playback_offset_ms=playback_offset,
+            )
+            frames = await run.io_bound(self.dp.list_reference_frames, reference["id"])
+            if self.reference != reference or self.reference_player is not player:
+                frame = None
+                return
+            self.frames = frames
+            ui.notify(t("distance_frame_saved"), type="positive")
+        except (ValueError, TimeoutError) as exc:
+            frame = None
+            ui.notify(
+                t("distance_player_not_ready")
+                if isinstance(exc, TimeoutError) or str(exc) == "distance_player_not_ready"
+                else str(exc),
+                type="warning",
+            )
+        except IntegrityError:
+            frame = None
+            ui.notify(t("distance_duplicate_frame"), type="warning")
+        except SQLAlchemyError:
+            frame = None
+            ui.notify(t("distance_reference_save_failed"), type="negative")
+        finally:
+            self.busy = False
+            if frame:
+                self.preview_frame(frame)
+            else:
+                self.refresh_sample_ui()
 
     @stable_client
     async def prepare_reference_dialog(self) -> None:
@@ -2114,6 +2272,9 @@ class DistanceReviewPage:
                     not self.busy and self.reference and self.reference["id"] == candidate_id
                 ),
                 on_frames_saved=lambda frames: self._reference_frames_saved(reference_id, frames),
+                on_frames_deleted=lambda frames: self._reference_frames_deleted(
+                    reference_id, frames
+                ),
             )
         )
 
@@ -2121,6 +2282,25 @@ class DistanceReviewPage:
         if self.reference and self.reference["id"] == reference_id:
             self.frames = frames
             self.render_frames.refresh()
+
+    async def _reference_frames_deleted(self, reference_id: str, frames: list[dict]) -> None:
+        if not self.reference or self.reference["id"] != reference_id:
+            return
+        self.frames = frames
+        if not self.selected_skip_reason and not any(
+            frame["id"] == self.selected_frame_id for frame in frames
+        ):
+            self.selected_frame_id = None
+        self._graph_preview_key = None
+        if self.video:
+            await self.reload_individuals()
+            self.reset_sample_values()
+        self.render_frames.refresh()
+        self.refresh_sample_ui()
+
+    async def probe_reference(self, path: Path) -> ProbeResult:
+        probe, _ = await run.io_bound(self.reference_probe_cache.probe, path, _probe_video)
+        return probe
 
     @stable_client
     async def open_reference(
@@ -2162,7 +2342,7 @@ class DistanceReviewPage:
         if not path.is_file():
             ui.notify(t("video_not_found", path=str(path)), type="warning")
             return
-        probe = await run.io_bound(_probe_video, path)
+        probe = await self.probe_reference(path)
         if not probe.is_valid or not probe.is_web_safe or not probe.duration_sec:
             ui.notify(t("distance_reference_format"), type="warning")
             return
@@ -2269,6 +2449,9 @@ class DistanceReviewPage:
                 self.render_references.refresh()
             else:
                 self.reference = updated
+                if updated:
+                    self.frames = await run.io_bound(self.dp.list_reference_frames, updated["id"])
+                    self.ensure_reference_selection()
                 self.render_reference_controls.refresh()
             self.refresh_sample_ui()
         except ValueError as exc:
