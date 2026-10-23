@@ -1,5 +1,0 @@
-{
-  "$schema": "https://pi.dev/schemas/settings.schema.json",
-  "defaultModel": "openai-codex/gpt-6-luna",
-  "defaultThinkingLevel": "high"
-}
