@@ -57,7 +57,14 @@ Config and database are stored in platform-specific user directories:
 | macOS | `~/Library/Application Support/VideoAnnotation/` |
 | Windows | `%LOCALAPPDATA%\VideoAnnotation\` |
 
-The SQLite database (`review_data.db`) and `config.yaml` are both written there — nothing is stored next to the executable.
+The SQLite database (`review_data.db`), `config.yaml`, and NiceGUI browser-session files
+(`nicegui/`) are written there — nothing is stored next to the executable. The selected
+project is remembered per annotator name in the local database, across restarts and
+logout/login—even when annotators share a browser. New annotators and those whose
+remembered project was deleted start at the project picker. Browser cookies identify
+the current login session, not ownership of the remembered project. `NICEGUI_STORAGE_PATH` can override the session
+storage directory. Existing session files in the old working-directory `.nicegui/`
+folder are copied on first use of the new default directory.
 
 ## Database Management
 

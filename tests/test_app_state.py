@@ -85,6 +85,70 @@ class TestResetAppState:
         assert state.get_active_project_id() is None  # Should be cleared as it's session state
 
 
+class TestAnnotatorProject:
+    def test_shared_browser_restores_each_annotators_own_project(
+        self, provider_with_project, tmp_path
+    ):
+        dp, first, _ = provider_with_project
+        second_dir = tmp_path / "second"
+        second_dir.mkdir()
+        second = dp.create_project("Second", str(second_dir))
+        dp.set_setting("active_project_id", first.id)  # Legacy shared default must not leak.
+        state.set_data_provider(dp)
+
+        state.set_annotator_name("alice")
+        state.set_active_project(first.id)
+        state.set_queue(["video"])
+        state.update_filters(search_query="chimp")
+        state.clear_session()
+
+        assert state.get_active_project_id() is None
+        assert state.get_annotator_name() == ""
+        assert state.get_queue() == []
+        assert state.get_filters() == state._DEFAULT_FILTERS
+
+        state.set_annotator_name("bob")
+        state.load_session_defaults(dp, restore_project=True)
+        assert state.get_active_project_id() is None
+        state.set_active_project(second.id)
+
+        # Login must replace any selection remaining in browser storage.
+        state.set_annotator_name("alice")
+        state.load_session_defaults(dp, restore_project=True)
+        assert state.get_active_project_id() == first.id
+        state.set_annotator_name("bob")
+        state.load_session_defaults(dp, restore_project=True)
+        assert state.get_active_project_id() == second.id
+
+    def test_fresh_browser_and_provider_restore_annotator_project(self, provider_with_project):
+        from review_app.backend.provider.local_data_provider import LocalDataProvider
+
+        dp, project, _ = provider_with_project
+        state.set_data_provider(dp)
+        state.set_annotator_name("alice")
+        state.set_active_project(project.id)
+        state.reset_app_state(keep_prefs=False)
+
+        reopened = LocalDataProvider()
+        try:
+            state.set_data_provider(reopened)
+            state.set_annotator_name("alice")
+            state.load_session_defaults(reopened, restore_project=True)
+            assert state.get_active_project_id() == project.id
+        finally:
+            reopened.engine.dispose()
+
+    def test_explicit_clear_forgets_only_current_annotators_project(self, provider_with_project):
+        dp, project, _ = provider_with_project
+        state.set_data_provider(dp)
+        dp.set_annotator_active_project("bob", project.id)
+        state.set_annotator_name("alice")
+        state.set_active_project(project.id)
+        state.set_active_project(None)
+        assert dp.get_annotator_active_project("alice") is None
+        assert dp.get_annotator_active_project("bob") == project.id
+
+
 class TestLoadSettingsFromDb:
     def test_loads_all_settings_from_provider(self):
         class MockDP:
@@ -109,7 +173,8 @@ class TestLoadSettingsFromDb:
         assert state.get_annotator_name() == ""
         assert state.get_blank_threshold() == 0.5
         assert state.get_species_threshold() == 0.6
-        assert state.get_active_project_id() == "proj-123"
+        # A legacy global project is not another annotator's preference.
+        assert state.get_active_project_id() is None
         assert state.is_dark_mode() is False
         assert state.get_language() == "fr"
         assert state.is_autoplay() is False

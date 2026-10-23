@@ -120,8 +120,9 @@ def _validate_transcoded_video_cached(
     if len(video_streams) != 1:
         return TranscodedVideoValidation(False, "output must contain exactly one video stream")
     video = video_streams[0]
-    if video.get("codec_name") != "h264" or video.get("pix_fmt") != "yuv420p":
-        return TranscodedVideoValidation(False, "output video must be H.264 yuv420p")
+    # ffprobe reports full-range 8-bit 4:2:0 as yuvj420p rather than yuv420p.
+    if video.get("codec_name") != "h264" or video.get("pix_fmt") not in {"yuv420p", "yuvj420p"}:
+        return TranscodedVideoValidation(False, "output video must be 8-bit H.264 4:2:0")
     if any(
         stream.get("codec_name") != "aac" or stream.get("profile") != "LC"
         for stream in audio_streams

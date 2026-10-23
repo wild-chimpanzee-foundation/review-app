@@ -22,6 +22,36 @@ class AssignmentMixin(ProviderBase):
             rows = conn.execute(text("SELECT name FROM annotators ORDER BY name")).fetchall()
         return [r[0] for r in rows]
 
+    def get_annotator_active_project(self, name: str) -> str | None:
+        """Return this annotator's last project, ignoring deleted projects."""
+        with self.engine.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT p.id FROM app_settings s JOIN projects p ON p.id = s.value "
+                    "WHERE s.key = :key"
+                ),
+                {"key": f"annotator_active_project:{name}"},
+            ).scalar_one_or_none()
+
+    def set_annotator_active_project(self, name: str, project_id: str | None) -> None:
+        """Persist one preference per exact annotator name without a schema change."""
+        with self.engine.begin() as conn:
+            key = f"annotator_active_project:{name}"
+            if project_id is None:
+                conn.execute(text("DELETE FROM app_settings WHERE key = :key"), {"key": key})
+                return
+            if not conn.execute(
+                text("SELECT id FROM projects WHERE id = :id"), {"id": project_id}
+            ).first():
+                raise ValueError("Project not found")
+            conn.execute(
+                text(
+                    "INSERT INTO app_settings (key, value) VALUES (:key, :value) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                ),
+                {"key": key, "value": project_id},
+            )
+
     def add_annotator(self, name: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self.engine.begin() as conn:
@@ -71,6 +101,10 @@ class AssignmentMixin(ProviderBase):
                 text("DELETE FROM video_assignments WHERE assigned_to = :name"), {"name": name}
             )
             conn.execute(text("DELETE FROM annotators WHERE name = :name"), {"name": name})
+            conn.execute(
+                text("DELETE FROM app_settings WHERE key = :key"),
+                {"key": f"annotator_active_project:{name}"},
+            )
 
     def get_annotator_annotation_counts(self) -> dict[str, int]:
         """Map each annotator name to their total saved annotation count across

@@ -107,12 +107,13 @@ def test_find_video_tool_uses_homebrew_fallback_on_macos(monkeypatch, tmp_path):
     assert video_tools.find_video_tool("ffmpeg") == str(ffmpeg)
 
 
-def test_validate_transcoded_video_accepts_browser_safe_output(monkeypatch, tmp_path):
+@pytest.mark.parametrize("pix_fmt", ["yuv420p", "yuvj420p"])
+def test_validate_transcoded_video_accepts_browser_safe_output(monkeypatch, tmp_path, pix_fmt):
     output = tmp_path / "video.v2.mp4"
     output.touch()
     probe_data = {
         "streams": [
-            {"codec_type": "video", "codec_name": "h264", "pix_fmt": "yuv420p"},
+            {"codec_type": "video", "codec_name": "h264", "pix_fmt": pix_fmt},
             {"codec_type": "audio", "codec_name": "aac", "profile": "LC"},
         ],
         "format": {"format_name": "mov,mp4,m4a,3gp,3g2,mj2", "duration": "10.0"},
@@ -129,12 +130,15 @@ def test_validate_transcoded_video_accepts_browser_safe_output(monkeypatch, tmp_
     assert transcoding.validate_transcoded_video(output).valid is True
 
 
-def test_validate_transcoded_video_rejects_incompatible_pixel_format(monkeypatch, tmp_path):
+@pytest.mark.parametrize("pix_fmt", ["yuv422p", "yuvj422p", "yuv420p10le"])
+def test_validate_transcoded_video_rejects_incompatible_pixel_format(
+    monkeypatch, tmp_path, pix_fmt
+):
     output = tmp_path / "video.v2.mp4"
     output.touch()
     probe_data = {
         "streams": [
-            {"codec_type": "video", "codec_name": "h264", "pix_fmt": "yuv422p"},
+            {"codec_type": "video", "codec_name": "h264", "pix_fmt": pix_fmt},
         ],
         "format": {"format_name": "mov,mp4", "duration": "10.0"},
     }
@@ -150,7 +154,7 @@ def test_validate_transcoded_video_rejects_incompatible_pixel_format(monkeypatch
     validation = transcoding.validate_transcoded_video(output)
 
     assert validation.valid is False
-    assert validation.error == "output video must be H.264 yuv420p"
+    assert validation.error == "output video must be 8-bit H.264 4:2:0"
 
 
 def test_inspect_transcoded_cache_reports_missing_and_outdated_entries(tmp_path):

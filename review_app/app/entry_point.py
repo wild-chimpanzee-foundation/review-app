@@ -10,6 +10,7 @@ from pathlib import Path
 
 from review_app.app.media import set_media_dirs, setup_media_route
 from review_app.app.project_picker import build_project_picker
+from review_app.app.session_storage import configure_user_storage
 from review_app.app.setup_wizard import setup_wizard
 from review_app.app.state import (
     get_active_project_id,
@@ -94,7 +95,7 @@ for _ext, _mime in [
     mimetypes.add_type(_mime, _ext.upper())
 
 
-def shared_header(show_drawer: bool = False):
+def shared_header(show_drawer: bool = False, *, show_project_picker: bool = False):
     from nicegui import ui
 
     apply_theme()
@@ -186,21 +187,23 @@ def shared_header(show_drawer: bool = False):
                     "flat round color=white"
                 ).tooltip(t("filters_label"))
             _active_pid = get_active_project_id()
-            if _active_pid:
-                _header_dp = get_data_provider()
+            _header_dp = get_data_provider()
+            if _header_dp and get_annotator_name():
                 _active_proj_name = (
                     p.name
-                    if (_header_dp and (p := _header_dp.get_project(_active_pid)))
-                    else _active_pid
+                    if (_active_pid and (p := _header_dp.get_project(_active_pid)))
+                    else (_active_pid or t("switch_project"))
                 )
                 project_dialog, refresh_projects = build_project_picker()
+                if show_project_picker:
+                    project_dialog.open()
                 ui.button(
                     _active_proj_name,
                     icon="folder_special",
                     on_click=lambda: (refresh_projects(), project_dialog.open()),
                 ).props("outline color=white dense icon-right=arrow_drop_down").classes(
                     "q-ml-sm text-caption q-px-sm"
-                ).style("border-color: rgba(255, 255, 255, 0.5)")
+                ).style("border-color: rgba(255, 255, 255, 0.5)").mark("project-picker")
             ui.space()
             with ui.row().classes("gap-2 items-center"):
                 ui.button(t("nav_overview"), on_click=lambda: ui.navigate.to("/overview")).props(
@@ -341,6 +344,8 @@ class GUI:
             ui.navigate.to("/login")
         elif get_active_project_id():
             ui.navigate.to("/overview")
+        elif (dp := get_data_provider()) and dp.list_projects():
+            shared_header(show_project_picker=True)
         else:
             ui.navigate.to("/setup")
 
@@ -502,6 +507,7 @@ class GUI:
 
         _udd = _get_udd()
         _udd.mkdir(parents=True, exist_ok=True)
+        configure_user_storage(_udd)
         _setup_logging(_udd, dev_mode)
 
         from review_app import __version__

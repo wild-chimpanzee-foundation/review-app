@@ -3,8 +3,10 @@
 - Module-level globals (thresholds, auto_transcode, the data provider): one value
   for the whole server process, shared by every connected browser/user, persisted
   in the DB's app_settings table.
-- ``app.storage.user`` (filters, queue, prefs, active project): per-browser session,
-  persisted in NiceGUI's storage file keyed by the browser cookie.
+- ``app.storage.user`` (filters, queue, prefs, current login/project): per-browser
+  session, persisted in NiceGUI's storage file keyed by the browser cookie.
+- The last selected project is also stored per annotator name in the database;
+  login restores that preference independently of the previous browser session.
 
 When adding a setting, decide which scope it belongs to and keep its getter/setter
 in the matching section.
@@ -129,8 +131,8 @@ def load_settings_from_db(dp) -> None:
     )
 
 
-def load_session_defaults(dp=None) -> None:
-    """Prime per-session storage with DB defaults. Only sets keys not already present."""
+def load_session_defaults(dp=None, *, restore_project: bool = False) -> None:
+    """Prime preferences and restore the logged-in annotator's project on login."""
     from nicegui import app
 
     storage = app.storage.user
@@ -150,8 +152,11 @@ def load_session_defaults(dp=None) -> None:
             else:
                 storage[key] = raw if raw is not None else default
 
-    if "active_project_id" not in storage:
-        storage["active_project_id"] = dp.get_setting("active_project_id") if dp else None
+    if restore_project or "active_project_id" not in storage:
+        name = storage.get("annotator_name")
+        storage["active_project_id"] = (
+            dp.get_annotator_active_project(name) if dp and name else None
+        )
 
 
 def save_user_prefs_to_db(dp) -> None:
@@ -162,6 +167,9 @@ def save_user_prefs_to_db(dp) -> None:
 def set_active_project(project_id: str | None) -> None:
     from nicegui import app
 
+    name = get_annotator_name()
+    if _data_provider and name:
+        _data_provider.set_annotator_active_project(name, project_id)
     app.storage.user["active_project_id"] = project_id
 
 
