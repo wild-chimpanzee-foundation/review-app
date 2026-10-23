@@ -47,7 +47,7 @@ const elements = {overlay: null};
 global.window = {};
 global.document = {body: new Element('body'), createElement(tag) { return new Element(tag); },
     createElementNS(_namespace, tag) { return new Element(tag); }};
-global.getElement = () => ({$el:video});
+global.getElement = () => ({$el:video, $emit: (...args) => global.emitEvent(...args)});
 global.emitEvent = (_name, payload) => { emitted.push(payload); };
 global.ResizeObserver = class { observe() {} disconnect() {} };
 global.MutationObserver = class { constructor(callback) { this.callback = callback; }

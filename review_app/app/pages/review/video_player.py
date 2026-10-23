@@ -143,13 +143,14 @@ def render_custom_video_player(
                 return
             set_playback_speed(f"{round(rate, 2)}x")
 
-        ui.on(f"vp_speed_change_{vid_key}", _persist_speed)
+        # Source switches retain these callbacks; deleting the player releases them.
+        v.on(f"vp_speed_change_{vid_key}", _persist_speed)
 
         def _persist_mute(e):
             set_muted(bool(e.args))
 
-        ui.on(f"vp_mute_change_{vid_key}", _persist_mute)
-        ui.on(
+        v.on(f"vp_mute_change_{vid_key}", _persist_mute)
+        v.on(
             f"vp_autoplay_fallback_{vid_key}",
             lambda e: logger.info(
                 "Unmuted autoplay was blocked; retrying muted for player %s: %s",
@@ -157,7 +158,7 @@ def render_custom_video_player(
                 e.args,
             ),
         )
-        ui.on(
+        v.on(
             f"vp_autoplay_failed_{vid_key}",
             lambda e: logger.warning("Autoplay failed for player %s: %s", vid_key, e.args),
         )
@@ -229,7 +230,7 @@ def render_custom_video_player(
                             if (best === null || Math.abs(parseFloat(opt.value) - actual) < Math.abs(parseFloat(best.value) - actual)) best = opt;
                         }}
                         if (best) speedSel.value = best.value;
-                        emitEvent('vp_speed_change_{vid_key}', actual);
+                        comp.$emit('vp_speed_change_{vid_key}', actual);
                     }}
                 }}, 100);
 
@@ -279,7 +280,7 @@ def render_custom_video_player(
                     muteBtn.addEventListener('click', () => {{
                         videoEl.muted = !videoEl.muted;
                         syncMuteUi();
-                        emitEvent('vp_mute_change_{vid_key}', videoEl.muted);
+                        comp.$emit('vp_mute_change_{vid_key}', videoEl.muted);
                     }});
                 }}
 
@@ -288,17 +289,17 @@ def render_custom_video_player(
                         await videoEl.play();
                     }} catch (error) {{
                         if (error.name === 'NotAllowedError' && !videoEl.muted) {{
-                            emitEvent('vp_autoplay_fallback_{vid_key}', error.message);
+                            comp.$emit('vp_autoplay_fallback_{vid_key}', error.message);
                             videoEl.muted = true;
                             syncMuteUi();
-                            emitEvent('vp_mute_change_{vid_key}', true);
+                            comp.$emit('vp_mute_change_{vid_key}', true);
                             try {{
                                 await videoEl.play();
                             }} catch (retryError) {{
-                                emitEvent('vp_autoplay_failed_{vid_key}', retryError.message);
+                                comp.$emit('vp_autoplay_failed_{vid_key}', retryError.message);
                             }}
                         }} else {{
-                            emitEvent('vp_autoplay_failed_{vid_key}', error.message);
+                            comp.$emit('vp_autoplay_failed_{vid_key}', error.message);
                         }}
                     }}
                 }}
@@ -425,9 +426,9 @@ def render_custom_video_player(
                                 if (best === null || Math.abs(parseFloat(opt.value) - actual) < Math.abs(parseFloat(best.value) - actual)) best = opt;
                             }}
                             if (best) speedSel.value = best.value;
-                            emitEvent('vp_speed_change_{vid_key}', actual);
+                            comp.$emit('vp_speed_change_{vid_key}', actual);
                         }} else {{
-                            emitEvent('vp_speed_change_{vid_key}', rate);
+                            comp.$emit('vp_speed_change_{vid_key}', rate);
                         }}
                     }}, 50);
                 }});

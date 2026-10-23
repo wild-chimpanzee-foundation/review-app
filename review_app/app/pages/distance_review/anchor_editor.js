@@ -196,7 +196,7 @@
         const anchor = {x: Math.min(start.x, end.x), y: Math.min(start.y, end.y),
             width: Math.abs(start.x - end.x), height: Math.abs(start.y - end.y)};
         if (anchor.width === 0 || anchor.height === 0) { setMode(__MODE__); return; }
-        emitEvent('__EVENT__', {
+        component.$emit('__EVENT__', {
             individual_id: individual.id, offset_ms: Math.round(video.currentTime * 1000), anchor});
         setMode(null);
     });

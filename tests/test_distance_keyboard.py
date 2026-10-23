@@ -598,7 +598,9 @@ async def test_programmatic_pause_suppression_waits_for_delayed_event_and_expire
         "run_javascript",
         lambda source, **_: listener_source.setdefault("source", source),
     )
-    player_module.install_manual_pause_snap(SimpleNamespace(id=12), lambda *_: None)
+    player_module.install_manual_pause_snap(
+        SimpleNamespace(id=12, on=lambda *_: None), lambda *_: None
+    )
     operation_source = {}
     if operation.endswith("seek"):
         monkeypatch.setattr(
@@ -633,7 +635,7 @@ async def test_programmatic_pause_suppression_waits_for_delayed_event_and_expire
         + "global.emitEvent = (name, args) => emitted.push([name, args.offset_ms]);"
         + "new Function('getElement', 'emitEvent', "
         + json.dumps(listener_source["source"])
-        + ")( () => ({$el:video}), global.emitEvent);"
+        + ")( () => ({$el:video, $emit:global.emitEvent}), global.emitEvent);"
         + "new Function('getElement', "
         + json.dumps(operation_source["source"])
         + ")( () => ({$el:video}));"
@@ -687,7 +689,9 @@ async def test_automatic_stop_suppresses_delayed_pause_then_reports_user_pause(m
         "run_javascript",
         lambda source, **_: listener_source.setdefault("source", source),
     )
-    player_module.install_manual_pause_snap(SimpleNamespace(id=12), lambda *_: None)
+    player_module.install_manual_pause_snap(
+        SimpleNamespace(id=12, on=lambda *_: None), lambda *_: None
+    )
     script = (
         Path(player_module.__file__)
         .with_name("sample_playback.js")
@@ -712,7 +716,7 @@ async def test_automatic_stop_suppresses_delayed_pause_then_reports_user_pause(m
         + "global.emitEvent = (name, args) => emitted.push([name, args.offset_ms]);"
         + "new Function('getElement', 'emitEvent', "
         + json.dumps(listener_source["source"])
-        + ")( () => ({$el:video}), global.emitEvent);"
+        + ")( () => ({$el:video, $emit:global.emitEvent}), global.emitEvent);"
         + "new Function('getElement', 'requestAnimationFrame', 'cancelAnimationFrame',"
         + json.dumps("return (async()=>{" + script + "})();")
         + ")( () => ({$el:video}), callback => setImmediate(() => {if (!video.paused) time += .2; callback();}), clearImmediate)"
@@ -729,7 +733,9 @@ def test_manual_pause_listener_follows_remounted_video_and_ignores_detached_even
     scripts = []
     monkeypatch.setattr(player_module.ui, "on", lambda *_: None)
     monkeypatch.setattr(player_module.ui, "run_javascript", lambda source: scripts.append(source))
-    player_module.install_manual_pause_snap(SimpleNamespace(id=12), lambda *_: None)
+    player_module.install_manual_pause_snap(
+        SimpleNamespace(id=12, on=lambda *_: None), lambda *_: None
+    )
     result = run_javascript(
         "const observers=[], emitted=[]; global.document={body:{}};"
         + "global.MutationObserver=class {constructor(callback) {this.callback=callback; observers.push(this);}"
@@ -741,7 +747,7 @@ def test_manual_pause_listener_follows_remounted_video_and_ignores_detached_even
         + "global.emitEvent=(name,args)=>emitted.push([name,args.offset_ms]);"
         + "const install=new Function('getElement','emitEvent',"
         + json.dumps(scripts[0])
-        + "); const get=()=>current ? {$el:current} : null;"
+        + "); const get=()=>current ? {$el:current, $emit:emitEvent} : null;"
         + "install(get,emitEvent); install(get,emitEvent);"
         + "first.isConnected=false; current=second; observers[0].callback(); first.pause();"
         + "setTimeout(()=>{second._distanceSuppressedPauseEvents=1; second.pause(); second.pause();"

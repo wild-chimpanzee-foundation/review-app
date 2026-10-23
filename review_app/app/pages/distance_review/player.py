@@ -116,7 +116,7 @@ async def play_to_sample(player, from_ms: int | float, to_ms: int | float) -> No
 def install_manual_pause_snap(player, handler) -> None:
     """Report only user-initiated pauses from this annotation player."""
     event_name = f"distance_manual_pause_{player.id}"
-    ui.on(event_name, handler)
+    player.on(event_name, handler)
     ui.run_javascript(f"""
         (function install() {{
             const video = {video_element(player)};
@@ -129,7 +129,7 @@ def install_manual_pause_snap(player, handler) -> None:
                     return;
                 }}
                 if (!video.seeking)
-                    emitEvent({json.dumps(event_name)}, {{offset_ms: video.currentTime * 1000}});
+                    getElement({player.id})?.$emit({json.dumps(event_name)}, {{offset_ms: video.currentTime * 1000}});
             }});
             // Global dialog events can remount this video. Follow the same
             // replacement lifecycle as the shared controls and anchor editor.
@@ -241,7 +241,7 @@ def install_anchor_editor(
     if initial_mode not in ("box", None):
         raise ValueError("Anchor editor only supports bounding boxes")
     event_name = f"distance_anchor_{player.id}"
-    ui.on(event_name, on_anchor)
+    player.on(event_name, on_anchor)
     source = Path(__file__).with_name("anchor_editor.js").read_text()
     ui.run_javascript(
         source.replace("__PLAYER_ID__", str(player.id))
