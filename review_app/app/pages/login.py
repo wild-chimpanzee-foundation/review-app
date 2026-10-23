@@ -89,7 +89,7 @@ async def setup_login():
                     await run.io_bound(dp.add_annotator, name)
 
                 app.storage.user["annotator_name"] = name
-                load_session_defaults(get_data_provider())
+                load_session_defaults(get_data_provider(), restore_project=True)
                 ui.navigate.to("/")
 
             name_select.on("keydown.enter", lambda _: _submit())
