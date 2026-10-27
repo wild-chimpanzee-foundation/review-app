@@ -794,6 +794,11 @@ async def setup_review():
             }
             .review-video-panel [id^=vp-wrap-]:not(.vp-fs-active) .vp-video-container {
                 border: 0 !important;
+                max-height: max(160px, calc(100dvh - 420px));
+            }
+            .review-video-panel [id^=vp-wrap-]:not(.vp-fs-active) .vp-video-container video {
+                max-height: inherit;
+                object-fit: contain;
             }
             .review-queue-header {
                 display: grid;
