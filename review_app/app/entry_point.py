@@ -391,7 +391,8 @@ class GUI:
     def db_error_page(self):
         from nicegui import ui
 
-        from review_app.app.config import get_default_db_path, get_user_data_dir
+        from review_app.app.components.database_recovery import build_backup_recovery
+        from review_app.app.config import get_default_db_path
 
         shared_header()
 
@@ -436,14 +437,9 @@ class GUI:
                 self._startup_error = None
                 ui.navigate.to("/setup")
 
+            build_backup_recovery()
+
             with ui.row().classes("gap-4 q-mt-sm"):
-                ui.button(
-                    "Open data folder",
-                    icon="folder_open",
-                    on_click=lambda: ui.run_javascript(
-                        f"window.open('file://{get_user_data_dir()}', '_blank')"
-                    ),
-                ).props("flat")
                 ui.button(
                     "Delete database and start fresh",
                     icon="delete_forever",
