@@ -155,7 +155,7 @@ def _plan(session, project_id, package):
                 errors.append(
                     f"Confirm Species Review labels for {row['species']} in {row['video_path']} before importing."
                 )
-            schedules.setdefault(video.video_id, set())
+            schedules.setdefault((video.video_id, row["species"]), set())
             if video.video_id in tagged:
                 errors.append(f"Animal track points to a Reference Video: {row['video_path']}")
             if deployment_key(project_id, video.camera_id, video.video_path, roots) is None:
@@ -163,11 +163,12 @@ def _plan(session, project_id, package):
         if not any(p["individual_id"] == row["individual_id"] for p in package.predictions):
             errors.append(f"Individual {row['individual_id']} has no predictions.")
     for row in package.predictions:
-        video = videos.get(tracks[row["individual_id"]]["video_path"])
+        track = tracks[row["individual_id"]]
+        video = videos.get(track["video_path"])
         if video is None:
             continue
         _check_time(errors, video, row)
-        schedules[video.video_id].add(row["time_s"])
+        schedules[(video.video_id, track["species"])].add(row["time_s"])
         reference = references.get(row["suggested_reference_id"])
         ref_video = videos.get(reference["video_path"]) if reference else None
         if ref_video and deployment_key(
@@ -176,7 +177,8 @@ def _plan(session, project_id, package):
             errors.append(
                 f"Suggested reference is from another deployment: {row['prediction_id']}"
             )
-    for video_id, times in schedules.items():
+    for key in schedules:
+        video_id, species_name = key
         video = session.get(Video, video_id)
         try:
             track_times = [
@@ -186,16 +188,17 @@ def _plan(session, project_id, package):
                     if p["individual_id"] == row["individual_id"]
                 ]
                 for row in package.individuals
-                if videos.get(row["video_path"]) is video
+                if videos.get(row["video_path"]) is video and row["species"] == species_name
             ]
             full_times, cadence = infer_imported_schedule(track_times, video.duration_sec)
-            schedules[video_id] = full_times
+            schedules[key] = full_times
             sample_count = len(full_times) * len(track_times)
             summary["scheduled_samples"] += sample_count
             summary["inferred_absences"] += sample_count - sum(map(len, track_times))
             summary["sampling"].append(
                 {
                     "video_path": video.video_path,
+                    "species": species_name,
                     "cadence_s": cadence,
                     "samples": len(full_times),
                 }
@@ -204,44 +207,36 @@ def _plan(session, project_id, package):
                 errors.append("Package would create more than 100,000 review samples")
         except ValueError as exc:
             errors.append(f"{video.video_path}: {exc}")
-        target_species = {
-            species.get(row["species"])
-            for row in package.individuals
-            if videos.get(row["video_path"]) is video
-        }
-        reviews = [
-            task for (vid, sid), task in tasks.items() if vid == video_id and sid in target_species
-        ]
-        for review in reviews:
-            individuals = session.query(DistanceIndividual).filter_by(task_id=review.id).all()
-            if (
-                review.verified_at is None
-                and not individuals
-                and review.started_at is None
-                and review.completed_at is None
-            ):
-                continue
-            if (
-                not review
-                or review.alignment_mode != "imported"
-                or not review.import_id
-                or review.started_at
-                or review.completed_at
-                or any(row.import_id != review.import_id or row.labeled_at for row in individuals)
-                or session.query(DistanceSample.id)
-                .join(DistanceIndividual, DistanceSample.individual_id == DistanceIndividual.id)
-                .filter(
-                    DistanceIndividual.task_id == review.id, DistanceSample.status != "pending"
-                )
-                .first()
-            ):
-                errors.append(
-                    f"Distance review already started or manually configured: {video.video_path}. Import cannot overwrite it."
-                )
-            else:
-                summary["replace_video_ids"].append(video_id)
+        review = tasks.get((video_id, species.get(species_name)))
+        if review is None:
+            continue  # Missing confirmed species labels were reported above.
+        individuals = session.query(DistanceIndividual).filter_by(task_id=review.id).all()
+        if (
+            review.verified_at is None
+            and not individuals
+            and review.started_at is None
+            and review.completed_at is None
+        ):
+            continue
+        if (
+            review.alignment_mode != "imported"
+            or not review.import_id
+            or review.started_at
+            or review.completed_at
+            or any(row.import_id != review.import_id or row.labeled_at for row in individuals)
+            or session.query(DistanceSample.id)
+            .join(DistanceIndividual, DistanceSample.individual_id == DistanceIndividual.id)
+            .filter(DistanceIndividual.task_id == review.id, DistanceSample.status != "pending")
+            .first()
+        ):
+            errors.append(
+                f"Distance review already started or manually configured: {video.video_path}. Import cannot overwrite it."
+            )
+        else:
+            summary["replace_video_ids"].append(video_id)
     summary["errors"] = list(dict.fromkeys(errors))
-    return summary, videos, frames, {vid: sorted(times) for vid, times in schedules.items()}
+    summary["replace_video_ids"] = list(dict.fromkeys(summary["replace_video_ids"]))
+    return summary, videos, frames, {key: sorted(times) for key, times in schedules.items()}
 
 
 def _check_time(errors, video, row):
@@ -341,7 +336,7 @@ class DistanceAIImportMixin(ProviderBase):
                     reset_video_evidence(session, review.id)
                 review.started_at = None
                 review.alignment_mode = "imported"
-                review.imported_sample_times_s = schedules[video_id]
+                review.imported_sample_times_s = schedules[(video_id, row["species"])]
                 review.import_id = imported.id
                 review.verified_by = f"AI {package.manifest['model']['name']}"
                 review.verified_at = self._utcnow_dt()
@@ -378,7 +373,7 @@ class DistanceAIImportMixin(ProviderBase):
                 session.flush()
                 identities.append({**row, "distance_individual_id": individual.id})
                 by_time = {prediction["time_s"]: prediction for prediction in predictions}
-                for time_s in schedules[video_id]:
+                for time_s in schedules[(video_id, row["species"])]:
                     prediction = by_time.get(time_s)
                     if prediction is not None:
                         suggested = frames.get(prediction["suggested_reference_id"])

@@ -99,17 +99,28 @@ def test_task_transition_discards_only_legacy_distance_evidence(legacy_database,
         migrations.run_migrations(engine)
     with engine.begin() as conn:
         conn.exec_driver_sql("""
+            INSERT INTO distance_imports
+                (id, project_id, content_hash, manifest, payload, imported_at)
+            VALUES ('import', 'project', 'package-hash', '{"source_id":"pipeline"}',
+                    '{"references":[{"reference_frame_id":"frame"}]}', '2026-01-01')
+        """)
+        conn.exec_driver_sql("""
             INSERT INTO reference_videos VALUES ('ref', 'project', 'camera', 'ref.mp4')
         """)
         conn.exec_driver_sql("""
-            INSERT INTO reference_frames (id, reference_video_id, offset_ms, playback_offset_ms, distance_m)
-            VALUES ('frame', 'ref', 1000, 1000.5, 2.5)
+            INSERT INTO reference_frames
+                (id, reference_video_id, offset_ms, playback_offset_ms, distance_m, import_id)
+            VALUES ('frame', 'ref', 1000, 1000.5, 2.5, 'import')
         """)
         conn.exec_driver_sql("""
             INSERT INTO distance_individuals
-                (id, video_id, individual_number, species_id, first_seen_offset_ms, updated_at)
-            VALUES ('legacy', 'video', 1, 'species', 0, '2026-01-01')
+                (id, video_id, import_id, individual_number, species_id,
+                 first_seen_offset_ms, updated_at)
+            VALUES ('legacy', 'video', 'import', 1, 'species', 0, '2026-01-01')
         """)
+        import_before = conn.exec_driver_sql("""
+            SELECT id, project_id, manifest, payload, imported_at FROM distance_imports
+        """).all()
         before = {
             table: conn.exec_driver_sql(f'SELECT * FROM "{table}"').all()
             for table in (
@@ -121,10 +132,27 @@ def test_task_transition_discards_only_legacy_distance_evidence(legacy_database,
         }
     Base.metadata.create_all(engine)
     migrations.run_migrations(engine)
-    with engine.connect() as conn:
+    migrations.run_migrations(engine)
+    with engine.begin() as conn:
         for table, rows in before.items():
             assert conn.exec_driver_sql(f'SELECT * FROM "{table}"').all() == rows
         assert conn.exec_driver_sql("SELECT count(*) FROM distance_individuals").scalar() == 0
+        assert (
+            conn.exec_driver_sql("""
+            SELECT id, project_id, manifest, payload, imported_at FROM distance_imports
+        """).all()
+            == import_before
+        )
+        assert conn.exec_driver_sql("SELECT content_hash FROM distance_imports").scalar() == (
+            "discarded-v24:import:package-hash"
+        )
+        # The normal importer can now claim the original hash again, without
+        # deleting the source record referenced by the retained calibration.
+        conn.exec_driver_sql("""
+            INSERT INTO distance_imports
+                (id, project_id, content_hash, manifest, payload, imported_at)
+            VALUES ('reimport', 'project', 'package-hash', '{}', '{}', '2026-01-02')
+        """)
         assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
 
 

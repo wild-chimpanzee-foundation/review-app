@@ -945,6 +945,13 @@ def _migration_v24(conn) -> None:
         "distance_video_reviews",
     ):
         conn.exec_driver_sql(f"DROP TABLE IF EXISTS {table}")
+    # Retain source packages for reference-frame provenance, but allow their
+    # discarded drafts to be imported again. Package hashes are SHA-256 hex, so
+    # this namespace cannot collide with a live package's deduplication key.
+    conn.exec_driver_sql("""
+        UPDATE distance_imports
+        SET content_hash = 'discarded-v24:' || id || ':' || content_hash
+    """)
     # Frozen task schema; create_all may already have created this empty table.
     conn.exec_driver_sql("""
         CREATE TABLE IF NOT EXISTS distance_review_tasks (

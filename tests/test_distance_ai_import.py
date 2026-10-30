@@ -200,6 +200,139 @@ def test_preview_and_import_create_pending_samples_with_provenance(distance_data
         assert snapshot(dp, [table])[table] == before[table]
 
 
+def test_v23_upgrade_allows_identical_package_reimport_and_preserves_references(
+    distance_data, ai_package
+):
+    from review_app.backend.db.migrations import DISTANCE_SCHEMA_V23
+    from review_app.backend.provider.local_data_provider import LocalDataProvider
+
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    data = package_zip(ai_package)
+    original = dp.import_distance_ai_package(project_id, data)
+    individual = dp.list_distance_individuals(distance_data["videos"][0])[0]
+    references_before = snapshot(dp, ["reference_videos", "reference_frames"])
+    ordinary_before = snapshot(dp, ["individual_observations", "video_labels", "video_tags"])
+    # Reconstruct the frozen v23 Distance tables around the real imported
+    # package and reference calibration, before exercising normal startup.
+    with dp.engine.begin() as conn:
+        for table in (
+            "distance_sample_behaviors",
+            "distance_individual_tags",
+            "distance_samples",
+            "distance_review_progress",
+            "distance_individuals",
+            "distance_review_tasks",
+        ):
+            conn.exec_driver_sql(f"DROP TABLE {table}")
+        for ddl in DISTANCE_SCHEMA_V23:
+            conn.exec_driver_sql(ddl)
+        conn.exec_driver_sql(
+            """
+            INSERT INTO distance_individuals
+                (id, video_id, import_id, individual_number, species_id,
+                 first_seen_offset_ms, updated_at)
+            VALUES (?, ?, ?, 1, ?, 1250, '2026-01-01')
+            """,
+            (
+                individual["id"],
+                distance_data["videos"][0],
+                original["import_id"],
+                distance_data["species_id"],
+            ),
+        )
+        conn.exec_driver_sql("UPDATE _schema_version SET version = 23")
+    dp.engine.dispose()
+    upgraded = LocalDataProvider()
+    try:
+        assert snapshot(upgraded, list(references_before)) == references_before
+        assert snapshot(upgraded, list(ordinary_before)) == ordinary_before
+        preview = upgraded.preview_distance_ai_package(project_id, data)
+        assert preview["errors"] == []
+        assert not preview["already_imported"]
+        assert preview["new_reference_frames"] == 0
+        assert preview["reused_reference_frames"] == 1
+        result = upgraded.import_distance_ai_package(project_id, data)
+        assert result["import_id"] != original["import_id"]
+        individuals = upgraded.list_distance_individuals(distance_data["videos"][0])
+        assert len(individuals) == 1 and individuals[0]["id"] != individual["id"]
+        state = upgraded.get_distance_review_state(distance_data["videos"][0], "alice")
+        assert len(state["samples"]) == preview["scheduled_samples"]
+        assert all(row["status"] == "pending" for row in state["samples"])
+        assert snapshot(upgraded, list(references_before)) == references_before
+        assert snapshot(upgraded, list(ordinary_before)) == ordinary_before
+        retry = upgraded.import_distance_ai_package(project_id, data)
+        assert retry["already_imported"] and retry["import_id"] == result["import_id"]
+        assert len(upgraded.list_distance_imports(project_id)) == 2
+    finally:
+        upgraded.engine.dispose()
+
+
+def test_mixed_species_import_keeps_schedules_and_replacements_task_scoped(
+    distance_data, ai_package
+):
+    from copy import deepcopy
+
+    from review_app.backend.db.models import IndividualObservation, Species
+    from review_app.backend.distance_timing import infer_imported_schedule
+
+    dp, project = distance_data["dp"], distance_data["project"]
+    video_id = distance_data["videos"][0]
+    with dp.Session.begin() as session:
+        fox_id = session.query(Species).filter_by(scientific_name="fox").one().id
+        session.add(IndividualObservation(video_id=video_id, id=1001, species_id=fox_id, count=1))
+    files = deepcopy(ai_package)
+    files["individuals.csv"].append(
+        {**files["individuals.csv"][0], "individual_id": "fox-1", "species": "fox"}
+    )
+    for index, time in enumerate((1.5, 3.5)):
+        files["predictions.csv"].append(
+            {
+                **files["predictions.csv"][0],
+                "individual_id": "fox-1",
+                "prediction_id": f"fox-p{index}",
+                "time_s": str(time),
+            }
+        )
+    expected = {
+        distance_data["species_id"]: infer_imported_schedule([[1.250000001, 2.250000001]], 10)[0],
+        fox_id: infer_imported_schedule([[1.5, 3.5]], 10)[0],
+    }
+    package = package_zip(files)
+    preview = dp.preview_distance_ai_package(project.id, package)
+    assert preview["errors"] == []
+    assert preview["scheduled_samples"] == sum(map(len, expected.values()))
+    assert preview["inferred_absences"] == preview["scheduled_samples"] - 4
+    assert {row["species"]: row["cadence_s"] for row in preview["sampling"]} == {
+        "deer": 1,
+        "fox": 2,
+    }
+    dp.import_distance_ai_package(project.id, package)
+    tasks = {
+        row["species_id"]: row["task_id"]
+        for row in dp.get_distance_video_queue(project.id)
+        if row["video_id"] == video_id
+    }
+    for species_id, schedule in expected.items():
+        state = dp.get_distance_review_state(tasks[species_id], "alice")
+        assert state["review"]["imported_sample_times_s"] == schedule
+        assert len(state["samples"]) == len(schedule)
+        assert [sample["ai_original"]["time_s"] for sample in state["samples"]] == schedule
+    fox_before = dp.get_distance_review_state(tasks[fox_id], "alice")
+    # Replacing only the deer draft must leave the fox draft and its schedule intact.
+    replacement = package_zip(ai_package)
+    assert dp.preview_distance_ai_package(project.id, replacement)["replace_video_ids"] == [
+        video_id
+    ]
+    dp.import_distance_ai_package(project.id, replacement, replace_video_ids=[video_id])
+    assert dp.get_distance_review_state(tasks[fox_id], "alice") == fox_before
+    assert (
+        dp.get_distance_review_state(tasks[distance_data["species_id"]], "alice")["review"][
+            "imported_sample_times_s"
+        ]
+        == expected[distance_data["species_id"]]
+    )
+
+
 def test_ai_import_cannot_overwrite_absence_without_alignment(distance_data, ai_package):
     dp = distance_data["dp"]
     dp.record_distance_task_absence(distance_data["videos"][0], "alice")
