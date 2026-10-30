@@ -606,6 +606,11 @@ class DistanceReviewPage:
         )
 
     async def load_queue(self, *, restore: bool = False) -> None:
+        if self.species_filter not in self.species_options:
+            self.species_filter = None
+            self.queue, self.index = [], 0
+            self.remember_queue()
+            return
         saved = get_distance_queue_state(self.project_id)
         saved_task_id = saved.get("task_id")
         saved_video_id = saved.get("video_id")
@@ -741,7 +746,7 @@ class DistanceReviewPage:
 
     def render_filters(self) -> None:
         def update(name, event):
-            if self.busy:
+            if self.busy or (name == "species_filter" and event.value not in self.species_options):
                 event.sender.set_value(getattr(self, name))
                 return
             setattr(self, name, event.value)
@@ -752,12 +757,14 @@ class DistanceReviewPage:
             ui.label(t("filter_section_general")).classes("text-caption q-mt-xs")
             ui.select(
                 self.species_options,
-                label=t("distance_species_filter"),
+                label=t("distance_target_species"),
                 value=self.species_filter,
-                clearable=True,
+                clearable=False,
                 with_input=True,
                 on_change=lambda e: update("species_filter", e),
-            ).props("dense outlined").classes("w-full")
+            ).props("dense outlined required data-testid=distance-target-species").classes(
+                "w-full"
+            )
             ui.select(
                 self.camera_options,
                 label=t("camera_filter"),
@@ -807,18 +814,15 @@ class DistanceReviewPage:
         if not video:
             with ui.card().classes("w-full items-center q-pa-xl"):
                 ui.icon("video_library", size="lg").classes("text-grey-5")
-                ui.label(t("distance_no_videos"))
-            return
-        with ui.column().classes("distance-queue"):
-            if self.target_species:
                 ui.label(
                     t(
-                        "distance_target_species",
-                        species=self.target_species_options()[self.target_species],
+                        "distance_choose_target_species"
+                        if not self.species_filter
+                        else "distance_no_videos"
                     )
-                ).classes("text-subtitle1 text-weight-bold").props(
-                    "data-testid=distance-target-species"
                 )
+            return
+        with ui.column().classes("distance-queue"):
             with ui.element("div").classes("distance-queue-header"):
                 ui.label(video["camera_id"] or t("unknown")).classes(
                     "text-caption distance-queue-text"
@@ -2696,13 +2700,13 @@ async def setup_distance_review() -> None:
         ui.button(t("go_to_overview_btn"), on_click=lambda: ui.navigate.to("/overview"))
         return
     await run.io_bound(dp.repair_distance_camera_layout, project_id)
+    all_videos = await run.io_bound(dp.get_distance_video_queue, project_id)
     species_options = await run.io_bound(
-        dp.get_distance_species_options, project_id, get_language()
+        dp.get_distance_target_species_options, project_id, get_language()
     )
     tags = await run.io_bound(dp.get_all_tags)
     page = DistanceReviewPage(dp, project_id, species_options, tags)
     page.behavior_options = await run.io_bound(dp.get_distance_behavior_options, get_language())
-    all_videos = await run.io_bound(dp.get_distance_video_queue, project_id)
     page.camera_options = sorted({row["camera_id"] for row in all_videos if row["camera_id"]})
     if page.camera_filter not in page.camera_options:
         page.camera_filter = None

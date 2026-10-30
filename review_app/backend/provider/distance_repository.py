@@ -88,6 +88,29 @@ class DistanceMixin(ProviderBase):
                 for row in rows
             }
 
+    def get_distance_target_species_options(
+        self, project_id: str, lang: str = "en"
+    ) -> dict[str, str]:
+        """Only species with manual Species Review annotations in this project."""
+        with self.Session() as session:
+            species_ids = {
+                species_id
+                for (species_id,) in session.query(IndividualObservation.species_id)
+                .join(Video, IndividualObservation.video_id == Video.video_id)
+                .filter(
+                    Video.project_id == project_id, IndividualObservation.species_id.is_not(None)
+                )
+                .distinct()
+            }
+        if not species_ids:
+            return {}
+        options = self.get_distance_species_options(
+            project_id, lang, include_species_ids=list(species_ids)
+        )
+        return {
+            species_id: label for species_id, label in options.items() if species_id in species_ids
+        }
+
     def get_distance_reviewed_species(self, video_id: str) -> list[str]:
         """Use ordinary Review's saved species, without inferring identities or counts."""
         return [row["species_id"] for row in self.get_distance_reviewed_species_counts(video_id)]

@@ -35,7 +35,11 @@ species. Distance evidence never automatically corrects ordinary Review labels.
    layout to tag them **Reference Video** automatically, or tag other reference
    clips manually in ordinary Review. Open **Distance**; reference distances may
    initially have no configured frame positions.
-2. Select a species task in the Distance queue; its target species stays visible.
+2. Choose a **Target species** in Filters before starting. Choices include only species
+   with manual Species Review annotations in the current project, not predictions or
+   unused vocabulary entries. This selection is required and cannot be cleared; no
+   task queue loads until a species is selected. The queue contains only that species,
+   and the selection persists per browser/project.
    Align in the independent task clock dialog. The default Simplified workflow opens
    near the video midpoint: select any frame showing an even camera second.
    It shows the expected timestamp as an estimate; correcting that time is optional.

@@ -1,5 +1,6 @@
 """Browser-scoped Distance queue resume, independent of Species Review."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -32,7 +33,8 @@ def queue_page():
 
     @ui.page("/distance-queue-test")
     async def route():
-        page = DistanceReviewPage(dp, "project", {"species": "Species"}, [])
+        page = DistanceReviewPage(dp, "project", {"species": "Species", "fox": "Fox"}, [])
+        holder["render_workspace"] = page.render_workspace
         page.load_video = AsyncMock()
         for name in ("render_workspace", "render_sidebar", "render_sample_navigation"):
             setattr(page, name, SimpleNamespace(refresh=Mock()))
@@ -85,33 +87,85 @@ async def test_missing_selected_video_falls_back_safely(user: User, queue_page, 
     page = holder["page"]
     dp.get_distance_video_queue.return_value = rows
     with page.client:
+        page.species_filter = "species"
         set_distance_queue_state("project", video_id="removed")
         await page.load_queue(restore=True)
         assert page.index == 0
         assert get_distance_queue_state("project")["video_id"] == ("one" if rows else None)
 
 
-async def test_reload_restores_species_task_when_two_rows_share_video(user: User, queue_page):
+async def test_reload_restores_target_species_and_task(user: User, queue_page):
     holder, dp = queue_page
-    dp.get_distance_video_queue.return_value = [
-        {"video_id": "shared", "task_id": "deer", "species_id": "species", "camera_id": "cam"},
-        {"video_id": "shared", "task_id": "fox", "species_id": "fox", "camera_id": "cam"},
-    ]
+    row = {"video_id": "shared", "task_id": "fox", "species_id": "fox", "camera_id": "cam"}
+    dp.get_distance_video_queue.return_value = [row]
     await user.open("/distance-queue-test")
     page = holder["page"]
     with page.client:
+        page.species_filter = "fox"
         await page.load_queue()
-        await page.move_video(1)
         assert get_distance_queue_state("project")["task_id"] == "fox"
-    dp.get_distance_video_queue.return_value.reverse()
     await user.open("/distance-queue-test")
     page = holder["page"]
     with page.client:
         await page.load_queue(restore=True)
+        assert page.species_filter == "fox"
+        dp.get_distance_video_queue.assert_called_with(
+            "project", "fox", camera_id=None, status=None
+        )
         assert page.task_id == "fox"
         assert page.video["video_id"] == "shared"
         assert page.default_species() == "fox"
-        assert page.target_species_options() == {"fox": "fox"}
+        assert page.target_species_options() == {"fox": "Fox"}
+
+
+@pytest.mark.parametrize("restore", [False, True])
+async def test_target_species_required_before_loading_queue(user: User, queue_page, restore):
+    holder, dp = queue_page
+    await user.open("/distance-queue-test")
+    page = holder["page"]
+    with page.client:
+        page.queue = [{"video_id": "previous"}]
+        await page.load_queue(restore=restore)
+        assert page.queue == [] and page.index == 0
+        assert get_distance_queue_state("project")["task_id"] is None
+        assert get_distance_queue_state("project")["video_id"] is None
+        dp.get_distance_video_queue.assert_not_called()
+        holder["render_workspace"]()
+    await user.should_see("Select a target species in Filters to start Distance review.")
+
+
+async def test_target_species_selector_is_required_and_loads_only_selection(
+    user: User, queue_page
+):
+    holder, dp = queue_page
+    await user.open("/distance-queue-test")
+    page = holder["page"]
+    with page.client:
+        page.render_filters()
+    selector = next(
+        element
+        for element in user.client.elements.values()
+        if element.props.get("data-testid") == "distance-target-species"
+    )
+    assert selector.label == "Target species"
+    assert selector.props["required"]
+    assert not selector.props.get("clearable")
+    assert selector.value is None
+    user.find("Target species").click()
+    user.find("Species").click()
+    # Filter callbacks finish asynchronously.
+    for _ in range(100):
+        if page.load_video.await_count:
+            break
+        await asyncio.sleep(0.01)
+    dp.get_distance_video_queue.assert_called_once_with(
+        "project", "species", camera_id=None, status=None
+    )
+    assert page.species_filter == "species"
+    with page.client:
+        selector.set_value(None)
+    assert selector.value == "species" and page.species_filter == "species"
+    assert dp.get_distance_video_queue.call_count == 1
 
 
 async def test_filter_change_starts_at_first_video(user: User, queue_page):
@@ -119,6 +173,7 @@ async def test_filter_change_starts_at_first_video(user: User, queue_page):
     await user.open("/distance-queue-test")
     page = holder["page"]
     with page.client:
+        page.species_filter = "species"
         await page.load_queue()
         await page.move_video(1)
         page.status_filter = "completed"

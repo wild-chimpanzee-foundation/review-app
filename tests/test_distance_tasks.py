@@ -57,6 +57,56 @@ def test_eligibility_is_confirmed_only_and_identity_survives_label_corrections(t
         dp.align_distance_on_even_frame(video, 500, "alice")
 
 
+def test_target_species_options_require_manual_annotations_not_predictions_or_old_tasks(task_data):
+    dp, project, video, species, tasks = task_data
+    dp.add_custom_species("lynx", "Lynx", "Lynx", "Mammal", "Mammifère")
+    dp.set_project_species(project.id, ["deer", "fox", "lynx"])
+    with dp.Session.begin() as session:
+        session.query(IndividualObservation).filter_by(
+            video_id=video, species_id=species["fox"]
+        ).delete()
+        session.add(
+            ModelAnnotation(
+                video_id=video, annotation_type="species", model_name="model", value_text="lynx"
+            )
+        )
+    options = dp.get_distance_target_species_options(project.id)
+    assert set(options) == {species["deer"]}
+    # The old fox task survives label corrections, but cannot populate the selector.
+    assert len(dp.get_distance_video_queue(project.id)) == len(tasks)
+    assert set(dp.get_distance_species_options(project.id)) > set(options)
+    with dp.Session.begin() as session:
+        session.query(IndividualObservation).filter_by(video_id=video).delete()
+    assert dp.get_distance_target_species_options(project.id) == {}
+
+
+def test_target_species_options_are_project_scoped_and_include_manual_species_outside_vocabulary(
+    task_data,
+):
+    from review_app.backend.db.models import Video
+
+    dp, project, video, species, _ = task_data
+    other = dp.create_project("Other project", "/other-project")
+    with dp.Session.begin() as session:
+        session.query(IndividualObservation).filter_by(
+            video_id=video, species_id=species["fox"]
+        ).delete()
+        session.add(Video(video_id="other-video", project_id=other.id, video_path="other.mp4"))
+        session.flush()
+        session.add(
+            IndividualObservation(video_id="other-video", id=1, species_id=species["fox"], count=1)
+        )
+    dp.set_project_species(project.id, ["fox"])
+    options = dp.get_distance_target_species_options(project.id, "fr")
+    assert set(options) == {species["deer"]}
+    assert options == {
+        species["deer"]: dp.get_distance_species_options(
+            project.id, "fr", include_species_ids=[species["deer"]]
+        )[species["deer"]]
+    }
+    assert set(dp.get_distance_target_species_options(other.id)) == {species["fox"]}
+
+
 def test_alignment_reset_samples_completion_and_resume_are_task_scoped(task_data):
     dp, project, video, species, tasks = task_data
     deer, fox = (tasks[species[name]]["task_id"] for name in ("deer", "fox"))
