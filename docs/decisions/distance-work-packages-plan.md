@@ -4,6 +4,12 @@
 completion, and explicit absence are implemented. Package generation, portable
 handoff/return, and the supervisor package UI remain planned.
 
+**Next prerequisite:** Define and implement a simple manual Distance annotation
+export/import round trip before package generation. See [manual export/import
+planning notes](./distance-manual-export-import.md) for candidate tables,
+per-species video/date/time selection, and a locale-independent TSV proposal.
+This step does not yet implement the package-return merge contract below.
+
 Requirements originate in [Distance Annotation Feedback, item 1](./distance-annotation-feedback.md#1-independent-species-based-annotator-packages).
 The [current Distance workflow](./reference-based-distance-annotation.md) remains
 the authoritative description of shipped behavior.
