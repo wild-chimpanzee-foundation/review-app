@@ -41,6 +41,10 @@ def ai_package(distance_data):
     root = Path(distance_data["directory"].path)
     # Keep unrelated human evidence on the other video; the imported video starts fresh.
     dp.delete_distance_individual(distance_data["individual"]["id"])
+    from review_app.backend.db.models import DistanceReviewTask
+
+    with dp.Session.begin() as session:
+        session.query(DistanceReviewTask).filter_by(video_id=distance_data["videos"][0]).delete()
     distance_data["individual"] = dp.create_distance_individual(
         distance_data["videos"][1],
         distance_data["species_id"],
@@ -194,6 +198,37 @@ def test_preview_and_import_create_pending_samples_with_provenance(distance_data
         assert frame.import_id == result["import_id"]
     for table in ("individual_observations", "video_labels", "video_tags", "model_annotations"):
         assert snapshot(dp, [table])[table] == before[table]
+
+
+def test_ai_import_cannot_overwrite_absence_without_alignment(distance_data, ai_package):
+    dp = distance_data["dp"]
+    dp.record_distance_task_absence(distance_data["videos"][0], "alice")
+    before = imported_state(distance_data)
+    package = package_zip(ai_package)
+    assert dp.preview_distance_ai_package(distance_data["project"].id, package)["errors"]
+    with pytest.raises(ValueError, match="cannot overwrite"):
+        dp.import_distance_ai_package(distance_data["project"].id, package)
+    assert imported_state(distance_data) == before
+
+
+def test_absence_requires_explicit_ai_rejection_and_retains_provenance(distance_data, ai_package):
+    dp, project = distance_data["dp"], distance_data["project"]
+    files = ai_package
+    dp.import_distance_ai_package(project.id, package_zip(files))
+    video_id = distance_data["videos"][0]
+    state = dp.get_distance_review_state(video_id, "alice")
+    task_id = state["task"]["id"]
+    with pytest.raises(ValueError, match="Explicitly reject"):
+        dp.record_distance_task_absence(task_id, "alice")
+    assert dp.get_distance_review_state(task_id, "alice") == state
+    dp.record_distance_task_absence(task_id, "alice", reject_ai=True)
+    after = dp.get_distance_review_state(task_id, "alice")
+    assert after["samples"] == []
+    assert dp.list_distance_individuals(task_id) == []
+    assert after["task"]["completion_outcome"] == "absent"
+    assert after["task"]["rejected_ai"][0]["original"]
+    assert after["task"]["rejected_ai"][0]["author"] == "alice"
+    assert dp.list_distance_imports(project.id)
 
 
 def test_pending_samples_do_not_count_as_review_or_graph_answers(distance_data, ai_package):

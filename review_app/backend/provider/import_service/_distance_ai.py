@@ -214,7 +214,12 @@ def _plan(session, project_id, package):
         ]
         for review in reviews:
             individuals = session.query(DistanceIndividual).filter_by(task_id=review.id).all()
-            if review.verified_at is None and not individuals:
+            if (
+                review.verified_at is None
+                and not individuals
+                and review.started_at is None
+                and review.completed_at is None
+            ):
                 continue
             if (
                 not review
