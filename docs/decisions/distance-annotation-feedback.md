@@ -10,17 +10,46 @@ behavior.
 **Feedback:** Distance annotator packages are independent of species review and
 should be distributed by species.
 
-**Confirmed:** A mixed-species video is included in both relevant species
-packages, rather than assigned exclusively to one. Each recipient annotates only
-the species assigned to their package. Completion is scoped to that assigned
-species, independently of the other species package.
+**Confirmed:** Distance review is organized into species-specific tasks, one
+canonical task per video and target species. A video containing chimps and duikers
+appears twice in the Distance queue. Each task permits annotation only of its
+target species and owns its individuals, samples, alignment, resume state, and
+completion. The two tasks may use different alignment anchors and finish
+independently. Packages distribute tasks while preserving their stable identities.
 
-**Confirmed label source:** Build packages from manual/confirmed species
-annotations, not unconfirmed model predictions. Distance annotation and completion
-remain independent of ordinary species-review completion once those labels exist.
+**Confirmed label source:** Create tasks from manual/confirmed Species Review
+species and counts, not unconfirmed model predictions. No additional ordinary
+Review completion flag or ordinary assignment is required once those labels exist.
+Snapshot the source species/count context when generating packages.
 
-**Still open:** Implement species-based package generation and species-scoped
-annotation/completion.
+**Confirmed absence outcome:** Provide an explicit **No target species visible**
+action. It completes an empty task without a placeholder animal and retains author,
+time, and a discrepancy against the manual source labels. Existing human target-
+species individuals block absence; later additions invalidate it. Normal Finish
+requires at least one individual and complete evidence. Correcting Species Review
+or creating a task for another species happens separately, never automatically.
+
+**Return reconciliation:** Accept a task return only when its evidence and required
+alignment/reference/relationship dependencies can be applied consistently. On a
+conflict, the importer chooses for that task whether to overwrite source changes
+with the returned task or skip importing it. Overwrite applies the task and its
+completion claim atomically; skip leaves source evidence unchanged and does not
+store the skipped return in the app. Other safe species tasks for the same video
+may still import. Preserve accepted submitted completion as provenance separately
+from current source completion. Provide an import summary showing the choice and
+record the decision with author/time. Users must retain the original import package
+if they want to inspect or retry skipped tasks later; the app does not archive it.
+No pending-return list or later-resolution workflow is required for the first release.
+Richer resolution UI follows later. Independent duplicate reviews of one species are
+not required, but a source task and its distributed copy may diverge.
+
+**Still open:** Implement species-specific tasks, add package generation and
+task-scoped annotation/completion, and implement safe handoff/return. Treat Distance
+annotation as unreleased: no live databases use it. The developer's existing
+annotations are disposable or can be migrated manually; automatic legacy annotation
+migration is not required. Preserve existing reference frames and their
+calibration/media. See the [work-package implementation plan](./distance-work-packages-plan.md)
+and [Review issues design](./review-issues.md).
 
 ## 2. Use a 24-hour timestamp
 
@@ -59,10 +88,9 @@ camera-even-second transitions by a subsecond amount. Testing found odd displaye
 seconds from the first sample on some clips. Reusing Exact's forward-frame estimate
 could also push a late-even frame into the next odd second. The revised Simplified
 grid preserves the selected frame's phase without this forward rounding/padding.
-Irregular frames or camera-clock drift still require real-footage validation.
-
-**Evaluation goal:** Validate annotation effort and timing accuracy on real clips;
-the Exact implementation remains available for developer-configured comparison.
+The simplified workflow has been tested and works well enough to use as the
+default. Further real-footage timing evaluation is not an outstanding prerequisite.
+Keep the Exact implementation for now as a code-configured alternative.
 
 **Implemented:** Simplified opens at the midpoint (or its saved anchor), retains
 inspection/frame-step controls, and uses **Frame shows an even camera second.**
@@ -97,9 +125,8 @@ individual, so alignment can be checked using graph markers, arrow navigation,
 and replay. These browse-only actions do not create annotation evidence or resume
 records; saving still requires an individual.
 
-Automated timing, backend, UI, and migration tests cover these paths. Comparing
-effort and subsecond accuracy on real footage remains open. Simplified is now the
-default; Exact has not been removed from the code.
+Automated timing, backend, UI, and migration tests cover these paths. Simplified
+is the accepted default; retain Exact in the code for now.
 
 ## 4. Play up to the first sample
 
@@ -171,8 +198,8 @@ both before **Finish video** succeeds.
 
 **Working interpretation:** Explicit **Unknown** satisfies the requirement;
 unset values do not. Identify individuals with missing fields and keep the video
-open for correction. In species-specific packages, check individuals of the
-assigned species, consistent with species-scoped completion.
+open for correction. In species-specific tasks, check the task's target-species individuals;
+other species tasks have independent completion.
 
 **Implemented:** Finish video checks every individual in the current video after
 sample coverage validation. Missing age/sex blocks completion and reports the
@@ -180,26 +207,12 @@ individual numbers and missing fields; the video remains open. Explicit **Unknow
 satisfies either field. Creation and in-progress editing still allow unset values;
 clearing a field reopens video completion without changing sample coverage.
 Schema v26 also reopens previously completed videos with unset attributes.
-Species-package-scoped validation will follow the packaging work in item 1.
+Task-scoped validation will follow the task and packaging work in item 1.
 
-## 9. Independently detachable animal and reference panels
+## 9. Detachable panels — dropped
 
-**Clarified direction:** Pop out the full animal or reference panel, not merely
-a read-only image mirror. Either panel can be detached independently, and both
-can be detached if desired.
-
-When one panel is detached, the remaining panel expands to use the full available
-comparison width in the original tab. The detached panel retains its associated
-controls and remains part of the same annotation session; popping it out must
-not create a separate review or independent selection state.
-
-**Feasibility:** Possible in principle, using user-triggered companion tabs or
-windows with coordinated session state. Panel ownership, playback/selection
-synchronization, and main-tab layout reflow need implementation validation.
-
-**Still open:** Exact playback-sync guarantees and how closing a companion view
-reattaches its panel. The desired interaction is established; these mechanics
-have not yet been specified.
+**Decision:** Do not implement detachable animal/reference panels. This request
+is removed from scope, not deferred.
 
 ## 10. General design overhaul and collapsible annotation sidebar
 
@@ -215,12 +228,12 @@ comparison panels the freed width without losing the active individual, sample,
 or unsaved form selection. Keep the expand/collapse button in the sidebar itself,
 visible in both modes, independently of whether the page header is shown.
 
-Coordinate this layout work with detachable panels: when a panel is popped out
-or the sidebar is collapsed, the remaining content should expand into the
+When the sidebar is collapsed, the remaining content should expand into the
 available space rather than leave empty reserved columns.
 
 **Scope:** A general Distance UI design overhaul, not just isolated spacing
-adjustments. Detailed visual design remains to be worked out.
+adjustments. Further visual redesign beyond the implemented changes below is
+deferred.
 
 **Partially implemented:** A sticky toggle at the top of the sidebar switches
 between a 400 px drawer and a 72 px action rail without rebuilding players or full
@@ -242,15 +255,18 @@ the annotation sidebar. Graph height is reduced for typical
 individual counts while retaining readable status lanes; long help text moves to
 tooltips. At the validated desktop sizes the standard three-individual workflow
 fits without page scrolling, without shrinking the videos. Very large individual
-counts and expanded inspection controls may still require scrolling. Detachable
-panels and any further visual redesign remain deferred.
+counts and expanded inspection controls may still require scrolling. Further
+visual redesign is deferred; detachable panels are dropped.
 
 ## Discussion progress
 
 All ten feedback items are captured. Key clarifications:
-- Mixed-species videos go to both relevant species packages; annotation and
-  completion are scoped to the assigned species. Package species labels come from
-  manual/confirmed species annotations.
+- Mixed-species videos have separate target-species-only Distance tasks, with
+  independent alignment, evidence, and completion. Packages distribute these tasks
+  using manual/confirmed Species Review species and counts. No target species
+  visible is an explicit completion outcome. Conflicting task returns are overwritten
+  atomically or skipped; skipped payloads are not retained in the app. Accepted
+  submitted completion is distinct from current source completion.
 - Simplified is the frontend default, using an even frame near the midpoint and
   optional time confirmation. Exact remains only as a code-configured workflow.
 - The first-sample lead-in plays from the video opening.
@@ -258,10 +274,9 @@ All ten feedback items are captured. Key clarifications:
   zero-behavior selections; multiple behaviors remain allowed. Carry confirmed
   behaviors forward. Absent and Not visible automatically use no behavior.
 - The graph previews unsaved distance choices.
-- Pop out either full comparison panel independently, or both, with the remaining
-  panel expanding in the original tab.
-- Overhaul the Distance layout to reduce wasted space and make the right-hand
-  annotation sidebar collapsible/restorable.
+- Detachable comparison panels are dropped, not deferred.
+- The right-hand sidebar is collapsible/restorable and initial layout improvements
+  are implemented. Further visual redesign is deferred.
 
 Open implementation/policy questions remain noted in the relevant sections.
 
