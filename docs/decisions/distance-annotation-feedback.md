@@ -43,8 +43,12 @@ No pending-return list or later-resolution workflow is required for the first re
 Richer resolution UI follows later. Independent duplicate reviews of one species are
 not required, but a source task and its distributed copy may diverge.
 
-**Still open:** Implement species-specific tasks, add package generation and
-task-scoped annotation/completion, and implement safe handoff/return. Treat Distance
+**Implemented locally:** Species-specific tasks, task-scoped alignment, annotation,
+resume/completion, and explicit absence with pending-AI rejection. The queue uses
+confirmed Species Review labels and keeps different species tasks independent.
+
+**Still open:** Package generation, supervisor package UI, and safe handoff/return.
+Treat Distance
 annotation as unreleased: no live databases use it. The developer's existing
 annotations are disposable or can be migrated manually; automatic legacy annotation
 migration is not required. Preserve existing reference frames and their

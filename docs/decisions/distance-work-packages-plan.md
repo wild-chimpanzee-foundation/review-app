@@ -1,6 +1,8 @@
 # Distance Annotator Tasks and Work Packages
 
-**Status:** Agreed direction and phased delivery scope. Not implemented.
+**Status:** Local species-specific tasks, task-scoped annotation/alignment/resume,
+completion, and explicit absence are implemented. Package generation, portable
+handoff/return, and the supervisor package UI remain planned.
 
 Requirements originate in [Distance Annotation Feedback, item 1](./distance-annotation-feedback.md#1-independent-species-based-annotator-packages).
 The [current Distance workflow](./reference-based-distance-annotation.md) remains
@@ -224,6 +226,12 @@ without implementing that entire pipeline as part of packages.
 ## Agreed delivery phases
 
 ### Work-package release
+
+The local task foundation and annotator task UI are implemented. Eligibility
+creates canonical tasks idempotently from confirmed labels; correcting source
+labels does not automatically delete existing tasks. Schema migration 24 discards
+legacy Distance annotation state while preserving references and ordinary Review.
+Package preview/generation, distribution UI, and handoff/return remain to be built.
 
 1. Task model, schema transition, eligibility preview, task-owned alignment,
    species restrictions, and completion/backend behavior.

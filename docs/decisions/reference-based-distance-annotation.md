@@ -19,9 +19,13 @@ demand during review; upfront preparation is optional. The chosen frame supplies
 the sample's exact distance in meters, including existing fractional distances.
 There is no free-form distance-entry field during animal annotation.
 
-Distance identities, samples, queue, and completion are independent of ordinary
-Review. Ordinary species/count annotations provide context and omission warnings;
-they do not create or synchronize Distance observations automatically.
+Distance review uses one canonical task per video and target species, created
+idempotently from manual/confirmed Species Review labels, without requiring an
+ordinary Review completion flag. Model predictions alone do not establish eligibility.
+Each task owns its alignment, individuals, samples, resume state, and completion.
+Different species tasks for the same video appear separately and finish independently.
+Source label corrections do not automatically delete existing tasks or change their
+species. Distance evidence never automatically corrects ordinary Review labels.
 
 ![Distance annotation mockup](./images/distance-mockup.jpg)
 
@@ -31,13 +35,14 @@ they do not create or synchronize Distance observations automatically.
    layout to tag them **Reference Video** automatically, or tag other reference
    clips manually in ordinary Review. Open **Distance**; reference distances may
    initially have no configured frame positions.
-2. Align in the independent clock dialog. The default Simplified workflow opens
+2. Select a species task in the Distance queue; its target species stays visible.
+   Align in the independent task clock dialog. The default Simplified workflow opens
    near the video midpoint: select any frame showing an even camera second.
    It shows the expected timestamp as an estimate; correcting that time is optional.
    Without an explicit timestamp edit, absolute camera time stays
    unknown. There is no frontend alignment-mode selector.
-3. Add an individual on its identifying first-seen frame. Choose species and draw
-   a bounding box. Earlier scheduled samples are saved as **Absent**; samples at
+3. Add an individual on its identifying first-seen frame. Its species is fixed to
+   the task target; draw a bounding box. Earlier scheduled samples are saved as **Absent**; samples at
    or after first sighting remain unreviewed. Creation retains the identifying
    frame while selecting the first scheduled sample at/after it, or the final
    sample when first sighting is later than the last stop.
@@ -50,8 +55,9 @@ they do not create or synchronize Distance observations automatically.
    retains it and shows **End of video**; it never switches individuals, returns
    to earlier gaps, or finishes/advances the video automatically.
 6. Review other individuals manually. Full sample coverage completes each
-   individual automatically. Use **Finish video** explicitly after all animals
-   have been added and all individuals are complete.
+   individual automatically. Use **Finish task** explicitly after all target-species
+   animals have been added and all individuals are complete. An empty task requires
+   **No target species visible**, with explicit rejection of pending AI suggestions.
 
 Selecting a reference only changes the current form, not saved evidence. Existing
 samples remain editable; a missing sample row means unreviewed, not absent.
@@ -116,16 +122,16 @@ samples remain editable; a missing sample row means unreviewed, not absent.
 - Mark whether the opening still already shows an even second. If so, that still
   is also required, and alignment normally uses the next odd-to-even transition.
   A short clip ending before a transition may use its even opening still.
-- Alignment is shared across individuals/annotators. After verification, timestamp-only
+- Alignment is shared across individuals/annotators within one species task. After verification, timestamp-only
   corrections must be whole multiples of two seconds and preserve the exact anchor,
   opening-even setting, and scheduled playback offsets. They retain all annotations,
   progress, and completion, and update verification attribution/time.
 - Changing the saved alignment mode, alignment frame, or opening-even setting requires explicitly choosing
   **Change alignment frame and reset Distance review** and confirming the destructive
   warning. The reset atomically deletes every Distance individual (including infants),
-  box, attribute/tag, sample/behavior, resume state, and completion for this video,
-  including other annotators' work, before saving the new alignment. Other videos,
-  prepared references, and ordinary Review remain unchanged. Cancellation or invalid
+  box, attribute/tag, sample/behavior, resume state, and current completion for this
+  task, including other annotators' work, before saving the new alignment. Other
+  species tasks, prepared references, ordinary Review, and completion history remain unchanged. Cancellation or invalid
   alignment leaves the existing review intact. Reconfirming an unchanged Simplified
   anchor (or legacy parity), or explicitly establishing/correcting its camera time,
   preserves evidence and completion. Timestamp corrections retain even-second parity.
@@ -228,17 +234,16 @@ available; there is no separate bulk-absence or bulk-undo API.
 ### Individuals and carried infants
 
 - Each individual has a durable UUID and an incremental displayed number within
-  the video. Species, age, sex, and tags belong to the individual; behavior belongs
-  to each sample. Age/sex may remain unset during creation and annotation, but both
-  are required to finish the video. Allowed ages are `Adult`, `Adolescent`,
+  the task. Species is fixed to the task target; age, sex, and tags belong to the
+  individual; behavior belongs to each sample. Age/sex may remain unset during
+  creation and annotation, but both are required to finish the task. Allowed ages are `Adult`, `Adolescent`,
   `Juvenile`, `Infant`, `Unknown`; sexes are `Male`, `Female`, `Unknown`.
   Explicit `Unknown` satisfies completion; unset values do not.
-- Species defaults, in order, to the active species filter, active individual,
-  then the clip's first reviewed species. The selector remains editable across
-  project vocabulary, with saved species still available outside that vocabulary.
-- Metadata saves immediately. Species corrections retain identity/evidence and
-  update linked carriers/infants together to preserve their same-species rule.
-  Edits reopen explicit video completion; ordinary Review is unaffected.
+- Species is read-only in individual cards and fixed in creation dialogs. Saved
+  task species remain readable outside the current project vocabulary. Backend
+  writes reject cross-species individuals and species changes inside a task.
+- Metadata saves immediately. Edits reopen explicit task completion; ordinary Review
+  and other species tasks are unaffected.
 - Creating an individual requires a complete normalized box on its first-seen
   frame. Geometry is relative to original video dimensions, corrected for zoom,
   pan, and letterboxing, with positive dimensions entirely inside 0–1.
@@ -264,7 +269,7 @@ available; there is no separate bulk-absence or bulk-undo API.
   or prefill later absence.
 - While carrying is active, parent assignments atomically copy evidence,
   visibility choices, and behaviors to that same infant, for manual and suffix
-  writes. Both individuals must belong to the same video/species; self-carrying,
+  writes. Both individuals must belong to the same task; self-carrying,
   nested carrying, and simultaneous different carriers are rejected.
 - Viewing a carried infant shows its carrier and locks distance/visibility choices for
   that sample; behaviors remain editable. Change carrying on the adult's sample.
@@ -280,22 +285,24 @@ available; there is no separate bulk-absence or bulk-undo API.
 
 ### Completion and ordinary Review context
 
-Show ordinary Review's species and summed counts without synchronizing records.
+Show ordinary Review's target-species count without synchronizing observations.
 An individual completes automatically once every scheduled sample is annotated or
-explicitly skipped. Persist completion attribution; edits/reprobes reconcile
-coverage and reopen video completion when required. An empty individual list or
-incomplete coverage cannot finish a video. Every individual must also have age and
-sex set (explicit `Unknown` is accepted). Failure identifies the individual numbers
-and missing fields and leaves the video open. Schema v26 preserves Distance data
-and reopens older completed reviews with unset age/sex.
+explicitly skipped. Normal **Finish task** requires at least one human individual,
+complete sample coverage, and age/sex for every individual (explicit `Unknown` is
+accepted). Relevant edits/reprobes reopen current completion as needed.
 
-**Finish video** checks every reviewed species, independent of the Distance
-species filter. Warn if a species has no Distance individual or its reviewed
-count exceeds the number of Distance individuals. These are possible omissions,
-not proof of error. Offer **Return to annotation** or **Ignore and finish**;
-without discrepancies, finish directly. Only successful completion advances to
-the next video in the current queue. Cancellation/failure never advances. At queue
-end, retain the completed video and notify the annotator.
+Warn when the confirmed target-species count exceeds the task's Distance count.
+Offer **Return to annotation** or **Ignore and finish**; other species tasks do not
+generate omission warnings for this task. Successful completion advances to the
+next task, even when it uses the same video. Cancellation/failure never advances.
+
+**No target species visible** completes a task without a placeholder individual.
+Human individuals block it; pending AI-only identities require explicit rejection,
+retained with author/time and original import provenance. The absence outcome
+retains the task's source species/count context without modifying Species Review.
+Adding human evidence invalidates absence. Any editor may finish a task; current
+completion is shared, resume progress is per annotator, and previous completion
+claims remain in history.
 
 ## References and deployment identity
 
@@ -425,13 +432,13 @@ alongside rounded millisecond frame identities; never round saved meter values.
   **Tab** (next) controls; omit the redundant reference-clip label.
   **Confirm selection and advance** and **Apply to end** sit together immediately
   above the clip picker, below the sample fields/summary; they are not in the
-  sidebar. **Finish video** remains in the sidebar. Actions wrap when necessary;
+  sidebar. **Finish task** remains in the sidebar. Actions wrap when necessary;
   omit the Enter badge in narrow panels without changing its keyboard shortcut.
   Keep horizontal overflow local to long distance/reference strips.
 - Put camera time and interval replay directly below the animal video, and sample
   progress in the selected individual's expanded card. Other cards show their
   first row. Highlight the active identity; metadata/actions stay attached to
-  their own card. Keep **Finish video** prominent.
+  their own card. Keep **Finish task** prominent.
 - The graph shows all individuals over elapsed time, highlighting the active
   track in orange. Use gaps for skipped/unreviewed distances, plus labeled status
   lanes: dotted not-visible, blocked absent, hollow unreviewed. Never imply zero
@@ -440,15 +447,15 @@ alongside rounded millisecond frame identities; never round saved meter values.
   count grows. Graph/keyboard/carrier explanations live in tooltips instead of
   permanent multi-line help blocks. Large individual counts or expanded inspection
   controls may still need scrolling; do not clip essential controls to force a fit.
-- Species, camera, and Distance-completion filters plus selected video ID persist
+- Species, camera, and Distance-completion filters plus selected task ID persist
   per browser/project, separately from ordinary Review. Clear stale filters and
-  fall back to an available video if the saved selection disappears.
+  fall back to an available task if the saved selection disappears.
 - **Left/Right:** scheduled samples. **Up/Down:** distance/visibility choices.
   **Enter:** open clock setup if alignment has not been saved; otherwise confirm
   the current sample. Clock-setup buttons show an **↵ Enter** badge in the expanded
   sidebar and compact rail. **J/K:** next/previous individual with wrapping.
   **A:** add an individual after alignment; it does not open clock setup.
-  **P/N:** previous/next video, respecting completion guards for forward moves.
+  **P/N:** previous/next species task, including tasks sharing one video.
   **Tab / Shift+Tab:** next/previous reference clip with wrapping, retaining
   visibility or matching/nearest distance.
 - Focused playback supports **Space**, **Shift+Left/Right** five-second inspection,
@@ -459,25 +466,26 @@ alongside rounded millisecond frame identities; never round saved meter values.
 
 ## Database Schema
 
-Published migrations 1–22 remain unchanged. The only Distance migration is
-migration 23: it creates the final nine tables and adds `tags.individual_eligible`.
-Fresh installs and v22 upgrades enforce the same schema. Distance is unreleased
-and has only one development database; intermediate schemas have no compatibility
-migrations or maintained rebuild tool. That database was backed up and manually
-aligned after verifying full schema parity and preservation of every application
-row. Future application versions should migrate from this final schema.
+Published migrations 1–22 remain unchanged. Migration 23 creates the original
+Distance schema and adds `tags.individual_eligible`. Migration 24 introduces
+`distance_review_tasks`, task-owned individuals, and task/annotator progress. It
+discards legacy Distance annotations while preserving reference calibration/media
+and ordinary Review data. Fresh installs and upgrades enforce the same task schema.
+Distance remains unreleased; automatic preservation of legacy annotation evidence
+is intentionally not required. Intermediate development schemas have no maintained
+rebuild tool.
 
 | Table | Purpose and key fields |
 |---|---|
 | `distance_imports` | Immutable original package, manifest, content hash and import time; unique project/content hash. |
 | `reference_videos` | UUID, project, camera label, normalized path; unique project/path. |
 | `reference_frames` | UUID, source reference, integer offset, optional precise playback offset, known meters; unique source/offset. |
-| `distance_individuals` | UUID, video/number, species, age/sex, first-seen offset and optional complete box, attribution and derived completion; unique video/number. |
+| `distance_individuals` | UUID, task, video, task-local number, fixed target species, age/sex, first-seen offset and optional complete box, attribution and derived completion; unique task/number. |
 | `distance_samples` | UUID, individual/offset, pending/annotated/skipped state, original AI suggestion, separate human reference/distance or skip, optional carrier, attribution; unique individual/offset. |
 | `distance_individual_tags` | Individual/tag pair with attribution/time. |
 | `distance_sample_behaviors` | Sample/behavior pair. |
-| `distance_video_reviews` | Alignment mode, nullable verified wall-clock start (unknown in Simplified), integer/precise clock anchor, opening-even flag, verification and explicit completion attribution. |
-| `distance_review_progress` | Active individual per video/annotator, with update time. |
+| `distance_review_tasks` | UUID, video/target species (unique), original source count, task alignment, current completion/absence, completion history, and explicit AI rejection provenance. |
+| `distance_review_progress` | Active individual per task/annotator, with update time. |
 
 AI provenance is part of the same initial Distance schema: `distance_imports`
 retains immutable package provenance (manifest, content hash and original payload),

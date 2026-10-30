@@ -86,11 +86,28 @@ def _make_database(path, schema):
             playback_offset_ms=100.25,
             distance_m=5.5,
         )
+        _insert(
+            conn,
+            "distance_review_tasks",
+            id="task",
+            video_id="video",
+            species_id="species",
+            source_count=1,
+            recorded_start=STAMP,
+            verified_by="alice",
+            verified_at=STAMP,
+            clock_anchor_offset_ms=0,
+            clock_anchor_playback_ms=0.25,
+            opening_even_second=True,
+            completed_by="alice",
+            completed_at=STAMP,
+        )
         for number, individual in enumerate(("parent", "infant", "independent"), 1):
             _insert(
                 conn,
                 "distance_individuals",
                 id=individual,
+                task_id="task",
                 video_id="video",
                 individual_number=number,
                 species_id="species",
@@ -105,21 +122,8 @@ def _make_database(path, schema):
             )
         _insert(
             conn,
-            "distance_video_reviews",
-            video_id="video",
-            recorded_start=STAMP,
-            verified_by="alice",
-            verified_at=STAMP,
-            clock_anchor_offset_ms=0,
-            clock_anchor_playback_ms=0.25,
-            opening_even_second=True,
-            completed_by="alice",
-            completed_at=STAMP,
-        )
-        _insert(
-            conn,
             "distance_review_progress",
-            video_id="video",
+            task_id="task",
             annotator_name="alice",
             active_individual_id="infant",
             updated_at=STAMP,
@@ -329,6 +333,6 @@ def test_sample_and_individual_deletion_still_cascade_to_behaviors(distance_db):
         conn.exec_driver_sql("DELETE FROM videos WHERE video_id='video'")
         assert conn.exec_driver_sql("SELECT count(*) FROM distance_samples").scalar() == 0
         assert conn.exec_driver_sql("SELECT count(*) FROM distance_sample_behaviors").scalar() == 0
-        assert conn.exec_driver_sql("SELECT count(*) FROM distance_video_reviews").scalar() == 0
+        assert conn.exec_driver_sql("SELECT count(*) FROM distance_review_tasks").scalar() == 0
         assert conn.exec_driver_sql("SELECT count(*) FROM reference_frames").scalar() == 1
         assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []

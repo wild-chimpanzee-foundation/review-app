@@ -73,6 +73,12 @@ def snapshot(data):
 
 
 def individual(data, *, video_id=None, age="Infant", species_id=None):
+    if species_id and species_id != data["species_id"]:
+        data["dp"].update_manual_review(
+            video_id or data["videos"][0],
+            [{"species": "deer"}, {"species": "fox"}],
+            is_blank=False,
+        )
     return data["dp"].create_distance_individual(
         video_id or data["videos"][0],
         species_id or data["species_id"],

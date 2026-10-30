@@ -51,6 +51,8 @@ def _multi_root_deployment(tmp_db, mock_probe):
         species_id = conn.execute(
             text("SELECT id FROM species WHERE scientific_name='deer'")
         ).scalar_one()
+    for deployment in ids.values():
+        dp.update_manual_review(deployment["animal"], [{"species": "deer"}], is_blank=False)
     return dp, project, ids, species_id
 
 

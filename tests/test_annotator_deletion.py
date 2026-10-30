@@ -91,7 +91,9 @@ def test_distance_only_work_protects_annotator_in_ui_and_backend(distance_data, 
         dp.remove_annotator("bob")
     assert "bob" in dp.get_all_annotators()
     with dp.Session() as session:
-        assert session.get(DistanceReviewProgress, (video_id, "bob")) is not None
+        assert (
+            session.get(DistanceReviewProgress, (data["individual"]["task_id"], "bob")) is not None
+        )
 
 
 def test_removing_unused_annotator_cleans_selection_only_progress(distance_data):
@@ -103,5 +105,7 @@ def test_removing_unused_annotator_cleans_selection_only_progress(distance_data)
     dp.remove_annotator("charlie")
     assert "charlie" not in dp.get_all_annotators()
     with dp.Session() as session:
-        assert session.get(DistanceReviewProgress, (video_id, "charlie")) is None
+        assert (
+            session.get(DistanceReviewProgress, (data["individual"]["task_id"], "charlie")) is None
+        )
     assert len(dp.list_distance_individuals(video_id)) == 1

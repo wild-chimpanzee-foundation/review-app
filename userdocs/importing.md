@@ -26,6 +26,11 @@ A downloadable CSV template is available on the import page if you're unsure of 
 
 ## AI Distance packages
 
+Confirm the target species/counts in Species Review for each animal video first.
+Distance imports attach drafts to those species-specific tasks; model predictions
+alone do not create eligible tasks. A separate ordinary Review completion flag is
+not required.
+
 Use **Model Import → AI Distance** to upload a `distance-ai` version 1 ZIP (maximum 32 MiB). First create/rescan the destination project so its videos are registered, and tag reference clips as **Reference Video**. The paired `<deployment>/videos/` and `<deployment>/references/` layout applies this tag automatically.
 
 1. Upload the ZIP to validate it and preview counts, video matches, calibration conflicts, and up to 20 predictions. Preview does not write anything.

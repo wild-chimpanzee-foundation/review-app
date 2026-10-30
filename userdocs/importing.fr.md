@@ -26,6 +26,11 @@ Un modèle de CSV téléchargeable est disponible sur la page d'import si vous n
 
 ## Paquets Distance IA
 
+Confirmez d’abord les espèces cibles et leurs effectifs dans la revue Espèces pour
+chaque vidéo animale. Les brouillons importés appartiennent à ces tâches par espèce ;
+les prédictions seules ne créent pas de tâches éligibles. Il n’est pas nécessaire de
+marquer la revue ordinaire comme terminée.
+
 Utilisez **Import de modèle → Distance IA** pour charger un ZIP `distance-ai` version 1 (32 Mio maximum). Créez/réanalysez d’abord le projet pour enregistrer ses vidéos, puis marquez les clips de référence comme **Vidéo de référence**. La structure appariée `<déploiement>/videos/` et `<déploiement>/references/` applique automatiquement cette étiquette.
 
 1. Chargez le ZIP pour valider et prévisualiser les nombres d’enregistrements, les correspondances vidéo, les conflits d’étalonnage et jusqu’à 20 prédictions. L’aperçu n’écrit rien.
