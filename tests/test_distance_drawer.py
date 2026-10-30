@@ -82,7 +82,7 @@ async def test_only_selected_animal_expands(user: User, drawer_page):
         assert len(cards) == 2
         for card in cards:
             fields = [element for element in card.descendants() if isinstance(element, ui.select)]
-            assert len(fields) == (4 if card.props["data-distance-individual"] == active_id else 1)
+            assert len(fields) == (3 if card.props["data-distance-individual"] == active_id else 0)
             buttons = [element for element in card.descendants() if isinstance(element, ui.button)]
             assert any(button.props.get("icon") == "delete" for button in buttons)
             assert not any(button.props.get("icon") == "save" for button in buttons)
@@ -1045,7 +1045,7 @@ async def test_attributes_save_immediately_and_keep_rapid_changes(user: User, dr
     assert saved["age"] is None and saved["sex"] is None and saved["tag_ids"] == []
 
 
-async def test_inactive_species_saves_without_expanding_card(user: User, drawer_page):
+async def test_inactive_species_is_read_only_without_expanding_card(user: User, drawer_page):
     holder, data, second = drawer_page
     await user.open("/distance-drawer-test")
     page = holder["page"]
@@ -1054,20 +1054,7 @@ async def test_inactive_species_saves_without_expanding_card(user: User, drawer_
         for element in user.client.elements.values()
         if element.props.get("data-distance-individual") == second["id"]
     )
-    species = next(
-        element for element in inactive_card.descendants() if isinstance(element, ui.select)
-    )
-    interaction = user.find(ui.select)
-    interaction.elements = {species}
-    interaction.click()
-    fox_id, fox_label = next(
-        (key, label) for key, label in page.species_options.items() if "Fox" in label
-    )
-    user.find(fox_label).click()
-    await wait_for_saved(
-        page,
-        lambda: data["dp"].list_distance_individuals(data["videos"][0])[1]["species_id"] == fox_id,
-    )
+    assert not any(isinstance(element, ui.select) for element in inactive_card.descendants())
     assert page.individual_id == data["individual"]["id"]
     assert len(user.find("Age").elements) == 1
 
@@ -1333,6 +1320,7 @@ async def test_clock_confirmation_uses_current_frame_without_selection_controls(
         assert page.offsets[:2] == [0, int(offset)]
     else:
         assert page.offsets[:2] == [int(offset), int(offset) + 2000]
+    await user.should_not_see("Verify recording time")
     assert "Verify recording time" not in labels(holder["sidebar"])
     add = next(
         element

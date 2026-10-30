@@ -164,15 +164,9 @@ def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
                 if active
                 else t("distance_review_individual", number=row["individual_number"])
             )
-            ui.select(
-                context.species_choices(row),
-                value=row["species_id"],
-                label=t("species_label"),
-                with_input=True,
-                on_change=lambda e: context.on_attribute(row["id"], "species_id", e.value),
-            ).classes("col min-w-0").props("dense outlined").bind_enabled_from(
-                context.busy_state, "busy", backward=lambda busy: not busy
-            )
+            ui.label(
+                context.species_choices(row).get(row["species_id"], row["species_id"])
+            ).classes("col min-w-0 text-caption")
             (
                 ui.button(icon="delete", on_click=lambda: context.on_delete(row["id"]))
                 .props("flat color=negative dense")
@@ -188,12 +182,6 @@ def render_individual_card(context: IndividualViewsContext, row: dict) -> None:
         if not active:
             return
         context.render_progress()
-        if any(
-            sample["carried_by_individual_id"]
-            and row["id"] in (sample["individual_id"], sample["carried_by_individual_id"])
-            for sample in context.samples
-        ):
-            ui.label(t("distance_linked_species_change")).classes("text-caption text-grey-6")
         with ui.row().classes("w-full no-wrap gap-2"):
             ui.select(
                 {

@@ -119,6 +119,11 @@ SKIP_CHOICES = (
 )
 
 
+def task_key(row: dict) -> str:
+    """Use canonical task identity, accepting old single-species queue rows."""
+    return row.get("task_id", row["video_id"])
+
+
 def reference_path(reference: dict) -> Path:
     cache = inspect_transcoded_cache(reference.get("transcoded_path"), validate_contents=False)
     path = reference["transcoded_path"] if cache.current else reference["video_path"]
@@ -180,6 +185,7 @@ class DistanceReviewPage:
         self.animal_player = self.reference_player = None
         self.busy = False
         self.review: dict | None = None
+        self.task: dict | None = None
         self.offsets: list[int] = []
         self.samples: list[dict] = []
         self.animal_masks: list[dict] = []
@@ -393,13 +399,14 @@ class DistanceReviewPage:
     @stable_client
     async def reload_review(self, *, resume: bool = False) -> None:
         state = await run.io_bound(
-            self.dp.get_distance_review_state, self.video["video_id"], get_annotator_name()
+            self.dp.get_distance_review_state, self.task_id, get_annotator_name()
         )
         self.review, self.offsets, self.samples = (
             state["review"],
             state["offsets"],
             state["samples"],
         )
+        self.task = state.get("task")
         masks = animal_mask_overlays(self.samples)
         if self.animal_player and (masks or getattr(self, "animal_masks", [])):
             configure_masks(
@@ -488,6 +495,23 @@ class DistanceReviewPage:
         return self.queue[self.index] if self.queue else None
 
     @property
+    def task_id(self) -> str | None:
+        return task_key(self.video) if self.video else None
+
+    @property
+    def target_species(self) -> str | None:
+        return self.video.get("species_id") if self.video else None
+
+    def target_species_options(self) -> dict[str, str]:
+        species = self.target_species
+        if species is None:
+            return self.species_options
+        return {
+            species: self.species_options.get(species)
+            or self.saved_species_options.get(species, species)
+        }
+
+    @property
     def individual(self) -> dict | None:
         return next((row for row in self.individuals if row["id"] == self.individual_id), None)
 
@@ -504,7 +528,7 @@ class DistanceReviewPage:
         self.reference = None
         self.frames = []
         self.selected_frame_id = None
-        self.review = None
+        self.review = self.task = None
         self.offsets, self.samples = [], []
         self.animal_masks = []
         self.sample_offset = None
@@ -516,10 +540,14 @@ class DistanceReviewPage:
             self.reviewed_species_counts = await run.io_bound(
                 self.dp.get_distance_reviewed_species_counts, self.video["video_id"]
             )
+            if self.target_species:
+                self.reviewed_species_counts = [
+                    row
+                    for row in self.reviewed_species_counts
+                    if row["species_id"] == self.target_species
+                ]
             self.reviewed_species = [row["species_id"] for row in self.reviewed_species_counts]
-            self.individuals = await run.io_bound(
-                self.dp.list_distance_individuals, self.video["video_id"]
-            )
+            self.individuals = await run.io_bound(self.dp.list_distance_individuals, self.task_id)
             await self.load_saved_species_options()
             self.individual_id = self.individuals[0]["id"] if self.individuals else None
             await self.reload_review(resume=True)
@@ -573,11 +601,14 @@ class DistanceReviewPage:
             species_filter=self.species_filter,
             camera_filter=self.camera_filter,
             status_filter=self.status_filter,
+            task_id=self.task_id,
             video_id=self.video["video_id"] if self.video else None,
         )
 
     async def load_queue(self, *, restore: bool = False) -> None:
-        saved_video_id = get_distance_queue_state(self.project_id).get("video_id")
+        saved = get_distance_queue_state(self.project_id)
+        saved_task_id = saved.get("task_id")
+        saved_video_id = saved.get("video_id")
         self.queue = await run.io_bound(
             self.dp.get_distance_video_queue,
             self.project_id,
@@ -589,7 +620,12 @@ class DistanceReviewPage:
             (
                 index
                 for index, row in enumerate(self.queue)
-                if restore and row["video_id"] == saved_video_id
+                if restore
+                and (
+                    task_key(row) == saved_task_id
+                    if saved_task_id
+                    else row["video_id"] == saved_video_id
+                )
             ),
             0,
         )
@@ -628,9 +664,7 @@ class DistanceReviewPage:
 
     @stable_client
     async def reload_individuals(self) -> None:
-        self.individuals = await run.io_bound(
-            self.dp.list_distance_individuals, self.video["video_id"]
-        )
+        self.individuals = await run.io_bound(self.dp.list_distance_individuals, self.task_id)
         await self.load_saved_species_options()
         if self.animal_player:
             configure_anchor(self.animal_player, self.individual, individuals=self.individuals)
@@ -649,6 +683,12 @@ class DistanceReviewPage:
                 if row["species_id"] and row["species_id"] not in self.species_options
             }
         )
+        if (
+            self.target_species
+            and self.target_species not in self.species_options
+            and self.target_species not in species_ids
+        ):
+            species_ids.append(self.target_species)
         if not species_ids:
             self.saved_species_options = {}
             return
@@ -663,13 +703,13 @@ class DistanceReviewPage:
         }
 
     def individual_species_options(self, row: dict) -> dict[str, str]:
-        options = dict(self.species_options)
-        species_id = row["species_id"]
-        if species_id in self.saved_species_options:
-            options[species_id] = (
-                f"{self.saved_species_options[species_id]} ({t('distance_species_out_of_vocabulary')})"
-            )
-        return options
+        species = row["species_id"]
+        label = self.species_options.get(species) or self.saved_species_options.get(
+            species, species
+        )
+        if species in self.saved_species_options:
+            label = f"{label} ({t('distance_species_out_of_vocabulary')})"
+        return {species: label}
 
     def individual_label(self, row: dict) -> str:
         options = self.individual_species_options(row)
@@ -681,6 +721,8 @@ class DistanceReviewPage:
 
     def default_species(self) -> str | None:
         """Prefer the session target or active individual, then the clip's reviewed species."""
+        if self.target_species:
+            return self.target_species
         candidates = [
             self.species_filter,
             self.individual["species_id"] if self.individual else None,
@@ -768,6 +810,15 @@ class DistanceReviewPage:
                 ui.label(t("distance_no_videos"))
             return
         with ui.column().classes("distance-queue"):
+            if self.target_species:
+                ui.label(
+                    t(
+                        "distance_target_species",
+                        species=self.target_species_options()[self.target_species],
+                    )
+                ).classes("text-subtitle1 text-weight-bold").props(
+                    "data-testid=distance-target-species"
+                )
             with ui.element("div").classes("distance-queue-header"):
                 ui.label(video["camera_id"] or t("unknown")).classes(
                     "text-caption distance-queue-text"
@@ -976,8 +1027,11 @@ class DistanceReviewPage:
         return [
             {**row, "distance_count": distance_counts.get(row["species_id"], 0)}
             for row in self.reviewed_species_counts
-            if distance_counts.get(row["species_id"], 0) == 0
-            or row["count"] > distance_counts[row["species_id"]]
+            if (not self.target_species or row["species_id"] == self.target_species)
+            and (
+                distance_counts.get(row["species_id"], 0) == 0
+                or row["count"] > distance_counts[row["species_id"]]
+            )
         ]
 
     def _individual_views_context(self) -> IndividualViewsContext:
@@ -1131,7 +1185,7 @@ class DistanceReviewPage:
         """Inspect first seen; creation keeps its already displayed identifying frame."""
         await run.io_bound(
             self.dp.set_distance_active_individual,
-            self.video["video_id"],
+            self.task_id,
             get_annotator_name(),
             individual_id,
         )
@@ -1192,7 +1246,7 @@ class DistanceReviewPage:
     @stable_client
     async def create_individual(
         self,
-        video_id: str,
+        task_id: str,
         species_id: str,
         offset_ms: int,
         anchor: dict[str, float],
@@ -1202,13 +1256,13 @@ class DistanceReviewPage:
         sex: str | None = None,
         tag_ids: list[str] | None = None,
     ) -> bool:
-        if self.busy or not self.video or self.video["video_id"] != video_id:
+        if self.busy or not self.video or self.task_id != task_id:
             return False
         self.busy = True
         try:
             row = await run.io_bound(
                 self.dp.create_distance_individual,
-                video_id,
+                task_id,
                 species_id,
                 offset_ms,
                 anchor=anchor,
@@ -1228,17 +1282,15 @@ class DistanceReviewPage:
             self.refresh_sample_ui()
             self.render_sample_navigation.refresh()
 
-    def _anchor_dialog_is_current(self, dialog: ui.dialog, video_id: str) -> bool:
-        return bool(
-            dialog.value and not self.busy and self.video and self.video["video_id"] == video_id
-        )
+    def _anchor_dialog_is_current(self, dialog: ui.dialog, task_id: str) -> bool:
+        return bool(dialog.value and not self.busy and self.video and self.task_id == task_id)
 
     @stable_client
     async def redraw_anchor_dialog(self, individual_id: str) -> None:
         row = next((item for item in self.individuals if item["id"] == individual_id), None)
         if self.busy or not self.video or not self.animal_player or row is None:
             return
-        video_id = self.video["video_id"]
+        task_id = self.task_id
         offset_ms = row["first_seen_offset_ms"]
         filters = await image_filters(self.animal_player)
 
@@ -1266,12 +1318,12 @@ class DistanceReviewPage:
                 duration_sec=self.video.get("duration_sec") or 0,
                 frame_rate=self.animal_frame_rate,
                 filters=filters,
-                species_options=self.species_options,
+                species_options=self.target_species_options(),
                 default_species=None,
                 tag_options=self.tag_options,
                 guard=self.client_handler,
                 is_current=lambda dialog: bool(
-                    self._anchor_dialog_is_current(dialog, video_id)
+                    self._anchor_dialog_is_current(dialog, task_id)
                     and any(
                         item["id"] == individual_id and item["first_seen_offset_ms"] == offset_ms
                         for item in self.individuals
@@ -1286,14 +1338,14 @@ class DistanceReviewPage:
     async def add_individual_dialog(self) -> None:
         if self.busy or not self.video or not self.animal_player or not self.review:
             return
-        video_id = self.video["video_id"]
+        task_id = self.task_id
         player = self.animal_player
         try:
             offset_ms = await capture_offset(player)
         except (ValueError, TimeoutError):
             ui.notify(t("distance_player_not_ready"), type="warning")
             return
-        if not self.video or self.video["video_id"] != video_id:
+        if not self.video or self.task_id != task_id:
             return
         draft = {"id": str(uuid.uuid4()), "first_seen_offset_ms": offset_ms}
         filters = await image_filters(player)
@@ -1304,13 +1356,13 @@ class DistanceReviewPage:
                 duration_sec=self.video.get("duration_sec") or 0,
                 frame_rate=self.animal_frame_rate,
                 filters=filters,
-                species_options=self.species_options,
+                species_options=self.target_species_options(),
                 default_species=self.default_species(),
                 tag_options=self.tag_options,
                 guard=self.client_handler,
-                is_current=lambda dialog: self._anchor_dialog_is_current(dialog, video_id),
+                is_current=lambda dialog: self._anchor_dialog_is_current(dialog, task_id),
                 create_individual=lambda species_id, first_seen, anchor, **choices: (
-                    self.create_individual(video_id, species_id, first_seen, anchor, **choices)
+                    self.create_individual(task_id, species_id, first_seen, anchor, **choices)
                 ),
                 save_anchor=lambda _anchor: False,
             )
@@ -1378,7 +1430,7 @@ class DistanceReviewPage:
             ui.notify(t("distance_ai_schedule_active"))
             return
         video = self.video
-        video_id = video["video_id"]
+        task_id = self.task_id
         path = Path(normalize_path_str(video["video_path"]))
         cache = inspect_transcoded_cache(video.get("transcoded_path"), validate_contents=False)
         if cache.current:
@@ -1386,7 +1438,7 @@ class DistanceReviewPage:
         playable = path.is_file() and (cache.current or video.get("is_web_safe") is not False)
         if playable:
             await self.load_sample_timing()
-        if not self.video or self.video["video_id"] != video_id:
+        if not self.video or self.task_id != task_id:
             return
         review = self.review
         proposed = review["recorded_start"] if review else video.get("created_at")
@@ -1418,7 +1470,7 @@ class DistanceReviewPage:
             ClockDialogContext(
                 client=self.client,
                 provider=self.dp,
-                video_id=video_id,
+                task_id=task_id,
                 source=(self.animal_player.source if self.animal_player else self.media_url(path))
                 if playable
                 else None,
@@ -1439,7 +1491,7 @@ class DistanceReviewPage:
                 unavailable_message=unavailable,
                 show_estimated_steps=self.animal_frame_rate is None,
                 guard=self.client_handler,
-                is_current=lambda: bool(self.video and self.video["video_id"] == video_id),
+                is_current=lambda: bool(self.video and self.task_id == task_id),
                 is_busy=lambda: self.busy,
                 set_busy=lambda value: setattr(self, "busy", value),
                 annotator=get_annotator_name(),
@@ -1561,7 +1613,9 @@ class DistanceReviewPage:
             skip_choices=SKIP_CHOICES,
             animal_player=self.animal_player,
             busy=self.busy,
-            video_completed=bool(self.review and self.review["completed_at"]),
+            video_completed=bool(
+                (self.task or self.review) and (self.task or self.review)["completed_at"]
+            ),
             remaining_offsets=self.remaining_sample_offsets(),
             all_individuals_completed=bool(
                 self.individuals
@@ -1584,6 +1638,23 @@ class DistanceReviewPage:
     @ui.refreshable
     def render_video_actions(self) -> None:
         render_video_actions_view(self._sample_controls_context())
+
+        if not self.video:
+            return
+        if self.task and self.task.get("completion_outcome") == "absent":
+            ui.label(t("distance_absence_completed")).classes("text-positive text-caption")
+        else:
+            human_present = any(
+                row.get("labeled_at") is not None or not row.get("import_id")
+                for row in self.individuals
+            )
+            ui.button(
+                t("distance_no_target_visible"),
+                icon="visibility_off",
+                on_click=self.absence_dialog,
+            ).props("outline dense data-distance-action=task-absence").set_enabled(
+                not self.busy and not human_present
+            )
 
     def remaining_sample_offsets(self) -> list[int]:
         if not self.individual or self.sample_offset not in self.offsets:
@@ -1952,7 +2023,7 @@ class DistanceReviewPage:
             except ValueError:
                 ui.notify(t("distance_player_not_ready"), type="warning")
 
-    async def complete_video(self, dialog=None) -> bool:
+    async def complete_video(self, dialog=None, *, absence=False, reject_ai=False) -> bool:
         if self.busy or not self.video:
             return False
         previous_queue = list(self.queue)
@@ -1960,9 +2031,17 @@ class DistanceReviewPage:
         completed_video = self.video
         self.busy = True
         try:
-            await run.io_bound(
-                self.dp.finish_distance_video, completed_video["video_id"], get_annotator_name()
-            )
+            if absence:
+                await run.io_bound(
+                    self.dp.record_distance_task_absence,
+                    task_key(completed_video),
+                    get_annotator_name(),
+                    reject_ai=reject_ai,
+                )
+            else:
+                await run.io_bound(
+                    self.dp.finish_distance_video, task_key(completed_video), get_annotator_name()
+                )
             fresh_queue = await run.io_bound(
                 self.dp.get_distance_video_queue,
                 self.project_id,
@@ -1971,19 +2050,19 @@ class DistanceReviewPage:
                 status=self.status_filter,
             )
             next_video_id = (
-                previous_queue[previous_index + 1]["video_id"]
+                task_key(previous_queue[previous_index + 1])
                 if previous_index + 1 < len(previous_queue)
                 else None
             )
-            fresh_ids = [row["video_id"] for row in fresh_queue]
+            fresh_ids = [task_key(row) for row in fresh_queue]
             if next_video_id not in fresh_ids:
-                if completed_video["video_id"] in fresh_ids:
-                    fresh_index = fresh_ids.index(completed_video["video_id"])
+                if task_key(completed_video) in fresh_ids:
+                    fresh_index = fresh_ids.index(task_key(completed_video))
                     next_video_id = (
                         fresh_ids[fresh_index + 1] if fresh_index + 1 < len(fresh_ids) else None
                     )
                 elif previous_index < len(fresh_queue):
-                    next_video_id = fresh_queue[previous_index]["video_id"]
+                    next_video_id = task_key(fresh_queue[previous_index])
                 else:
                     next_video_id = None
             if next_video_id:
@@ -1991,8 +2070,8 @@ class DistanceReviewPage:
                 self.index = fresh_ids.index(next_video_id)
             else:
                 self.queue = fresh_queue
-                if completed_video["video_id"] in fresh_ids:
-                    self.index = fresh_ids.index(completed_video["video_id"])
+                if task_key(completed_video) in fresh_ids:
+                    self.index = fresh_ids.index(task_key(completed_video))
                 else:
                     self.queue.insert(min(previous_index, len(self.queue)), completed_video)
                     self.index = min(previous_index, len(self.queue) - 1)
@@ -2014,9 +2093,48 @@ class DistanceReviewPage:
             self.render_sample_navigation.refresh()
 
     @stable_client
+    async def absence_dialog(self) -> None:
+        if self.busy or not self.video:
+            return
+        task_id = self.task_id
+        pending_ai = any(
+            row.get("import_id") and row.get("labeled_at") is None for row in self.individuals
+        )
+        with (
+            ui.dialog() as dialog,
+            keyboard_dialog_card().classes("w-full").style("max-width:520px"),
+        ):
+            ui.label(t("distance_no_target_visible")).classes("text-h6")
+            ui.label(t("distance_absence_help"))
+            reject = (
+                ui.checkbox(t("distance_absence_reject_ai"), value=False) if pending_ai else None
+            )
+
+            @self.client_handler
+            async def confirm_absence():
+                if self.task_id != task_id:
+                    dialog.close()
+                    return
+                if reject is not None and not reject.value:
+                    return
+                await self.complete_video(
+                    dialog, absence=True, reject_ai=bool(reject and reject.value)
+                )
+
+            with ui.row().classes("w-full justify-end"):
+                ui.button(t("cancel"), on_click=dialog.close).props("flat")
+                confirm = ui.button(
+                    t("distance_no_target_visible"), on_click=confirm_absence
+                ).props("color=warning data-distance-dialog-action=confirm")
+                if reject is not None:
+                    confirm.bind_enabled_from(reject, "value")
+        dialog.open()
+
+    @stable_client
     async def finish_video(self) -> None:
         if self.busy:
             return
+        task_id = self.task_id
         discrepancies = self.completion_discrepancies()
         if not discrepancies:
             await self.complete_video()
@@ -2040,6 +2158,9 @@ class DistanceReviewPage:
 
             @self.client_handler
             async def ignore_and_finish():
+                if self.task_id != task_id:
+                    dialog.close()
+                    return
                 await self.complete_video(dialog)
 
             with ui.row().classes("w-full justify-end"):

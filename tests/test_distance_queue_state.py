@@ -91,6 +91,29 @@ async def test_missing_selected_video_falls_back_safely(user: User, queue_page, 
         assert get_distance_queue_state("project")["video_id"] == ("one" if rows else None)
 
 
+async def test_reload_restores_species_task_when_two_rows_share_video(user: User, queue_page):
+    holder, dp = queue_page
+    dp.get_distance_video_queue.return_value = [
+        {"video_id": "shared", "task_id": "deer", "species_id": "species", "camera_id": "cam"},
+        {"video_id": "shared", "task_id": "fox", "species_id": "fox", "camera_id": "cam"},
+    ]
+    await user.open("/distance-queue-test")
+    page = holder["page"]
+    with page.client:
+        await page.load_queue()
+        await page.move_video(1)
+        assert get_distance_queue_state("project")["task_id"] == "fox"
+    dp.get_distance_video_queue.return_value.reverse()
+    await user.open("/distance-queue-test")
+    page = holder["page"]
+    with page.client:
+        await page.load_queue(restore=True)
+        assert page.task_id == "fox"
+        assert page.video["video_id"] == "shared"
+        assert page.default_species() == "fox"
+        assert page.target_species_options() == {"fox": "fox"}
+
+
 async def test_filter_change_starts_at_first_video(user: User, queue_page):
     holder, _ = queue_page
     await user.open("/distance-queue-test")

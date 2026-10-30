@@ -114,6 +114,8 @@ async def open_create_individual_dialog(context: AnchorDialogContext) -> None:
             .classes("w-full")
             .props("autofocus")
         )
+        if len(context.species_options) == 1:
+            species.set_enabled(False)
         with ui.row().classes("w-full no-wrap gap-2"):
             age = (
                 ui.select(

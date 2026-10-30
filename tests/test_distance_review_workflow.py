@@ -13,6 +13,7 @@ from review_app.app.pages.distance_review.page import DistanceReviewPage
 def test_completion_discrepancies_check_all_reviewed_species():
     page = DistanceReviewPage.__new__(DistanceReviewPage)
     page.species_filter = "deer"
+    page.queue = []
     page.individuals = [
         {"species_id": "deer"},
         {"species_id": "deer"},
@@ -68,6 +69,7 @@ def test_default_species_prefills_without_restricting_other_choices(
     page = DistanceReviewPage.__new__(DistanceReviewPage)
     page.species_options = {"deer": "Red Deer", "fox": "Red Fox"}
     page.species_filter = target
+    page.queue = []
     page.individual_id = "adult" if active else None
     page.individuals = [{"id": "adult", "species_id": active}] if active else []
     page.reviewed_species = reviewed
@@ -80,6 +82,7 @@ def distance_page(monkeypatch):
     page = DistanceReviewPage.__new__(DistanceReviewPage)
     page.client = nullcontext()
     page.busy = False
+    page.task = None
     page.individual_id = "adult"
     page.individuals = [
         {"id": "adult", "age": "Adult", "species_id": "deer", "first_seen_offset_ms": 500}
@@ -1056,6 +1059,7 @@ async def test_video_navigation_allows_any_review_status(distance_page, review, 
         species_filter=None,
         camera_filter=None,
         status_filter=None,
+        task_id=str(2 + delta),
         video_id=str(2 + delta),
     )
     assert page.index == 2 + delta

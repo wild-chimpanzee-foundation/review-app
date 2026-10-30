@@ -25,7 +25,7 @@ from review_app.app.translations import t
 class ClockDialogContext:
     client: object
     provider: object
-    video_id: str
+    task_id: str
     source: str | None
     duration_sec: float
     frame_rate: float
@@ -434,7 +434,7 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
                     if simplified:
                         await run.io_bound(
                             context.provider.align_distance_on_even_frame,
-                            context.video_id,
+                            context.task_id,
                             playback_offset,
                             context.annotator,
                             camera_time=camera_time,
@@ -443,7 +443,7 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
                     else:
                         await run.io_bound(
                             context.provider.calibrate_distance_clock,
-                            context.video_id,
+                            context.task_id,
                             camera_time,
                             playback_offset,
                             context.annotator,
@@ -454,14 +454,14 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
                     if legacy_parity:
                         await run.io_bound(
                             context.provider.align_distance_by_parity,
-                            context.video_id,
+                            context.task_id,
                             context.opening_even_second,
                             context.annotator,
                         )
                     else:
                         await run.io_bound(
                             context.provider.align_distance_on_even_frame,
-                            context.video_id,
+                            context.task_id,
                             saved_anchor,
                             context.annotator,
                             camera_time=camera_time,
@@ -471,7 +471,7 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
                         raise ValueError("Timestamp corrections must use whole two-second steps")
                     await run.io_bound(
                         context.provider.verify_distance_recording_time,
-                        context.video_id,
+                        context.task_id,
                         review["recorded_start"] + (camera_time - proposed),
                         context.annotator,
                         clock_anchor_offset_ms=review["clock_anchor_offset_ms"],
@@ -490,7 +490,7 @@ async def open_clock_alignment_dialog(context: ClockDialogContext) -> None:
                     "Select an anchor frame within the video": "distance_clock_frame_out_of_range",
                     "No even camera second occurs within this video": "distance_clock_no_even_sample",
                     "Timestamp corrections must use whole two-second steps": "distance_clock_correction_invalid",
-                    "Changing clock alignment requires resetting this video's Distance review": "distance_clock_reset_required",
+                    "Changing clock alignment requires resetting this task's Distance review": "distance_clock_reset_required",
                 }
                 message = (
                     t("distance_player_not_ready")

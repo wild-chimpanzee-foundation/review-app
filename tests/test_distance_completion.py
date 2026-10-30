@@ -46,6 +46,66 @@ def completion_page(monkeypatch):
     return holder
 
 
+async def test_finishing_advances_to_other_species_task_on_same_video(user: User, completion_page):
+    await user.open("/distance-completion-test")
+    page = completion_page["page"]
+    page.queue = [
+        {"video_id": "shared", "task_id": "deer-task", "species_id": "deer"},
+        {"video_id": "shared", "task_id": "fox-task", "species_id": "fox"},
+    ]
+    page.dp.get_distance_video_queue.return_value = list(page.queue)
+    # Other species counts must not warn when finishing this task.
+    page.reviewed_species_counts = [
+        {"species_id": "deer", "count": 1},
+        {"species_id": "fox", "count": 3},
+    ]
+    user.find("Finish task").click()
+    await wait_until(lambda: page.load_video.await_count == 1 and not page.busy)
+    page.dp.finish_distance_video.assert_called_once_with("deer-task", "alice")
+    assert page.task_id == "fox-task"
+
+
+@pytest.mark.parametrize("pending_ai", [False, True])
+async def test_explicit_absence_confirms_and_requires_ai_rejection(
+    user: User, completion_page, pending_ai
+):
+    await user.open("/distance-completion-test")
+    page = completion_page["page"]
+    page.queue = [
+        {"video_id": "shared", "task_id": "deer-task", "species_id": "deer"},
+        {"video_id": "shared", "task_id": "fox-task", "species_id": "fox"},
+    ]
+    page.dp.get_distance_video_queue.return_value = list(page.queue)
+    page.dp.record_distance_task_absence = Mock()
+    page.individual_id = None
+    page.individuals = (
+        [{"id": "draft", "import_id": "ai", "labeled_at": None, "review_status": "not_started"}]
+        if pending_ai
+        else []
+    )
+    page.review = None
+    with page.client:
+        page.render_video_actions.refresh()
+    await asyncio.sleep(0.1)
+    user.find("No target species visible").click()
+    await user.should_see("Complete this species task without an individual.")
+    confirm = next(
+        element
+        for element in user.client.elements.values()
+        if element.props.get("data-distance-dialog-action") == "confirm"
+    )
+    if pending_ai:
+        assert confirm.props["disable"]
+        user.find("Reject the pending AI suggestions for this task").click()
+    confirm.mark("absence-confirm")
+    user.find(marker="absence-confirm").click()
+    await wait_until(lambda: page.load_video.await_count == 1 and not page.busy)
+    page.dp.record_distance_task_absence.assert_called_once_with(
+        "deer-task", "alice", reject_ai=pending_ai
+    )
+    assert page.task_id == "fox-task"
+
+
 async def wait_until(predicate):
     for _ in range(100):
         if predicate():
@@ -67,7 +127,7 @@ async def test_finish_without_discrepancies_is_prominent_and_advances_directly(
     assert button.props["color"] == "positive"
     assert button.props["size"] == "md"
     page.reviewed_species_counts = [{"species_id": "deer", "count": 1}]
-    user.find("Finish distance review").click()
+    user.find("Finish task").click()
     await wait_until(lambda: page.load_video.await_count == 1 and not page.busy)
     assert page.video["video_id"] == "next"
     page.dp.finish_distance_video.assert_called_once_with("current", "alice")
@@ -88,7 +148,7 @@ async def test_warning_lists_all_reviewed_species_and_only_ignore_finishes(
         page.render_reviewed_species()
     await user.should_see("Deer: 2 recorded")
     await user.should_see("Fox: 1 recorded")
-    user.find("Finish distance review").click()
+    user.find("Finish task").click()
     await user.should_see("Deer: 2 recorded in Species; 1 in Distance")
     await user.should_see("Fox: 1 recorded in Species; 0 in Distance")
     page.dp.finish_distance_video.assert_not_called()
@@ -120,7 +180,7 @@ async def test_completion_handles_video_disappearing_from_filtered_queue(
     if not has_next:
         page.queue = page.queue[:1]
     page.dp.get_distance_video_queue.return_value = [{"video_id": "next"}] if has_next else []
-    user.find("Finish distance review").click()
+    user.find("Finish task").click()
     await wait_until(lambda: page.load_video.await_count == 1 and not page.busy)
     assert page.video["video_id"] == ("next" if has_next else "current")
     page.dp.get_distance_video_queue.assert_called_once_with(
@@ -134,7 +194,7 @@ async def test_failed_completion_does_not_advance_or_reload(user: User, completi
     await user.open("/distance-completion-test")
     page = completion_page["page"]
     page.dp.finish_distance_video.side_effect = ValueError("Review every scheduled sample")
-    user.find("Finish distance review").click()
+    user.find("Finish task").click()
     await user.should_see("Review every scheduled sample")
     assert page.video["video_id"] == "current"
     page.dp.get_distance_video_queue.assert_not_called()

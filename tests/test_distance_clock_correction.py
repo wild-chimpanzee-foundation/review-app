@@ -358,12 +358,12 @@ async def test_realignment_ui_requires_destructive_confirmation(
     before = snapshot(data["dp"])
     user.find("Change alignment frame and reset Distance review").click()
     user.find("Confirm clock alignment").click()
-    await user.should_see("Reset Distance review for this video?")
+    await user.should_see("Reset Distance review for this species task?")
     await user.should_see("including other annotators' work")
     assert snapshot(data["dp"]) == before
     if not confirm:
         user.find("Cancel").click()
-        await user.should_not_see("Reset Distance review for this video?")
+        await user.should_not_see("Reset Distance review for this species task?")
         assert snapshot(data["dp"]) == before
         return
     user.find("Delete Distance tracks and realign").click()
@@ -375,7 +375,7 @@ async def test_realignment_ui_requires_destructive_confirmation(
     assert page.sample_offset == 1120
     assert page.review["completed_at"] is None
     assert page.review["clock_anchor_playback_ms"] == 1120.5
-    await user.should_not_see("Reset Distance review for this video?")
+    await user.should_not_see("Reset Distance review for this species task?")
 
 
 @pytest.mark.parametrize("opening_even,first", [(True, 0), (False, 1000)])
@@ -492,7 +492,7 @@ async def test_simplified_button_confirms_even_frame_and_requires_reset(
     holder["capture"].assert_not_awaited()
     seek_clock_test_player(user, 5120.125)
     user.find("Frame shows an even camera second.").click()
-    await user.should_see("Reset Distance review for this video?")
+    await user.should_see("Reset Distance review for this species task?")
     cancel = next(iter(user.find("Cancel").elements))
     assert cancel.props["autofocus"]  # Destructive reset never defaults to confirmation.
     reset = next(iter(user.find("Delete Distance tracks and realign").elements))
@@ -500,7 +500,7 @@ async def test_simplified_button_confirms_even_frame_and_requires_reset(
     assert snapshot(data["dp"]) == before
     if not confirm:
         user.find("Cancel").click()
-        await user.should_not_see("Reset Distance review for this video?")
+        await user.should_not_see("Reset Distance review for this species task?")
         assert snapshot(data["dp"]) == before
         return
     user.find("Delete Distance tracks and realign").click()
@@ -552,7 +552,7 @@ async def test_initial_even_frame_alignment_with_optional_camera_time(
     dp, video_id = data["dp"], data["videos"][0]
     dp.align_distance_by_parity(video_id, True, "alice", reset_tracks=True)
     with dp.Session.begin() as session:
-        session.delete(session.get(DistanceReviewTask, video_id))
+        session.delete(session.query(DistanceReviewTask).filter_by(video_id=video_id).one())
     await user.open("/clock-correction")
     assert app_config.DISTANCE_CLOCK_ALIGNMENT_MODE == "simplified"
     await user.should_not_see("Exact alignment")
@@ -617,7 +617,7 @@ async def test_moving_frame_refreshes_estimate_and_requires_fresh_button_confirm
     )
     assert snapshot(data["dp"]) == before
     user.find("Frame shows an even camera second.").click()
-    await user.should_see("Reset Distance review for this video?")
+    await user.should_see("Reset Distance review for this species task?")
     user.find("Delete Distance tracks and realign").click()
     await wait_for_clock(holder["page"])
     assert holder["page"].review["clock_anchor_playback_ms"] == 6000.125
