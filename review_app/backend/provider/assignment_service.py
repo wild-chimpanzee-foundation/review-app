@@ -19,8 +19,8 @@ _ANNOTATOR_WORK_SOURCES = (
     ("distance_individuals", "completed_by"),
     ("distance_samples", "labeled_by"),
     ("distance_individual_tags", "tagged_by"),
-    ("distance_video_reviews", "verified_by"),
-    ("distance_video_reviews", "completed_by"),
+    ("distance_review_tasks", "verified_by"),
+    ("distance_review_tasks", "completed_by"),
 )
 _ANNOTATOR_WORK_SQL = " UNION ALL ".join(
     f"SELECT {column} AS name FROM {table}" for table, column in _ANNOTATOR_WORK_SOURCES

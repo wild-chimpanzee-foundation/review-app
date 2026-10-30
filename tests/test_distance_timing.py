@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from review_app.backend.db.models import (
     DistanceIndividual,
+    DistanceReviewTask,
     DistanceSample,
-    DistanceVideoReview,
     ReferenceFrame,
     Video,
 )
@@ -235,7 +235,7 @@ def test_confirmation_persists_provenance_behaviors_and_durable_sample_identity(
         == "in_progress"
     )
     with data["dp"].engine.connect() as conn:
-        assert conn.execute(text("SELECT COUNT(*) FROM individual_observations")).scalar() == 0
+        assert conn.execute(text("SELECT COUNT(*) FROM individual_observations")).scalar() == 2
         assert conn.execute(text("SELECT COUNT(*) FROM video_labels")).scalar() == 0
 
 
@@ -662,7 +662,7 @@ def test_video_completion_rechecks_actual_coverage(timed_data):
         session.query(DistanceSample).filter_by(
             individual_id=data["individual"]["id"], offset_ms=1000
         ).delete()
-        session.get(DistanceVideoReview, data["videos"][0]).completed_at = None
+        session.get(DistanceReviewTask, data["individual"]["task_id"]).completed_at = None
     with pytest.raises(ValueError, match="every scheduled"):
         dp.finish_distance_video(data["videos"][0], "alice")
 

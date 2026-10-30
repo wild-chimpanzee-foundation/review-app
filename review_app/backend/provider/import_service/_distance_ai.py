@@ -9,8 +9,8 @@ from review_app.backend.camera_layout import deployment_key
 from review_app.backend.db.models import (
     DistanceImport,
     DistanceIndividual,
+    DistanceReviewTask,
     DistanceSample,
-    DistanceVideoReview,
     Project,
     ProjectDir,
     ReferenceFrame,
@@ -24,6 +24,7 @@ from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
 from review_app.backend.provider.distance_references import reference_tagged
 from review_app.backend.provider.distance_review import reset_video_evidence
+from review_app.backend.provider.distance_tasks import ensure_tasks
 
 
 def _plan(session, project_id, package):
@@ -134,7 +135,14 @@ def _plan(session, project_id, package):
         else:
             summary["new_reference_frames"] += 1
         frames[row["reference_id"]] = frame
+    ensure_tasks(session, project_id)
     species = {row.scientific_name: row.id for row in session.query(Species)}
+    tasks = {
+        (task.video_id, task.species_id): task
+        for task in session.query(DistanceReviewTask)
+        .join(Video, DistanceReviewTask.video_id == Video.video_id)
+        .filter(Video.project_id == project_id)
+    }
     tracks = {row["individual_id"]: row for row in package.individuals}
     references = {row["reference_id"]: row for row in package.references}
     schedules = {}
@@ -143,6 +151,10 @@ def _plan(session, project_id, package):
             errors.append(f"Add/map species {row['species']!r} before importing.")
         video = videos.get(row["video_path"])
         if video:
+            if (video.video_id, species.get(row["species"])) not in tasks:
+                errors.append(
+                    f"Confirm Species Review labels for {row['species']} in {row['video_path']} before importing."
+                )
             schedules.setdefault(video.video_id, set())
             if video.video_id in tagged:
                 errors.append(f"Animal track points to a Reference Video: {row['video_path']}")
@@ -192,9 +204,18 @@ def _plan(session, project_id, package):
                 errors.append("Package would create more than 100,000 review samples")
         except ValueError as exc:
             errors.append(f"{video.video_path}: {exc}")
-        review = session.get(DistanceVideoReview, video_id)
-        individuals = session.query(DistanceIndividual).filter_by(video_id=video_id).all()
-        if review or individuals:
+        target_species = {
+            species.get(row["species"])
+            for row in package.individuals
+            if videos.get(row["video_path"]) is video
+        }
+        reviews = [
+            task for (vid, sid), task in tasks.items() if vid == video_id and sid in target_species
+        ]
+        for review in reviews:
+            individuals = session.query(DistanceIndividual).filter_by(task_id=review.id).all()
+            if review.verified_at is None and not individuals:
+                continue
             if (
                 not review
                 or review.alignment_mode != "imported"
@@ -205,7 +226,7 @@ def _plan(session, project_id, package):
                 or session.query(DistanceSample.id)
                 .join(DistanceIndividual, DistanceSample.individual_id == DistanceIndividual.id)
                 .filter(
-                    DistanceIndividual.video_id == video_id, DistanceSample.status != "pending"
+                    DistanceIndividual.task_id == review.id, DistanceSample.status != "pending"
                 )
                 .first()
             ):
@@ -297,20 +318,28 @@ class DistanceAIImportMixin(ProviderBase):
                     session.flush()
                     frames[row["reference_id"]] = frame
                 refs.append({**row, "reference_frame_id": frame.id})
-            for video_id, times in schedules.items():
+            species = {row.scientific_name: row.id for row in session.query(Species)}
+            tasks = {}
+            for row in package.individuals:
+                video_id = videos[row["video_path"]].video_id
+                key = video_id, species[row["species"]]
+                if key in tasks:
+                    continue
+                review = (
+                    session.query(DistanceReviewTask)
+                    .filter_by(video_id=video_id, species_id=key[1])
+                    .one()
+                )
+                tasks[key] = review
                 # Only untouched imported drafts can reach this branch; never human work.
-                if video_id in summary["replace_video_ids"]:
-                    reset_video_evidence(session, video_id)
-                review = session.get(DistanceVideoReview, video_id)
-                if review is None:
-                    review = DistanceVideoReview(video_id=video_id)
-                    session.add(review)
+                if review.import_id:
+                    reset_video_evidence(session, review.id)
+                review.started_at = None
                 review.alignment_mode = "imported"
-                review.imported_sample_times_s = times
+                review.imported_sample_times_s = schedules[video_id]
                 review.import_id = imported.id
                 review.verified_by = f"AI {package.manifest['model']['name']}"
                 review.verified_at = self._utcnow_dt()
-            species = {row.scientific_name: row.id for row in session.query(Species)}
             identities = []
             for row in package.individuals:
                 predictions = sorted(
@@ -326,9 +355,11 @@ class DistanceAIImportMixin(ProviderBase):
                         identifying, box = prediction, candidate
                         break
                 video_id = videos[row["video_path"]].video_id
-                number = session.query(DistanceIndividual).filter_by(video_id=video_id).count() + 1
+                task = tasks[(video_id, species[row["species"]])]
+                number = session.query(DistanceIndividual).filter_by(task_id=task.id).count() + 1
                 individual = DistanceIndividual(
                     video_id=video_id,
+                    task_id=task.id,
                     individual_number=number,
                     species_id=species[row["species"]],
                     import_id=imported.id,

@@ -9,9 +9,9 @@ from review_app.backend.camera_layout import deployment_key
 from review_app.backend.db.models import (
     DistanceIndividual,
     DistanceReviewProgress,
+    DistanceReviewTask,
     DistanceSample,
     DistanceSampleBehavior,
-    DistanceVideoReview,
     ProjectDir,
     ReferenceFrame,
     ReferenceVideo,
@@ -19,6 +19,11 @@ from review_app.backend.db.models import (
 )
 from review_app.backend.distance_timing import sample_offsets
 from review_app.backend.path_matching import normalize_path_str
+from review_app.backend.provider.distance_tasks import (
+    clear_completion,
+    complete_task,
+    resolve_task,
+)
 
 
 def _record(row) -> dict:
@@ -26,6 +31,8 @@ def _record(row) -> dict:
 
 
 def review_offsets(review, duration_sec: float | None) -> list[int]:
+    if review.verified_at is None:
+        return []
     try:
         return sample_offsets(
             review.recorded_start,
@@ -45,7 +52,7 @@ def refresh_individual_completion(
     session, individual: DistanceIndividual, expected_offsets: set[int] | None = None
 ) -> None:
     """Derive individual completion from the verified schedule and saved samples."""
-    review = session.get(DistanceVideoReview, individual.video_id)
+    review = session.get(DistanceReviewTask, individual.task_id)
     video = session.get(Video, individual.video_id)
     expected = (
         expected_offsets
@@ -74,19 +81,19 @@ def refresh_individual_completion(
         )
         individual.completed_by = individual.completed_at = None
         if review:
-            review.completed_by = review.completed_at = None
+            clear_completion(review)
 
 
 def reopen_individual_review(session, individual: DistanceIndividual) -> None:
-    mark_review_started(session, individual.video_id)
+    mark_review_started(session, individual.task_id)
     refresh_individual_completion(session, individual)
-    review = session.get(DistanceVideoReview, individual.video_id)
+    review = session.get(DistanceReviewTask, individual.task_id)
     if review:
-        review.completed_by = review.completed_at = None
+        clear_completion(review)
 
 
-def mark_review_started(session, video_id: str) -> None:
-    review = session.get(DistanceVideoReview, video_id)
+def mark_review_started(session, task_id: str) -> None:
+    review = session.get(DistanceReviewTask, task_id)
     if review and review.started_at is None:
         review.started_at = datetime.now()
 
@@ -97,27 +104,28 @@ def reconcile_video_completion(session, video_id: str) -> None:
 
 
 def set_active_individual(session, video_id: str, annotator_name: str, individual_id: str, now):
+    task = resolve_task(session, video_id)
     individual = session.get(DistanceIndividual, individual_id)
-    if individual is None or individual.video_id != video_id:
-        raise ValueError("Active individual must belong to this video")
-    progress = session.get(DistanceReviewProgress, (video_id, annotator_name))
+    if individual is None or individual.task_id != task.id:
+        raise ValueError("Active individual must belong to this task")
+    progress = session.get(DistanceReviewProgress, (task.id, annotator_name))
     if progress is None:
-        progress = DistanceReviewProgress(video_id=video_id, annotator_name=annotator_name)
+        progress = DistanceReviewProgress(task_id=task.id, annotator_name=annotator_name)
         session.add(progress)
     progress.active_individual_id = individual_id
     progress.updated_at = now
 
 
 def get_review_state(session, video_id: str, annotator_name: str) -> dict:
-    video = session.get(Video, video_id)
+    review = resolve_task(session, video_id)
+    video = session.get(Video, review.video_id)
     if video is None:
         raise ValueError("Video not found")
-    review = session.get(DistanceVideoReview, video_id)
     offsets = review_offsets(review, video.duration_sec) if review else []
     rows = (
         session.query(DistanceSample)
         .join(DistanceIndividual, DistanceSample.individual_id == DistanceIndividual.id)
-        .filter(DistanceIndividual.video_id == video_id)
+        .filter(DistanceIndividual.task_id == review.id)
         .order_by(DistanceSample.offset_ms)
         .all()
     )
@@ -171,9 +179,10 @@ def get_review_state(session, video_id: str, annotator_name: str) -> dict:
                 "reference_video_id": frame.reference_video_id if frame else None,
             }
         )
-    progress = session.get(DistanceReviewProgress, (video_id, annotator_name))
+    progress = session.get(DistanceReviewProgress, (review.id, annotator_name))
     return {
-        "review": _record(review) if review else None,
+        "task": _record(review),
+        "review": _record(review) if review.verified_at is not None else None,
         "offsets": offsets,
         "samples": samples,
         "active_individual_id": progress.active_individual_id if progress else None,
@@ -217,7 +226,7 @@ def finish_individual(session, individual_id: str, annotator_name: str) -> None:
     individual = session.get(DistanceIndividual, individual_id)
     if individual is None:
         raise ValueError("Distance individual not found")
-    review = session.get(DistanceVideoReview, individual.video_id)
+    review = session.get(DistanceReviewTask, individual.task_id)
     if review is None:
         raise ValueError("Verify the camera recording time first")
     refresh_individual_completion(session, individual)
@@ -228,14 +237,14 @@ def finish_individual(session, individual_id: str, annotator_name: str) -> None:
 def finish_video(session, video_id: str, annotator_name: str, now) -> None:
     if not annotator_name or not annotator_name.strip():
         raise ValueError("Annotator is required")
-    review = session.get(DistanceVideoReview, video_id)
-    individuals = session.query(DistanceIndividual).filter_by(video_id=video_id).all()
-    if review is None or not individuals:
-        raise ValueError("Review all individuals before finishing the video")
+    review = resolve_task(session, video_id)
+    individuals = session.query(DistanceIndividual).filter_by(task_id=review.id).all()
+    if review.verified_at is None or not individuals:
+        raise ValueError("Review all individuals before finishing the task")
     for individual in individuals:
         refresh_individual_completion(session, individual)
         if individual.review_status != "completed":
-            raise ValueError("Review every scheduled sample before finishing the video")
+            raise ValueError("Review every scheduled sample before finishing the task")
     missing = []
     for individual in sorted(individuals, key=lambda row: row.individual_number):
         fields = [field for field in ("age", "sex") if getattr(individual, field) is None]
@@ -243,30 +252,54 @@ def finish_video(session, video_id: str, annotator_name: str, now) -> None:
             missing.append(f"#{individual.individual_number} ({', '.join(fields)})")
     if missing:
         raise ValueError(
-            "Set age and sex before finishing the video. Missing: "
+            "Set age and sex before finishing the task. Missing: "
             + "; ".join(missing)
             + ". Select Unknown if undetermined."
         )
-    review.completed_by = annotator_name
-    review.completed_at = now
+    complete_task(review, annotator_name, now, "present")
+
+
+def record_absence(session, task_id: str, annotator_name: str, now, *, reject_ai=False) -> None:
+    if not annotator_name or not annotator_name.strip():
+        raise ValueError("Annotator is required")
+    task = resolve_task(session, task_id)
+    individuals = session.query(DistanceIndividual).filter_by(task_id=task.id).all()
+    if any(row.labeled_at is not None or row.import_id is None for row in individuals):
+        raise ValueError("Remove human target-species individuals before recording absence")
+    if individuals and not reject_ai:
+        raise ValueError("Explicitly reject pending AI suggestions before recording absence")
+    rejected = []
+    for individual in individuals:
+        rejected.append(
+            {
+                "individual_id": individual.id,
+                "import_id": individual.import_id,
+                "original": individual.ai_original,
+                "author": annotator_name,
+                "time": now.isoformat(),
+            }
+        )
+    if individuals:
+        reset_video_evidence(session, task.id)
+    task.rejected_ai = [*(task.rejected_ai or []), *rejected]
+    complete_task(task, annotator_name, now, "absent")
 
 
 def reset_video_evidence(session, video_id: str) -> None:
     """Clear a video's human Distance work, retaining references and ordinary Review."""
-    individuals = session.query(DistanceIndividual.id).filter_by(video_id=video_id)
+    review = resolve_task(session, video_id)
+    individuals = session.query(DistanceIndividual.id).filter_by(task_id=review.id)
     # Infant samples may reference another individual; remove all samples first.
     session.query(DistanceSample).filter(DistanceSample.individual_id.in_(individuals)).delete(
         synchronize_session=False
     )
-    session.query(DistanceReviewProgress).filter_by(video_id=video_id).delete(
+    session.query(DistanceReviewProgress).filter_by(task_id=review.id).delete(
         synchronize_session=False
     )
-    session.query(DistanceIndividual).filter_by(video_id=video_id).delete(
+    session.query(DistanceIndividual).filter_by(task_id=review.id).delete(
         synchronize_session=False
     )
-    review = session.get(DistanceVideoReview, video_id)
-    if review:
-        review.completed_by = review.completed_at = None
+    clear_completion(review)
 
 
 def verify_recording_time(
@@ -286,7 +319,8 @@ def verify_recording_time(
         raise ValueError("Confirm whether to reset Distance review")
     if not annotator_name or not annotator_name.strip():
         raise ValueError("Annotator is required")
-    video = session.get(Video, video_id)
+    review = resolve_task(session, video_id)
+    video = session.get(Video, review.video_id)
     if video is None:
         raise ValueError("Video not found")
     offsets = sample_offsets(
@@ -312,8 +346,7 @@ def verify_recording_time(
         raise ValueError("Select an anchor frame within the video")
     if not offsets:
         raise ValueError("No even camera second occurs within this video")
-    review = session.get(DistanceVideoReview, video_id)
-    if review:
+    if review.verified_at is not None:
         timestamp_only = (
             alignment_mode == review.alignment_mode
             and (
@@ -333,7 +366,7 @@ def verify_recording_time(
             and offsets == review_offsets(review, video.duration_sec)
         )
         has_tracks = (
-            session.query(DistanceIndividual.id).filter_by(video_id=video_id).first() is not None
+            session.query(DistanceIndividual.id).filter_by(task_id=review.id).first() is not None
         )
         if (
             not timestamp_only
@@ -345,13 +378,10 @@ def verify_recording_time(
             and not reset_tracks
         ):
             raise ValueError(
-                "Changing clock alignment requires resetting this video's Distance review"
+                "Changing clock alignment requires resetting this task's Distance review"
             )
         if reset_tracks:
-            reset_video_evidence(session, video_id)
-    if review is None:
-        review = DistanceVideoReview(video_id=video_id)
-        session.add(review)
+            reset_video_evidence(session, review.id)
     review.recorded_start = recorded_start
     review.alignment_mode = alignment_mode
     review.imported_sample_times_s = None

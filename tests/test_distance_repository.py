@@ -14,9 +14,9 @@ from review_app.backend.db.models import (
     Base,
     DistanceIndividual,
     DistanceIndividualTag,
+    DistanceReviewTask,
     DistanceSample,
     DistanceSampleBehavior,
-    DistanceVideoReview,
     IndividualObservation,
     ModelAnnotation,
     ReferenceFrame,
@@ -35,7 +35,7 @@ DISTANCE_TABLES = (
     "distance_samples",
     "distance_individual_tags",
     "distance_sample_behaviors",
-    "distance_video_reviews",
+    "distance_review_tasks",
     "distance_review_progress",
 )
 
@@ -109,6 +109,8 @@ def test_refresh_repairs_legacy_category_ids_and_preserves_prepared_evidence(
         project.id, "cam_a/references", str(root / "cam_a" / "references" / "ref.MOV")
     )
     frame = dp.add_reference_frame(prepared["id"], 0, 5)
+    for animal_id in animals.values():
+        dp.update_manual_review(animal_id, [{"species": "deer"}], is_blank=False)
     individual = dp.create_distance_individual(
         animals["cam_a"], data["species_id"], 0, anchor=data["anchor"]
     )
@@ -208,7 +210,10 @@ def test_reference_video_tags_exclude_clips_from_distance_queue_only(distance_da
     assert [row["video_id"] for row in dp.get_distance_video_queue(data["project"].id)] == [
         data["videos"][1]
     ]
-    assert dp.get_distance_video_queue(data["project"].id, data["species_id"]) == []
+    assert [
+        row["video_id"]
+        for row in dp.get_distance_video_queue(data["project"].id, data["species_id"])
+    ] == [data["videos"][1]]
     assert first_id in dp.get_video_queue({}, active_project_id=data["project"].id)
     dp.set_video_tags(first_id, [])
     assert len(dp.get_distance_video_queue(data["project"].id)) == 2
@@ -408,7 +413,7 @@ def test_individuals_have_durable_identity_and_video_local_numbers(distance_data
         infant["id"],
     ]
     with dp.engine.connect() as conn:
-        assert conn.execute(text("SELECT COUNT(*) FROM individual_observations")).scalar() == 0
+        assert conn.execute(text("SELECT COUNT(*) FROM individual_observations")).scalar() == 2
         assert conn.execute(text("SELECT COUNT(*) FROM video_labels")).scalar() == 0
 
 
@@ -573,7 +578,7 @@ def test_deleting_custom_tag_cascades_distance_tag_association_only(distance_dat
         assert conn.execute(text("PRAGMA foreign_key_check")).fetchall() == []
         assert (
             conn.execute(
-                text("SELECT completed_at FROM distance_video_reviews WHERE video_id = :video_id"),
+                text("SELECT completed_at FROM distance_review_tasks WHERE video_id = :video_id"),
                 {"video_id": data["videos"][0]},
             ).scalar_one()
             is None
@@ -660,7 +665,7 @@ def test_distance_queue_is_project_scoped_and_filters_existing_individuals(dista
     assert [
         row["video_id"]
         for row in dp.get_distance_video_queue(data["project"].id, data["species_id"])
-    ] == [data["videos"][0]]
+    ] == data["videos"]
 
 
 @pytest.mark.parametrize("source", ["ordinary", "prediction"])
@@ -668,6 +673,8 @@ def test_distance_queue_finds_species_before_distance_individuals_are_added(dist
     data = distance_data
     dp, second_video = data["dp"], data["videos"][1]
     with dp.Session.begin() as session:
+        session.query(IndividualObservation).filter_by(video_id=second_video).delete()
+        session.query(DistanceReviewTask).filter_by(video_id=second_video).delete()
         if source == "ordinary":
             session.add(
                 IndividualObservation(video_id=second_video, id=1, species_id=data["species_id"])
@@ -684,7 +691,7 @@ def test_distance_queue_finds_species_before_distance_individuals_are_added(dist
     assert {
         row["video_id"]
         for row in dp.get_distance_video_queue(data["project"].id, data["species_id"])
-    } == set(data["videos"])
+    } == (set(data["videos"]) if source == "ordinary" else {data["videos"][0]})
 
 
 def test_distance_species_options_use_project_vocabulary_and_language(distance_data):
@@ -700,6 +707,7 @@ def test_reviewed_species_are_ordered_unique_manual_labels_for_this_clip(distanc
     data = distance_data
     dp, video_id = data["dp"], data["videos"][0]
     with dp.Session.begin() as session:
+        session.query(IndividualObservation).delete()
         fox = session.query(Species).filter_by(scientific_name="fox").one().id
         session.add_all(
             [
@@ -745,24 +753,15 @@ def test_species_correction_preserves_evidence_and_reopens_completion(distance_d
     samples = dp.get_distance_review_state(video_id, "alice")["samples"]
     with dp.Session.begin() as session:
         fox = session.query(Species).filter_by(scientific_name="fox").one().id
-        session.add(IndividualObservation(video_id=video_id, id=1, species_id=data["species_id"]))
 
-    dp.set_distance_individual_attributes(
-        individual_id, species_id=fox, age="Adult", sex="Female", tag_ids=[], labeled_by="bob"
-    )
-
-    after = dp.list_distance_individuals(video_id)[0]
-    assert after["species_id"] == fox and after["labeled_by"] == "bob"
-    for key in ("id", "individual_number", "first_seen_offset_ms", "anchor_x", "anchor_y"):
-        assert after[key] == before[key]
-    assert after["review_status"] == "completed" and after["completed_at"] is not None
+    with pytest.raises(ValueError, match="target species"):
+        dp.set_distance_individual_attributes(
+            individual_id, species_id=fox, age="Adult", sex="Female", tag_ids=[], labeled_by="bob"
+        )
+    assert dp.list_distance_individuals(video_id)[0] == before
     state = dp.get_distance_review_state(video_id, "alice")
     assert state["samples"] == samples
-    assert state["review"]["completed_at"] is None
-    assert dp.get_distance_reviewed_species(video_id) == [data["species_id"]]
-    # Callers saving only attributes retain the corrected species.
-    dp.set_distance_individual_attributes(individual_id, age="Adult", sex=None, tag_ids=[])
-    assert dp.list_distance_individuals(video_id)[0]["species_id"] == fox
+    assert state["review"]["completed_at"] is not None
 
 
 def test_invalid_species_correction_is_atomic(distance_data):
@@ -809,40 +808,22 @@ def test_species_correction_keeps_connected_carriers_and_infant_consistent(
     )
     before = {row["id"]: row for row in dp.list_distance_individuals(video_id)}
     samples = dp.get_distance_review_state(video_id, "alice")["samples"]
-    connected = {carrier, second_carrier["id"], infant}
-    with dp.Session.begin() as session:
+    with dp.Session() as session:
         fox = session.query(Species).filter_by(scientific_name="fox").one().id
-        for individual_id in connected:
-            row = session.get(DistanceIndividual, individual_id)
-            row.review_status, row.completed_at = "completed", datetime(2026, 10, 12)
-        session.get(DistanceVideoReview, video_id).completed_at = datetime(2026, 10, 12)
     selected = infant if correct_infant else carrier
-    dp.set_distance_individual_attributes(
-        selected,
-        species_id=fox,
-        age=before[selected]["age"],
-        sex=before[selected]["sex"],
-        tag_ids=before[selected]["tag_ids"],
-        labeled_by="bob",
-    )
-    after = {row["id"]: row for row in dp.list_distance_individuals(video_id)}
-    for individual_id in connected:
-        row = after[individual_id]
-        assert row["species_id"] == fox and row["completed_at"] is None
-        assert row["review_status"] == "in_progress" and row["labeled_by"] == "bob"
-        for key in ("age", "sex", "tag_ids", "first_seen_offset_ms", "individual_number"):
-            assert row[key] == before[individual_id][key]
-    assert after[unrelated["id"]] == before[unrelated["id"]]
-    assert (
-        dp.list_distance_individuals(data["videos"][1])[0]["species_id"]
-        == other_video["species_id"]
-    )
-    state = dp.get_distance_review_state(video_id, "alice")
-    assert state["samples"] == samples and state["review"]["completed_at"] is None
-    # The existing carrier/infant pair can still be saved after the correction.
-    dp.save_distance_sample(
-        carrier, 1000, reference_frame_id=data["frame"]["id"], infant_id=infant, labeled_by="bob"
-    )
+    with pytest.raises(ValueError, match="target species"):
+        dp.set_distance_individual_attributes(
+            selected,
+            species_id=fox,
+            age=before[selected]["age"],
+            sex=before[selected]["sex"],
+            tag_ids=before[selected]["tag_ids"],
+            labeled_by="bob",
+        )
+    assert {row["id"]: row for row in dp.list_distance_individuals(video_id)} == before
+    assert dp.get_distance_review_state(video_id, "alice")["samples"] == samples
+    assert dp.list_distance_individuals(data["videos"][1])[0]["id"] == other_video["id"]
+    assert unrelated["id"] in before
 
 
 def _annotated_sample(data, **overrides):
@@ -945,10 +926,12 @@ def test_distance_rows_cascade_through_existing_deletion_paths(distance_data, ac
             "distance_individuals",
             "distance_samples",
             "distance_sample_behaviors",
-            "distance_video_reviews",
+            "distance_review_tasks",
             "distance_review_progress",
         ):
-            assert conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar() == 0
+            assert conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar() == (
+                1 if table == "distance_review_tasks" and action == "delete_missing" else 0
+            )
         reference_count = conn.execute(text("SELECT COUNT(*) FROM reference_videos")).scalar()
         assert reference_count == (0 if action == "delete_project" else 1)
         assert conn.execute(text("PRAGMA foreign_key_check")).fetchall() == []
@@ -992,7 +975,7 @@ def test_deleting_individual_cleans_links_and_reopens_reviews(distance_data, del
                 "alice",
                 datetime.now(),
             )
-        review = session.get(DistanceVideoReview, video_id)
+        review = session.get(DistanceReviewTask, data["individual"]["task_id"])
         review.completed_by, review.completed_at = "alice", datetime.now()
 
     dp.delete_distance_individual(deleted_id)
@@ -1087,11 +1070,16 @@ def test_distance_migration_upgrades_v22_and_matches_constraints(tmp_path):
                     {"id": "species", "scientific_name": "deer"},
                 )
                 conn.execute(
+                    DistanceReviewTask.__table__.insert(),
+                    {"id": "task", "video_id": "v1", "species_id": "species", "source_count": 1},
+                )
+                conn.execute(
                     DistanceIndividual.__table__.insert(),
                     [
                         {
                             "id": individual_id,
                             "video_id": "v1",
+                            "task_id": "task",
                             "individual_number": number,
                             "species_id": "species",
                             "first_seen_offset_ms": 0,

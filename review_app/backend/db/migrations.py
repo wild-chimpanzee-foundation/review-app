@@ -765,6 +765,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     ),
     (22, _migration_v22),
     (23, _migration_v23),
+    (24, lambda conn: _migration_v24(conn)),
 ]
 
 # Frozen upgrade DDL. Keep independent of evolving ORM metadata.
@@ -931,6 +932,81 @@ DISTANCE_SCHEMA_V23 = [
     )
     """,
 ]
+
+
+def _migration_v24(conn) -> None:
+    """Discard unreleased Distance evidence, preserving references and ordinary Review."""
+    for table in (
+        "distance_sample_behaviors",
+        "distance_individual_tags",
+        "distance_samples",
+        "distance_review_progress",
+        "distance_individuals",
+        "distance_video_reviews",
+    ):
+        conn.exec_driver_sql(f"DROP TABLE IF EXISTS {table}")
+    # Frozen task schema; create_all may already have created this empty table.
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS distance_review_tasks (
+            id VARCHAR PRIMARY KEY NOT NULL,
+            video_id VARCHAR NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
+            species_id VARCHAR NOT NULL REFERENCES species(id),
+            source_count INTEGER NOT NULL,
+            completion_outcome VARCHAR,
+            completion_history JSON NOT NULL,
+            rejected_ai JSON NOT NULL,
+            recorded_start DATETIME,
+            alignment_mode VARCHAR DEFAULT 'exact' NOT NULL,
+            imported_sample_times_s JSON,
+            import_id VARCHAR REFERENCES distance_imports(id) ON DELETE SET NULL,
+            started_at DATETIME,
+            clock_anchor_offset_ms INTEGER,
+            clock_anchor_playback_ms FLOAT,
+            opening_even_second BOOLEAN DEFAULT '0' NOT NULL,
+            verified_by VARCHAR,
+            verified_at DATETIME,
+            completed_by VARCHAR,
+            completed_at DATETIME,
+            CONSTRAINT uq_distance_task UNIQUE (video_id, species_id)
+        )
+    """)
+    conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_distance_review_tasks_video_id ON distance_review_tasks(video_id)"
+    )
+    # Reuse only frozen v23 DDL, never evolving ORM metadata.
+    for ddl in DISTANCE_SCHEMA_V23:
+        if "CREATE TABLE IF NOT EXISTS distance_individuals (" in ddl:
+            ddl = ddl.replace(
+                "video_id VARCHAR NOT NULL,",
+                "video_id VARCHAR NOT NULL, task_id VARCHAR NOT NULL "
+                "REFERENCES distance_review_tasks(id) ON DELETE CASCADE,",
+            ).replace(
+                "UNIQUE (video_id, individual_number)", "UNIQUE (task_id, individual_number)"
+            )
+        elif "CREATE TABLE IF NOT EXISTS distance_review_progress (" in ddl:
+            ddl = ddl.replace(
+                "video_id VARCHAR NOT NULL,",
+                "task_id VARCHAR NOT NULL REFERENCES distance_review_tasks(id) ON DELETE CASCADE,",
+            ).replace(
+                "PRIMARY KEY (video_id, annotator_name)", "PRIMARY KEY (task_id, annotator_name)"
+            )
+            ddl = ddl.replace(
+                "FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE,",
+                "",
+            )
+        elif not any(
+            f"CREATE TABLE IF NOT EXISTS {table} (" in ddl
+            for table in (
+                "distance_samples",
+                "distance_individual_tags",
+                "distance_sample_behaviors",
+            )
+        ):
+            continue
+        conn.exec_driver_sql(ddl)
+    conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_distance_individuals_task_id ON distance_individuals(task_id)"
+    )
 
 
 def check_schema_version(conn) -> None:

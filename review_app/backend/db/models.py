@@ -303,7 +303,7 @@ class ReferenceFrame(Base):
 class DistanceIndividual(Base):
     __tablename__ = "distance_individuals"
     __table_args__ = (
-        UniqueConstraint("video_id", "individual_number", name="uq_distance_individual_number"),
+        UniqueConstraint("task_id", "individual_number", name="uq_distance_individual_number"),
         CheckConstraint("individual_number > 0", name="ck_distance_individual_number"),
         CheckConstraint("first_seen_offset_ms >= 0", name="ck_distance_first_seen"),
         CheckConstraint(
@@ -332,6 +332,9 @@ class DistanceIndividual(Base):
     import_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("distance_imports.id", ondelete="SET NULL")
     )
+    task_id: Mapped[str] = mapped_column(
+        String, ForeignKey("distance_review_tasks.id", ondelete="CASCADE"), index=True
+    )
     ai_original: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     individual_number: Mapped[int] = mapped_column(Integer)
     species_id: Mapped[str] = mapped_column(String, ForeignKey("species.id"))
@@ -357,12 +360,19 @@ class DistanceIndividual(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
-class DistanceVideoReview(Base):
-    __tablename__ = "distance_video_reviews"
+class DistanceReviewTask(Base):
+    __tablename__ = "distance_review_tasks"
+    __table_args__ = (UniqueConstraint("video_id", "species_id", name="uq_distance_task"),)
 
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     video_id: Mapped[str] = mapped_column(
-        String, ForeignKey("videos.video_id", ondelete="CASCADE"), primary_key=True
+        String, ForeignKey("videos.video_id", ondelete="CASCADE"), index=True
     )
+    species_id: Mapped[str] = mapped_column(String, ForeignKey("species.id"))
+    source_count: Mapped[int] = mapped_column(Integer)
+    completion_outcome: Mapped[str | None] = mapped_column(String)
+    completion_history: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    rejected_ai: Mapped[list[dict]] = mapped_column(JSON, default=list)
     # Camera wall-clock time, deliberately independent of file creation metadata.
     recorded_start: Mapped[datetime | None] = mapped_column(DateTime)
     alignment_mode: Mapped[str] = mapped_column(String, default="exact", server_default="exact")
@@ -375,8 +385,8 @@ class DistanceVideoReview(Base):
     clock_anchor_offset_ms: Mapped[int | None] = mapped_column(Integer)
     clock_anchor_playback_ms: Mapped[float | None] = mapped_column(Float)
     opening_even_second: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
-    verified_by: Mapped[str] = mapped_column(String)
-    verified_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    verified_by: Mapped[str | None] = mapped_column(String)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime)
     completed_by: Mapped[str | None] = mapped_column(String)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
 
@@ -384,8 +394,8 @@ class DistanceVideoReview(Base):
 class DistanceReviewProgress(Base):
     __tablename__ = "distance_review_progress"
 
-    video_id: Mapped[str] = mapped_column(
-        String, ForeignKey("videos.video_id", ondelete="CASCADE"), primary_key=True
+    task_id: Mapped[str] = mapped_column(
+        String, ForeignKey("distance_review_tasks.id", ondelete="CASCADE"), primary_key=True
     )
     annotator_name: Mapped[str] = mapped_column(String, primary_key=True)
     active_individual_id: Mapped[str] = mapped_column(

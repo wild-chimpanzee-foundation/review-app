@@ -10,7 +10,6 @@ from review_app.backend.db.models import (
     DistanceIndividual,
     DistanceIndividualTag,
     DistanceSample,
-    DistanceVideoReview,
     Species,
     Tag,
     Video,
@@ -21,6 +20,7 @@ from review_app.backend.provider.distance_review import (
     reopen_individual_review,
     review_offsets,
 )
+from review_app.backend.provider.distance_tasks import clear_completion, resolve_task
 
 AGES = {"Adult", "Adolescent", "Juvenile", "Infant", "Unknown"}
 SEXES = {"Male", "Female", "Unknown"}
@@ -92,6 +92,8 @@ def create_distance_individual(
     if anchor is None:
         raise ValueError("A bounding box is required to create a distance individual")
     geometry = _anchor_fields(anchor)
+    review = resolve_task(session, video_id, species_id)
+    video_id = review.video_id
     video = session.get(Video, video_id)
     if video is None:
         raise ValueError("Video not found")
@@ -102,12 +104,13 @@ def create_distance_individual(
         raise ValueError("Species not found")
     last_number = (
         session.query(func.max(DistanceIndividual.individual_number))
-        .filter_by(video_id=video_id)
+        .filter_by(task_id=review.id)
         .scalar()
     )
     now = utcnow()
     row = DistanceIndividual(
         video_id=video_id,
+        task_id=review.id,
         species_id=species_id,
         individual_number=(last_number or 0) + 1,
         first_seen_offset_ms=first_seen_offset_ms,
@@ -120,9 +123,8 @@ def create_distance_individual(
     )
     session.add(row)
     session.flush()
-    review = session.get(DistanceVideoReview, video_id)
-    if review:
-        mark_review_started(session, video_id)
+    if review.verified_at is not None:
+        mark_review_started(session, review.id)
         # The identifying frame establishes when this animal first appears.
         # Earlier scheduled samples are reviewed as absent, atomically with
         # creation; the first-seen sample itself remains unreviewed.
@@ -141,7 +143,8 @@ def create_distance_individual(
         )
         session.flush()
         refresh_individual_completion(session, row)
-        review.completed_by = review.completed_at = None
+        clear_completion(review)
+    clear_completion(review)
     if tag_ids:
         set_distance_individual_attributes(
             session,
@@ -157,7 +160,7 @@ def create_distance_individual(
         infant = create_distance_individual(
             session,
             utcnow,
-            video_id,
+            review.id,
             species_id,
             first_seen_offset_ms,
             age="Infant",
@@ -257,35 +260,7 @@ def set_distance_individual_attributes(
         raise ValueError("Species not found")
     now = utcnow()
     if species_id is not None and species_id != row.species_id:
-        # A shared infant can link more than one carrier. Correct the entire
-        # connected group atomically, keeping every saved pair consistent.
-        individuals = {
-            item.id: item
-            for item in session.query(DistanceIndividual).filter_by(video_id=row.video_id)
-        }
-        links: dict[str, set[str]] = {}
-        for child in individuals.values():
-            if child.initial_carrier_individual_id:
-                links.setdefault(child.id, set()).add(child.initial_carrier_individual_id)
-                links.setdefault(child.initial_carrier_individual_id, set()).add(child.id)
-        for child, parent in (
-            session.query(DistanceSample.individual_id, DistanceSample.carried_by_individual_id)
-            .filter(DistanceSample.individual_id.in_(individuals))
-            .filter(DistanceSample.carried_by_individual_id.is_not(None))
-        ):
-            links.setdefault(child, set()).add(parent)
-            links.setdefault(parent, set()).add(child)
-        pending, visited = [row.id], set()
-        while pending:
-            current = pending.pop()
-            if current in visited:
-                continue
-            visited.add(current)
-            pending.extend(links.get(current, set()) - visited)
-            linked = individuals[current]
-            linked.species_id = species_id
-            linked.labeled_by, linked.labeled_at, linked.updated_at = labeled_by, now, now
-            reopen_individual_review(session, linked)
+        raise ValueError("Individual species must match the task's target species")
     row.age, row.sex = age, sex
     row.labeled_by, row.labeled_at, row.updated_at = labeled_by, now, now
     reopen_individual_review(session, row)
@@ -333,9 +308,10 @@ def set_distance_individual_anchor(
 
 
 def list_distance_individuals(session, video_id: str) -> list[dict]:
+    task = resolve_task(session, video_id)
     individuals = (
         session.query(DistanceIndividual)
-        .filter_by(video_id=video_id)
+        .filter_by(task_id=task.id)
         .order_by(DistanceIndividual.individual_number)
         .all()
     )
@@ -346,7 +322,7 @@ def list_distance_individuals(session, video_id: str) -> list[dict]:
             DistanceIndividual,
             DistanceIndividualTag.individual_id == DistanceIndividual.id,
         )
-        .filter(DistanceIndividual.video_id == video_id)
+        .filter(DistanceIndividual.task_id == task.id)
         .order_by(DistanceIndividualTag.tag_id)
     ):
         tags.setdefault(individual_id, []).append(tag_id)

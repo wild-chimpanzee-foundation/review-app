@@ -389,9 +389,9 @@ class TagMixin(ProviderBase):
             # explicit video completion in the same transaction as the deletion.
             conn.execute(
                 text(
-                    "UPDATE distance_video_reviews SET completed_by = NULL, completed_at = NULL "
-                    "WHERE video_id IN ("
-                    "SELECT di.video_id FROM distance_individual_tags dit "
+                    "UPDATE distance_review_tasks SET completed_by = NULL, completed_at = NULL, "
+                    "completion_outcome = NULL WHERE id IN ("
+                    "SELECT di.task_id FROM distance_individual_tags dit "
                     "JOIN distance_individuals di ON di.id = dit.individual_id "
                     "WHERE dit.tag_id = :tid)"
                 ),

@@ -11,10 +11,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from review_app.backend.camera_layout import deployment_key
 from review_app.backend.db.models import (
     DistanceIndividual,
+    DistanceReviewTask,
     DistanceSample,
-    DistanceVideoReview,
-    IndividualObservation,
-    ModelAnnotation,
     Project,
     ProjectDir,
     ReferenceFrame,
@@ -26,6 +24,7 @@ from review_app.backend.db.models import (
 )
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.distance_review import reopen_individual_review
+from review_app.backend.provider.distance_tasks import ensure_tasks
 
 
 def _record(row) -> dict:
@@ -54,53 +53,46 @@ def get_distance_video_queue(
     camera_id: str | None = None,
     status: str | None = None,
 ) -> list[dict]:
-    query = session.query(Video).filter(
-        Video.project_id == project_id,
-        Video.is_missing.is_(False),
-        ~reference_tagged(session),
+    ensure_tasks(session, project_id)
+    query = (
+        session.query(Video, DistanceReviewTask)
+        .join(DistanceReviewTask, DistanceReviewTask.video_id == Video.video_id)
+        .filter(
+            Video.project_id == project_id, Video.is_missing.is_(False), ~reference_tagged(session)
+        )
     )
     if camera_id:
         query = query.filter(Video.camera_id == camera_id)
+    if species_id:
+        if session.get(Species, species_id) is None:
+            raise ValueError("Species not found")
+        query = query.filter(DistanceReviewTask.species_id == species_id)
     if status:
         if status not in {"not_started", "in_progress", "completed"}:
             raise ValueError("Invalid distance review status")
-        review_exists = session.query(DistanceVideoReview.video_id).filter(
-            DistanceVideoReview.video_id == Video.video_id
-        )
         if status == "not_started":
-            query = query.filter(~review_exists.exists())
-        elif status == "completed":
             query = query.filter(
-                review_exists.filter(DistanceVideoReview.completed_at.is_not(None)).exists()
+                DistanceReviewTask.verified_at.is_(None), DistanceReviewTask.completed_at.is_(None)
             )
+        elif status == "completed":
+            query = query.filter(DistanceReviewTask.completed_at.is_not(None))
         else:
             query = query.filter(
-                review_exists.filter(DistanceVideoReview.completed_at.is_(None)).exists()
+                DistanceReviewTask.verified_at.is_not(None),
+                DistanceReviewTask.completed_at.is_(None),
             )
-    if species_id:
-        species = session.get(Species, species_id)
-        if species is None:
-            raise ValueError("Species not found")
-        query = query.filter(
-            or_(
-                session.query(DistanceIndividual.id)
-                .filter_by(species_id=species_id)
-                .filter(DistanceIndividual.video_id == Video.video_id)
-                .exists(),
-                session.query(IndividualObservation.id)
-                .filter_by(species_id=species_id)
-                .filter(IndividualObservation.video_id == Video.video_id)
-                .exists(),
-                session.query(ModelAnnotation.id)
-                .filter(
-                    ModelAnnotation.video_id == Video.video_id,
-                    ModelAnnotation.annotation_type.in_(("species", "object_detection")),
-                    ModelAnnotation.value_text == species.scientific_name,
-                )
-                .exists(),
-            )
+    return [
+        {
+            **_record(video),
+            "task_id": task.id,
+            "species_id": task.species_id,
+            "source_count": task.source_count,
+            "completion_outcome": task.completion_outcome,
+        }
+        for video, task in query.order_by(
+            Video.camera_id, Video.video_path, DistanceReviewTask.species_id
         )
-    return [_record(row) for row in query.order_by(Video.camera_id, Video.video_path)]
+    ]
 
 
 def register_reference_video(session, project_id: str, camera_id: str, video_path: str) -> dict:

@@ -92,11 +92,49 @@ def test_failed_v23_upgrade_rolls_back_ddl_data_and_version(legacy_database, mon
     migrations.run_migrations(engine)
 
 
+def test_task_transition_discards_only_legacy_distance_evidence(legacy_database, monkeypatch):
+    engine = legacy_database
+    with monkeypatch.context() as patch:
+        patch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:23])
+        migrations.run_migrations(engine)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("""
+            INSERT INTO reference_videos VALUES ('ref', 'project', 'camera', 'ref.mp4')
+        """)
+        conn.exec_driver_sql("""
+            INSERT INTO reference_frames (id, reference_video_id, offset_ms, playback_offset_ms, distance_m)
+            VALUES ('frame', 'ref', 1000, 1000.5, 2.5)
+        """)
+        conn.exec_driver_sql("""
+            INSERT INTO distance_individuals
+                (id, video_id, individual_number, species_id, first_seen_offset_ms, updated_at)
+            VALUES ('legacy', 'video', 1, 'species', 0, '2026-01-01')
+        """)
+        before = {
+            table: conn.exec_driver_sql(f'SELECT * FROM "{table}"').all()
+            for table in (
+                "reference_videos",
+                "reference_frames",
+                "individual_observations",
+                "video_tags",
+            )
+        }
+    Base.metadata.create_all(engine)
+    migrations.run_migrations(engine)
+    with engine.connect() as conn:
+        for table, rows in before.items():
+            assert conn.exec_driver_sql(f'SELECT * FROM "{table}"').all() == rows
+        assert conn.exec_driver_sql("SELECT count(*) FROM distance_individuals").scalar() == 0
+        assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
+
+
 def test_v22_upgrade_creates_final_distance_schema_directly(legacy_database):
     engine = legacy_database
     migrations.run_migrations(engine)
     with engine.begin() as conn:
-        assert conn.exec_driver_sql("SELECT version FROM _schema_version").scalar() == 23
+        assert conn.exec_driver_sql("SELECT version FROM _schema_version").scalar() == len(
+            migrations.MIGRATIONS
+        )
         tables = {
             row[0]
             for row in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")
@@ -104,23 +142,23 @@ def test_v22_upgrade_creates_final_distance_schema_directly(legacy_database):
         assert "distance_imports" in tables
         assert not any(name.startswith("distance_ai_") for name in tables)
         conn.exec_driver_sql("""
+            INSERT INTO distance_review_tasks
+                (id, video_id, species_id, source_count, completion_history, rejected_ai, alignment_mode, imported_sample_times_s, verified_by, verified_at)
+            VALUES ('task', 'video', 'species', 3, '[]', '[]', 'imported', '[1.250000001]', 'AI', '2026-01-01')
+        """)
+        conn.exec_driver_sql("""
             INSERT INTO distance_individuals
-                (id, video_id, individual_number, species_id, age, sex,
+                (id, task_id, video_id, individual_number, species_id, age, sex,
                  first_seen_offset_ms, first_seen_playback_ms, updated_at)
-            VALUES ('animal', 'video', 1, 'species', 'Unknown', 'Unknown',
+            VALUES ('animal', 'task', 'video', 1, 'species', 'Unknown', 'Unknown',
                     1250, 1250.000001, '2026-01-01')
         """)
         conn.exec_driver_sql("""
             INSERT INTO distance_individuals
-                (id, video_id, individual_number, species_id, age,
+                (id, task_id, video_id, individual_number, species_id, age,
                  first_seen_offset_ms, initial_carrier_individual_id, updated_at)
-            VALUES ('infant', 'video', 2, 'species', 'Infant',
+            VALUES ('infant', 'task', 'video', 2, 'species', 'Infant',
                     1250, 'animal', '2026-01-01')
-        """)
-        conn.exec_driver_sql("""
-            INSERT INTO distance_video_reviews
-                (video_id, alignment_mode, imported_sample_times_s, verified_by, verified_at)
-            VALUES ('video', 'imported', '[1.250000001]', 'AI', '2026-01-01')
         """)
         conn.exec_driver_sql("""
             INSERT INTO distance_samples
@@ -128,7 +166,7 @@ def test_v22_upgrade_creates_final_distance_schema_directly(legacy_database):
             VALUES ('proposal', 'animal', 1250, 'pending', '{"time_s": 1.250000001}', '2026-01-01')
         """)
         assert conn.exec_driver_sql(
-            "SELECT recorded_start, started_at FROM distance_video_reviews"
+            "SELECT recorded_start, started_at FROM distance_review_tasks"
         ).one() == (None, None)
         assert conn.exec_driver_sql(
             "SELECT reference_frame_id, distance_m, labeled_by, labeled_at FROM distance_samples"

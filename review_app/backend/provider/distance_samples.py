@@ -11,9 +11,9 @@ from review_app.backend.db.distance_behaviors import ensure_unidentified_behavio
 from review_app.backend.db.models import (
     Behavior,
     DistanceIndividual,
+    DistanceReviewTask,
     DistanceSample,
     DistanceSampleBehavior,
-    DistanceVideoReview,
     ProjectDir,
     ReferenceFrame,
     ReferenceVideo,
@@ -39,8 +39,8 @@ def scheduled_sample(session, individual_id: str, offset_ms: int):
     individual = session.get(DistanceIndividual, individual_id)
     if individual is None:
         raise ValueError("Distance individual not found")
-    review = session.get(DistanceVideoReview, individual.video_id)
-    if review is None:
+    review = session.get(DistanceReviewTask, individual.task_id)
+    if review is None or review.verified_at is None:
         raise ValueError("Verify the camera recording time before annotating samples")
     video = session.get(Video, individual.video_id)
     if offset_ms not in review_offsets(review, video.duration_sec):
@@ -122,8 +122,8 @@ def save_distance_sample(
     infant = None
     if infant_id:
         infant = session.get(DistanceIndividual, infant_id)
-        if infant is None or infant.video_id != video.video_id or infant.id == individual.id:
-            raise ValueError("Carried infant must be another individual in this video")
+        if infant is None or infant.task_id != individual.task_id or infant.id == individual.id:
+            raise ValueError("Carried infant must be another individual in this task")
         if infant.age != "Infant":
             raise ValueError("Select an individual with age Infant")
         if infant.species_id != individual.species_id:
@@ -157,11 +157,12 @@ def save_distance_sample(
     if create_infant:
         last_number = (
             session.query(func.max(DistanceIndividual.individual_number))
-            .filter_by(video_id=video.video_id)
+            .filter_by(task_id=individual.task_id)
             .scalar()
         )
         infant = DistanceIndividual(
             video_id=video.video_id,
+            task_id=individual.task_id,
             individual_number=last_number + 1,
             species_id=individual.species_id,
             first_seen_offset_ms=individual.first_seen_offset_ms,
@@ -178,7 +179,7 @@ def save_distance_sample(
         )
         session.add(infant)
         session.flush()
-        review = session.get(DistanceVideoReview, video.video_id)
+        review = session.get(DistanceReviewTask, individual.task_id)
         if review:
             session.add_all(
                 DistanceSample(

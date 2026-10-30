@@ -10,7 +10,7 @@ from sqlalchemy import or_
 from review_app.backend.db.models import (
     Behavior,
     DistanceIndividual,
-    DistanceVideoReview,
+    DistanceReviewTask,
     IndividualObservation,
     Species,
     Video,
@@ -41,12 +41,14 @@ from review_app.backend.provider.distance_review import (
     finish_video,
     get_review_state,
     reconcile_video_completion,
+    record_absence,
     refresh_individual_completion,
     review_offsets,
     set_active_individual,
     verify_recording_time,
 )
 from review_app.backend.provider.distance_samples import save_distance_sample
+from review_app.backend.provider.distance_tasks import clear_completion, resolve_task
 
 
 def _offset(value: int) -> None:
@@ -113,7 +115,7 @@ class DistanceMixin(ProviderBase):
         camera_id: str | None = None,
         status: str | None = None,
     ) -> list[dict]:
-        with self.Session() as session:
+        with self.Session.begin() as session:
             return get_distance_video_queue(
                 session, project_id, species_id, camera_id=camera_id, status=status
             )
@@ -317,7 +319,8 @@ class DistanceMixin(ProviderBase):
         if not isinstance(opening_even_second, bool):
             raise ValueError("Check whether the opening timestamp is even")
         with self.Session() as session:
-            video = session.get(Video, video_id)
+            task = resolve_task(session, video_id)
+            video = session.get(Video, task.video_id)
             if video is None:
                 raise ValueError("Video not found")
             if video.duration_sec is None or playback_offset_ms >= video.duration_sec * 1000:
@@ -418,7 +421,7 @@ class DistanceMixin(ProviderBase):
             )
 
     def get_distance_review_state(self, video_id: str, annotator_name: str) -> dict:
-        with self.Session() as session:
+        with self.Session.begin() as session:
             return get_review_state(session, video_id, annotator_name)
 
     def apply_distance_to_end(
@@ -463,8 +466,8 @@ class DistanceMixin(ProviderBase):
             if individual is None:
                 raise ValueError("Distance individual not found")
             video = session.get(Video, individual.video_id)
-            review = session.get(DistanceVideoReview, individual.video_id)
-            if review is None:
+            review = session.get(DistanceReviewTask, individual.task_id)
+            if review is None or review.verified_at is None:
                 raise ValueError("Verify the camera recording time before annotating samples")
             schedule = review_offsets(review, video.duration_sec)
             if offset_ms not in schedule:
@@ -502,7 +505,7 @@ class DistanceMixin(ProviderBase):
                 affected = session.get(DistanceIndividual, affected_id)
                 if affected is not None:
                     refresh_individual_completion(session, affected, scheduled_offsets)
-            review.completed_by = review.completed_at = None
+            clear_completion(review)
             return {"samples": rows, "infant_id": infant_id}
 
     def save_distance_sample(
@@ -545,6 +548,18 @@ class DistanceMixin(ProviderBase):
     def finish_distance_individual(self, individual_id: str, annotator_name: str) -> None:
         with self.Session.begin() as session:
             finish_individual(session, individual_id, annotator_name)
+
+    def record_distance_task_absence(
+        self, task_id: str, annotator_name: str, *, reject_ai: bool = False
+    ) -> None:
+        with self.Session.begin() as session:
+            record_absence(
+                session, task_id, annotator_name, self._utcnow_dt(), reject_ai=reject_ai
+            )
+
+    def finish_distance_task(self, task_id: str, annotator_name: str) -> None:
+        with self.Session.begin() as session:
+            finish_video(session, task_id, annotator_name, self._utcnow_dt())
 
     def finish_distance_video(self, video_id: str, annotator_name: str) -> None:
         with self.Session.begin() as session:

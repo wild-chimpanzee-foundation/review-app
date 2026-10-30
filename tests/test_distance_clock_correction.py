@@ -12,7 +12,7 @@ from review_app.app import config as app_config
 from review_app.app.pages.distance_review import clock_dialog as clock_module
 from review_app.app.pages.distance_review import page as page_module
 from review_app.app.pages.distance_review.page import DistanceReviewPage
-from review_app.backend.db.models import Base, DistanceVideoReview
+from review_app.backend.db.models import Base, DistanceReviewTask
 from review_app.backend.distance_timing import sample_camera_time
 from sqlalchemy import event, text
 
@@ -105,8 +105,8 @@ def test_timestamp_correction_preserves_all_evidence_and_completion(clock_data, 
     old_state = dp.get_distance_review_state(video_id, "alice")
     dp.calibrate_distance_clock(video_id, CAMERA_TIME + timedelta(seconds=seconds), ANCHOR, "bob")
     after = snapshot(dp)
-    assert {k: v for k, v in before.items() if k != "distance_video_reviews"} == {
-        k: v for k, v in after.items() if k != "distance_video_reviews"
+    assert {k: v for k, v in before.items() if k != "distance_review_tasks"} == {
+        k: v for k, v in after.items() if k != "distance_review_tasks"
     }
     new_state = dp.get_distance_review_state(video_id, "alice")
     assert new_state["offsets"] == old_state["offsets"]
@@ -180,7 +180,7 @@ def test_realignment_resets_only_this_videos_distance_tracks(clock_data):
         "distance_individual_tags",
         "distance_sample_behaviors",
         "distance_review_progress",
-        "distance_video_reviews",
+        "distance_review_tasks",
     }
     assert {k: v for k, v in after.items() if k not in reset_tables} == {
         k: v for k, v in before.items() if k not in reset_tables
@@ -198,14 +198,14 @@ def test_failed_realignment_rolls_back_deleted_tracks(clock_data):
     def reject_clock_update(*_args):
         raise ValueError("Simulated clock write failure")
 
-    event.listen(DistanceVideoReview, "before_update", reject_clock_update)
+    event.listen(DistanceReviewTask, "before_update", reject_clock_update)
     try:
         with pytest.raises(ValueError, match="Simulated"):
             dp.calibrate_distance_clock(
                 data["videos"][0], CAMERA_TIME, 1120.5, "bob", reset_tracks=True
             )
     finally:
-        event.remove(DistanceVideoReview, "before_update", reject_clock_update)
+        event.remove(DistanceReviewTask, "before_update", reject_clock_update)
     assert snapshot(dp) == before
 
 
@@ -552,7 +552,7 @@ async def test_initial_even_frame_alignment_with_optional_camera_time(
     dp, video_id = data["dp"], data["videos"][0]
     dp.align_distance_by_parity(video_id, True, "alice", reset_tracks=True)
     with dp.Session.begin() as session:
-        session.delete(session.get(DistanceVideoReview, video_id))
+        session.delete(session.get(DistanceReviewTask, video_id))
     await user.open("/clock-correction")
     assert app_config.DISTANCE_CLOCK_ALIGNMENT_MODE == "simplified"
     await user.should_not_see("Exact alignment")

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 import pytest
-from review_app.backend.db.models import DistanceVideoReview, Video
+from review_app.backend.db.models import DistanceReviewTask, Video
 
 
 @pytest.mark.parametrize("status", [None, "not_started", "in_progress", "completed"])
@@ -14,15 +14,12 @@ def test_missing_video_is_excluded_from_distance_queue_without_losing_evidence(
 
     if status in {"in_progress", "completed"}:
         with dp.Session.begin() as session:
-            session.add(
-                DistanceVideoReview(
-                    video_id=video_id,
-                    recorded_start=datetime(2026, 10, 12),
-                    verified_by="alice",
-                    completed_by="alice" if status == "completed" else None,
-                    completed_at=datetime(2026, 10, 12) if status == "completed" else None,
-                )
-            )
+            task = session.get(DistanceReviewTask, data["individual"]["task_id"])
+            task.recorded_start = datetime(2026, 10, 12)
+            task.verified_by = "alice"
+            task.verified_at = datetime(2026, 10, 12)
+            task.completed_by = "alice" if status == "completed" else None
+            task.completed_at = datetime(2026, 10, 12) if status == "completed" else None
 
     filters = {"species_id": data["species_id"], "camera_id": "cam_x", "status": status}
     assert video_id in {

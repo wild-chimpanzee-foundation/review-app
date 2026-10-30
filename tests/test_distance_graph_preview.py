@@ -15,8 +15,8 @@ from review_app.app.pages.distance_review.tracks import PREVIEW_COLOR, track_opt
 from review_app.backend.db.models import (
     DistanceIndividual,
     DistanceReviewProgress,
+    DistanceReviewTask,
     DistanceSample,
-    DistanceVideoReview,
 )
 
 pytest_plugins = ["nicegui.testing.user_plugin"]
@@ -32,7 +32,7 @@ def snapshot(dp):
                 DistanceIndividual,
                 DistanceSample,
                 DistanceReviewProgress,
-                DistanceVideoReview,
+                DistanceReviewTask,
             )
         }
 

@@ -250,6 +250,13 @@ def distance_data(provider_with_project):
             text("SELECT id FROM species WHERE scientific_name='deer'")
         ).scalar()
         behavior_id = conn.execute(text("SELECT id FROM behaviors WHERE key='grazing'")).scalar()
+    from review_app.backend.db.models import IndividualObservation
+
+    with dp.Session.begin() as session:
+        for video_id in videos:
+            session.add(
+                IndividualObservation(video_id=video_id, id=1000, species_id=species_id, count=1)
+            )
     reference = dp.register_reference_video(project.id, "cam_x", "references/patrol.mp4")
     frame = dp.add_reference_frame(reference["id"], 3500, 5.0)
     individual = dp.create_distance_individual(
