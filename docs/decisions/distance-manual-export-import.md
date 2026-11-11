@@ -1,8 +1,8 @@
 # Manual Distance Annotation Export and Import
 
-**Status:** Planning notes; not implemented. Establish a manual annotation
-export/import round trip before building annotator work-package generation.
-The file layout and encoding below are proposals, not a frozen format.
+**Status:** Implemented initial manual-only round trip and analysis export under
+**Model Import → Manual Distance**. Annotator package generation and baseline-aware
+return reconciliation remain separate follow-ups.
 
 Related: [current Distance workflow](./reference-based-distance-annotation.md)
 and [Distance work packages](./distance-work-packages-plan.md).
@@ -12,129 +12,142 @@ and [Distance work packages](./distance-work-packages-plan.md).
 Start with exporting and importing saved manual Distance annotations. Keep this
 separate from recipient management, package generation, AI input packages, and
 baseline-aware package-return reconciliation. Ordinary Species Review labels
-must not be modified as a side effect of importing Distance annotations.
+are never modified as a side effect of importing Distance annotations.
 
-Distinguish two uses:
+Two outputs are available:
 
-- **Analysis export:** a flat table of measurements is useful on its own.
-- **Editable round trip:** restore tasks, timing, individual identity, references,
-  visibility skips, relationships, and completion, not just numeric distances.
+- **Analysis TSV:** one row per saved sample, including visibility skips. It is
+  not an editable backup; empty/explicitly absent tasks have no sample rows.
+- **Editable ZIP:** restores whole tasks, timing, individual identity, references,
+  visibility skips, relationships, completion/history, and resume state.
 
-A results-only table must not be presented as a lossless editable backup. The
-current annotated-sample model requires a calibrated reference frame, not only a
-numeric distance.
+Version 1 deliberately rejects AI-linked tasks, individuals, samples, and selected
+references rather than dropping their provenance. Imported AI schedules and
+rejected-AI history are also outside this manual format. AI input ZIPs, ordinary
+project bundles, and future work-package returns are different formats.
 
-## Species, video, date, and time selection
+## Confirmed species and time selection
 
-**Requested:** Per-species Distance export must allow selecting any video from
-any day showing the selected species between a start time and an end time.
-Selection must not depend on ordinary annotator assignments or be restricted to
-the currently open day/video. Support selecting videos across days and previewing
-the selected set before export.
+Per-species export selects videos across all days using a recurring camera-local
+**time-of-day window**, for example **18:00–20:00 each day**. Match the video's
+**start time only**; overlap alone does not qualify. A video starting inside the
+window is included in full even if it ends outside it. This is not an absolute
+date/time interval or a playback interval within a video.
 
-Keep the following semantics explicit before implementation:
+**Showing the species** means a manually confirmed Species Review label for the
+selected species, with positive or unspecified count. Unconfirmed predictions,
+a Distance task label, or Distance samples alone do not establish eligibility.
+An explicit Distance absence outcome may coexist with a positive source Species
+Review label and is preserved as such.
 
-- Does the start/end range mean camera time of day across selected dates, an
-  absolute date/time interval, or a playback interval within each video?
-- Does a matching interval select whole videos/tasks, or only the sample rows
-  inside that interval? A filtered analysis export and a full editable task export
-  need not have the same rules. Never treat omitted samples as deletions or absence.
-- Does "showing the species" mean confirmed Species Review presence, manual
-  Distance evidence of presence during the interval, or both? A species-task label
-  alone does not establish visibility at a particular sample; an explicit absent
-  task may still have positive source Species Review labels.
-- For camera-time filtering, define interval boundaries, overlap handling, and
-  overnight ranges. Camera time can be unknown even when playback alignment is
-  valid. Report such videos explicitly; do not silently use file timestamps as
-  verified camera time.
+Selection is independent of ordinary annotator assignments and the open day/video.
+Preview the set, then select which matching tasks to download. AI-linked tasks are
+shown with an error and are not preselected.
 
-## Proposed data layout
+Initial boundary rules:
 
-A flat sample table is the foundation: one row per saved individual/sample.
-Repeating individual attributes across rows is acceptable. Reject contradictory
-values for the same individual on import instead of choosing a row silently.
+- Start inclusive, end exclusive: `[18:00, 20:00)`.
+- End earlier than start means an overnight window, e.g. `[22:00, 02:00)`.
+- Both fields empty means all times; one missing boundary or equal boundaries
+  is rejected. Use 24-hour time inputs.
+- Use the task's verified `recorded_start`, not file creation metadata. Alignment
+  may be valid while absolute camera time is unknown. Such videos are listed
+  explicitly as excluded from a time-filtered export; an unfiltered export can
+  still include them. No file timestamp is silently promoted to camera time.
+- Editable exports always retain whole tasks. Omitted samples never imply absence
+  or deletion; only an explicit whole-task replace action removes current evidence.
 
-Candidate sample fields:
-
-- `video_path`: resolvable relative path, not a source-machine absolute path.
-- `task_id`: stable species-specific task identity.
-- `individual_id`: stable UUID, distinct from the displayed individual number.
-- `species`: scientific name, with an explicit mapping if local vocabulary IDs differ.
-- `offset_ms`: integer sample key.
-- `playback_time_s`: exact playback position, preserving fractional precision.
-- `distance_m`: numeric distance, empty for visibility skips.
-- `skip_reason`: distinguish `individual absent` from `midpoint not visible`.
-- `behaviors`: behavior keys, with a specified list encoding.
-- `sex`, `age`: individual attributes, including explicit Unknown.
-- `carried_by_individual_id`: within-task infant/carrier relationships.
-- `annotator`, `labeled_at`: evidence attribution and annotation time.
-
-Do not use an ambiguous single `timestamp` field. Playback position, camera
-wall-clock time, and annotation creation time have different meanings. Unknown
-camera time stays empty rather than being fabricated.
-
-For editable round trips, also preserve identifying position/bounding box,
-individual numbers/tags, reference selection, and the vocabulary definitions
-needed to interpret the exported keys.
-
-**Proposed simple archive:**
+## Version 1 archive
 
 ```text
 distance-annotations.zip
+  manifest.json
   tasks.tsv
+  individuals.tsv
   samples.tsv
   references.tsv
+  progress.tsv
+  species.tsv
+  behaviors.tsv
+  tags.tsv
 ```
 
-- `tasks.tsv`: task/video/species identity, source species/count context,
-  alignment and sampling schedule, completion/absence outcome and attribution.
-  Explicit absence needs a task record because it has no individual/sample rows.
-  An unfinished task must not become completed merely because rows were exported.
-- `samples.tsv`: sample evidence and enough individual data to restore the editor.
-  Include an explicit reference link for measured samples. Row omission means
-  unreviewed/not exported, never implicitly absent.
-- `references.tsv`: stable reference identities, calibrated distances, exact frame
-  positions, relative media paths, and calibration context required by evidence.
-  Masks or other non-tabular assets may need additional files if present.
+The manifest identifies `review-app.distance-manual`, integer version `1`, the
+source project ID, and media-root IDs. It contains no absolute source-machine paths.
 
-Footage remains separate. The exact file split, list encoding, and treatment of
-reference assets are still to be specified. Do not silently overwrite shared
-calibration used by other tasks. A first manual importer should preview explicit
-per-task replace-or-skip behavior, validate dependencies, and apply accepted tasks
-atomically; detailed package baseline merging is a later concern.
+- `tasks.tsv`: stable task ID, root-relative video path, camera, duration, scientific
+  species name, original source count, alignment/precise anchor positions, schedule,
+  current completion/absence and history, attribution. An empty or unfinished task
+  does not become completed just because it was exported.
+- `individuals.tsv`: stable UUID and task ID, individual number, age/sex (including
+  explicit Unknown), first-seen positions, identifying box, initial carrier link,
+  individual tags with attribution, and individual completion.
+- `samples.tsv`: stable UUID, individual ID, integer `offset_ms` sample key, saved
+  annotated/skipped state, calibrated reference ID and distance or visibility-skip
+  reason, sample-specific carrier, behavior keys and attribution.
+- `references.tsv`: selected reference identities, calibrated fractional distances,
+  precise frame positions, camera/root-relative media path, and inline mask context
+  where present. Includes dependencies used by the exported samples, not a complete
+  backup of every unused calibration in the project.
+- `progress.tsv`: task/annotator bookmark, active individual and update time.
+- Vocabulary tables: definitions for the used scientific species names, behavior
+  keys and individual-tag keys. Local vocabulary IDs are mapped by name/key.
 
-## Delimiters, decimals, and spreadsheet locales
+Playback alignment and precise anchor/first-seen/reference positions are retained
+as stored. A sample's integer schedule key is not a claim about an independently
+saved inspected playback frame. Camera time, playback position, and annotation
+creation time remain distinct; unknown camera time stays empty.
 
-**Problem raised:** English, German, and French spreadsheet defaults disagree
-about comma/semicolon field delimiters and decimal punctuation. The decimal
-separator is generally `.` or `,`; `;` is commonly a field delimiter, not a decimal
-separator. File-extension conventions alone do not resolve this.
+Footage remains separate. Media paths are relative to stable source root IDs;
+most-specific registered roots take precedence. On import, match those roots to
+local project folders. Matching root IDs are reused; a single source/destination
+root can map automatically. Ambiguous multi-root mappings require an explicit
+choice. Traversal/absolute media paths are rejected and no footage is extracted.
 
-**Recommendation:** Use a canonical UTF-8 **tab-separated** format (`.tsv`), with:
+## Restore semantics and safety
 
-- Literal tabs between fields and a header row with stable machine-readable names.
-- Decimal point `.` for numeric values, irrespective of application/UI language.
-- No thousands separators and no locale-dependent numeric formatting.
-- Empty fields for missing values; distinguish these from zero and explicit Unknown.
-- ISO-formatted dates and 24-hour times. Preserve naive camera-local time as such;
-  do not append a fabricated timezone. Preserve real timezone information where known.
-- Standard delimited-text quoting for tabs, quotes, or newlines inside a field;
-  use a proper parser, not string splitting. Define structured-list encoding separately.
-- UUIDs/paths treated as text, and enough numeric precision to retain source-frame timing.
-- Import tolerance for a UTF-8 BOM and common line endings.
+Upload, map roots, inspect the per-task preview, and explicitly choose **Replace
+task** or **Skip**. The default is skip. Videos must already be imported/synced in
+the destination project; camera/deployment and duration must match. Missing or
+incompatible dependencies are reported per task before restoration.
 
-Tabs eliminate the field-delimiter versus decimal-comma collision, but **do not
-force Excel/LibreOffice to interpret decimal points correctly**. Recommend using
-Text/CSV Import, selecting tab as the delimiter and a decimal-point numeric locale
-(e.g. English/US), with identifiers explicitly imported as text. Double-clicking a
-TSV is not a reliable cross-locale workflow. Quoting a decimal does not reliably
-control spreadsheet numeric interpretation either.
+- Replace restores that task's complete evidence and corresponding completion
+  atomically. It removes current individuals, samples and bookmarks for that task,
+  not another species task for the same video. This is not a fine-grained merge.
+- Existing canonical destination task/vocabulary identities are reused where
+  appropriate; otherwise source task/entity IDs are retained. An entity ID already
+  owned by another task/project is a conflict, not permission to overwrite it.
+- Shared references must match the exported frame position, distance, mask and
+  deployment. Conflicting calibration blocks that task; it is never silently
+  overwritten, even when replacing task evidence. Other independent tasks can
+  still import.
+- Validate graph ownership, schedules, boxes/attributes, carrier dependencies,
+  reference distances, vocabulary, explicit absence and completion consistency.
+- Revalidate under a database writer reservation and apply all accepted tasks in
+  one transaction. A failed write rolls back the accepted batch, including newly
+  installed dependencies. Exports read a consistent database snapshot.
+- Reimporting the same snapshot does not duplicate evidence or completion history.
+- Skips leave source data untouched. The app does not retain skipped payloads or
+  archive the upload. The UI lists imported/skipped task IDs; keep the original ZIP
+  to retry. Imports do not update ordinary labels, assignments or video metadata.
 
-The app should always read its own canonical files without locale guessing. If
-support for externally edited, decimal-comma files is added, provide an explicit
-import setting/preview and normalize numeric columns only. Do not globally replace
-commas or guess ambiguous numbers such as `1,234`.
+This initial manual restore is not the work-package baseline/return-merge contract.
 
-An optional XLSX analysis export with typed numeric cells could improve spreadsheet
-convenience later. It is not necessary for the initial machine round trip and
-should not silently become a second import contract.
+## Delimiters, decimals and spreadsheet locales
+
+The canonical format is UTF-8 **tab-separated** text with stable header names,
+decimal point `.`, no thousands separators, ISO dates/times, and empty fields for
+missing values. Zero and explicit Unknown remain distinct. Lists/objects use JSON
+inside properly quoted TSV cells; boolean columns use `0`/`1`. The reader tolerates
+a UTF-8 BOM and common line endings, but does not guess delimiters or decimal locales.
+Archives are limited to 50 MiB compressed and 100 MiB uncompressed.
+
+Tabs avoid comma-versus-decimal-comma delimiter collisions, but do not force Excel
+or LibreOffice to interpret decimal points correctly. Use Text/CSV Import with tab
+as delimiter, a decimal-point numeric locale, and identifiers imported as text.
+Double-clicking a TSV is not a reliable cross-locale workflow. Do not globally
+replace commas or guess ambiguous numbers such as `1,234`.
+
+An optional typed XLSX analysis export and externally edited decimal-comma imports
+remain deferred. The editable archive is an application snapshot, not a supported
+spreadsheet-editing or whole-database-backup contract.

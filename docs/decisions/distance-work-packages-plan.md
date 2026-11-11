@@ -4,11 +4,11 @@
 completion, and explicit absence are implemented. Package generation, portable
 handoff/return, and the supervisor package UI remain planned.
 
-**Next prerequisite:** Define and implement a simple manual Distance annotation
-export/import round trip before package generation. See [manual export/import
-planning notes](./distance-manual-export-import.md) for candidate tables,
-per-species video/date/time selection, and a locale-independent TSV proposal.
-This step does not yet implement the package-return merge contract below.
+**Prerequisite implemented:** The initial manual-only Distance annotation
+export/import round trip and analysis TSV are available under Model Import →
+Manual Distance. See the [manual export/import contract](./distance-manual-export-import.md)
+for tables, per-species start-time selection, and locale-independent TSV encoding.
+This does not yet implement package generation or the package-return merge contract below.
 
 Requirements originate in [Distance Annotation Feedback, item 1](./distance-annotation-feedback.md#1-independent-species-based-annotator-packages).
 The [current Distance workflow](./reference-based-distance-annotation.md) remains
@@ -22,6 +22,13 @@ the authoritative description of shipped behavior.
 - Create tasks from manual/confirmed Species Review species and counts.
   Unconfirmed model predictions do not establish eligibility. No additional
   ordinary Review completion flag or ordinary assignment is required.
+- Select videos across days using a recurring camera-local time-of-day window
+  (for example 18:00–20:00 each day), matching the video's start time only,
+  independently of ordinary assignments. Overlap alone does not qualify.
+  "Showing the species" means a manually confirmed Species Review label, not
+  model predictions or Distance evidence alone. See the [export selection
+  notes](./distance-manual-export-import.md#confirmed-species-and-time-selection)
+  for the start-inclusive/end-exclusive and overnight rules.
 - A video with confirmed chimps and duikers appears twice in the Distance queue:
   once for the chimp task and once for the duiker task.
 - Each task permits annotation only of its target species. Its individuals,
@@ -237,7 +244,8 @@ The local task foundation and annotator task UI are implemented. Eligibility
 creates canonical tasks idempotently from confirmed labels; correcting source
 labels does not automatically delete existing tasks. Schema migration 24 discards
 legacy Distance annotation state while preserving references and ordinary Review.
-Package preview/generation, distribution UI, and handoff/return remain to be built.
+Manual-only task snapshots and analysis export are implemented. Package
+preview/generation, distribution UI, and baseline-aware handoff/return remain to be built.
 
 1. Task model, schema transition, eligibility preview, task-owned alignment,
    species restrictions, and completion/backend behavior.

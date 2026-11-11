@@ -16,6 +16,7 @@ from review_app.backend.db.models import Base
 from review_app.backend.provider.annotation_repository import AnnotationMixin
 from review_app.backend.provider.assignment_service import AssignmentMixin
 from review_app.backend.provider.distance_repository import DistanceMixin
+from review_app.backend.provider.distance_transfer import DistanceTransferMixin
 from review_app.backend.provider.import_service import ImportMixin
 from review_app.backend.provider.project_repository import ProjectMixin
 from review_app.backend.provider.species import SpeciesMixin
@@ -42,6 +43,7 @@ class LocalDataProvider(
     TagMixin,
     AssignmentMixin,
     DistanceMixin,
+    DistanceTransferMixin,
 ):
     """SQLite-backed local data provider for manual review + constrained model imports."""
 

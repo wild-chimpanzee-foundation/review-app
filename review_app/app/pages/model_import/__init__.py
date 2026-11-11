@@ -7,6 +7,7 @@ from review_app.app.utils import get_or_create_data_provider, render_uninitializ
 
 from ._annotations_tab import setup_annotations_tab
 from ._distance_ai_tab import setup_distance_ai_tab
+from ._distance_manual_tab import setup_distance_manual_tab
 from ._metadata_tab import setup_metadata_tab
 from ._model_tab import setup_model_tab
 
@@ -40,6 +41,7 @@ async def setup_model_import():
         with ui.tabs().classes("w-full") as tabs:
             tab_model = ui.tab("model_import", label=t("model_import_title"))
             tab_distance_ai = ui.tab("distance_ai", label=t("distance_ai_title"))
+            tab_distance_manual = ui.tab("distance_manual", label=t("distance_manual_title"))
             tab_annotations = ui.tab("annotations", label=t("annotation_export_import_title"))
             tab_metadata = ui.tab("metadata", label=t("metadata_import_title"))
 
@@ -48,6 +50,8 @@ async def setup_model_import():
                 await setup_model_tab(dp, loading_dialog)
             with ui.tab_panel(tab_distance_ai):
                 await setup_distance_ai_tab(dp, loading_dialog)
+            with ui.tab_panel(tab_distance_manual):
+                await setup_distance_manual_tab(dp, loading_dialog)
             with ui.tab_panel(tab_annotations):
                 setup_annotations_tab(dp, loading_dialog)
             with ui.tab_panel(tab_metadata):

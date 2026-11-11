@@ -8,7 +8,11 @@ input is supported via Model Import → AI Distance (see the
 AI predictions remain separate from human evidence. Their supplied playback times
 are retained exactly, with no manual clock verification required. Imports create
 full-video AI drafts with inferred Absent recommendations at missing samples, and
-original animal masks can be overlaid at prediction frames. Research export and transfer remain deferred. See the [cleanup plan](./distance-branch-cleanup-plan.md) for
+original animal masks can be overlaid at prediction frames. Initial manual-only
+analysis TSV and editable task snapshots are available under Model Import → Manual
+Distance; see the [export/import contract](./distance-manual-export-import.md).
+Annotator work packages and AI-aware transfer remain deferred.
+See the [cleanup plan](./distance-branch-cleanup-plan.md) for
 migration consolidation, development-database recovery, and validation status.
 
 ## Approach
@@ -531,22 +535,35 @@ Sample invariants:
   primary keys. Box geometry is all-null or complete/valid; first-seen offsets
   must be inside the video. Parent/infant writes and reopening remain atomic.
 
-## Exported Dataset (Deferred)
+## Manual Distance export and restore
 
-The research CSV will emit one row per **annotated** Distance sample, not ordinary
-Review observations. Include species, age, sex, individual number/ID, exact
-meters, sample behaviors, individual tags, annotator, folder/location/video, and
-sample camera timestamp (year/month/day/hour/minute/second), explicitly unknown
-when Simplified camera time has not been explicitly confirmed. Skip rows are omitted.
+Model Import → Manual Distance provides a flat analysis TSV and a versioned
+editable ZIP snapshot. Selection uses manually confirmed Species Review labels,
+independently of ordinary assignments. An optional recurring time-of-day window
+checks only the video's verified camera-local start time across days; unknown
+times are reported rather than inferred from file metadata.
 
-A separate transfer bundle must preserve skips as well as identities, anchors,
-attributes, behavior/tag vocabulary, reference provenance/media-path resolution,
-verified timing, completion, and resume state. Ordinary annotation CSV is not a
-full-fidelity Distance transfer or database backup.
+The analysis TSV includes annotated and visibility-skipped samples, species,
+individual identity/number, age/sex, distance, behaviors/tags, carrier links,
+reference ID, camera time where known, and attribution. Empty/explicitly absent
+tasks have no sample rows and require the editable ZIP to preserve their outcome.
+
+The editable ZIP retains whole manual tasks, precise alignment, individuals and
+boxes, samples/skips, relationships, used reference calibration/media-path context,
+vocabulary, completion/history and bookmarks. Restore uses explicit per-task
+replace-or-skip decisions and transactional writes. Shared calibration conflicts
+block the dependent task; ordinary Review labels and other species tasks are not
+modified. AI-linked state is explicitly unsupported in this initial manual format.
+
+See the [manual export/import contract](./distance-manual-export-import.md) for
+format, media-root mapping, limits and restoration semantics. Neither a flat
+analysis table nor ordinary annotation CSV is an editable Distance or database backup.
 
 ## Remaining Work
 
-- Research CSV and transfer-bundle design/implementation.
+- Species-specific annotator package generation and baseline-aware returns,
+  including AI-aware/provenance-preserving transfer. Manual-only snapshots are
+  implemented but are not work packages.
 - AI assistance: reference-mask overlays remain deferred. Imported animal masks are
   shown on their exact prediction frames with a visibility toggle; they hide during
   playback, seeking and box drawing. Selected masks are yellow and other animals gray.
