@@ -1,17 +1,16 @@
 # Manual Distance Annotation Export and Import
 
 **Status:** Implemented initial manual-only round trip and analysis export under
-**Model Import → Manual Distance**. Annotator package generation and baseline-aware
-return reconciliation remain separate follow-ups.
+**Model Import → Manual Distance**. Assignment handoff remains a separate, unimplemented workflow.
 
 Related: [current Distance workflow](./reference-based-distance-annotation.md)
-and [Distance work packages](./distance-work-packages-plan.md).
+and [assignment handoff](./assignment-handoff.md).
 
 ## Scope and delivery order
 
 Start with exporting and importing saved manual Distance annotations. Keep this
 separate from recipient management, package generation, AI input packages, and
-baseline-aware package-return reconciliation. Ordinary Species Review labels
+assignment returns. Ordinary Species Review labels
 are never modified as a side effect of importing Distance annotations.
 
 Two outputs are available:
@@ -131,7 +130,7 @@ incompatible dependencies are reported per task before restoration.
   archive the upload. The UI lists imported/skipped task IDs; keep the original ZIP
   to retry. Imports do not update ordinary labels, assignments or video metadata.
 
-This initial manual restore is not the work-package baseline/return-merge contract.
+This initial manual restore is separate from the assignment-handoff contract.
 
 ## Delimiters, decimals and spreadsheet locales
 

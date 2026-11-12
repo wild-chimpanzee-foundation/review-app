@@ -29,19 +29,11 @@ species individuals block absence; later additions invalidate it. Normal Finish
 requires at least one individual and complete evidence. Correcting Species Review
 or creating a task for another species happens separately, never automatically.
 
-**Return reconciliation:** Accept a task return only when its evidence and required
-alignment/reference/relationship dependencies can be applied consistently. On a
-conflict, the importer chooses for that task whether to overwrite source changes
-with the returned task or skip importing it. Overwrite applies the task and its
-completion claim atomically; skip leaves source evidence unchanged and does not
-store the skipped return in the app. Other safe species tasks for the same video
-may still import. Preserve accepted submitted completion as provenance separately
-from current source completion. Provide an import summary showing the choice and
-record the decision with author/time. Users must retain the original import package
-if they want to inspect or retry skipped tasks later; the app does not archive it.
-No pending-return list or later-resolution workflow is required for the first release.
-Richer resolution UI follows later. Independent duplicate reviews of one species are
-not required, but a source task and its distributed copy may diverge.
+**Assignment handoff:** The [assignment-handoff design](./assignment-handoff.md)
+defines preparation, fresh annotator projects, partial and repeated returns, and
+acceptance. Each Distance assignment targets exactly one species. Acceptance uses
+Keep existing or Use imported for whole tasks, with an impact preview; serialization
+and storage remain undecided.
 
 **Implemented locally:** Species-specific tasks, task-scoped alignment, annotation,
 resume/completion, and explicit absence with pending-AI rejection. The queue uses
@@ -52,7 +44,7 @@ Treat Distance
 annotation as unreleased: no live databases use it. The developer's existing
 annotations are disposable or can be migrated manually; automatic legacy annotation
 migration is not required. Preserve existing reference frames and their
-calibration/media. See the [work-package implementation plan](./distance-work-packages-plan.md)
+calibration/media. See the [assignment-handoff design](./assignment-handoff.md)
 and [Review issues design](./review-issues.md).
 
 ## 2. Use a 24-hour timestamp
@@ -268,9 +260,8 @@ All ten feedback items are captured. Key clarifications:
 - Mixed-species videos have separate target-species-only Distance tasks, with
   independent alignment, evidence, and completion. Packages distribute these tasks
   using manual/confirmed Species Review species and counts. No target species
-  visible is an explicit completion outcome. Conflicting task returns are overwritten
-  atomically or skipped; skipped payloads are not retained in the app. Accepted
-  submitted completion is distinct from current source completion.
+  visible is an explicit completion outcome. Assignment handoff follows the
+  agreed workflow in the assignment-handoff design.
 - Simplified is the frontend default, using an even frame near the midpoint and
   optional time confirmation. Exact remains only as a code-configured workflow.
 - The first-sample lead-in plays from the video opening.

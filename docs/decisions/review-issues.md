@@ -3,8 +3,7 @@
 **Status:** Agreed product direction and phased scope. Backend/frontend structure
 below is a design proposal, not implemented behavior.
 
-Related: [Distance work packages](./distance-work-packages-plan.md) and
-[Distance feedback](./distance-annotation-feedback.md#1-independent-species-based-annotator-packages).
+Related: [assignment handoff](./assignment-handoff.md).
 
 ## Purpose and terminology
 
@@ -15,9 +14,8 @@ than a user-configurable rules engine. Use Review issues as the umbrella section
 - **Conflicts:** competing returned answers that require a reconciliation decision.
 
 Do not assume a discrepancy identifies which review is wrong. Do not silently
-correct annotations or overwrite conflicting work. Any overwrite of a conflicting
-task requires the importer's explicit choice. Skipping a task leaves source data
-unchanged; the app does not retain the skipped payload or archive the import package.
+correct annotations or overwrite conflicting work. Replacing existing work requires the importer's explicit choice through the
+assignment-handoff preview. Keeping existing work leaves that unit unchanged.
 
 Two annotators reviewing the same video is not automatically a disagreement.
 Distance tasks for different target species are independent, including their
@@ -27,36 +25,14 @@ become a blocking conflict. Ordinary Species Review submissions can also overlap
 
 ## Agreed delivery scope
 
-### 1. Work-package release: safe return, minimal UI
+### Assignment handoff
 
-- Packages distribute stable species-specific tasks. Each task permits annotation
-  only of its target species and owns its alignment, individuals, and samples.
-- Completion is independent per task, with an explicit **No target species visible**
-  outcome. Source labels are manual Species Review species and counts; no additional
-  ordinary Review completion flag is required.
-- Accept unambiguous task returns only when their evidence and dependencies can be
-  applied consistently. If alignment, reference context, relationships, or evidence
-  conflict, the importer chooses per task whether to overwrite source changes with
-  the returned task or skip that task. Overwrite applies the returned evidence and
-  completion claim atomically; skip leaves source evidence and completion unchanged
-  without storing the skipped return in the app. Independent safe tasks may still import, and
-  the choice for one task does not affect other species tasks for the same video.
-- Preserve accepted submitted completion as provenance separately from current
-  source task completion. Skipped completion claims are not stored in the app.
-- Provide an import summary showing each conflict, the importer's overwrite-or-skip
-  choice, and which tasks were imported or skipped. Record the choice with author/time.
-  Users must retain the original import package for later inspection or retry; the
-  app does not archive it. Retry compares against the then-current source.
-- No retained skipped payloads, pending-return list, or later-resolution workflow
-  is required for the first release. A completed import may include skipped tasks;
-  the summary must not describe those tasks as imported. A sophisticated merge
-  editor or general warnings dashboard is not a prerequisite.
+The [assignment-handoff design](./assignment-handoff.md) owns return validation,
+impact previews, and Keep existing / Use imported policies for whole Species video
+states or Distance tasks. It requires neither baseline-aware comparison nor
+per-task conflict choices. A general Review issues page is not a prerequisite.
 
-Use the [conservative task-level return-merge contract](./distance-work-packages-plan.md#5-conservative-return-merge-contract).
-Apply each accepted task and its completion reconciliation transactionally;
-finer-grained partial merges are deferred.
-
-### 2. First QA follow-up: simple Review issues page
+### QA follow-up: simple Review issues page
 
 Four fixed checks:
 
@@ -68,20 +44,9 @@ Four fixed checks:
 | Overlapping annotator submissions | Separate submissions cover the same Distance task, or overlapping ordinary Species Review work, and need comparison. Different target-species tasks alone do not trigger this check. |
 
 Initial UI capabilities: explanation, evidence, links to existing review screens,
-recheck, and acknowledgement for warnings. Package-return conflicts are handled
-at import with a per-task overwrite-or-skip choice; inspecting or retrying skipped
-returns requires the user-retained original package. Corrections to source annotations happen in the existing review
-screens, not a new merge editor. Record explicit reconciliation separately from
-warning acknowledgement.
-
-### 3. Later: richer reconciliation
-
-Add side-by-side comparisons, selective merge actions, and shared reconciliation
-for ordinary Species Review. Potential additional fixed types include concurrent
-edits/deletions, possible duplicate Distance individuals, and incompatible returned
-alignment/calibration. Phase 1 reports conflicts and overwrite-or-skip decisions
-in the import summary, but does not retain skipped evidence. In-app preservation
-of alternative returned answers and richer resolution can follow later.
+recheck, and acknowledgement for warnings. Corrections happen in existing review
+screens. Return acceptance stays in the assignment-handoff preview; this page does
+not add a merge editor or a pending-return workflow.
 
 ## Confirmed animal-count semantics
 
@@ -143,23 +108,14 @@ project-level recheck for recovery/backfills.
 
 Acknowledgement records a human decision; it does not mutate annotation data.
 
-### Returned submissions
+### Returned work
 
-For the first release, retain the baseline needed for comparison and accepted-task
-provenance, including package/task identities and submitted completion/absence
-claims. Stable source identities and baseline-aware comparison distinguish unchanged
-old values from competing edits. Record overwrite-or-skip decisions with author/time,
-but do not store skipped payloads or create pending submissions for them. Users
-retain the original import package if they want to inspect or retry skipped tasks.
-Later source edits must not erase accepted historical submitted completion claims;
-source completion reflects only consistently accepted task evidence.
-
-Later reconciliation may add stored alternative returned payloads, source references,
-and reconciliation status. An issue row alone would not preserve an alternative
-returned answer; that storage and workflow are outside the first-release scope.
+Compare current accepted evidence. Assignment identity, scope validation, and
+whole-work replacement belong to assignment handoff; this proposal adds no
+baseline storage or alternative-return archive requirements.
 
 Do not match independent animals solely by local individual number. Do not
-silently change ordinary Species Review labels from a Distance discrepancy.
+silently change Species Review labels from a Distance discrepancy.
 
 ## Proposed frontend structure
 
@@ -186,14 +142,8 @@ acknowledge, with corrections made in the existing review screens.
 For outside-scope species, show the annotation and project scope, with correction
 links. A direct Add species to project action is a possible later convenience.
 
-For returned conflicts, the initial import summary shows the importer's per-task
-overwrite-or-skip decision. Skipped evidence is not available in an in-app detail
-view; inspecting or retrying it requires the original package. Record import
-decisions separately from warning acknowledgement.
-
-Later offer type-appropriate Keep current, Accept returned,
-or Resolve manually actions. Do not provide a universal Keep both action that
-could turn alternative edits into duplicate animals.
+For returned differences, use the assignment-handoff preview and its impact
+summary. Keep warning acknowledgement separate from data-changing acceptance.
 
 ## Safety and unresolved details
 
@@ -205,7 +155,6 @@ could turn alternative edits into duplicate animals.
   consequences. Retain decision provenance.
 - Exact issue schema, finer-grained merge actions, broader species-set comparison
   rules, duplicate matching, severity choices, and detailed layouts remain
-  implementation design. The initial per-task overwrite-or-skip behavior is
-  specified in the work-package plan.
+  implementation design. Return acceptance is specified in the assignment-handoff design.
 - Keep scope proportional: do not implement the entire future reconciliation
-  system as a prerequisite for Distance work packages.
+  system as a prerequisite for assignment handoff.

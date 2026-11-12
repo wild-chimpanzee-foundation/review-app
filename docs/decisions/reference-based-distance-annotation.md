@@ -11,7 +11,8 @@ full-video AI drafts with inferred Absent recommendations at missing samples, an
 original animal masks can be overlaid at prediction frames. Initial manual-only
 analysis TSV and editable task snapshots are available under Model Import → Manual
 Distance; see the [export/import contract](./distance-manual-export-import.md).
-Annotator work packages and AI-aware transfer remain deferred.
+[Assignment handoff](./assignment-handoff.md), including AI-aware transfer, remains
+unimplemented.
 See the [cleanup plan](./distance-branch-cleanup-plan.md) for
 migration consolidation, development-database recovery, and validation status.
 
@@ -561,9 +562,8 @@ analysis table nor ordinary annotation CSV is an editable Distance or database b
 
 ## Remaining Work
 
-- Species-specific annotator package generation and baseline-aware returns,
-  including AI-aware/provenance-preserving transfer. Manual-only snapshots are
-  implemented but are not work packages.
+- [Assignment handoff](./assignment-handoff.md), including AI-aware/provenance-preserving
+  transfer. Manual-only snapshots are implemented separately.
 - AI assistance: reference-mask overlays remain deferred. Imported animal masks are
   shown on their exact prediction frames with a visibility toggle; they hide during
   playback, seeking and box drawing. Selected masks are yellow and other animals gray.
