@@ -343,7 +343,7 @@ class ReferenceVideo(Base):
 class ReferenceFrame(Base):
     __tablename__ = "reference_frames"
     __table_args__ = (
-        UniqueConstraint("reference_video_id", "offset_ms", name="uq_reference_frame_offset"),
+        UniqueConstraint("reference_video_id", "distance_m", name="uq_reference_frame_distance"),
         CheckConstraint("offset_ms >= 0", name="ck_reference_frame_offset"),
         CheckConstraint("playback_offset_ms >= 0", name="ck_reference_frame_playback"),
         CheckConstraint("distance_m > 0", name="ck_reference_frame_distance"),

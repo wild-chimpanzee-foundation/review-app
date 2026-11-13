@@ -293,8 +293,11 @@ def test_reference_frames_preserve_known_distance_and_playback_offset(distance_d
     assert [row["offset_ms"] for row in frames] == [0, 3500]
     assert frames[0] == close
     assert frames[1]["distance_m"] == 5.0
+    same_position = dp.add_reference_frame(reference["id"], 0, 10)
+    assert same_position["id"] != close["id"]
+    assert same_position["offset_ms"] == close["offset_ms"]
     with pytest.raises(IntegrityError):
-        dp.add_reference_frame(reference["id"], 0, 10)
+        dp.add_reference_frame(reference["id"], 1500, 10)
 
 
 def test_startup_retains_species_used_only_by_distance(distance_data, tmp_db):

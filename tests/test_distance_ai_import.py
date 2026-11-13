@@ -130,7 +130,7 @@ def package_zip(files):
 def snapshot(dp, tables=None):
     with dp.engine.connect() as conn:
         return {
-            table: conn.exec_driver_sql(f'SELECT * FROM "{table}"').all()
+            table: sorted(conn.exec_driver_sql(f'SELECT * FROM "{table}"').all())
             for table in tables or Base.metadata.tables
         }
 
@@ -695,6 +695,51 @@ async def test_ui_requires_draft_replacement_confirmation(user: User, distance_d
     assert len(dp.list_distance_imports(project_id)) == 2
 
 
+def test_ai_import_matches_distance_when_multiple_frames_share_timestamp(
+    distance_data, ai_package
+):
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    reference = dp.register_reference_video(
+        project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
+    )
+    unrelated = dp.add_reference_frame(reference["id"], 2125, 10, playback_offset_ms=2125.125)
+    matching = dp.add_reference_frame(reference["id"], 2125, 3.5, playback_offset_ms=2125.125)
+    ai_package["reference_frames.csv"].append(
+        {**ai_package["reference_frames.csv"][0], "reference_id": "ref-2", "known_distance_m": "7"}
+    )
+    data = package_zip(ai_package)
+    preview = dp.preview_distance_ai_package(project_id, data)
+    assert preview["errors"] == []
+    assert preview["reused_reference_frames"] == 1
+    assert preview["new_reference_frames"] == 1
+    result = dp.import_distance_ai_package(project_id, data)
+    frames = dp.list_reference_frames(reference["id"])
+    assert {frame["distance_m"] for frame in frames} == {3.5, 7, 10}
+    assert {frame["offset_ms"] for frame in frames} == {2125}
+    assert next(frame for frame in frames if frame["id"] == unrelated["id"]) == unrelated
+    saved = dp.get_distance_import(project_id, result["import_id"])["references"]
+    assert (
+        next(row for row in saved if row["reference_id"] == "ref-1")["reference_frame_id"]
+        == matching["id"]
+    )
+
+
+def test_ai_import_rejects_duplicate_video_distance_before_writing(distance_data, ai_package):
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    ai_package["reference_frames.csv"].append(
+        {**ai_package["reference_frames.csv"][0], "reference_id": "ref-2", "time_s": "4.5"}
+    )
+    data = package_zip(ai_package)
+    before = snapshot(dp)
+    assert any(
+        "same video/distance" in error
+        for error in dp.preview_distance_ai_package(project_id, data)["errors"]
+    )
+    with pytest.raises(ValueError, match="same video/distance"):
+        dp.import_distance_ai_package(project_id, data)
+    assert snapshot(dp) == before
+
+
 def test_import_revalidates_calibration_after_preview(distance_data, ai_package):
     dp, project_id = distance_data["dp"], distance_data["project"].id
     data = package_zip(ai_package)
@@ -702,7 +747,7 @@ def test_import_revalidates_calibration_after_preview(distance_data, ai_package)
     reference = dp.register_reference_video(
         project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x" / "patrol.mp4")
     )
-    dp.add_reference_frame(reference["id"], 2125, 10, playback_offset_ms=2125.125)
+    dp.add_reference_frame(reference["id"], 3125, 3.5, playback_offset_ms=3125.125)
     before = snapshot(dp)
     with pytest.raises(ValueError, match="Conflicting prepared reference"):
         dp.import_distance_ai_package(project_id, data)

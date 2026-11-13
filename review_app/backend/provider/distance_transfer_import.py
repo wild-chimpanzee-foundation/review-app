@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -55,7 +56,7 @@ def _reference_plan(session, project_id, row, path):
     if frame is None and reference is not None:
         frame = (
             session.query(ReferenceFrame)
-            .filter_by(reference_video_id=reference.id, offset_ms=row["offset_ms"])
+            .filter_by(reference_video_id=reference.id, distance_m=row["distance_m"])
             .one_or_none()
         )
     if frame is not None and any(
@@ -84,6 +85,9 @@ def plan_import(session, project_id, manifest, tables, root_map):
     ):
         raise ValueError("Media-root mapping contains an unknown source root")
     reference_rows = {row["id"]: row for row in tables["references"]}
+    reference_distances = Counter(
+        (row["root_id"], row["video_path"], row["distance_m"]) for row in reference_rows.values()
+    )
     plans = []
     for task in tables["tasks"]:
         plan = {
@@ -146,6 +150,13 @@ def plan_import(session, project_id, manifest, tables, root_map):
                 row["reference_frame_id"] for row in samples if row["reference_frame_id"]
             }:
                 row = reference_rows[frame_id]
+                # Manual v1 may contain repeated distances at distinct positions.
+                # Do not silently substitute calibration or let the new UNIQUE
+                # constraint fail after a misleadingly clean preview.
+                if reference_distances[(row["root_id"], row["video_path"], row["distance_m"])] > 1:
+                    raise ValueError(
+                        "Reference calibration conflicts: multiple frames for the same video/distance"
+                    )
                 ref_path = _media_path(row, roots, manifest, root_map)
                 scope_roots = [(root.id, root.path) for root in roots]
                 scope = deployment_key(project_id, video.camera_id, video.video_path, scope_roots)

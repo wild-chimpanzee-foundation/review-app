@@ -282,6 +282,95 @@ def test_reference_conflicts_block_only_the_dependent_task(manual_data):
         assert session.get(ReferenceFrame, frame["id"]).distance_m == 99
 
 
+@pytest.mark.parametrize("distance", [3.75, 6])
+def test_manual_import_matches_distance_not_ambiguous_timestamp(manual_data, distance):
+    dp, project, _, _, _, deer, _, _, frame = manual_data
+    archive = dp.export_distance_annotations(project.id, [deer])
+    manifest, tables = decode_archive(archive)
+    tables["references"][0].update(id="returned-frame", distance_m=distance)
+    for sample in tables["samples"]:
+        if sample["reference_frame_id"] == frame["id"]:
+            sample.update(reference_frame_id="returned-frame", distance_m=distance)
+    archive = encode_archive(tables, manifest)
+    extra = dp.add_reference_frame(frame["reference_video_id"], frame["offset_ms"], 9)
+    assert dp.preview_distance_annotations_import(project.id, archive)[0]["error"] is None
+    dp.import_distance_annotations(project.id, archive, {deer: "replace"})
+    frames = dp.list_reference_frames(frame["reference_video_id"])
+    target = next(row for row in frames if row["distance_m"] == distance)
+    assert target["id"] == (frame["id"] if distance == 3.75 else "returned-frame")
+    assert frame in frames and extra in frames
+    assert all(row["offset_ms"] == frame["offset_ms"] for row in frames)
+    assert {
+        row["reference_frame_id"]
+        for row in dp.get_distance_review_state(deer, "alice")["samples"]
+        if row["status"] == "annotated"
+    } == {target["id"]}
+
+
+def test_manual_import_does_not_substitute_different_position_for_same_distance(manual_data):
+    dp, project, _, _, _, deer, _, _, _ = manual_data
+    archive = dp.export_distance_annotations(project.id, [deer])
+    manifest, tables = decode_archive(archive)
+    tables["references"][0].update(offset_ms=2250, playback_offset_ms=2250.25)
+    before = export_state(dp, project.id, [deer])
+    archive = encode_archive(tables, manifest)
+    assert (
+        "calibration conflicts"
+        in dp.preview_distance_annotations_import(project.id, archive)[0]["error"]
+    )
+    with pytest.raises(ValueError, match="calibration conflicts"):
+        dp.import_distance_annotations(project.id, archive, {deer: "replace"})
+    assert export_state(dp, project.id, [deer]) == before
+
+
+def test_legacy_repeated_distances_are_previewed_as_calibration_conflicts(manual_data):
+    dp, project, _, _, _, deer, fox, _, frame = manual_data
+    archive = dp.export_distance_annotations(project.id, [deer, fox])
+    manifest, tables = decode_archive(archive)
+    tables["references"].append(
+        {
+            **tables["references"][0],
+            "id": "legacy-second-position",
+            "offset_ms": 2250,
+            "playback_offset_ms": 2250.25,
+        }
+    )
+    # Manual v1 permits the same distance at distinct positions. Its old graph
+    # remains valid, but cannot silently choose calibration under the new schema.
+    second_offset = next(
+        row["offset_ms"] for row in tables["samples"] if row["status"] == "skipped"
+    )
+    for sample in tables["samples"]:
+        if sample["offset_ms"] == second_offset:
+            sample.update(
+                status="annotated",
+                skip_reason=None,
+                reference_frame_id="legacy-second-position",
+                distance_m=frame["distance_m"],
+            )
+    archive = encode_archive(tables, manifest)
+    before = export_state(dp, project.id, [deer, fox])
+    preview = {
+        row["task_id"]: row for row in dp.preview_distance_annotations_import(project.id, archive)
+    }
+    assert "same video/distance" in preview[deer]["error"]
+    assert preview[fox]["error"] is None
+    with pytest.raises(ValueError, match="same video/distance"):
+        dp.import_distance_annotations(project.id, archive, {deer: "replace"})
+    assert export_state(dp, project.id, [deer, fox]) == before
+
+
+def test_manual_v1_still_rejects_two_distances_at_one_timestamp(manual_data):
+    dp, project, _, _, _, deer, _, _, frame = manual_data
+    archive = dp.export_distance_annotations(project.id, [deer])
+    manifest, tables = decode_archive(archive)
+    tables["references"].append(
+        {**tables["references"][0], "id": "same-position", "distance_m": 6}
+    )
+    with pytest.raises(ValueError, match="Duplicate reference frame"):
+        dp.preview_distance_annotations_import(project.id, encode_archive(tables, manifest))
+
+
 def test_import_revalidates_duration_after_preview(manual_data):
     dp, project, _, video, _, deer, _, _, _ = manual_data
     archive = dp.export_distance_annotations(project.id, [deer])

@@ -11,7 +11,7 @@ from review_app.app.pages.distance_review import page as page_module
 from review_app.app.pages.distance_review.page import DistanceReviewPage
 from review_app.backend.db.models import DistanceSample
 from review_app.backend.provider.local_data_provider import LocalDataProvider
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 
 pytest_plugins = ["nicegui.testing.user_plugin"]
 
@@ -29,14 +29,15 @@ def test_configure_is_persistent_and_never_overwrites(distance_data):
         assert session.query(DistanceSample).count() == 0
 
 
-def test_configure_is_scoped_to_reference_and_duplicate_positions_roll_back(distance_data):
+def test_configure_is_scoped_to_reference_and_distances_can_share_positions(distance_data):
     dp, data = distance_data["dp"], distance_data
     other = dp.register_reference_video(data["project"].id, "cam_x", "references/other.mp4")
     frame = dp.configure_reference_distance(other["id"], 3500, 5)
     assert frame["id"] != data["frame"]["id"]
-    with pytest.raises(IntegrityError):
-        dp.configure_reference_distance(other["id"], 3500, 6)
-    assert dp.list_reference_frames(other["id"]) == [frame]
+    same_position = dp.configure_reference_distance(other["id"], 3500, 6)
+    assert same_position["offset_ms"] == frame["offset_ms"]
+    assert dp.configure_reference_distance(other["id"], 4000, 6) == same_position
+    assert dp.list_reference_frames(other["id"]) == [frame, same_position]
     assert dp.list_reference_frames(data["reference"]["id"]) == [data["frame"]]
 
 
@@ -52,9 +53,13 @@ def test_explicit_edit_retains_reference_identity_and_distance(distance_data):
     assert updated == {**frame, "offset_ms": 333, "playback_offset_ms": 333.334}
     assert dp.get_distance_review_state(video_id, "alice")["samples"] == before
     dp.add_reference_frame(frame["reference_video_id"], 1000, 6)
-    with pytest.raises(IntegrityError):
-        dp.update_reference_frame_position(frame["id"], 1000)
-    assert dp.list_reference_frames(frame["reference_video_id"])[0] == updated
+    moved = dp.update_reference_frame_position(frame["id"], 1000)
+    assert moved == {**frame, "offset_ms": 1000, "playback_offset_ms": None}
+    assert [row["offset_ms"] for row in dp.list_reference_frames(frame["reference_video_id"])] == [
+        1000,
+        1000,
+    ]
+    assert dp.get_distance_review_state(video_id, "alice")["samples"] == before
     with pytest.raises(ValueError, match="Playback position"):
         dp.update_reference_frame_position(frame["id"], 333, playback_offset_ms=334)
 
@@ -143,6 +148,21 @@ async def test_unconfigured_click_saves_then_configured_click_seeks(user: User, 
     assert page.dp.list_reference_frames(page.reference["id"]) == page.frames
 
 
+async def test_on_demand_distances_can_share_a_timestamp(user: User, on_demand_page):
+    on_demand_page["capture"].return_value = 3500
+    await user.open("/reference-on-demand-test")
+    page = on_demand_page["page"]
+    distance_button(user, 4).mark("four-same-time")
+    user.find(marker="four-same-time").click()
+    await wait_for(lambda: not page.busy and len(page.frames) == 2)
+    assert {row["offset_ms"] for row in page.frames} == {3500}
+    assert {row["distance_m"] for row in page.frames} == {4, 5}
+    assert page.selected_frame_id == next(
+        row["id"] for row in page.frames if row["distance_m"] == 4
+    )
+    assert page.samples == []
+
+
 async def test_review_can_start_with_zero_reference_frames(user: User, on_demand_page):
     data = on_demand_page["data"]
     data["reference"] = data["dp"].register_reference_video(
@@ -162,14 +182,11 @@ async def test_review_can_start_with_zero_reference_frames(user: User, on_demand
     assert page.samples == []
 
 
-@pytest.mark.parametrize("failure", ["not-ready", "duplicate", "database"])
+@pytest.mark.parametrize("failure", ["not-ready", "database"])
 async def test_failed_save_leaves_distance_unconfigured(user: User, on_demand_page, failure):
     if failure == "not-ready":
         on_demand_page["capture"].side_effect = TimeoutError()
         message = "Wait for the video to load before saving a frame."
-    elif failure == "duplicate":
-        on_demand_page["capture"].return_value = 3500
-        message = "A reference frame is already saved at this time."
     else:
         on_demand_page["data"]["dp"].configure_reference_distance = Mock(
             side_effect=SQLAlchemyError("Database unavailable")

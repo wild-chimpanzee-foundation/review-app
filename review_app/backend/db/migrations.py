@@ -767,6 +767,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (23, _migration_v23),
     (24, lambda conn: _migration_v24(conn)),
     (25, lambda conn: _migration_v25(conn)),
+    (26, lambda conn: _migration_v26(conn)),
 ]
 
 # Frozen upgrade DDL. Keep independent of evolving ORM metadata.
@@ -1066,6 +1067,65 @@ def _migration_v25(conn) -> None:
         """,
     ):
         conn.exec_driver_sql(ddl)
+
+
+def _migration_v26(conn) -> None:
+    """Identity is reference video/distance; retain evidence when merging duplicates.
+
+    run_migrations disables foreign keys around this atomic rebuild. The lexical
+    minimum frame ID is the deterministic keeper; samples retain their own saved
+    distance, timestamps, authors, and behavior links. Historical import payloads
+    remain untouched provenance, not live foreign keys.
+    """
+    conn.exec_driver_sql("""
+        CREATE TEMP TABLE reference_frame_map_v26 AS
+        SELECT frame.id AS old_id, keeper.id AS keeper_id
+        FROM reference_frames AS frame
+        JOIN (
+            SELECT reference_video_id, distance_m, MIN(id) AS id
+            FROM reference_frames GROUP BY reference_video_id, distance_m
+        ) AS keeper USING (reference_video_id, distance_m)
+    """)
+    conn.exec_driver_sql(
+        "CREATE UNIQUE INDEX reference_frame_map_v26_old ON reference_frame_map_v26(old_id)"
+    )
+    conn.exec_driver_sql("""
+        UPDATE distance_samples
+        SET reference_frame_id = (
+            SELECT keeper_id FROM reference_frame_map_v26
+            WHERE old_id = distance_samples.reference_frame_id
+        )
+        WHERE reference_frame_id IN (
+            SELECT old_id FROM reference_frame_map_v26 WHERE old_id != keeper_id
+        )
+    """)
+    conn.exec_driver_sql("""
+        CREATE TABLE reference_frames_v26 (
+            id VARCHAR NOT NULL PRIMARY KEY,
+            reference_video_id VARCHAR NOT NULL,
+            offset_ms INTEGER NOT NULL,
+            playback_offset_ms FLOAT,
+            distance_m FLOAT NOT NULL,
+            mask JSON,
+            import_id VARCHAR,
+            CONSTRAINT uq_reference_frame_distance UNIQUE (reference_video_id, distance_m),
+            CONSTRAINT ck_reference_frame_offset CHECK (offset_ms >= 0),
+            CONSTRAINT ck_reference_frame_playback CHECK (playback_offset_ms >= 0),
+            CONSTRAINT ck_reference_frame_distance CHECK (distance_m > 0),
+            FOREIGN KEY(reference_video_id) REFERENCES reference_videos (id) ON DELETE CASCADE,
+            FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL
+        )
+    """)
+    conn.exec_driver_sql("""
+        INSERT INTO reference_frames_v26
+            (id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id)
+        SELECT id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id
+        FROM reference_frames
+        WHERE id IN (SELECT keeper_id FROM reference_frame_map_v26)
+    """)
+    conn.exec_driver_sql("DROP TABLE reference_frames")
+    conn.exec_driver_sql("ALTER TABLE reference_frames_v26 RENAME TO reference_frames")
+    conn.exec_driver_sql("DROP TABLE reference_frame_map_v26")
 
 
 def check_schema_version(conn) -> None:

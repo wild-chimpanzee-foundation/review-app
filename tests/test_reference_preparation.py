@@ -53,7 +53,7 @@ async def wait_for(predicate):
     raise AssertionError("Reference preparation did not finish")
 
 
-@pytest.mark.parametrize("offset", [1000, 9500, 333.334])
+@pytest.mark.parametrize("offset", [1000, 9500, 333.334, 3500])
 async def test_saving_prefills_next_integer_and_keeps_selected_frame(
     user: User, preparation_page, offset
 ):
@@ -69,9 +69,10 @@ async def test_saving_prefills_next_integer_and_keeps_selected_frame(
     frame = next(
         row
         for row in data["dp"].list_reference_frames(data["reference"]["id"])
-        if row["offset_ms"] == int(offset + 0.5)
+        if row["distance_m"] == 6
     )
     assert frame["distance_m"] == 6
+    assert frame["offset_ms"] == int(offset + 0.5)
     assert frame["playback_offset_ms"] == offset
     capture.assert_awaited_once_with(next(iter(user.find(ui.video).elements)), exact=True)
     seek.assert_not_called()
@@ -83,10 +84,12 @@ async def test_failed_save_keeps_number_and_playback_offset(user: User, preparat
     capture.return_value = data["frame"]["offset_ms"]
     await user.open("/reference-preparation-test")
     number = next(iter(user.find(ui.number).elements))
+    with user:
+        number.set_value(5)
     seek.reset_mock()
     user.find("Save current frame").click()
-    await user.should_see("A reference frame is already saved at this time.")
-    assert number.value == 6 and number.enabled
+    await user.should_see("A reference frame is already saved for this distance.")
+    assert number.value == 5 and number.enabled
     seek.assert_not_called()
     assert len(data["dp"].list_reference_frames(data["reference"]["id"])) == 1
 

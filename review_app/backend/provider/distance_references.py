@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import uuid
 
-from sqlalchemy import func, literal, or_, select
+from sqlalchemy import func, or_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from review_app.backend.camera_layout import deployment_key
@@ -254,9 +254,9 @@ def configure_reference_distance(
 ) -> dict:
     """Fill an unknown distance without replacing an existing mapping.
 
-    The conditional insert is one SQLite write statement so simultaneous first
-    clicks cannot create two mappings for the same distance. Legacy prepared
-    frames (including repeated distances) remain untouched.
+    Video/distance uniqueness arbitrates simultaneous first clicks. A repeated
+    configuration reuses the saved position; correcting it requires the explicit
+    position-update API. Different distances may use the same timestamp.
     """
     _validate_reference_position(offset_ms, playback_offset_ms)
     if (
@@ -272,18 +272,17 @@ def configure_reference_distance(
         reference_video_id=reference_video_id, distance_m=distance_m
     )
     session.execute(
-        sqlite_insert(ReferenceFrame).from_select(
-            ["id", "reference_video_id", "offset_ms", "distance_m", "playback_offset_ms"],
-            select(
-                literal(str(uuid.uuid4())),
-                literal(reference_video_id),
-                literal(offset_ms),
-                literal(distance_m),
-                literal(playback_offset_ms),
-            ).where(~existing.exists()),
+        sqlite_insert(ReferenceFrame)
+        .values(
+            id=str(uuid.uuid4()),
+            reference_video_id=reference_video_id,
+            offset_ms=offset_ms,
+            distance_m=distance_m,
+            playback_offset_ms=playback_offset_ms,
         )
+        .on_conflict_do_nothing(index_elements=["reference_video_id", "distance_m"])
     )
-    return _record(existing.order_by(ReferenceFrame.offset_ms).first())
+    return _record(existing.one())
 
 
 def update_reference_frame_position(
@@ -337,5 +336,5 @@ def list_reference_frames(session, reference_video_id: str) -> list[dict]:
         _record(row)
         for row in session.query(ReferenceFrame)
         .filter_by(reference_video_id=reference_video_id)
-        .order_by(ReferenceFrame.offset_ms)
+        .order_by(ReferenceFrame.offset_ms, ReferenceFrame.distance_m, ReferenceFrame.id)
     ]

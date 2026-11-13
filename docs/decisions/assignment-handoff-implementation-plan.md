@@ -1,6 +1,6 @@
 # Assignment handoff implementation plan
 
-**Status:** M1–M3 complete, including operator sign-off. M4 is next; cross-workflow UI/UX refinement is deferred to final M7.
+**Status:** M1–M4 complete. M5 is next; cross-workflow UI/UX refinement is deferred to final M7.
 **Direction:** Explicit serialized assignment snapshots, not database snapshots.
 **Product contract:** [Assignment handoff](./assignment-handoff.md).
 
@@ -15,7 +15,7 @@ this tracker records readiness, validation, and the next action.
 | M1 — Persistence, identity, archive | Done | Immutable preparation/download; portable graph mapping; fresh/upgrade schema parity; archive validation tests. |
 | M2 — Species backend round trip | Done | Prepare/open/return/preview/accept across instances and same-instance projects; both policies, empty states, import-scope validation, scoped media sync, unrestricted local annotation, stale previews, and rollback tested. |
 | M3 — Species UI and delivery | Done | Usable prepare/open/return/accept flow; package and footage copy use saved scope; focused UI and multi-root copy tests pass. |
-| M4 — Reference identity | Not started | Video/distance uniqueness on fresh and upgraded databases; dependent samples preserved; reference write paths and affected legacy imports tested. |
+| M4 — Reference identity | Done | Video/distance uniqueness on fresh and upgraded databases; dependent samples preserved; reference write paths and affected legacy imports tested. |
 | M5 — Complete Distance backend | Not started | AI/manual state and reference dependencies round-trip; saved-scope import eligibility and reference substitution tested, without restricting local annotation. |
 | M6 — Distance UI and integration | Not started | Distance handoff usable end to end; translations/docs updated; combined workflow and relevant legacy regressions pass. |
 | M7 — Final UI/UX refinement | Not started | Species and Distance handoff screens are clear and compact across origin/working roles; prepare/open/deliver/return/accept actions are discoverable; operator walkthrough and focused UI regressions pass; translations/docs reflect the final UI. |
@@ -25,15 +25,18 @@ when its completion gate is met. If blocked, record the concrete blocker below.
 
 ### Current checkpoint
 
-- **Current milestone:** M4 — Reference identity (next to start).
-- **Next action:** Replace reference-frame timestamp uniqueness with
-  video/distance uniqueness, preserving dependent samples during upgrade, then
-  align reference write/import paths and run focused legacy regressions.
-  M3 automated checks and operator sign-off are complete. Independent legacy
-  import/analysis workflows remain available. Defer visual/layout refinement to
-  M7 after M6; fix correctness and workflow-blocking UI issues as encountered.
+- **Current milestone:** M5 — Complete Distance backend (next to start).
+- **Next action:** Extend assignment snapshots to complete Distance state,
+  including AI/manual evidence, reference dependencies, and saved-scope return
+  eligibility. Reuse existing admin video/distance calibration on return with
+  explicit substitution reporting. M4 schema and write/import alignment are
+  complete. Keep legacy manual v1 semantics separate. Defer visual/layout
+  refinement to M7; fix correctness and workflow-blocking issues as encountered.
 - **Blockers:** None identified.
-- **Recorded validation:** M1 baseline: 115 focused tests passed. M2 completion:
+- **Recorded validation:** M4: 580 affected tests passed; one pre-existing
+  reference-deletion assertion failure reproduced on clean pre-M4 commit
+  `4fe5c86` (details below). Ruff lint/format (12 files) and diff checks passed.
+  M1 baseline: 115 focused tests passed. M2 completion:
   350 focused handoff, schema, queue, transfer/import, video, path relocation,
   provider, and review-equivalence tests passed. Ruff check, Ruff format check
   (10 files), and `git diff --check` passed. M3 first UI slice: 116 focused tests
@@ -52,6 +55,74 @@ implemented, relevant paths, exact validation command/result, and commit hash
 when committed. Update the next action and any remaining gaps at the same time.
 Do not rely on conversation history to reconstruct progress. Record substantive
 design deviations in this plan before continuing with a changed approach.
+
+### M4 completion — reference video/distance identity
+
+Implemented:
+
+- `review_app/backend/db/models.py`: reference-frame uniqueness is now
+  `(reference_video_id, distance_m)`, not timestamp. Distinct distances can share
+  a timestamp; duplicate distances cannot be inserted at another timestamp.
+- Frozen migration v26 in `review_app/backend/db/migrations.py`: atomically
+  rebuilds `reference_frames`, selecting the lexically smallest frame ID for each
+  video/distance pair and remapping dependent `distance_samples` foreign keys.
+  Sample IDs, distances, authors, timestamps, carried relationships, and behavior
+  links are not rewritten. Keeper position, precise playback, mask, and import
+  provenance survive. Historical import payloads remain unchanged evidence.
+  Foreign-key enforcement is restored; failure rolls back DDL/data/version.
+- `distance_references.py`: configuration uses a conflict-safe video/distance
+  insert and reuses existing calibration without overwriting its position;
+  explicit position edits and new distances may share timestamps. Frame ordering
+  is deterministic at equal timestamps. Duplicate-distance UI text now describes
+  the actual constraint in English/French; no UI layout work was added.
+- AI import matches existing calibration by video/distance, permits distinct
+  distances at a shared timestamp, rejects repeated video/distance definitions,
+  and still blocks conflicting prepared positions without overwriting them.
+- Manual import no longer assumes one frame at a timestamp. It reuses exact
+  video/distance calibration or inserts a new distance at an occupied timestamp;
+  differing position/mask calibration still conflicts. Repeated-distance legacy
+  archives receive dependent-task preview errors rather than a late integrity
+  failure. Manual v1's frozen timestamp-uniqueness validation is unchanged: it is
+  not silently expanded to the future assignment snapshot contract.
+- `tests/test_reference_identity.py` covers fresh/upgraded constraints,
+  deterministic consolidation with sample/behavior preservation, repeat startup,
+  and rollback. Repository/UI tests assert new timestamp-sharing semantics.
+  AI/manual regression tests cover ambiguous timestamps, matching versus new
+  distances, duplicate definitions, calibration conflicts, and unchanged v1
+  validation. Unordered snapshot comparisons now sort by record identity rather
+  than relying on SQLite's incidental row order after a rebuild.
+
+Validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_reference_identity.py tests/test_schema_parity.py tests/test_migrations.py tests/test_distance_schema_upgrade.py tests/test_distance_skip_schema.py tests/test_distance_repository.py tests/test_reference_on_demand.py tests/test_reference_preparation.py tests/test_reference_frame_deletion.py tests/test_reference_source_switch.py tests/test_reference_probe_cache.py tests/test_distance_ai_import.py tests/test_distance_transfer.py tests/test_distance_timing.py tests/test_distance_apply_to_end.py tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py tests/test_translations.py
+# 580 passed, 1 failed in 37.89s.
+```
+
+The sole failure is pre-existing:
+`test_reference_frame_deletion.py::test_delete_mapping_clears_shared_evidence_and_reopens_affected_reviews`
+expects `completion_outcome='present'` to survive reopening, while the existing
+implementation clears it. Reproduced the identical failure by exporting clean
+commit `4fe5c86` to a temporary checkout and running that test with the same Python
+environment. Left this unrelated deletion-behavior/test mismatch unchanged.
+The earlier targeted schema/repository/import batch passed all 228 tests; the
+subsequently extended AI/manual batch passed all 82 tests.
+
+An attempted broader `tests/test_distance*.py tests/test_reference*.py` run
+(with schema, migration, handoff, and translation tests) hit the 120-second command
+time limit without a reported failure. It is not a passing full-suite result.
+The bounded affected regression run above completed; full suite not run.
+
+```bash
+.venv/bin/ruff check review_app/backend/db/models.py review_app/backend/db/migrations.py review_app/backend/provider/distance_references.py review_app/backend/provider/distance_transfer_import.py review_app/backend/provider/import_service/_distance_ai.py review_app/app/translations.py tests/test_reference_identity.py tests/test_distance_repository.py tests/test_reference_on_demand.py tests/test_reference_preparation.py tests/test_distance_ai_import.py tests/test_distance_transfer.py
+.venv/bin/ruff format --check review_app/backend/db/models.py review_app/backend/db/migrations.py review_app/backend/provider/distance_references.py review_app/backend/provider/distance_transfer_import.py review_app/backend/provider/import_service/_distance_ai.py review_app/app/translations.py tests/test_reference_identity.py tests/test_distance_repository.py tests/test_reference_on_demand.py tests/test_reference_preparation.py tests/test_distance_ai_import.py tests/test_distance_transfer.py
+git diff --check
+# Passed.
+```
+
+M4 is complete; no M5 implementation is included. Commit identity is recorded by
+Git. The known baseline failure is recorded above, not hidden by an expected-fail
+marker or a changed deletion contract.
 
 ### M3 completion and operator sign-off
 
