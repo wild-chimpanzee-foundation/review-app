@@ -1,7 +1,6 @@
-"""Bounded, versioned assignment snapshots with explicit Species setup graph validation.
+"""Bounded, versioned Species setup/return snapshots with explicit graph validation.
 
-Distance and return payloads are deliberately rejected until their implementations
-can preserve and validate the complete graph; no best-effort partial imports.
+Distance payloads remain rejected until their full implementation is available.
 """
 
 from __future__ import annotations
@@ -80,8 +79,8 @@ def validate_snapshot(manifest, context, work):
     )
     if manifest["format"] != FORMAT or manifest["version"] != VERSION:
         raise ValueError("Unsupported assignment format/version")
-    if manifest["stage"] != "species" or manifest["direction"] != "setup":
-        raise ValueError("Only Species setup snapshots are implemented")
+    if manifest["stage"] != "species" or manifest["direction"] not in {"setup", "return"}:
+        raise ValueError("Only Species setup/return snapshots are implemented")
     if manifest["target_species"] is not None:
         raise ValueError("Species assignments cannot have a target species")
     if any(
@@ -197,8 +196,10 @@ def validate_snapshot(manifest, context, work):
         },
         "video_id",
     )
-    if units.keys() != work_keys:
-        raise ValueError("Setup work must exactly match the saved scope")
+    if not units.keys() <= work_keys or (
+        manifest["direction"] == "setup" and units.keys() != work_keys
+    ):
+        raise ValueError("Work must match the saved scope; setup must contain every unit")
     for unit in units.values():
         if unit["label"] is not None:
             _record(

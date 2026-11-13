@@ -1,6 +1,6 @@
 # Assignment handoff implementation plan
 
-**Status:** M1 complete; M2 in progress.
+**Status:** M1 and M2 complete; M3 in progress (first UI round trip ready for manual testing).
 **Direction:** Explicit serialized assignment snapshots, not database snapshots.
 **Product contract:** [Assignment handoff](./assignment-handoff.md).
 
@@ -13,8 +13,8 @@ this tracker records readiness, validation, and the next action.
 | Milestone | Status | Completion gate |
 | --- | --- | --- |
 | M1 — Persistence, identity, archive | Done | Immutable preparation/download; portable graph mapping; fresh/upgrade schema parity; archive validation tests. |
-| M2 — Species backend round trip | In progress | Prepare/open/return/preview/accept across instances and same-instance projects; both policies, empty states, import-scope validation, scoped media sync, unrestricted local annotation, stale previews, and rollback tested. |
-| M3 — Species UI and delivery | Not started | Usable prepare/open/return/accept flow; package and footage copy use saved scope; focused UI and multi-root copy tests pass. |
+| M2 — Species backend round trip | Done | Prepare/open/return/preview/accept across instances and same-instance projects; both policies, empty states, import-scope validation, scoped media sync, unrestricted local annotation, stale previews, and rollback tested. |
+| M3 — Species UI and delivery | In progress | Usable prepare/open/return/accept flow; package and footage copy use saved scope; focused UI and multi-root copy tests pass. |
 | M4 — Reference identity | Not started | Video/distance uniqueness on fresh and upgraded databases; dependent samples preserved; reference write paths and affected legacy imports tested. |
 | M5 — Complete Distance backend | Not started | AI/manual state and reference dependencies round-trip; saved-scope import eligibility and reference substitution tested, without restricting local annotation. |
 | M6 — Distance UI and integration | Not started | Distance handoff usable end to end; translations/docs updated; combined workflow and relevant legacy regressions pass. |
@@ -24,27 +24,114 @@ when its completion gate is met. If blocked, record the concrete blocker below.
 
 ### Current checkpoint
 
-- **Current milestone:** M2 — Species backend round trip.
-- **Next action:** Align the M2 draft with the unrestricted-local-annotation
-  decision below: replace recursive assignment-project media sync with listed-media
-  checks, remove annotation/queue/stage/legacy-import guards, and replace their
-  tests. Retain strict scope/ownership validation at return acceptance. Then fix
-  the outdated M1 archive expectation and rerun focused M2 and relevant regressions.
+- **Current milestone:** M3 — Species UI and delivery.
+- **Next action:** Operator tests the first Species UI round trip using
+  [the manual checklist](./assignment-handoff-ui-roundtrip.md). Then implement
+  saved-scope footage copying and multi-root copy tests, and finish replacing
+  assignment-facing legacy delivery controls. This slice locates externally
+  delivered footage manually; it does not claim M3's copy gate is met.
 - **Blockers:** None identified.
-- **Recorded validation:** M1 baseline: 115 focused tests passed. M2 draft: 10
-  round-trip tests passed before the latest decision; its editing-guard assertions
-  are now superseded. The latest combined run had 188 passes and one failure:
-  an M1 test still expects return archives to be unimplemented. M2 is not yet
-  complete or validated against the updated design. Full suite not run.
-- **Completed implementation slices:** M1 complete. M2 draft includes fresh opening,
-  full-scope return export, preview/acceptance, stale-preview detection, and rollback
-  tests; implementation alignment and validation remain.
+- **Recorded validation:** M1 baseline: 115 focused tests passed. M2 completion:
+  350 focused handoff, schema, queue, transfer/import, video, path relocation,
+  provider, and review-equivalence tests passed. Ruff check, Ruff format check
+  (10 files), and `git diff --check` passed. M3 first UI slice: 116 focused tests
+  passed; Ruff lint/format (7 files) and `git diff --check` passed. Full suite not run.
+- **Completed implementation slices:** M1 complete. M2 now includes fresh opening,
+  listed-media-only sync, unrestricted ordinary Species/Distance annotation and
+  imports, full-scope return export, preview/acceptance, stale-preview detection,
+  and rollback tests. Tests asserting assignment write/stage guards were replaced
+  with listed-media sync and ordinary local-write regressions. Completion checks
+  additionally prove identical returns perform no annotation writes under either
+  policy, skipped work imports no new dependencies, applied snapshots preserve
+  saved evidence, and Species working projects can create/edit Distance tasks.
 
 For each completed slice, append a short entry here with milestone ID, behavior
 implemented, relevant paths, exact validation command/result, and commit hash
 when committed. Update the next action and any remaining gaps at the same time.
 Do not rely on conversation history to reconstruct progress. Record substantive
 design deviations in this plan before continuing with a changed approach.
+
+### M3 first UI slice — ready for operator round-trip testing
+
+Included in the Species backend/UI round-trip commit containing this record:
+
+- `review_app/app/components/assignment_handoff.py`: prepare Species work from
+  applied recipient distribution or all project videos (including labeled/missing
+  videos); list/download frozen saved packages; show working binding and download
+  complete saved-scope returns; upload, preview, and accept with one global policy.
+  Impact tables identify videos and record/link counts; overwrites, removals, and
+  unapplied progress have explicit warnings. File/policy changes invalidate
+  confirmation; backend stale previews remain blocking. New-project opening
+  validates setup, locates every media root, and reports missing footage.
+- `review_app/app/pages/distribution/page.py`, `project_picker.py`, and
+  `setup_wizard.py`: expose handoff controls in Distribution and fresh opening
+  through the picker and setup wizard. Legacy import/export remains available,
+  explicitly separate from assignment delivery. No stage editing locks added.
+- `review_app/backend/provider/assignment_handoff.py`: small read interfaces for
+  listing saved bindings, inspecting setup/root requirements, and selecting all
+  project videos without inheriting Review's missing-footage filter.
+- `review_app/app/translations.py`: English/French UI text.
+- `tests/test_assignment_handoff_ui.py`: real-database UI prepare/download/open/
+  return/preview/accept round trip; missing-footage selection/opening; policy/file
+  invalidation; invalid ZIP and stale-preview rejection. Video edits use the
+  ordinary provider API; browser playback is left to operator testing.
+- [Manual test guide](./assignment-handoff-ui-roundtrip.md): same-machine and
+  remote-instance testing instructions, both conflict policies, repeated returns,
+  empty snapshots, and sync checks.
+
+Remaining M3 work: saved-assignment footage copying, multi-root delivery tests,
+final assignment-facing legacy-control replacement, and operator feedback. The
+first UI slice deliberately permits separately delivered/located footage so the
+round trip can be tested now. No claim that the existing legacy footage controls
+copy a saved assignment; the UI explicitly explains their independence.
+
+Validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_assignment_handoff_ui.py tests/test_ui_smoke.py tests/test_translations.py tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py tests/test_onboarding.py tests/test_app_utils.py tests/test_distribution_bundle.py tests/test_assignments_import_export.py tests/test_update_project_dir.py
+# 116 passed in 7.90s
+
+.venv/bin/ruff check review_app/app/components/assignment_handoff.py review_app/app/pages/distribution/page.py review_app/app/project_picker.py review_app/app/setup_wizard.py review_app/app/translations.py review_app/backend/provider/assignment_handoff.py tests/test_assignment_handoff_ui.py
+# All checks passed
+
+.venv/bin/ruff format --check review_app/app/components/assignment_handoff.py review_app/app/pages/distribution/page.py review_app/app/project_picker.py review_app/app/setup_wizard.py review_app/app/translations.py review_app/backend/provider/assignment_handoff.py tests/test_assignment_handoff_ui.py
+# 7 files already formatted
+
+git diff --check
+# Passed
+```
+
+### M3 operator feedback — recipient and compact preview
+
+Included in the Species backend/UI round-trip commit containing this record:
+
+- `review_app/app/components/assignment_handoff.py`: choose registered recipients
+  from a dropdown (refresh names on focus after adding an annotator below).
+  Setup and return filenames include a filesystem-safe recipient name and retain
+  the assignment UUID. Policy changes automatically regenerate the preview;
+  superseded previews cannot enable acceptance. The default impact is a compact
+  summary plus applicable safety warnings, with the per-video table collapsed
+  behind **Show per-video details**.
+- English/French strings and the manual round-trip checklist updated.
+- `tests/test_assignment_handoff_ui.py`: recipient selection, both actual download
+  filenames, safe name formatting, collapsed details, and automatic policy-driven
+  reclassification/acceptance without a second Preview click.
+
+Validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_assignment_handoff_ui.py tests/test_translations.py tests/test_ui_smoke.py
+# 28 passed in 4.26s
+
+.venv/bin/ruff check review_app/app/components/assignment_handoff.py review_app/app/translations.py tests/test_assignment_handoff_ui.py
+# All checks passed
+
+.venv/bin/ruff format --check review_app/app/components/assignment_handoff.py review_app/app/translations.py tests/test_assignment_handoff_ui.py
+git diff --check
+# Passed
+```
+
+M3 remains in progress; saved-scope footage copying is still pending.
 
 ### Decision update — unrestricted local annotation, scoped media sync
 
@@ -73,9 +160,9 @@ conflict policy still determine eligible assignment return work. Any future opti
 to return/import extra cross-stage work needs an explicit transfer/UI decision,
 not an annotation guard.
 
-**Documentation only in this update:** the current M2 code still has the superseded
-guards and recursive sync behavior. Remove/replace them as the next implementation
-slice; do not interpret these documented decisions as already shipped behavior.
+**Implemented in the M2 working tree:** ordinary annotation remains unrestricted;
+assignment-project sync checks only listed footage. The backend alignment and its
+regressions are complete; UI/delivery integration remains M3 work.
 
 ### M1 completion record
 
@@ -118,8 +205,9 @@ Focused commits:
 - `871d829` — prepare immutable Species assignment snapshots; its isolated staged
   tree passed the 115 focused tests below, plus Ruff lint/format checks.
 
-M2 changes remain uncommitted on top of these commits. Its draft failures and the
-superseded editing guards are not included in either validated M1 commit.
+M2 and the first M3 UI slice are recorded in the subsequent Species backend/UI
+round-trip commit containing this tracker. Neither validated M1 commit includes
+M2's draft failures or superseded editing guards.
 
 Validation:
 
@@ -136,6 +224,47 @@ Validation:
 git diff --check
 # Passed
 ```
+
+### M2 completion record
+
+Included in the Species backend/UI round-trip commit containing this record:
+
+- `review_app/backend/annotation_package/archive.py`, `handoff.py`, `scope.py`,
+  and `species.py`: Species setup opening into fresh projects, complete saved-scope
+  returns, whole-video comparison and policy-specific previews, strict origin/
+  scope/media/relationship validation, stale-preview fingerprints, and atomic
+  acceptance. Identical work is a true no-op; dependencies are imported only for
+  applied work. Omitted units do not delete; explicit empty units preview removals.
+- `review_app/backend/provider/assignment_handoff.py`: public open/return/preview/
+  accept operations with read snapshots and write-reserved transactions.
+- `review_app/backend/provider/video.py`: working-project sync checks listed files
+  without recursively discovering unrelated footage, preserving missing entries
+  for later relocation/recheck. Ordinary annotation paths remain unrestricted.
+- `tests/test_assignment_handoff_roundtrip.py`: same-instance repeated opening,
+  cross-instance round trips, saved evidence/identity preservation, both policies,
+  no-op write rejection, dependency selection, empty/omitted units, local Distance
+  editing, media sync/relocation, invalid return rejection, stale previews, and
+  late-failure rollback. Existing M1/legacy tests remain green.
+
+Validation (final combined run):
+
+```bash
+.venv/bin/python -m pytest -q tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py tests/test_migrations.py tests/test_schema_parity.py tests/test_distance_schema_upgrade.py tests/test_distance_transfer.py tests/test_distribution_bundle.py tests/test_assignments_import_export.py tests/test_queue_and_export.py tests/test_distance_queue_state.py tests/test_distance_tasks.py tests/test_distance_ai_import.py tests/test_video_tools.py tests/test_update_project_dir.py tests/test_path_matching.py tests/test_local_data_provider.py tests/test_project_and_import.py tests/test_bulk_review_equivalence.py
+# 350 passed in 21.72s
+
+.venv/bin/ruff check review_app/backend/annotation_package review_app/backend/provider/assignment_handoff.py review_app/backend/provider/video.py tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py
+# All checks passed
+
+.venv/bin/ruff format --check review_app/backend/annotation_package review_app/backend/provider/assignment_handoff.py review_app/backend/provider/video.py tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py
+# 10 files already formatted
+
+git diff --check
+# Passed
+```
+
+No M2 completion blockers remain. Full-suite and UI validation were not run;
+Species UI and saved-scope footage copying belong to M3. Distance payloads remain
+explicitly unsupported until their later milestones.
 
 ## Inspection baseline (before M1)
 

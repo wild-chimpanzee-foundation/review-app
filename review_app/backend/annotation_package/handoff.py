@@ -2,22 +2,49 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from review_app.backend.annotation_package.archive import FORMAT, VERSION, encode_archive
+from review_app.backend.annotation_package import species
+from review_app.backend.annotation_package.archive import (
+    FORMAT,
+    VERSION,
+    decode_archive,
+    encode_archive,
+)
 from review_app.backend.annotation_package.identity import IdentityMap
 from review_app.backend.annotation_package.scope import (
+    AcceptanceResult,
     AssignmentRequest,
+    OpenedAssignment,
     PreparedAssignment,
+    ReturnPreview,
+    bound_videos,
     id_selection,
     select_videos,
 )
-from review_app.backend.annotation_package.species import collect
-from review_app.backend.db.models import HandoffAssignment, IndividualObservation
+from review_app.backend.annotation_package.species import (
+    collect,
+    restore_work,
+    timestamp,
+    vocabulary,
+)
+from review_app.backend.db.models import (
+    Annotator,
+    HandoffAssignment,
+    IndividualObservation,
+    ModelAnnotation,
+    Project,
+    ProjectDir,
+    ProjectSpecies,
+    Video,
+    VideoAssignment,
+)
 
 
 def prepare(session: Session, project_id: str, request: AssignmentRequest) -> PreparedAssignment:
@@ -81,6 +108,269 @@ def prepare(session: Session, project_id: str, request: AssignmentRequest) -> Pr
         video_count=len(videos),
         missing_video_ids=tuple(row.video_id for row in videos if row.is_missing),
     )
+
+
+def locate_media(manifest, context, media_roots):
+    """Resolve only listed footage, before writing anything. Missing files retain their scope."""
+    if not isinstance(media_roots, dict) or media_roots.keys() != set(manifest["roots"]):
+        raise ValueError("Locate every assignment media root, with no unknown roots")
+    roots = {}
+    for key, value in media_roots.items():
+        if not isinstance(value, (str, Path)) or not str(value).strip():
+            raise ValueError("Media roots must be nonempty folder paths")
+        roots[key] = Path(value).expanduser().resolve()
+    if len(set(roots.values())) != len(roots):
+        raise ValueError("Each assignment media root needs a distinct local folder")
+    paths, seen = {}, set()
+    for row in context["media"]:
+        path = (roots[row["root_id"]] / row["video_path"]).resolve()
+        if not path.is_relative_to(roots[row["root_id"]]) or path in seen:
+            raise ValueError("Media mapping escapes its root or maps two videos to the same file")
+        seen.add(path)
+        paths[row["video_id"]] = (path.as_posix(), not path.is_file())
+    return roots, paths
+
+
+def open_setup(session, data, manifest, context, work, project_name, roots, paths):
+    if not isinstance(project_name, str) or not project_name.strip():
+        raise ValueError("Choose a project name")
+    base, name, suffix = project_name.strip(), project_name.strip(), 2
+    while session.query(Project).filter_by(name=name).first():
+        name, suffix = f"{base} ({suffix})", suffix + 1
+    project = Project(name=name)
+    session.add(project)
+    session.flush()
+    binding = HandoffAssignment(
+        assignment_id=manifest["assignment_id"],
+        project_id=project.id,
+        role="working",
+        source_project_id=manifest["source_project_id"],
+        recipient=manifest["recipient"],
+        stage=manifest["stage"],
+        target_species=None,
+        created_at=timestamp(manifest["created_at"]),
+        scope={
+            "work_keys": manifest["work_keys"],
+            "roots": manifest["roots"],
+            "media": context["media"],
+        },
+        setup_archive=data,
+    )
+    session.add(binding)
+    session.flush()
+    identities = IdentityMap(session, binding.id)
+    for order, (key, path) in enumerate(roots.items()):
+        session.add(
+            ProjectDir(
+                id=identities.local("root", key),
+                project_id=project.id,
+                path=path.as_posix(),
+                sort_order=order,
+            )
+        )
+    vocab = vocabulary(session, context)
+    session.add_all(
+        ProjectSpecies(project_id=project.id, species_id=vocab["species"][name])
+        for name in context["project_species"]
+    )
+    if session.get(Annotator, manifest["recipient"]) is None:
+        session.add(Annotator(name=manifest["recipient"]))
+        session.flush()
+    videos = {}
+    for source in context["media"]:
+        local_id = identities.local("video", source["video_id"])
+        row = {
+            key: value
+            for key, value in source.items()
+            if key not in {"video_id", "video_path", "root_id", "is_missing"}
+        }
+        row["created_at"] = timestamp(row["created_at"])
+        session.add(
+            Video(
+                video_id=local_id,
+                project_id=project.id,
+                video_path=paths[source["video_id"]][0],
+                is_missing=paths[source["video_id"]][1],
+                **row,
+            )
+        )
+        session.flush()
+        session.add(VideoAssignment(video_id=local_id, assigned_to=manifest["recipient"]))
+        videos[source["video_id"]] = local_id
+    for source in context["predictions"]:
+        row = {key: value for key, value in source.items() if key not in {"id", "video_id"}}
+        row["updated_at"] = timestamp(row["updated_at"])
+        session.add(
+            ModelAnnotation(
+                id=identities.local("prediction", source["id"]),
+                video_id=videos[source["video_id"]],
+                project_id=project.id,
+                **row,
+            )
+        )
+    for unit in work:
+        restore_work(session, project.id, videos[unit["video_id"]], unit, vocab)
+    session.flush()
+    return OpenedAssignment(
+        binding.id,
+        binding.assignment_id,
+        project.id,
+        len(videos),
+        tuple(key for key, (_, missing) in paths.items() if missing),
+    )
+
+
+def export_return(session, working_project_id):
+    binding = (
+        session.query(HandoffAssignment)
+        .filter_by(project_id=working_project_id, role="working")
+        .one_or_none()
+    )
+    if binding is None or binding.stage != "species":
+        raise ValueError("Choose a Species working assignment project")
+    videos = bound_videos(session, binding)
+    roots = session.query(ProjectDir).filter_by(project_id=working_project_id).all()
+    current, work = collect(
+        session, session.get(Project, working_project_id), list(videos.values()), roots
+    )
+    portable = {row.video_id: key for key, row in videos.items()}
+    for unit in work:
+        unit["video_id"] = portable[unit["video_id"]]
+    manifest, original, _ = decode_archive(binding.setup_archive)
+    manifest["direction"] = "return"
+    used = species.used_vocabulary(work)
+    context = {
+        "project_name": original["project_name"],
+        "project_species": [],
+        "media": binding.scope["media"],
+        "predictions": [],
+    }
+    for name, key in (("species", "scientific_name"), ("behaviors", "key"), ("tags", "key")):
+        context[name] = [row for row in current[name] if row[key] in used[name]]
+    return encode_archive(manifest, context, sorted(work, key=lambda row: row["video_id"]))
+
+
+def plan_return(session, project_id, data, policy):
+    if not isinstance(policy, str) or policy not in {"keep_existing", "use_imported"}:
+        raise ValueError("Choose Keep existing or Use imported once for the entire return")
+    manifest, context, work = decode_archive(data)
+    if manifest["direction"] != "return":
+        raise ValueError("Accept a return, not an assignment setup package")
+    binding = (
+        session.query(HandoffAssignment)
+        .filter_by(project_id=project_id, assignment_id=manifest["assignment_id"], role="origin")
+        .one_or_none()
+    )
+    if binding is None or manifest["source_project_id"] != project_id:
+        raise ValueError("Return does not belong to an originating assignment in this project")
+    expected, original, _ = decode_archive(binding.setup_archive)
+    for key in (
+        "assignment_id",
+        "source_project_id",
+        "stage",
+        "target_species",
+        "recipient",
+        "work_keys",
+        "roots",
+    ):
+        # Order of scope keys has no authority, membership does.
+        a, b = manifest[key], expected[key]
+        differs = set(a) != set(b) if key in {"work_keys", "roots"} else a != b
+        if differs:
+            raise ValueError(
+                "Returned assignment scope or ownership differs from the saved handout"
+            )
+    if context["media"] != original["media"]:
+        raise ValueError("Returned media mapping differs from the saved handout")
+    videos = bound_videos(session, binding)
+    current_context, current_work = collect(
+        session,
+        session.get(Project, project_id),
+        list(videos.values()),
+        session.query(ProjectDir).filter_by(project_id=project_id).all(),
+    )
+    current = {unit["video_id"]: unit for unit in current_work}
+    descriptions = {row["video_id"]: row for row in current_context["media"]}
+    units, selected = [], []
+    totals = dict.fromkeys(
+        ("added", "unchanged", "replaced", "unapplied", "annotations_removed"), 0
+    )
+    for returned in sorted(work, key=lambda unit: unit["video_id"]):
+        video = videos[returned["video_id"]]
+        local = {**current[video.video_id], "video_id": returned["video_id"]}
+        if species.canonical(local) == species.canonical(returned):
+            classification, action = "identical", "unchanged"
+        elif not any(species.counts(local).values()):
+            classification, action = "new", "added"
+        else:
+            classification = "different"
+            action = "replaced" if policy == "use_imported" else "unapplied"
+        removed = (
+            species.removals(local, returned)
+            if action == "replaced"
+            else dict.fromkeys(species.counts(local), 0)
+        )
+        totals[action] += 1
+        totals["annotations_removed"] += sum(removed.values())
+        units.append(
+            {
+                "video_id": returned["video_id"],
+                "video_path": video.video_path,
+                "classification": classification,
+                "action": action,
+                "existing": species.counts(local),
+                "returned": species.counts(returned),
+                "removed": removed,
+            }
+        )
+        if action in {"added", "replaced"}:
+            selected.append((video.video_id, returned))
+    used = species.used_vocabulary(work)
+    relevant_vocab = {}
+    for name, key in (("species", "scientific_name"), ("behaviors", "key"), ("tags", "key")):
+        relevant_vocab[name] = [row for row in current_context[name] if row[key] in used[name]]
+    state = {
+        "payload": hashlib.sha256(data).hexdigest(),
+        "policy": policy,
+        "scope": binding.scope,
+        "binding": [binding.id, binding.stage, binding.recipient],
+        "units": [
+            species.canonical(
+                {**current[videos[unit["video_id"]].video_id], "video_id": unit["video_id"]}
+            )
+            for unit in work
+        ],
+        "media": [descriptions[videos[unit["video_id"]].video_id] for unit in work],
+        "vocabulary": relevant_vocab,
+        "paths": [unit["video_path"] for unit in units],
+    }
+    token = hashlib.sha256(
+        json.dumps(state, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    warnings = []
+    if totals["unapplied"]:
+        warnings.append(
+            "Keep existing leaves returned updates unapplied, including later annotator progress."
+        )
+    if totals["replaced"]:
+        warnings.append("Use imported replaces whole video states, including admin corrections.")
+    if totals["annotations_removed"]:
+        warnings.append(
+            "Replacement removes existing annotations, even for unfinished or empty returned work."
+        )
+    preview = ReturnPreview(token, policy, tuple(units), totals, tuple(warnings))
+    return binding, context, selected, preview
+
+
+def accept_return(session, project_id, data, policy, preview_token):
+    binding, context, selected, preview = plan_return(session, project_id, data, policy)
+    if not isinstance(preview_token, str) or preview_token != preview.token:
+        raise ValueError("Return preview is stale; preview again before accepting")
+    if selected:
+        vocab = vocabulary(session, context, [unit for _, unit in selected])
+        for video_id, unit in selected:
+            restore_work(session, project_id, video_id, unit, vocab)
+    return AcceptanceResult(binding.assignment_id, preview.totals)
 
 
 def export(session: Session, assignment_id: str) -> bytes:

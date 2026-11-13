@@ -254,6 +254,46 @@ class VideoMixin(ProviderBase):
             scan_dirs = []
 
         rows: list[dict[str, Any]] = []
+        if active_project_id:
+            with self.Session() as session:
+                binding = session.execute(
+                    text(
+                        "SELECT id, scope FROM handoff_assignments "
+                        "WHERE project_id=:pid AND role='working'"
+                    ),
+                    {"pid": active_project_id},
+                ).first()
+                if binding is not None:
+                    scope = json.loads(binding.scope)
+                    listed = session.execute(
+                        text(
+                            "SELECT v.video_path, v.camera_id FROM handoff_identity_maps m "
+                            "JOIN videos v ON v.video_id=m.local_id "
+                            "WHERE m.handoff_id=:hid AND m.kind='video' "
+                            "AND m.portable_id IN (SELECT value FROM json_each(:keys)) "
+                            "AND v.project_id=:pid"
+                        ),
+                        {
+                            "hid": binding.id,
+                            "keys": json.dumps(scope["work_keys"]),
+                            "pid": active_project_id,
+                        },
+                    ).all()
+                    for row in listed:
+                        path = Path(normalize_path_str(row.video_path))
+                        if path.is_file():
+                            rows.append(
+                                {
+                                    "video_path": path.as_posix(),
+                                    "camera_id": row.camera_id,
+                                    "is_reference_video": False,
+                                }
+                            )
+                    if not rows:
+                        return pd.DataFrame(
+                            columns=["video_path", "camera_id", "is_reference_video"]
+                        )
+                    return pd.DataFrame(rows)
         for scan_dir in scan_dirs:
             if not scan_dir.exists():
                 continue
@@ -286,23 +326,45 @@ class VideoMixin(ProviderBase):
         now = self._utcnow_dt()
 
         with self.Session() as session:
-            if scanned.empty:
+            working_binding = (
+                session.execute(
+                    text(
+                        "SELECT id, scope FROM handoff_assignments "
+                        "WHERE project_id=:pid AND role='working'"
+                    ),
+                    {"pid": active_project_id},
+                ).first()
+                if active_project_id
+                else None
+            )
+            if scanned.empty and working_binding is None:
                 session.commit()
                 return {"scanned": 0, "added": 0, "updated": 0, "removed": 0}
 
             # Deduplicate by (video_path, project_id)
-            existing = {
-                row[0]: row
-                for row in session.execute(
-                    select(
-                        Video.video_path,
-                        Video.video_id,
-                        Video.is_valid,
-                        Video.duration_sec,
-                        Video.validation_error,
-                    ).where(Video.project_id == active_project_id)
-                ).fetchall()
-            }
+            existing_query = select(
+                Video.video_path,
+                Video.video_id,
+                Video.is_valid,
+                Video.duration_sec,
+                Video.validation_error,
+            ).where(Video.project_id == active_project_id)
+            if working_binding is not None:
+                scope = json.loads(working_binding.scope)
+                listed_ids = (
+                    session.execute(
+                        text(
+                            "SELECT local_id FROM handoff_identity_maps "
+                            "WHERE handoff_id=:hid AND kind='video' "
+                            "AND portable_id IN (SELECT value FROM json_each(:keys))"
+                        ),
+                        {"hid": working_binding.id, "keys": json.dumps(scope["work_keys"])},
+                    )
+                    .scalars()
+                    .all()
+                )
+                existing_query = existing_query.where(Video.video_id.in_(listed_ids))
+            existing = {row[0]: row for row in session.execute(existing_query).fetchall()}
 
             new_rows = scanned[~scanned["video_path"].isin(existing)]
             existing_df = scanned[scanned["video_path"].isin(existing)]

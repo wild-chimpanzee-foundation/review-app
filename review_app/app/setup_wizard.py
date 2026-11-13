@@ -437,8 +437,13 @@ class SetupWizard:
             with ui.tabs().classes("w-full q-mb-md") as tabs:
                 ui.tab(name="manual", label=t("wizard_setup_tab_manual"), icon="edit")
                 ui.tab(name="bundle", label=t("wizard_setup_tab_bundle"), icon="inventory_2")
+                ui.tab(name="assignment", label=t("handoff_open"), icon="assignment")
 
             with ui.tab_panels(tabs, value="manual").classes("w-full"):
+                with ui.tab_panel("assignment"):
+                    from review_app.app.components.assignment_handoff import render_open_assignment
+
+                    render_open_assignment(self.on_complete_callback)
                 with ui.tab_panel("manual"):
                     with ui.card().classes("full-width q-mb-md"):
                         ui.label(t("project_name_label")).classes(

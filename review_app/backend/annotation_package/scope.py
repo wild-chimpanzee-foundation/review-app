@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from review_app.backend.db.models import (
     HandoffAssignment,
+    HandoffIdentityMap,
     Project,
     ProjectDir,
     Video,
@@ -34,6 +35,49 @@ class PreparedAssignment:
     recipient: str
     video_count: int
     missing_video_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class OpenedAssignment:
+    id: str
+    assignment_id: str
+    project_id: str
+    video_count: int
+    missing_video_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ReturnPreview:
+    token: str
+    policy: str
+    units: tuple[dict, ...]
+    totals: dict[str, int]
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AcceptanceResult:
+    assignment_id: str
+    totals: dict[str, int]
+
+
+def bound_videos(session, binding):
+    maps = {
+        row.portable_id: row.local_id
+        for row in session.query(HandoffIdentityMap).filter_by(handoff_id=binding.id, kind="video")
+        if row.portable_id in binding.scope["work_keys"]
+    }
+    if maps.keys() != set(binding.scope["work_keys"]):
+        raise ValueError("Assignment media identity mapping is incomplete")
+    rows = {
+        row.video_id: row
+        for row in session.query(Video).filter(Video.video_id.in_(id_selection(maps.values())))
+    }
+    if len(rows) != len(maps) or any(
+        row.project_id != binding.project_id for row in rows.values()
+    ):
+        raise ValueError("Assigned media is missing or belongs to another project")
+    return {key: rows[local] for key, local in maps.items()}
 
 
 def safe_relative(value: str) -> str:

@@ -266,7 +266,6 @@ def test_unknown_assignment_download(provider_with_project):
     [
         (lambda m, c, w: m.update(version=True), "version"),
         (lambda m, c, w: m.update(version=2), "version"),
-        (lambda m, c, w: m.update(direction="return"), "implemented"),
         (lambda m, c, w: m.update(work_keys=[]), "scope"),
         (lambda m, c, w: c["media"][0].update(video_path="../escape.mp4"), "relative"),
         (lambda m, c, w: c["media"][0].update(video_path="C:/absolute.mp4"), "relative"),

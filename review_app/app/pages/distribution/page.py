@@ -239,6 +239,11 @@ class DistributionSection:
 
 
 def render_distribution_section(dp, project_id: str) -> None:
+    from review_app.app.components.assignment_handoff import render_assignment_handoff
+
+    render_assignment_handoff(dp, project_id)
+    ui.label(t("handoff_legacy_help")).classes("text-caption text-grey-6 q-mb-md")
+
     _vz_annotators: list[str] = []
     _vz_selected: set[str] = set()
 

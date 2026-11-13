@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from review_app.backend.annotation_package.scope import id_selection, portable_path
 from review_app.backend.db.models import (
+    Annotator,
     Behavior,
     IndividualObservation,
     ModelAnnotation,
@@ -38,6 +39,162 @@ def fields(row, names: str) -> dict:
         key: value.isoformat() if isinstance(value, datetime) else value
         for key, value in result.items()
     }
+
+
+def timestamp(value):
+    """SQLite stores naive timestamps; retain the instant when input includes an offset."""
+    from datetime import timezone
+
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(value)
+    return parsed.astimezone(timezone.utc).replace(tzinfo=None) if parsed.tzinfo else parsed
+
+
+def used_vocabulary(work):
+    return {
+        "species": {
+            row["species"] for unit in work for row in unit["observations"] if row["species"]
+        },
+        "behaviors": {
+            key for unit in work for row in unit["observations"] for key in row["behaviors"]
+        },
+        "tags": {row["key"] for unit in work for row in unit["tags"]},
+    }
+
+
+def vocabulary(session, context, work=None):
+    """Reuse natural keys, never overwrite shared definitions; import only used return keys."""
+    used = None if work is None else used_vocabulary(work)
+    result = {}
+    for name, model, key in (
+        ("species", Species, "scientific_name"),
+        ("behaviors", Behavior, "key"),
+        ("tags", Tag, "key"),
+    ):
+        local = {getattr(row, key): row.id for row in session.query(model)}
+        for definition in context[name]:
+            value = definition[key]
+            if used is not None and value not in used[name]:
+                continue
+            if value not in local:
+                row = model(**definition)
+                session.add(row)
+                session.flush()
+                local[value] = row.id
+        result[name] = local
+    return result
+
+
+def restore_work(session, project_id, video_id, unit, vocab):
+    """Replace exactly one Species video, preserving saved evidence and unrelated Distance."""
+    existing = {
+        row.observation_uuid: row.id
+        for row in session.query(IndividualObservation).filter_by(video_id=video_id)
+    }
+    next_id = max(existing.values(), default=0) + 1
+    for model in (ObservationTag, IndividualObservation, VideoTag, VideoLabel):
+        session.query(model).filter_by(video_id=video_id).delete(synchronize_session=False)
+    session.flush()
+    authors = {row.get("labeled_by") for row in unit["observations"]}
+    authors.update(row["tagged_by"] for row in unit["tags"])
+    if unit["label"]:
+        authors.add(unit["label"]["labeled_by"])
+        label = {**unit["label"], "labeled_at": timestamp(unit["label"]["labeled_at"])}
+        session.add(VideoLabel(video_id=video_id, **label))
+    for name in authors - {None, ""}:
+        if session.get(Annotator, name) is None:
+            session.add(Annotator(name=name))
+    for source in unit["observations"]:
+        number = existing.get(source["observation_uuid"])
+        if number is None:
+            number, next_id = next_id, next_id + 1
+        row = {key: value for key, value in source.items() if key not in {"species", "behaviors"}}
+        for key in ("labeled_at", "updated_at"):
+            row[key] = timestamp(row[key])
+        session.add(
+            IndividualObservation(
+                video_id=video_id,
+                id=number,
+                project_id=project_id,
+                species_id=vocab["species"].get(source["species"]),
+                **row,
+            )
+        )
+        session.flush()
+        session.add_all(
+            ObservationTag(
+                video_id=video_id, observation_id=number, behavior_id=vocab["behaviors"][key]
+            )
+            for key in source["behaviors"]
+        )
+    session.add_all(
+        VideoTag(
+            video_id=video_id,
+            tag_id=vocab["tags"][row["key"]],
+            tagged_by=row["tagged_by"],
+            tagged_at=timestamp(row["tagged_at"]),
+        )
+        for row in unit["tags"]
+    )
+    session.flush()
+
+
+def canonical(unit):
+    """Compare saved meaning, ignoring local handles, list ordering, and timestamp spelling."""
+    import copy
+
+    value = copy.deepcopy(unit)
+    label = value["label"]
+    if label and not any(
+        (
+            label["is_blank"] is not None,
+            label["review_later"],
+            label["labeled_by"],
+            label["labeled_at"],
+        )
+    ):
+        value["label"] = None
+    elif label:
+        label["review_later"] = bool(label["review_later"])
+    rows = value["observations"] + value["tags"] + ([value["label"]] if value["label"] else [])
+    for row in rows:
+        for key, val in row.items():
+            if key.endswith("_at") and val is not None:
+                row[key] = timestamp(val).isoformat(timespec="microseconds")
+        if "behaviors" in row:
+            row["behaviors"] = sorted(row["behaviors"])
+    value["observations"].sort(key=lambda row: row["observation_uuid"])
+    value["tags"].sort(key=lambda row: row["key"])
+    return value
+
+
+def counts(unit):
+    unit = canonical(unit)
+    return {
+        "labels": int(unit["label"] is not None),
+        "observations": len(unit["observations"]),
+        "behaviors": sum(len(row["behaviors"]) for row in unit["observations"]),
+        "tags": len(unit["tags"]),
+    }
+
+
+def removals(before, after):
+    def keys(unit):
+        unit = canonical(unit)
+        return {
+            "labels": {"label"} if unit["label"] else set(),
+            "observations": {row["observation_uuid"] for row in unit["observations"]},
+            "behaviors": {
+                (row["observation_uuid"], key)
+                for row in unit["observations"]
+                for key in row["behaviors"]
+            },
+            "tags": {row["key"] for row in unit["tags"]},
+        }
+
+    old, new = keys(before), keys(after)
+    return {name: len(values - new[name]) for name, values in old.items()}
 
 
 def collect(session: Session, project, videos, roots) -> tuple[dict, list[dict]]:
