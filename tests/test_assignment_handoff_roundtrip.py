@@ -67,7 +67,7 @@ def test_return_contains_untouched_and_new_work_and_preview_does_not_apply(hando
     assert manifest["direction"] == "return"
     assert {unit["video_id"] for unit in work} == set(ids)
     assert context["predictions"] == []
-    preview = dp.preview_assignment_return(project.id, returned)
+    preview = dp.preview_assignment_return(project.id, returned, "keep_existing")
     assert preview.totals["added"] == 1
     assert preview.totals["unchanged"] == 1
     assert not dp.get_video_detail(original[empty_name])["manual_selections"]
@@ -157,12 +157,12 @@ def test_repeated_returns_obey_one_whole_video_policy_and_warn_about_admin_corre
         active_project_id=opened.project_id,
     )
     returned = dp.export_assignment_return(opened.project_id)
-    keep = dp.preview_assignment_return(project.id, returned)
+    keep = dp.preview_assignment_return(project.id, returned, "keep_existing")
     assert keep.totals["unapplied"] == 1
     assert "later annotator progress" in " ".join(keep.warnings)
     dp.accept_assignment_return(project.id, returned, "keep_existing", keep.token)
     assert dp.get_video_detail(ids[0])["manual_selections"][0]["species"] == "deer"
-    imported = dp.preview_assignment_return(project.id, returned, "use_imported")
+    imported = dp.preview_assignment_return(project.id, returned)
     assert imported.totals["replaced"] == 1
     assert "admin corrections" in " ".join(imported.warnings)
     assert imported.totals["annotations_removed"] >= 1
@@ -175,7 +175,7 @@ def test_repeated_returns_obey_one_whole_video_policy_and_warn_about_admin_corre
     dp.update_manual_review(
         ids[0], [{"species": "fox", "count": 99}], active_project_id=project.id
     )
-    keep = dp.preview_assignment_return(project.id, returned)
+    keep = dp.preview_assignment_return(project.id, returned, "keep_existing")
     dp.accept_assignment_return(project.id, returned, "keep_existing", keep.token)
     assert dp.get_video_detail(ids[0])["manual_selections"][0]["count"] == 99
 
@@ -208,6 +208,40 @@ def test_working_project_sync_checks_only_listed_media_and_local_writes_are_unre
     assert dp.get_distance_review_state(task, "alice")["task"]["completion_outcome"] == "absent"
     _, _, work = decode_archive(dp.export_assignment_return(opened.project_id))
     assert {unit["video_id"] for unit in work} == set(ids)
+
+
+def test_sync_probes_unprobed_assignment_media_without_expanding_scope(handout, monkeypatch):
+    from review_app.backend.db.models import Video
+    from review_app.backend.provider.video import ProbeResult
+
+    dp, project, root, ids, data = handout
+    opened = dp.open_assignment(data, "Alice", {root.id: root.path})
+    assert dp.get_overview_stats(opened.project_id)["videos"]["unprobed"] == len(ids)
+    (Path(root.path) / "cam_x" / "unlisted.mp4").touch()
+    calls = []
+
+    def probe_many(paths, progress_callback=None):
+        calls.extend(paths)
+        if progress_callback:
+            for count, path in enumerate(paths, 1):
+                progress_callback(count, len(paths), path.name)
+        return {path: ProbeResult(12.5, True, True, None, None, None, None) for path in paths}
+
+    monkeypatch.setattr("review_app.backend.provider.video._probe_many", probe_many)
+    result = dp.sync_videos(active_project_id=opened.project_id)
+    assert dp.get_overview_stats(opened.project_id)["videos"]["unprobed"] == 0
+    assert {path.name for path in calls} == {"a.mp4", "b.mp4"}
+    assert result == {"scanned": 2, "added": 0, "updated": 2, "removed": 0}
+    assert dp.get_overview_stats(project.id)["videos"]["unprobed"] == 0
+    with dp.Session() as session:
+        for video in session.query(Video).filter_by(project_id=opened.project_id):
+            assert video.is_valid is True
+            assert video.is_web_safe is True
+            assert video.duration_sec == 12.5
+    # A second sync does not re-probe already checked files.
+    calls.clear()
+    dp.sync_videos(active_project_id=opened.project_id)
+    assert calls == []
 
 
 def test_open_on_another_instance_returns_complete_progress_even_when_footage_is_missing(
@@ -275,7 +309,7 @@ def test_acceptance_requires_a_current_preview_of_payload_policy_work_and_media(
     dp, project, root, ids, data = handout
     opened = dp.open_assignment(data, "Alice", {root.id: root.path})
     returned = dp.export_assignment_return(opened.project_id)
-    preview = dp.preview_assignment_return(project.id, returned)
+    preview = dp.preview_assignment_return(project.id, returned, "keep_existing")
     with pytest.raises(ValueError, match="stale"):
         dp.accept_assignment_return(project.id, returned, "use_imported", preview.token)
     manifest, context, work = decode_archive(returned)

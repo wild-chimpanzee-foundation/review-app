@@ -1,8 +1,10 @@
 # Try a Species assignment round trip
 
-This is the first M3 UI slice. Species handoff is available; Distance handoff and
-saved-assignment footage copying are not yet wired. Legacy bundle/CSV/copy controls
-remain independent and do not use the frozen assignment selection.
+Species handoff and saved-assignment footage copying are available; Distance
+handoff is not yet wired. Distribution now delivers assignments only through
+saved handoffs; the old live-distribution bundle/copy controls were removed.
+Legacy CSV batch import remains independent and is not an assignment return.
+Legacy setup import is still available when creating a project.
 
 ## Start the app
 
@@ -34,20 +36,40 @@ with the current code. Use a small test project or a copy of your real project:
 Footage is not inside the ZIP. For same-machine testing, keep the videos where
 they are: both projects can point at the same footage folders.
 
+To test delivery, expand **Copy saved assignment footage** under the saved
+assignment. Enter an output folder on the machine running the app, outside all
+project footage folders, and click **Copy footage**. Check copied/missing/failed
+counts and the displayed root-folder mapping. Send the generated
+`assignment-<UUID>` folder together with the downloaded ZIP to the recipient.
+Use each root-ID subfolder when locating footage below. If copying is partial,
+inspect the errors and retry with a different output folder: existing delivery
+folders are deliberately never overwritten. Try a multi-root project with the
+same relative filename in two roots and verify both copies remain separate.
+
 ## 2. Open in a fresh working project
 
-1. Open the project picker and click **Open assignment**. On another instance,
-   **New project → Open assignment** offers the same form after initial setup.
+1. Open the project picker and click **Open package**. On another instance,
+   **New project → Open package** offers the same format-detecting upload after
+   initial setup. Assignment packages open linked working projects; older bundles
+   show a warning and create independent projects without assignment returns.
 2. Upload the saved **assignment-….zip**, not a return or legacy bundle ZIP.
 3. Choose a recognizable working project name, such as `Alice roundtrip`.
 4. For each root, enter the local folder containing the displayed relative paths.
    For example, if the example is `cam_a/clip.mp4`, enter the folder above
    `cam_a`, not `cam_a` itself. Paths refer to the machine running the app, not a
    remote browser's filesystem. Multiple roots need distinct local folders.
-5. Click **Open assignment**. It creates and activates a fresh project; it does
-   not import into the current project or recursively discover unrelated videos.
-6. If footage is missing, read the warning and click **Continue to project**.
-   The videos remain represented. Locate their folders in Settings and sync later.
+5. Click **Open assignment**. It checks the footage folders first. If files are
+   missing, no project is created yet: edit the folder paths above and click
+   **Open assignment** again. Changing a path clears the previous warning.
+6. To proceed without all footage, explicitly click **Open with missing footage**.
+   Otherwise, finding all listed files opens the project directly. Opening creates
+   one fresh project, then syncs/probes its listed footage before activating it
+   and continuing. Check that Overview's Unprobed count is zero for accessible
+   footage; failed probes appear as Invalid, and missing files remain unprobed.
+   If sync fails, use **Retry footage sync**; this reuses the same project rather
+   than creating another. Opening does not import into the current project or
+   recursively discover unrelated videos. Missing videos remain represented and
+   can be located in Settings and synced later.
 
 ## 3. Annotate and return
 
@@ -66,11 +88,12 @@ keep annotating and download another return later.
 1. Switch back to the **origin project** using the project picker.
 2. Open **Distribution → Preview and accept returned Species work**.
 3. Upload **return-….zip**.
-4. Leave **Keep existing** selected and click **Preview return**. New work is
-   added; identical work is unchanged; differing existing videos are left
-   unapplied. Nothing has been written yet.
-5. To accept a changed carried annotation, select **Use imported**. The preview
-   refreshes automatically. Read the compact summary and removal warnings;
+4. Leave the default **Use imported** selected and click **Preview return**.
+   New work is added; identical work is unchanged; differing existing videos are
+   replaced. Nothing has been written yet.
+5. To preserve differing work already in the origin, select **Keep existing**.
+   The preview refreshes automatically and those returned units remain unapplied.
+   Read the compact summary and removal warnings;
    click **Show per-video details** to expand the action/count table.
 6. Click **Accept previewed return**, then reopen Species Review and verify the
    change. Distance state and unrelated videos should be untouched.

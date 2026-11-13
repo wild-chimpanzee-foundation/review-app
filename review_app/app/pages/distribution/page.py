@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-from datetime import date
 
 import pandas as pd
 from nicegui import run, ui
@@ -242,150 +241,17 @@ def render_distribution_section(dp, project_id: str) -> None:
     from review_app.app.components.assignment_handoff import render_assignment_handoff
 
     render_assignment_handoff(dp, project_id)
-    ui.label(t("handoff_legacy_help")).classes("text-caption text-grey-6 q-mb-md")
-
-    _vz_annotators: list[str] = []
-    _vz_selected: set[str] = set()
-
-    @ui.refreshable
-    def render_vz_chips():
-        nonlocal _vz_annotators, _vz_selected
-        if _vz_annotators:
-            ui.label(t("video_zip_annotators_label")).classes("text-caption text-grey-6 q-mb-xs")
-            with ui.row().classes("gap-xs flex-wrap q-mb-sm"):
-                for ann in _vz_annotators:
-                    active = ann in _vz_selected
-
-                    def _toggle(a=ann):
-                        if a in _vz_selected:
-                            _vz_selected.discard(a)
-                        else:
-                            _vz_selected.add(a)
-                        render_vz_chips.refresh()
-
-                    chip = ui.chip(ann, icon="person", on_click=_toggle)
-                    chip.props("clickable")
-                    if active:
-                        chip.props("color=primary")
-                    else:
-                        chip.props("outline color=grey-6")
-
-    def reload_vz_annotators():
-        nonlocal _vz_annotators, _vz_selected
-        _vz_annotators = dp.get_all_annotators()
-        _vz_selected = set(dp.get_assigned_annotators(project_id))
-        render_vz_chips.refresh()
-
-    # Initial load of annotators
-    _vz_annotators = dp.get_all_annotators()
-    _vz_selected = set(dp.get_assigned_annotators(project_id))
-
-    # ── Work Distribution ─────────────────────────────────────────────────
+    # Distribution is a selection input; only saved handoffs deliver assignments.
     with ui.card().classes("full-width q-mb-lg"):
         with ui.row().classes("items-center q-mb-sm"):
             ui.icon("group", size="sm").classes("text-primary q-mr-sm")
             ui.label(t("distribution_title")).classes("text-subtitle1 font-weight-medium")
         ui.label(t("distribution_desc")).classes("text-caption text-grey-6 q-mb-md")
-        section = DistributionSection(dp, project_id, on_change=reload_vz_annotators)
+        section = DistributionSection(dp, project_id)
         section.render()
         section.render_summary()
 
-    # ── Bundle Export ─────────────────────────────────────────────────────
-    with ui.card().classes("full-width q-mb-lg"):
-        with ui.row().classes("items-center q-mb-sm"):
-            ui.icon("folder_zip", size="sm").classes("text-primary q-mr-sm")
-            ui.label(t("bundle_export_title")).classes("text-subtitle1 font-weight-medium")
-        ui.label(t("bundle_export_desc")).classes("text-caption text-grey-6 q-mb-md")
-
-        _all_include = ["species", "tags", "model_annotations", "metadata"]
-
-        async def download_all_bundles():
-            annotators = await run.io_bound(dp.get_assigned_annotators, project_id)
-            if not annotators:
-                ui.notify(t("bundle_no_annotators"), type="warning")
-                return
-            try:
-                zip_bytes = await run.io_bound(dp.export_all_bundles, project_id, _all_include)
-                if not zip_bytes:
-                    ui.notify(t("bundle_export_empty"), type="warning")
-                    return
-                filename = f"all_bundles_{date.today()}.zip"
-                ui.download(zip_bytes, filename)
-            except Exception as exc:
-                ui.notify(t("bundle_error", msg=user_error_message(exc)), type="negative")
-
-        ui.button(
-            t("bundle_download_all_btn"), icon="folder_zip", on_click=download_all_bundles
-        ).props("unelevated color=primary")
-
-    # ── Video ZIP Export ──────────────────────────────────────────────────
-    with ui.card().classes("full-width q-mb-lg"):
-        with ui.row().classes("items-center q-mb-sm"):
-            ui.icon("video_library", size="sm").classes("text-primary q-mr-sm")
-            ui.label(t("video_zip_title")).classes("text-subtitle1 font-weight-medium")
-        ui.label(t("video_zip_desc")).classes("text-caption text-grey-6 q-mb-md")
-
-        render_vz_chips()
-
-        ui.label(t("video_zip_output_label")).classes("text-caption text-grey-6 q-mb-xs")
-        video_zip_output_input = (
-            ui.input(placeholder=t("video_zip_output_placeholder"))
-            .props("outlined dense clearable")
-            .classes("w-full q-mb-sm")
-        )
-
-        async def export_video_zips():
-            if not _vz_annotators:
-                ui.notify(t("video_zip_no_assignments"), type="warning")
-                return
-            elif not _vz_selected:
-                ui.notify(t("video_zip_no_assignments"), type="warning")
-                return
-
-            output_dir = (video_zip_output_input.value or "").strip() or None
-            annotators = list(_vz_selected)
-
-            progress_dialog = ui.dialog().props("persistent")
-            with progress_dialog, ui.card().classes("q-pa-lg").style("min-width: 420px"):
-                ui.label(t("video_zip_title")).classes("text-h6 q-mb-md")
-                count_label = ui.label("0 / … files").classes("text-body2 q-mb-xs")
-                progress_bar = ui.linear_progress(value=0, show_value=False).props("color=primary")
-            progress_dialog.open()
-            await ui.context.client.connected()
-
-            def on_progress(done: int, total: int):
-                count_label.set_text(f"{done} / {total} files")
-                progress_bar.set_value(done / total)
-
-            try:
-                results = await run.io_bound(
-                    dp.export_annotator_videos,
-                    project_id,
-                    on_progress,
-                    4,
-                    output_dir,
-                    annotators,
-                )
-            except Exception as exc:
-                progress_dialog.close()
-                ui.notify(t("video_zip_error", msg=user_error_message(exc)), type="negative")
-                return
-
-            progress_dialog.clear()
-            out_dir = str(__import__("pathlib").Path(results[0]["path"]).parent) if results else ""
-            with (
-                progress_dialog,
-                ui.card().classes("q-pa-lg items-center gap-md").style("min-width: 420px"),
-            ):
-                ui.icon("check_circle", size="lg").classes("text-positive")
-                ui.label(t("video_zip_done", n=len(results), path=out_dir)).classes("text-body1")
-                ui.button(t("close"), on_click=progress_dialog.close, color="primary").classes(
-                    "full-width"
-                )
-
-        ui.button(t("video_zip_btn"), icon="archive", on_click=export_video_zips).props(
-            "unelevated color=secondary"
-        )
+    ui.label(t("handoff_legacy_help")).classes("text-caption text-grey-6 q-mb-md")
 
     # ── Batch Annotation Import ───────────────────────────────────────────
     with ui.card().classes("full-width q-mb-lg"):

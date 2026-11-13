@@ -53,10 +53,35 @@ Split a project's videos across multiple annotators so each person reviews their
 2. Assign cameras to annotators manually, or use **Auto-distribute** to spread cameras evenly.
 3. **Apply** to write the assignments; **Reset** clears them.
 
-A summary table shows each annotator's cameras, videos, and hours. The same panel offers:
+A summary table shows each annotator's cameras, videos, and hours. Open the
+**Distribution** page to hand off Species work:
 
-- **Bundle export** — download a per-annotator `.zip` project bundle to hand off.
-- **Video ZIP export** — package each annotator's assigned video files into ZIPs in an output folder you choose.
+1. Choose a registered recipient and either their applied distribution or all
+   project videos, then **Prepare Species assignment**. Preparation freezes the
+   selection and saved Species state; later edits do not change that package.
+2. **Download saved assignment**. For footage delivery, expand **Copy saved
+   assignment footage** and choose an output folder on the computer running the
+   app, outside the project footage folders. Send the generated folder and ZIP
+   together. Each media root has its own subfolder. Check missing/failed counts;
+   retry in a different output folder rather than overwriting an earlier delivery.
+3. The recipient uses **Open package** in the project picker to create a fresh
+   project, uploads the ZIP, and locates each media-root subfolder. Footage is not
+   embedded in the ZIP. On the same machine, the original footage can be reused.
+   Opening automatically syncs and probes listed footage before continuing. If
+   that sync fails, retry it in the same form without creating another project.
+4. After annotating, the recipient downloads **Return progress** from Distribution.
+   Returns include every assigned video's saved Species state, even untouched,
+   unfinished, or empty work. Annotation can continue after a return.
+5. In the origin project, upload the return under **Preview and accept returned
+   Species work**. Review the impact before accepting. The default **Use imported**
+   replaces differing whole-video Species states, including deletions; choose
+   **Keep existing** to leave differing origin work untouched.
+
+Distance handoff is not yet available. Local annotation remains unrestricted;
+only the assignment's saved Species scope is eligible for return acceptance.
+Legacy CSV batch import remains separate and appends annotations without an
+assignment preview. **Open package** also detects legacy setup bundles and explains that they create
+independent projects without assignment returns.
 
 Assignments show up on the [Dashboard](dashboard.md#assignment-summary) and as an annotator filter on the Species screen.
 

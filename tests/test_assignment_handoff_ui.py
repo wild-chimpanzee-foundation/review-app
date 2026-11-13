@@ -9,6 +9,7 @@ from review_app.app.components.assignment_handoff import (
     render_assignment_handoff,
     render_open_assignment,
 )
+from review_app.app.pages.distribution.page import render_distribution_section
 from review_app.app.state import get_active_project_id, set_data_provider
 from review_app.app.translations import t
 from review_app.backend.annotation_package.scope import AssignmentRequest
@@ -56,6 +57,11 @@ def handoff_ui(provider_with_project):
         app.storage.user["active_project_id"] = project.id
         render_assignment_handoff(dp, project.id)
 
+    @ui.page("/handoff-distribution")
+    def distribution():
+        app.storage.user["active_project_id"] = project.id
+        render_distribution_section(dp, project.id)
+
     @ui.page("/handoff-open")
     def opening():
         render_open_assignment(lambda: ui.label("Working project opened"))
@@ -66,6 +72,54 @@ def handoff_ui(provider_with_project):
 
     yield dp, project, root
     set_data_provider(None)
+
+
+async def test_distribution_uses_saved_delivery_and_keeps_independent_csv_import(
+    user: User, handoff_ui
+):
+    dp, project, _ = handoff_ui
+    video_id = dp.get_assignment_video_ids(project.id)[0]
+    dp.update_manual_review(
+        video_id, [{"species": "deer", "count": 3}], active_project_id=project.id
+    )
+    csv = dp.export_annotations_csv(project.id).to_csv(index=False).encode()
+    dp.update_manual_review(video_id, [], active_project_id=project.id)
+    saved = dp.prepare_assignment(project.id, AssignmentRequest("alice", (video_id,)))
+    await user.open("/handoff-distribution")
+    await user.should_see(t("handoff_download"))
+    await user.should_see(t("handoff_copy"))
+    await user.should_see(t("distribution_title"))
+    await user.should_see(t("handoff_legacy_help"))
+    texts = {getattr(e, "text", None) for e in user.client.elements.values()}
+    assert t("bundle_download_all_btn") not in texts
+    assert t("video_zip_btn") not in texts
+    csv_upload = next(
+        e
+        for e in user.client.elements.values()
+        if isinstance(e, ui.upload) and e.props.get("label") == t("batch_import_btn")
+    )
+    with user:
+        await csv_upload.handle_uploads([SmallFileUpload("annotations.csv", "text/csv", csv)])
+    await user.should_see(t("batch_import_summary", files=1, imported=2, skipped=0))
+    assert dp.get_video_detail(video_id)["manual_selections"][0]["count"] == 3
+    assert dp.list_assignments(project.id)[0]["id"] == saved.id
+
+
+async def test_saved_assignment_copy_control(user: User, handoff_ui, tmp_path):
+    dp, project, _ = handoff_ui
+    saved = dp.prepare_assignment(
+        project.id, AssignmentRequest("alice", tuple(dp.get_assignment_video_ids(project.id)))
+    )
+    await user.open("/handoff-admin")
+    with user:
+        expansion = next(iter(user.find(t("handoff_copy"), kind=ui.expansion).elements))
+        expansion.set_value(True)
+    user.find(t("handoff_copy_output")).type(str(tmp_path / "delivery"))
+    user.find(t("handoff_copy_start"), kind=ui.button).click()
+    path = tmp_path / "delivery" / f"assignment-{saved.assignment_id}"
+    await user.should_see(t("handoff_copy_result", copied=2, missing=0, failed=0, path=str(path)))
+    assert len(list(path.rglob("*.mp4"))) == 2
+    assert button(user, "handoff_copy_start").enabled
 
 
 async def test_species_roundtrip_through_prepare_open_return_preview_accept(
@@ -136,20 +190,24 @@ async def test_species_roundtrip_through_prepare_open_return_preview_accept(
     assert not button(user, "handoff_accept").enabled
     await upload(user, returned)
     await user.should_see(t("handoff_return_loaded"))
+    policy_select = next(iter(user.find(t("handoff_policy"), kind=ui.select).elements))
+    assert policy_select.value == "use_imported"
     user.find(t("handoff_preview"), kind=ui.button).click()
-    await user.should_see(t("handoff_keep_warning"))
-    assert not button(user, "handoff_accept").enabled
+    await user.should_see(t("handoff_replace_warning"))
+    assert button(user, "handoff_accept").enabled
     expansion = next(iter(user.find(t("handoff_details"), kind=ui.expansion).elements))
     assert not expansion.value
     # Simulate Quasar's model update; User.click doesn't emulate expansions.
     with user:
         expansion.set_value(True)
     assert expansion.value
-    # A policy change replans automatically, with no second Preview click.
+    # Policy changes replan automatically, with no second Preview click.
     with user:
-        next(iter(user.find(t("handoff_policy"), kind=ui.select).elements)).set_value(
-            "use_imported"
-        )
+        policy_select.set_value("keep_existing")
+    await user.should_see(t("handoff_keep_warning"))
+    assert not button(user, "handoff_accept").enabled
+    with user:
+        policy_select.set_value("use_imported")
     await user.should_see(t("handoff_replace_warning"))
     assert button(user, "handoff_accept").enabled
     assert not next(iter(user.find(t("handoff_details"), kind=ui.expansion).elements)).value
@@ -194,7 +252,7 @@ async def test_invalid_upload_and_stale_preview_cannot_apply_work(user: User, ha
     assert not button(user, "handoff_accept").enabled
 
 
-async def test_open_reports_missing_footage_and_keeps_fresh_project(
+async def test_missing_footage_can_be_corrected_before_creating_project(
     user: User, handoff_ui, tmp_path
 ):
     dp, project, root = handoff_ui
@@ -205,10 +263,43 @@ async def test_open_reports_missing_footage_and_keeps_fresh_project(
     await user.should_see(t("handoff_root", number=1))
     user.find(t("handoff_root", number=1)).type(str(tmp_path / "not-delivered"))
     user.find(t("handoff_open"), kind=ui.button).click()
-    await user.should_see(t("handoff_missing", count=2))
-    assert not button(user, "handoff_open").enabled
+    await user.should_see(t("handoff_missing_folders", count=2))
+    assert button(user, "handoff_open").enabled
+    with user:
+        assert get_active_project_id() is None  # No project is activated by a failed path check.
+    assert len(dp.list_projects()) == 1
+    with user:
+        next(iter(user.find(t("handoff_root", number=1), kind=ui.input).elements)).set_value(
+            root.path
+        )
+    await user.should_not_see(t("handoff_open_missing"))
+    user.find(t("handoff_open"), kind=ui.button).click()
+    await user.should_see("Working project opened")
     with user:
         working = get_active_project_id()
     assert working != project.id and dp.get_project_video_count(working) == 2
-    user.find(t("handoff_continue"), kind=ui.button).click()
+    assert len(dp.list_projects()) == 2
+
+
+async def test_open_with_missing_footage_requires_explicit_confirmation(
+    user: User, handoff_ui, tmp_path
+):
+    dp, project, root = handoff_ui
+    ids = dp.get_assignment_video_ids(project.id)
+    prepared = dp.prepare_assignment(project.id, AssignmentRequest("alice", tuple(ids)))
+    await user.open("/handoff-open")
+    await upload(user, dp.export_assignment(prepared.id))
+    await user.should_see(t("handoff_root", number=1))
+    user.find(t("handoff_root", number=1)).type(str(tmp_path / "not-delivered"))
+    user.find(t("handoff_open"), kind=ui.button).click()
+    await user.should_see(t("handoff_missing_folders", count=2))
+    assert len(dp.list_projects()) == 1
+    user.find(t("handoff_open_missing"), kind=ui.button).click()
     await user.should_see("Working project opened")
+    with user:
+        working = get_active_project_id()
+    assert working != project.id
+    assert len(dp.list_projects()) == 2
+    assert dp.get_project_video_count(working) == 2
+    with dp.Session() as session:
+        assert all(row.is_missing for row in session.query(Video).filter_by(project_id=working))

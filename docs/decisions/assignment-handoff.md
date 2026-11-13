@@ -161,7 +161,7 @@ work. Only assigned work for the assignment's stage is eligible:
 The admin chooses one policy once for all eligible work in the return, with no
 per-video or per-task policy selection:
 
-| Situation | Keep existing — default | Use imported |
+| Situation | Keep existing | Use imported — default |
 | --- | --- | --- |
 | New work | Add | Add |
 | Identical work | No-op | No-op |

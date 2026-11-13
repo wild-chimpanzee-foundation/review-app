@@ -1,7 +1,4 @@
-import io
-import json
 import sqlite3
-import zipfile
 from pathlib import Path
 
 from nicegui import app, run, ui
@@ -51,7 +48,7 @@ class SetupWizard:
         self.video_tools_ok = False
         self.inputs = {}
 
-    def build(self):
+    def build(self, *, package_only=False):
         db_path = get_default_db_path()
         adding_to_existing = db_path.exists() and _db_has_projects(db_path)
 
@@ -60,7 +57,9 @@ class SetupWizard:
         collection_select_holder: list = [None]
         bundle_bytes: list = [None]
         bundle_btn_holder: list = [None]
-        bundle_preview_label: list = [None]
+        assignment_loader: list = [None]
+        package_forms = {}
+        package_revision = 0
 
         # ── Shared helpers ────────────────────────────────────────────────────
 
@@ -134,32 +133,39 @@ class SetupWizard:
 
             ui.timer(0, do_check, once=True)
 
-        async def handle_bundle_upload(e):
-            raw = await e.file.read()
-            try:
-                with zipfile.ZipFile(io.BytesIO(raw)) as z:
-                    manifest = json.loads(z.read("bundle.json"))
-                    contents = manifest.get("contents", [])
-                comp_names = {
-                    "species": t("bundle_component_species"),
-                    "tags": t("bundle_component_tags"),
-                    "model_annotations": t("bundle_component_model_annotations"),
-                    "metadata": t("bundle_component_metadata"),
-                }
-                labels = [comp_names.get(c, c) for c in contents]
-                preview_text = (
-                    t("wizard_bundle_preview", contents=", ".join(labels)) if labels else ""
-                )
-                bundle_bytes[0] = raw
-                if bundle_preview_label[0]:
-                    bundle_preview_label[0].set_text(preview_text)
-                    bundle_preview_label[0].classes("text-positive", remove="text-negative")
-            except Exception:
-                bundle_bytes[0] = None
-                if bundle_preview_label[0]:
-                    bundle_preview_label[0].set_text(t("wizard_bundle_invalid"))
-                    bundle_preview_label[0].classes("text-negative", remove="text-positive")
+        async def handle_package_upload(e):
+            from review_app.backend.annotation_package.archive import MAX_ARCHIVE_BYTES
+            from review_app.backend.annotation_package.detection import detect_setup_package
+
+            nonlocal package_revision
+            package_revision += 1
+            current = package_revision
+            bundle_bytes[0] = None
             update_bundle_button()
+            package_forms["assignment"].set_visibility(False)
+            package_forms["legacy"].set_visibility(False)
+            package_forms["status"].set_text("")
+            try:
+                if e.file.size() > MAX_ARCHIVE_BYTES:
+                    raise ValueError(t("handoff_upload_limit"))
+                raw = await e.file.read()
+                kind = await run.io_bound(detect_setup_package, raw)
+                if current != package_revision:
+                    return
+                if kind == "assignment":
+                    await assignment_loader[0](e, raw=raw)
+                    if current != package_revision:
+                        return
+                else:
+                    bundle_bytes[0] = raw
+                    update_bundle_button()
+                package_forms["status"].set_text(e.file.name)
+                package_forms[kind].set_visibility(True)
+            except Exception as exc:
+                if current == package_revision:
+                    package_forms["status"].set_text(
+                        str(exc) if isinstance(exc, ValueError) else user_error_message(exc)
+                    )
 
         async def submit_project():
             project_btn_holder[0].set_enabled(False)
@@ -436,14 +442,11 @@ class SetupWizard:
         def render_project_tabs():
             with ui.tabs().classes("w-full q-mb-md") as tabs:
                 ui.tab(name="manual", label=t("wizard_setup_tab_manual"), icon="edit")
-                ui.tab(name="bundle", label=t("wizard_setup_tab_bundle"), icon="inventory_2")
-                ui.tab(name="assignment", label=t("handoff_open"), icon="assignment")
+                ui.tab(name="package", label=t("package_open"), icon="inventory_2")
 
             with ui.tab_panels(tabs, value="manual").classes("w-full"):
-                with ui.tab_panel("assignment"):
-                    from review_app.app.components.assignment_handoff import render_open_assignment
-
-                    render_open_assignment(self.on_complete_callback)
+                with ui.tab_panel("package"):
+                    render_package_form()
                 with ui.tab_panel("manual"):
                     with ui.card().classes("full-width q-mb-md"):
                         ui.label(t("project_name_label")).classes(
@@ -501,58 +504,75 @@ class SetupWizard:
                     )
                     project_btn_holder[0].set_enabled(False)
 
-                with ui.tab_panel("bundle"):
-                    with ui.card().classes("full-width q-mb-md"):
-                        ui.label(t("wizard_bundle_import_label")).classes(
-                            "text-subtitle1 font-weight-medium q-mb-xs"
-                        )
-                        ui.label(t("wizard_bundle_import_desc")).classes(
-                            "text-caption text-grey-6 q-mb-sm"
-                        )
-                        ui.upload(
-                            on_upload=handle_bundle_upload,
-                            multiple=False,
-                            label=t("wizard_bundle_import_btn"),
-                            auto_upload=True,
-                        ).props("accept=.zip flat color=primary").classes("full-width")
-                        bundle_preview_label[0] = ui.label("").classes("text-caption q-mt-xs")
+        def render_package_form():
+            from review_app.app.components.assignment_handoff import (
+                assignment_upload,
+                render_open_assignment,
+            )
 
-                    with ui.card().classes("full-width q-mb-md"):
-                        ui.label(t("video_dir_label")).classes(
-                            "text-subtitle1 font-weight-medium q-mb-xs"
-                        )
-                        ui.label(t("video_dir_desc")).classes("text-caption text-grey-6 q-mb-md")
-                        self.inputs["bundle_video_dir"] = ui.input(
-                            placeholder=t("video_dir_placeholder"),
-                        ).props("outlined dense class=w-full")
-                        self.inputs["bundle_video_dir"].on_value_change(on_bundle_video_dir_change)
-
-                    with ui.card().classes("full-width q-mb-md"):
-                        ui.label(t("project_name_label")).classes(
-                            "text-subtitle1 font-weight-medium q-mb-xs"
-                        )
-                        ui.label(t("project_name_desc")).classes(
-                            "text-caption text-grey-6 q-mb-md"
-                        )
-                        self.inputs["bundle_project_name"] = ui.input(
-                            placeholder=t("project_name_placeholder"),
-                        ).props("outlined dense class=w-full")
-
-                    bundle_btn_holder[0] = (
-                        ui.button(
-                            t("wizard_bundle_submit_btn"),
-                            on_click=submit_bundle_project,
-                            icon="inventory_2",
-                            color="primary",
-                        )
-                        .props("size=lg")
-                        .classes("full-width")
+            uploader = assignment_upload(handle_package_upload, "package_upload").style(
+                "display: none"
+            )
+            with ui.row().classes("items-center gap-sm"):
+                ui.button(
+                    t("package_upload"),
+                    icon="folder_open",
+                    on_click=lambda: ui.run_javascript(
+                        f"document.getElementById('c{uploader.id}')"
+                        ".querySelector('.q-uploader__input').click()"
+                    ),
+                ).props("outline no-caps")
+                package_status = ui.label("").classes("text-body2 break-all")
+            with ui.column().classes("w-full") as assignment_form:
+                assignment_loader[0] = render_open_assignment(
+                    self.on_complete_callback, show_upload=False
+                )
+            assignment_form.set_visibility(False)
+            with ui.column().classes("w-full") as legacy_form:
+                ui.label(t("package_legacy_warning")).classes("text-warning")
+                with ui.card().classes("full-width q-mb-md"):
+                    ui.label(t("video_dir_label")).classes(
+                        "text-subtitle1 font-weight-medium q-mb-xs"
                     )
-                    bundle_btn_holder[0].set_enabled(False)
+                    ui.label(t("video_dir_desc")).classes("text-caption text-grey-6 q-mb-md")
+                    self.inputs["bundle_video_dir"] = ui.input(
+                        placeholder=t("video_dir_placeholder"),
+                    ).props("outlined dense class=w-full")
+                    self.inputs["bundle_video_dir"].on_value_change(on_bundle_video_dir_change)
+
+                with ui.card().classes("full-width q-mb-md"):
+                    ui.label(t("project_name_label")).classes(
+                        "text-subtitle1 font-weight-medium q-mb-xs"
+                    )
+                    ui.label(t("project_name_desc")).classes("text-caption text-grey-6 q-mb-md")
+                    self.inputs["bundle_project_name"] = ui.input(
+                        placeholder=t("project_name_placeholder"),
+                    ).props("outlined dense class=w-full")
+
+                bundle_btn_holder[0] = (
+                    ui.button(
+                        t("wizard_bundle_submit_btn"),
+                        on_click=submit_bundle_project,
+                        icon="inventory_2",
+                        color="primary",
+                    )
+                    .props("size=lg")
+                    .classes("full-width")
+                )
+                bundle_btn_holder[0].set_enabled(False)
+
+            legacy_form.set_visibility(False)
+            package_forms.update(
+                assignment=assignment_form, legacy=legacy_form, status=package_status
+            )
 
         # ── Layout ────────────────────────────────────────────────────────────
 
         with ui.column().classes("w-full q-pa-lg").style("max-width: 720px; margin: 0 auto"):
+            if package_only:
+                render_video_tools_check()
+                render_package_form()
+                return
             if not adding_to_existing:
                 # ── Step 1: language, annotator, ffmpeg ───────────────────────
                 with ui.column().classes("w-full gap-0") as step1:

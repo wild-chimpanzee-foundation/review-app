@@ -53,10 +53,39 @@ Répartissez les vidéos d'un projet entre plusieurs annotateurs afin que chacun
 2. Affectez les caméras aux annotateurs manuellement, ou utilisez **Distribution automatique** pour répartir les caméras équitablement.
 3. **Appliquer** pour enregistrer les affectations ; **Réinitialiser** les efface.
 
-Un tableau récapitulatif montre les caméras, vidéos et heures de chaque annotateur. Le même panneau propose :
+Un tableau récapitulatif montre les caméras, vidéos et heures de chaque annotateur.
+Ouvrez la page **Distribution** pour transmettre un travail Espèces :
 
-- **Export par bundle** — télécharger un bundle de projet `.zip` par annotateur à transmettre.
-- **Export ZIP vidéo** — regrouper les fichiers vidéo affectés à chaque annotateur dans des ZIP, dans un dossier de sortie de votre choix.
+1. Choisissez un destinataire enregistré et sa distribution appliquée ou toutes
+   les vidéos du projet, puis préparez l’affectation Espèces. La sélection et
+   l’état Espèces enregistré sont figés ; les modifications ultérieures ne
+   changent pas ce paquet.
+2. Téléchargez l’affectation enregistrée. Pour livrer les vidéos, ouvrez la copie
+   des vidéos de l’affectation et choisissez un dossier sur l’ordinateur qui
+   exécute l’application, hors des dossiers vidéo du projet. Envoyez le dossier
+   créé avec le ZIP. Chaque racine possède son propre sous-dossier. Vérifiez les
+   fichiers absents et les échecs ; réessayez dans un autre dossier de sortie
+   plutôt que d’écraser une livraison existante.
+3. Le destinataire choisit **Ouvrir un paquet** dans le sélecteur de projet,
+   charge le ZIP et indique chaque sous-dossier racine pour créer un nouveau projet. Les
+   vidéos ne sont pas intégrées au ZIP. Sur le même ordinateur, les dossiers
+   vidéo d’origine peuvent être réutilisés. L’ouverture synchronise et analyse
+   automatiquement les vidéos répertoriées avant de continuer. En cas d’échec,
+   réessayez dans le même formulaire sans créer un autre projet.
+4. Après annotation, le destinataire télécharge le retour depuis Distribution.
+   Il contient l’état Espèces enregistré de chaque vidéo affectée, même inchangé,
+   inachevé ou vide. L’annotation peut continuer après un retour.
+5. Dans le projet d’origine, chargez le retour dans l’aperçu des travaux Espèces
+   retournés. Vérifiez l’impact avant d’accepter. Par défaut, **Utiliser l’import**
+   remplace les états Espèces différents de vidéos entières, y compris les
+   suppressions ; choisissez **Conserver l’existant** pour préserver le travail
+   différent du projet d’origine.
+
+La transmission Distance n’est pas encore disponible. L’annotation locale reste
+libre ; seul le périmètre Espèces enregistré peut être accepté au retour.
+L’import CSV par lot reste indépendant et ajoute des annotations sans aperçu
+d’affectation. **Ouvrir un paquet** détecte aussi les anciens bundles et explique qu’ils créent
+un projet indépendant sans retours d’affectation.
 
 Les affectations apparaissent sur le [tableau de bord](dashboard.md#recapitulatif-des-affectations) et comme filtre d'annotateur sur l'écran Espèces.
 

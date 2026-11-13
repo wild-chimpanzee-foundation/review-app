@@ -373,22 +373,30 @@ class VideoMixin(ProviderBase):
 
             total_scanned = len(scanned)
 
-            n_existing = len(existing_df)
+            unprobed_paths = [
+                Path(path) for path in existing_df["video_path"] if existing[path].is_valid is None
+            ]
+            already_probed = len(existing_df) - len(unprobed_paths)
 
             if progress_callback:
                 progress_callback(0, total_scanned, "")
 
             probe_results: dict[Path, tuple] = {}
-            if not new_rows.empty:
+            probe_paths = [Path(path) for path in new_rows["video_path"]] + unprobed_paths
+            if probe_paths:
 
                 def _offset_callback(current, total, filename):
                     if progress_callback:
-                        progress_callback(n_existing + current, total_scanned, filename)
+                        progress_callback(already_probed + current, total_scanned, filename)
 
-                probe_results = _probe_many(
-                    [Path(r) for r in new_rows["video_path"]],
-                    progress_callback=_offset_callback,
-                )
+                probe_results = _probe_many(probe_paths, progress_callback=_offset_callback)
+
+            for path in unprobed_paths:
+                probe = probe_results.get(path)
+                if probe is not None:
+                    video = session.get(Video, existing[path.as_posix()].video_id)
+                    self._apply_probe_result(video, probe)
+                    self._reconcile_distance_video_completion(session, video.video_id)
 
             if not new_rows.empty:
                 insert_rows = []
@@ -434,7 +442,7 @@ class VideoMixin(ProviderBase):
                     ],
                 )
                 if progress_callback:
-                    progress_callback(n_existing, total_scanned, "")
+                    progress_callback(total_scanned, total_scanned, "")
 
             reference_paths = scanned.loc[scanned["is_reference_video"], "video_path"].tolist()
             if reference_paths:

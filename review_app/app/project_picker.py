@@ -163,24 +163,22 @@ def build_project_picker():
             dialog.close()
             ui.navigate.to("/setup")
 
-        def open_assignment():
-            from review_app.app.components.assignment_handoff import render_open_assignment
+        def open_package():
+            from review_app.app.setup_wizard import SetupWizard
 
             with ui.dialog() as opening, ui.card().classes("w-full").style("max-width: 720px"):
-                ui.label(t("handoff_open")).classes("text-h6")
+                ui.label(t("package_open")).classes("text-h6")
 
                 def completed():
                     opening.close()
                     dialog.close()
                     ui.navigate.to("/overview")
 
-                render_open_assignment(completed)
+                SetupWizard(completed).build(package_only=True)
                 ui.button(t("cancel"), on_click=opening.close).props("flat")
             opening.open()
 
-        ui.button(t("handoff_open"), icon="inventory_2", on_click=open_assignment).classes(
-            "w-full"
-        )
+        ui.button(t("package_open"), icon="inventory_2", on_click=open_package).classes("w-full")
         ui.button(t("new_project"), icon="add", color="primary", on_click=go_to_setup).props(
             "flat dense"
         ).classes("w-full")

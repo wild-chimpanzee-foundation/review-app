@@ -6,7 +6,12 @@ from nicegui import run, ui
 
 from review_app.app.state import get_active_project_id
 from review_app.app.translations import t
-from review_app.app.utils import get_or_create_data_provider, switch_project, user_error_message
+from review_app.app.utils import (
+    get_or_create_data_provider,
+    switch_project,
+    sync_with_progress,
+    user_error_message,
+)
 from review_app.backend.annotation_package.archive import MAX_ARCHIVE_BYTES
 from review_app.backend.annotation_package.scope import AssignmentRequest
 
@@ -37,32 +42,48 @@ def assignment_upload(handler, label):
     )
 
 
-def render_open_assignment(on_complete):
+def render_open_assignment(on_complete, *, show_upload=True):
     """Shared fresh-project entry point for setup and the project picker."""
     data = None
+    opened = None
     busy = False
     revision = 0
     root_inputs = {}
-    ui.label(t("handoff_open_help")).classes("text-body2")
+    if show_upload:
+        ui.label(t("handoff_open_help")).classes("text-body2")
     details = ui.column().classes("w-full")
     name = ui.input(t("handoff_project_name")).classes("w-full")
     status = ui.label("").classes("text-body2")
+    progress = ui.linear_progress(value=0, show_value=False).classes("w-full")
+    progress.set_visibility(False)
 
     def update_enabled():
-        open_button.set_enabled(
+        enabled = (
             not busy
             and data is not None
             and bool((name.value or "").strip())
             and all((field.value or "").strip() for field in root_inputs.values())
         )
+        open_button.set_enabled(enabled)
+        open_button.set_text(t("handoff_retry_sync" if opened else "handoff_open"))
+        continue_button.set_enabled(enabled and opened is None)
+        name.set_enabled(not busy and opened is None)
+        for field in root_inputs.values():
+            field.set_enabled(not busy and opened is None)
 
-    async def uploaded(event):
-        nonlocal data, revision
+    def folders_changed():
+        status.set_text("")
+        continue_button.set_visibility(False)
+        update_enabled()
+
+    async def uploaded(event, *, raw=None):
+        nonlocal data, revision, opened
         if busy:
             return
         revision += 1
         current = revision
         data = None
+        opened = None
         root_inputs.clear()
         details.clear()
         continue_button.set_visibility(False)
@@ -71,7 +92,8 @@ def render_open_assignment(on_complete):
         try:
             if event.file.size() > MAX_ARCHIVE_BYTES:
                 raise ValueError(t("handoff_upload_limit"))
-            raw = await event.file.read()
+            if raw is None:
+                raw = await event.file.read()
             dp = await get_or_create_data_provider()
             info = await run.io_bound(dp.inspect_assignment, raw)
             if current != revision:
@@ -84,7 +106,7 @@ def render_open_assignment(on_complete):
                 for index, (root, paths) in enumerate(info["roots"].items(), 1):
                     ui.label(t("handoff_root_files", count=len(paths), example=paths[0]))
                     root_inputs[root] = ui.input(t("handoff_root", number=index)).classes("w-full")
-                    root_inputs[root].on_value_change(update_enabled)
+                    root_inputs[root].on_value_change(folders_changed)
         except Exception as exc:
             if current != revision:
                 return
@@ -92,41 +114,91 @@ def render_open_assignment(on_complete):
             status.set_text(_error_message(exc))
         update_enabled()
 
-    async def open_project():
-        nonlocal data, busy
+    async def open_project(*, allow_missing=False):
+        nonlocal data, busy, opened
         if data is None or busy:
             return
         busy = True
         update_enabled()
         try:
             dp = await get_or_create_data_provider()
-            opened = await run.io_bound(
-                dp.open_assignment,
-                data,
-                name.value.strip(),
-                {key: field.value.strip() for key, field in root_inputs.items()},
+            if opened is None:
+                roots = {key: field.value.strip() for key, field in root_inputs.items()}
+                missing = await run.io_bound(dp.check_assignment_media, data, roots)
+                if missing and not allow_missing:
+                    status.set_text(t("handoff_missing_folders", count=len(missing)))
+                    continue_button.set_visibility(True)
+                    return
+                opened = await run.io_bound(dp.open_assignment, data, name.value.strip(), roots)
+            continue_button.set_visibility(False)
+            update_enabled()
+            status.set_text(t("syncing_videos_label"))
+            progress.set_value(0)
+            progress.set_visibility(True)
+            await sync_with_progress(
+                dp, progress=progress, status=status, active_project_id=opened.project_id
             )
             switch_project(dp, opened.project_id)
             if opened.missing_video_ids:
-                # Keep this visible until the user explicitly continues.
-                status.set_text(t("handoff_missing", count=len(opened.missing_video_ids)))
-                continue_button.set_visibility(True)
-            else:
-                on_complete()
+                ui.notify(
+                    t("handoff_missing", count=len(opened.missing_video_ids)), type="warning"
+                )
+            on_complete()
         except Exception as exc:
             status.set_text(_error_message(exc))
         else:
             data = None
         finally:
             busy = False
+            progress.set_visibility(False)
             update_enabled()
 
-    assignment_upload(uploaded, "handoff_setup_upload")
+    if show_upload:
+        assignment_upload(uploaded, "handoff_setup_upload")
     name.on_value_change(update_enabled)
     open_button = ui.button(t("handoff_open"), on_click=open_project, icon="create_new_folder")
     open_button.disable()
-    continue_button = ui.button(t("handoff_continue"), on_click=on_complete)
+
+    async def open_with_missing():
+        await open_project(allow_missing=True)
+
+    continue_button = ui.button(t("handoff_open_missing"), on_click=open_with_missing)
     continue_button.set_visibility(False)
+    return uploaded
+
+
+def render_assignment_delivery(dp, binding, require_project):
+    """Each saved handout owns its output controls and result display."""
+    with ui.expansion(t("handoff_copy"), icon="folder_copy").classes("w-full"):
+        ui.label(t("handoff_copy_help")).classes("text-caption")
+        output = ui.input(t("handoff_copy_output")).classes("w-full")
+        status = ui.label("").classes("text-body2 whitespace-pre-wrap")
+
+        async def copy():
+            copy_button.disable()
+            try:
+                require_project()
+                result = await run.io_bound(
+                    dp.copy_assignment_footage, binding["id"], output.value
+                )
+                lines = [
+                    t(
+                        "handoff_copy_result",
+                        copied=result.copied_count,
+                        missing=len(result.missing_video_ids),
+                        failed=len(result.failures),
+                        path=result.path,
+                    )
+                ]
+                lines.extend(f"{root}: {path}" for root, path in result.media_roots.items())
+                lines.extend(f"{key}: {error}" for key, error in result.failures.items())
+                status.set_text("\n".join(lines))
+            except Exception as exc:
+                status.set_text(_error_message(exc))
+            finally:
+                copy_button.enable()
+
+        copy_button = ui.button(t("handoff_copy_start"), on_click=copy)
 
 
 def render_assignment_handoff(dp, project_id):
@@ -169,6 +241,8 @@ def render_assignment_handoff(dp, project_id):
                     on_click=download,
                     icon="download",
                 )
+                if binding["role"] == "origin":
+                    render_assignment_delivery(dp, binding, require_project)
             if any(row["role"] == "working" for row in bindings):
                 ui.label(t("handoff_working_help")).classes("text-caption")
 
@@ -254,7 +328,7 @@ def render_assignment_handoff(dp, project_id):
         assignment_upload(uploaded, "handoff_return_upload")
         policy = ui.select(
             {"keep_existing": t("handoff_keep"), "use_imported": t("handoff_use")},
-            value="keep_existing",
+            value="use_imported",
             label=t("handoff_policy"),
             on_change=policy_changed,
         ).classes("w-full")

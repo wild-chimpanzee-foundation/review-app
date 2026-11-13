@@ -1,6 +1,6 @@
 # Assignment handoff implementation plan
 
-**Status:** M1 and M2 complete; M3 in progress (first UI round trip ready for manual testing).
+**Status:** M1–M3 complete, including operator sign-off. M4 is next; cross-workflow UI/UX refinement is deferred to final M7.
 **Direction:** Explicit serialized assignment snapshots, not database snapshots.
 **Product contract:** [Assignment handoff](./assignment-handoff.md).
 
@@ -14,22 +14,24 @@ this tracker records readiness, validation, and the next action.
 | --- | --- | --- |
 | M1 — Persistence, identity, archive | Done | Immutable preparation/download; portable graph mapping; fresh/upgrade schema parity; archive validation tests. |
 | M2 — Species backend round trip | Done | Prepare/open/return/preview/accept across instances and same-instance projects; both policies, empty states, import-scope validation, scoped media sync, unrestricted local annotation, stale previews, and rollback tested. |
-| M3 — Species UI and delivery | In progress | Usable prepare/open/return/accept flow; package and footage copy use saved scope; focused UI and multi-root copy tests pass. |
+| M3 — Species UI and delivery | Done | Usable prepare/open/return/accept flow; package and footage copy use saved scope; focused UI and multi-root copy tests pass. |
 | M4 — Reference identity | Not started | Video/distance uniqueness on fresh and upgraded databases; dependent samples preserved; reference write paths and affected legacy imports tested. |
 | M5 — Complete Distance backend | Not started | AI/manual state and reference dependencies round-trip; saved-scope import eligibility and reference substitution tested, without restricting local annotation. |
 | M6 — Distance UI and integration | Not started | Distance handoff usable end to end; translations/docs updated; combined workflow and relevant legacy regressions pass. |
+| M7 — Final UI/UX refinement | Not started | Species and Distance handoff screens are clear and compact across origin/working roles; prepare/open/deliver/return/accept actions are discoverable; operator walkthrough and focused UI regressions pass; translations/docs reflect the final UI. |
 
 Use `Not started`, `In progress`, `Blocked`, or `Done`. Mark a milestone Done only
 when its completion gate is met. If blocked, record the concrete blocker below.
 
 ### Current checkpoint
 
-- **Current milestone:** M3 — Species UI and delivery.
-- **Next action:** Operator tests the first Species UI round trip using
-  [the manual checklist](./assignment-handoff-ui-roundtrip.md). Then implement
-  saved-scope footage copying and multi-root copy tests, and finish replacing
-  assignment-facing legacy delivery controls. This slice locates externally
-  delivered footage manually; it does not claim M3's copy gate is met.
+- **Current milestone:** M4 — Reference identity (next to start).
+- **Next action:** Replace reference-frame timestamp uniqueness with
+  video/distance uniqueness, preserving dependent samples during upgrade, then
+  align reference write/import paths and run focused legacy regressions.
+  M3 automated checks and operator sign-off are complete. Independent legacy
+  import/analysis workflows remain available. Defer visual/layout refinement to
+  M7 after M6; fix correctness and workflow-blocking UI issues as encountered.
 - **Blockers:** None identified.
 - **Recorded validation:** M1 baseline: 115 focused tests passed. M2 completion:
   350 focused handoff, schema, queue, transfer/import, video, path relocation,
@@ -50,6 +52,30 @@ implemented, relevant paths, exact validation command/result, and commit hash
 when committed. Update the next action and any remaining gaps at the same time.
 Do not rely on conversation history to reconstruct progress. Record substantive
 design deviations in this plan before continuing with a changed approach.
+
+### M3 completion and operator sign-off
+
+Operator accepted the Species workflow after the package-opening and automatic
+sync fixes and requested proceeding to M4, with a commit first. M3 is now Done;
+the functional completion gate is met. Crowded layouts and other cross-workflow
+visual refinement are explicitly tracked in final M7, not M3 blockers.
+
+This commit captures saved-scope multi-root delivery, replacement of legacy
+assignment-facing delivery controls, unified Open package detection, compact
+uploading, editable missing-footage checks, automatic opening sync with retry,
+existing-unprobed sync support, and the previously requested Use imported default.
+Individual slice records below preserve their validation and historical readiness
+states. Commit identity is supplied by Git; no M4 code changes are included.
+
+Combined pre-commit validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_assignment_delivery.py tests/test_open_package_ui.py tests/test_video_sync.py tests/test_assignment_handoff_ui.py tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py tests/test_ui_smoke.py tests/test_translations.py tests/test_onboarding.py tests/test_local_data_provider.py tests/test_update_project_dir.py tests/test_video_tools.py tests/test_distribution_bundle.py tests/test_assignments_import_export.py
+# 154 passed in 14.56s.
+```
+
+Ruff lint and format checks passed for all 14 changed/new Python files.
+`git diff --check` passed. Full suite not run.
 
 ### M3 first UI slice — ready for operator round-trip testing
 
@@ -131,7 +157,233 @@ git diff --check
 # Passed
 ```
 
-M3 remains in progress; saved-scope footage copying is still pending.
+M3 remained in progress after this slice; saved-scope copying is implemented below.
+
+### M3 saved-scope footage delivery
+
+- `review_app/backend/annotation_package/delivery.py`: resolve media from the
+  immutable setup manifest and bound current local paths, then copy the resolved
+  list with four workers. Destinations retain saved relative paths under distinct
+  root-ID folders. Relocation is supported without rebuilding scope from mutable
+  distribution or scanning folders. Missing files and per-file failures are
+  explicit results; progress counts every attempt.
+- Delivery creates a new `assignment-<UUID>` folder outside registered scanned
+  roots and refuses existing delivery folders instead of overwriting them.
+  This is an explicit retry limitation: use a different output folder for a new
+  attempt after a partial delivery. No legacy copy semantics were changed.
+- Provider exposes `copy_assignment_footage`; each saved origin assignment has
+  English/French copy controls showing the output, root mapping, and failure
+  details. Working bindings do not offer setup-footage delivery.
+- `tests/test_assignment_delivery.py`: saved selection after distribution changes
+  and added media, duplicate relative names across roots, copied-root opening,
+  relocation, missing files, copy failures, progress, repeat-copy refusal, and
+  source/output containment. UI tests exercise the real copy control.
+- M3 remains in progress: operator round-trip feedback and final legacy-control
+  replacement are pending. Not committed.
+
+Validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_assignment_delivery.py tests/test_assignment_handoff_ui.py tests/test_translations.py tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py tests/test_ui_smoke.py tests/test_distribution_bundle.py tests/test_assignments_import_export.py tests/test_update_project_dir.py
+# 111 passed (including the relocated-source regression).
+
+.venv/bin/ruff check review_app/backend/annotation_package/delivery.py review_app/backend/provider/assignment_handoff.py review_app/app/components/assignment_handoff.py review_app/app/translations.py tests/test_assignment_delivery.py tests/test_assignment_handoff_ui.py
+.venv/bin/ruff format --check review_app/backend/annotation_package/delivery.py review_app/backend/provider/assignment_handoff.py review_app/app/components/assignment_handoff.py review_app/app/translations.py tests/test_assignment_delivery.py tests/test_assignment_handoff_ui.py
+git diff --check
+# Passed; full suite not run.
+```
+
+### M3 assignment-facing legacy delivery replacement
+
+- `review_app/app/pages/distribution/page.py`: removed live-distribution bundle
+  downloads and annotator-footage copy controls from Distribution. The saved
+  handoff controls are now the only assignment delivery path on that page. Kept
+  Work Distribution as an explicit preparation-selection input and kept CSV batch
+  import independently available. Legacy provider APIs, setup import, manual
+  Distance import, and analysis exports are unchanged.
+- English/French explanatory text explicitly distinguishes legacy append-mode CSV
+  import from scope-validated return preview/acceptance. Updated
+  `userdocs/settings.md` and `userdocs/settings.fr.md` with the actual Species
+  handoff, copy, fresh-open, and return workflow, including replacement warnings.
+- `tests/test_assignment_handoff_ui.py`: full Distribution render regression
+  verifies saved download/copy controls, absence of legacy delivery buttons, and
+  real CSV upload restoring annotation without changing the saved binding.
+- M3 automated implementation is complete; manual operator validation remains
+  pending. This slice is not committed.
+
+Validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_assignment_delivery.py tests/test_assignment_handoff_ui.py tests/test_translations.py tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py tests/test_ui_smoke.py tests/test_distribution_bundle.py tests/test_assignments_import_export.py tests/test_update_project_dir.py
+# 112 passed.
+
+.venv/bin/ruff check review_app/app/pages/distribution/page.py review_app/app/translations.py tests/test_assignment_handoff_ui.py
+.venv/bin/ruff format --check review_app/app/pages/distribution/page.py review_app/app/translations.py tests/test_assignment_handoff_ui.py
+git diff --check
+# Passed; full suite not run.
+```
+
+### M3 UX update — one format-detecting Open package entry
+
+Operator-approved direction: users should not choose between legacy bundle import
+and assignment opening before uploading a file. Preserve the format distinction
+internally, not as competing top-level setup actions.
+
+- Setup wizard now has Manual and Open package tabs; the project picker uses the
+  same Open package flow. After upload, assignments show the existing linked
+  working-project form; legacy bundles show an explicit independent-project /
+  no-assignment-returns warning and the existing legacy importer. No legacy file
+  is promoted into an authenticated assignment.
+- `review_app/backend/annotation_package/detection.py` validates assignment setups,
+  rejects returns, and identifies legacy bundle manifests. An archive declaring an
+  assignment manifest never falls back to legacy interpretation if invalid.
+- `review_app/app/setup_wizard.py` reuses its legacy creation, annotator mapping,
+  sync, and import mechanics in a package-only rendering mode, also used by the
+  picker. Shared upload limits apply. Replacing a file hides both previous forms;
+  superseded detection cannot reveal an obsolete form.
+- Assignment opening can be embedded without a second uploader. Updated
+  English/French text and user/manual docs.
+- `tests/test_open_package_ui.py`: actual assignment opening, legacy project
+  creation with no binding, invalid replacement, single wizard tab/picker entry,
+  and return/malformed-assignment rejection. Not committed.
+
+Validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_open_package_ui.py tests/test_assignment_delivery.py tests/test_assignment_handoff_ui.py tests/test_translations.py tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py tests/test_ui_smoke.py tests/test_distribution_bundle.py tests/test_assignments_import_export.py tests/test_update_project_dir.py tests/test_onboarding.py
+# 119 passed.
+
+.venv/bin/ruff check review_app/app/setup_wizard.py review_app/app/project_picker.py review_app/app/components/assignment_handoff.py review_app/app/translations.py review_app/backend/annotation_package/detection.py tests/test_open_package_ui.py
+.venv/bin/ruff format --check review_app/app/setup_wizard.py review_app/app/project_picker.py review_app/app/components/assignment_handoff.py review_app/app/translations.py review_app/backend/annotation_package/detection.py tests/test_open_package_ui.py
+git diff --check
+# Passed; full suite not run.
+```
+
+### M3 package upload visual simplification
+
+- Removed the introductory upload sentence from Open package. Replaced the
+  visible full uploader panel with one outlined Choose package button backed by
+  the same hidden single-file ZIP uploader, preserving size limits and format
+  detection. The selected filename appears beside the button. Embedded assignment
+  opening no longer repeats its standalone upload instructions.
+- `tests/test_open_package_ui.py` verifies the compact control, hidden uploader,
+  absence of repeated instructions, and filename display. Browser-native file
+  chooser interaction is not exercised by NiceGUI's simulated user.
+- Validation: `.venv/bin/python -m pytest -q tests/test_open_package_ui.py
+  tests/test_assignment_handoff_ui.py tests/test_translations.py` — 28 passed.
+  Ruff check and format check on `setup_wizard.py`, `assignment_handoff.py`,
+  `translations.py`, and `test_open_package_ui.py`, plus `git diff --check`, passed.
+  Not committed; manual UI validation remains pending.
+
+### M3 opening — correct footage folders before creating the project
+
+- Operator feedback exposed that missing-footage opening created/activated the
+  project immediately, discarded the upload state, and disabled Open assignment.
+  Folder edits then had no retry path. Reproduced with the real UI regression
+  `test_missing_footage_can_be_corrected_before_creating_project` (failed on the
+  disabled button before the fix).
+- Provider `check_assignment_media` validates proposed folders with the same
+  listed-media resolver, without writing a project. Opening now checks paths
+  first: missing-file warnings leave the folders editable and Open assignment
+  enabled. Correct and retry, or explicitly Open with missing footage. Changing
+  a folder clears the previous warning/confirmation. No provisional or duplicate
+  projects are created by retries. Final opening still rechecks media paths.
+- English/French warning and confirmation text updated. Regression tests cover
+  correcting a wrong folder and opting into missing footage, including project
+  counts, activation, and retained missing rows. The manual checklist reflects
+  the new behavior. Not committed.
+- Validation: `.venv/bin/python -m pytest -q tests/test_assignment_handoff_ui.py
+  tests/test_open_package_ui.py tests/test_assignment_handoff_roundtrip.py
+  tests/test_translations.py` — 43 passed. Ruff lint/format on the changed UI,
+  provider, translations, and UI tests, plus `git diff --check`, passed.
+
+### M3 operator fix — sync probes existing unknown media
+
+- Reproduced the reported Overview Unprobed count: opening an assignment creates
+  listed video rows without local probe status, but sync previously probed only
+  newly discovered rows. Existing rows were merely marked present. The focused
+  regression failed with Unprobed still 2 after sync before the fix.
+- `review_app/backend/provider/video.py`: sync now probes present existing rows
+  whose `is_valid` is unknown, alongside newly discovered files. It applies the
+  normal probe result and reconciles Distance completion; existing timestamps
+  and location metadata are preserved. Already checked valid/invalid videos are
+  not automatically re-probed on subsequent syncs. Progress stays monotonic and
+  within the scanned total, including mixed new/existing work.
+- Assignment sync still considers only listed media: no unrelated discovery,
+  no probing origin-project rows, and no expansion of return scope.
+- `tests/test_assignment_handoff_roundtrip.py` checks the actual Overview count,
+  local validity/duration, listed-only probing, and no repeated probes.
+  `tests/test_video_sync.py` covers ordinary mixed new/unknown/checked media,
+  valid/invalid outcomes, metadata preservation, and progress. Not committed.
+
+Validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_video_sync.py tests/test_assignment_handoff_roundtrip.py tests/test_local_data_provider.py tests/test_update_project_dir.py tests/test_video_tools.py
+# 53 passed; existing pytest warning: unknown config option main_file.
+
+.venv/bin/ruff check review_app/backend/provider/video.py tests/test_video_sync.py tests/test_assignment_handoff_roundtrip.py
+.venv/bin/ruff format --check review_app/backend/provider/video.py tests/test_video_sync.py tests/test_assignment_handoff_roundtrip.py
+git diff --check
+# Passed; full suite not run.
+```
+
+### M3 operator fix — opening automatically syncs listed footage
+
+- Follow-up feedback clarified that the opening workflow itself must sync/probe
+  footage. The earlier fix only made a later manual sync effective. Reproduced
+  through Open package: after the completion callback, Overview still reported
+  two Unprobed videos.
+- `review_app/app/components/assignment_handoff.py`: after creating the working
+  project, run the existing progress-reporting sync helper for that project before
+  switching/continuing. This probes present listed media without scanning unrelated
+  footage, including when using the explicit missing-footage opening option.
+- Retain the created binding if sync fails and offer Retry footage sync; retries
+  do not create duplicate projects. Project name/root fields are locked after
+  creation, and the original project stays active until sync succeeds. Low-level
+  backend `open_assignment` remains an atomic snapshot operation, unchanged.
+- `tests/test_open_package_ui.py`: actual package opening now asserts Overview's
+  Unprobed count is zero and unrelated files are not imported. A failed initial
+  sync then successful retry verifies the same project is reused and activation
+  happens only on success. Manual guide updated. Not committed.
+
+Validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_open_package_ui.py tests/test_assignment_handoff_ui.py tests/test_video_sync.py tests/test_assignment_handoff_roundtrip.py tests/test_onboarding.py tests/test_translations.py tests/test_ui_smoke.py
+# 57 passed.
+
+.venv/bin/ruff check review_app/app/components/assignment_handoff.py review_app/app/translations.py tests/test_open_package_ui.py
+.venv/bin/ruff format --check review_app/app/components/assignment_handoff.py review_app/app/translations.py tests/test_open_package_ui.py
+git diff --check
+# Passed; full suite not run.
+```
+
+### Planning decision — defer cross-workflow UI refinement to final M7
+
+Operator requested UI work as the final milestone because further issues are
+likely to emerge while implementing Distance handoff. M3/M6 remain functional
+integration milestones; neither requires final visual polish. This does not mark
+unperformed manual validation complete or defer correctness/safety fixes.
+
+M7 follows M6 and reviews Species and Distance together. Initial feedback backlog:
+
+- Distribution's handoff card is crowded: preparation fields, explanatory text,
+  saved assignments, raw UUIDs/timestamps, and repeated download/copy controls
+  compete in one long section. Review information hierarchy and separate
+  preparation from browsing/actioning saved assignments.
+- Make recipient, stage, scope, and actions scannable; place technical IDs and
+  secondary details behind progressive disclosure where appropriate. Consider a
+  compact saved-assignment list rather than repeated full-width blocks. These are
+  design candidates, not a committed layout.
+- Review origin versus working-project actions, empty/loading/error states,
+  package opening/root correction, and return preview/confirmation together.
+- Preserve safety warnings and preview invalidation; compactness must not hide
+  destructive consequences or change saved-scope semantics.
+
+No UI code changed for this planning decision. Validation: `git diff --check`.
+Next implementation work is M4 reference identity; M3 manual sign-off remains
+tracked independently.
 
 ### Decision update — unrestricted local annotation, scoped media sync
 
@@ -312,7 +564,7 @@ export_assignment(assignment_id) -> bytes
 copy_assignment_footage(assignment_id, output_dir, progress_callback) -> CopyResult
 open_assignment(data, project_name, media_roots) -> OpenedAssignment
 export_assignment_return(working_project_id) -> bytes
-preview_assignment_return(project_id, data, policy="keep_existing") -> ReturnPreview
+preview_assignment_return(project_id, data, policy="use_imported") -> ReturnPreview
 accept_assignment_return(project_id, data, policy, preview_token) -> AcceptanceResult
 ```
 
@@ -559,7 +811,11 @@ Implement in these increments:
 4. Reference schema/write-path change with focused legacy regression tests.
 5. Complete Distance collection/open/return/accept with scoped return eligibility
    and unrestricted local annotation.
-6. Distance UI, final workflow documentation, and combined integration checks.
+6. Functional Distance UI, workflow documentation, and combined integration checks.
+7. Final cross-workflow UI/UX refinement with operator walkthrough, focused UI
+   regressions, and final translation/documentation alignment. Address layout and
+   visual polish here; correctness and workflow-blocking fixes remain in scope
+   throughout earlier milestones.
 
 Each increment runs its smallest focused tests and Ruff lint/format checks. Add
 interface-level database tests for:
