@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     UniqueConstraint,
     func,
@@ -244,6 +245,68 @@ class VideoAssignment(Base):
     video_id: Mapped[str] = mapped_column(String, ForeignKey("videos.video_id"), primary_key=True)
     assigned_to: Mapped[str] = mapped_column(String, ForeignKey("annotators.name"), index=True)
     assigned_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class HandoffAssignment(Base):
+    """A local binding to one frozen, portable assignment handout."""
+
+    __tablename__ = "handoff_assignments"
+    __table_args__ = (
+        UniqueConstraint("project_id", "assignment_id", name="uq_handoff_project_assignment"),
+        CheckConstraint("role IN ('origin', 'working')", name="ck_handoff_role"),
+        CheckConstraint("length(trim(recipient)) > 0", name="ck_handoff_recipient"),
+        CheckConstraint(
+            "(stage = 'species' AND target_species IS NULL) OR "
+            "(stage = 'distance' AND target_species IS NOT NULL "
+            "AND length(trim(target_species)) > 0)",
+            name="ck_handoff_stage",
+        ),
+        CheckConstraint(
+            "role != 'origin' OR source_project_id = project_id", name="ck_handoff_origin"
+        ),
+        Index(
+            "uq_handoff_working_project",
+            "project_id",
+            unique=True,
+            sqlite_where=text("role = 'working'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    assignment_id: Mapped[str] = mapped_column(String)
+    project_id: Mapped[str] = mapped_column(
+        String, ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String)
+    # The originating project need not exist on this instance.
+    source_project_id: Mapped[str] = mapped_column(String)
+    recipient: Mapped[str] = mapped_column(String)
+    stage: Mapped[str] = mapped_column(String)
+    target_species: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    scope: Mapped[dict] = mapped_column(JSON)
+    setup_archive: Mapped[bytes] = mapped_column(LargeBinary)
+
+
+class HandoffIdentityMap(Base):
+    """Portable graph identities are local to a handoff, never global DB keys."""
+
+    __tablename__ = "handoff_identity_maps"
+    __table_args__ = (
+        UniqueConstraint("handoff_id", "kind", "local_id", name="uq_handoff_local_identity"),
+        CheckConstraint(
+            "length(trim(kind)) > 0 AND length(trim(portable_id)) > 0 "
+            "AND length(trim(local_id)) > 0",
+            name="ck_handoff_identity",
+        ),
+    )
+
+    handoff_id: Mapped[str] = mapped_column(
+        String, ForeignKey("handoff_assignments.id", ondelete="CASCADE"), primary_key=True
+    )
+    kind: Mapped[str] = mapped_column(String, primary_key=True)
+    portable_id: Mapped[str] = mapped_column(String, primary_key=True)
+    local_id: Mapped[str] = mapped_column(String)
 
 
 class DistanceImport(Base):

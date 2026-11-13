@@ -766,6 +766,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (22, _migration_v22),
     (23, _migration_v23),
     (24, lambda conn: _migration_v24(conn)),
+    (25, lambda conn: _migration_v25(conn)),
 ]
 
 # Frozen upgrade DDL. Keep independent of evolving ORM metadata.
@@ -1014,6 +1015,57 @@ def _migration_v24(conn) -> None:
     conn.exec_driver_sql(
         "CREATE INDEX IF NOT EXISTS ix_distance_individuals_task_id ON distance_individuals(task_id)"
     )
+
+
+def _migration_v25(conn) -> None:
+    """Frozen assignment handouts and per-handoff portable identity mappings."""
+    for ddl in (
+        """
+        CREATE TABLE IF NOT EXISTS handoff_assignments (
+            id VARCHAR NOT NULL PRIMARY KEY,
+            assignment_id VARCHAR NOT NULL,
+            project_id VARCHAR NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            role VARCHAR NOT NULL,
+            source_project_id VARCHAR NOT NULL,
+            recipient VARCHAR NOT NULL,
+            stage VARCHAR NOT NULL,
+            target_species VARCHAR,
+            created_at DATETIME NOT NULL,
+            scope JSON NOT NULL,
+            setup_archive BLOB NOT NULL,
+            CONSTRAINT uq_handoff_project_assignment UNIQUE (project_id, assignment_id),
+            CONSTRAINT ck_handoff_role CHECK (role IN ('origin', 'working')),
+            CONSTRAINT ck_handoff_recipient CHECK (length(trim(recipient)) > 0),
+            CONSTRAINT ck_handoff_stage CHECK (
+                (stage = 'species' AND target_species IS NULL) OR
+                (stage = 'distance' AND target_species IS NOT NULL
+                 AND length(trim(target_species)) > 0)
+            ),
+            CONSTRAINT ck_handoff_origin CHECK (
+                role != 'origin' OR source_project_id = project_id
+            )
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_handoff_assignments_project_id "
+        "ON handoff_assignments(project_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_handoff_working_project "
+        "ON handoff_assignments(project_id) WHERE role = 'working'",
+        """
+        CREATE TABLE IF NOT EXISTS handoff_identity_maps (
+            handoff_id VARCHAR NOT NULL REFERENCES handoff_assignments(id) ON DELETE CASCADE,
+            kind VARCHAR NOT NULL,
+            portable_id VARCHAR NOT NULL,
+            local_id VARCHAR NOT NULL,
+            PRIMARY KEY (handoff_id, kind, portable_id),
+            CONSTRAINT uq_handoff_local_identity UNIQUE (handoff_id, kind, local_id),
+            CONSTRAINT ck_handoff_identity CHECK (
+                length(trim(kind)) > 0 AND length(trim(portable_id)) > 0
+                AND length(trim(local_id)) > 0
+            )
+        )
+        """,
+    ):
+        conn.exec_driver_sql(ddl)
 
 
 def check_schema_version(conn) -> None:
