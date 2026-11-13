@@ -7,7 +7,7 @@ from pathlib import Path
 
 from review_app.backend.annotation_package.archive import decode_archive
 from review_app.backend.annotation_package.scope import bound_videos, safe_relative
-from review_app.backend.db.models import HandoffAssignment, ProjectDir
+from review_app.backend.db.models import HandoffAssignment, HandoffIdentityMap, ProjectDir, Video
 from review_app.backend.path_matching import normalize_path_str
 
 
@@ -33,9 +33,18 @@ def resolve_delivery(session, assignment_id):
     ]
     media = []
     for row in context["media"]:
-        source = (
-            Path(normalize_path_str(videos[row["video_id"]].video_path)).expanduser().resolve()
-        )
+        video = videos.get(row["video_id"])
+        if video is None:
+            mapping = session.get(HandoffIdentityMap, (binding.id, "video", row["video_id"]))
+            video = session.get(Video, mapping.local_id) if mapping else None
+        if video is not None:
+            source = Path(normalize_path_str(video.video_path)).expanduser().resolve()
+        else:
+            mapping = session.get(HandoffIdentityMap, (binding.id, "root", row["root_id"]))
+            root = session.get(ProjectDir, mapping.local_id) if mapping else None
+            if root is None or root.project_id != binding.project_id:
+                raise ValueError("Assignment reference media root is missing")
+            source = (Path(root.path) / row["video_path"]).resolve()
         if not any(source.is_relative_to(root) for root in roots):
             raise ValueError("Assignment footage escapes its registered project folders")
         relative = Path(safe_relative(row["root_id"])) / safe_relative(row["video_path"])

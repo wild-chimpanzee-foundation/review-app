@@ -1,7 +1,4 @@
-"""Bounded, versioned Species setup/return snapshots with explicit graph validation.
-
-Distance payloads remain rejected until their full implementation is available.
-"""
+"""Bounded, versioned Species/Distance snapshots with explicit graph validation."""
 
 from __future__ import annotations
 
@@ -79,9 +76,17 @@ def validate_snapshot(manifest, context, work):
     )
     if manifest["format"] != FORMAT or manifest["version"] != VERSION:
         raise ValueError("Unsupported assignment format/version")
-    if manifest["stage"] != "species" or manifest["direction"] not in {"setup", "return"}:
-        raise ValueError("Only Species setup/return snapshots are implemented")
-    if manifest["target_species"] is not None:
+    if manifest["stage"] not in {"species", "distance"} or manifest["direction"] not in {
+        "setup",
+        "return",
+    }:
+        raise ValueError("Unknown assignment stage or direction")
+    is_distance = manifest["stage"] == "distance"
+    if is_distance and (
+        not isinstance(manifest["target_species"], str) or not manifest["target_species"].strip()
+    ):
+        raise ValueError("Distance assignments require a target species")
+    if not is_distance and manifest["target_species"] is not None:
         raise ValueError("Species assignments cannot have a target species")
     if any(
         not manifest[key].strip() for key in ("assignment_id", "source_project_id", "recipient")
@@ -90,6 +95,22 @@ def validate_snapshot(manifest, context, work):
     work_keys, roots = _strings(manifest["work_keys"]), _strings(manifest["roots"])
     if not work_keys:
         raise ValueError("Assignment scope must not be empty")
+    if is_distance:
+        from review_app.backend.annotation_package import distance
+
+        if "distance" not in context:
+            raise ValueError("Missing Distance dependencies")
+        distance.validate(manifest, context, work)
+        # Reuse the strict Species context/graph validator for carried setup context.
+        base = {key: value for key, value in context.items() if key != "distance"}
+        synthetic = {
+            **manifest,
+            "stage": "species",
+            "target_species": None,
+            "work_keys": [row["video_id"] for row in context["media"]],
+        }
+        validate_snapshot(synthetic, base, context["distance"]["species_work"])
+        return
     _record(
         context,
         {

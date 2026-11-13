@@ -1,6 +1,6 @@
 # Assignment handoff implementation plan
 
-**Status:** M1–M4 complete. M5 is next; cross-workflow UI/UX refinement is deferred to final M7.
+**Status:** M1–M5 complete. M6 is next; cross-workflow UI/UX refinement is deferred to final M7.
 **Direction:** Explicit serialized assignment snapshots, not database snapshots.
 **Product contract:** [Assignment handoff](./assignment-handoff.md).
 
@@ -16,7 +16,7 @@ this tracker records readiness, validation, and the next action.
 | M2 — Species backend round trip | Done | Prepare/open/return/preview/accept across instances and same-instance projects; both policies, empty states, import-scope validation, scoped media sync, unrestricted local annotation, stale previews, and rollback tested. |
 | M3 — Species UI and delivery | Done | Usable prepare/open/return/accept flow; package and footage copy use saved scope; focused UI and multi-root copy tests pass. |
 | M4 — Reference identity | Done | Video/distance uniqueness on fresh and upgraded databases; dependent samples preserved; reference write paths and affected legacy imports tested. |
-| M5 — Complete Distance backend | Not started | AI/manual state and reference dependencies round-trip; saved-scope import eligibility and reference substitution tested, without restricting local annotation. |
+| M5 — Complete Distance backend | Done | AI/manual state and reference dependencies round-trip; saved-scope import eligibility and reference substitution tested, without restricting local annotation. |
 | M6 — Distance UI and integration | Not started | Distance handoff usable end to end; translations/docs updated; combined workflow and relevant legacy regressions pass. |
 | M7 — Final UI/UX refinement | Not started | Species and Distance handoff screens are clear and compact across origin/working roles; prepare/open/deliver/return/accept actions are discoverable; operator walkthrough and focused UI regressions pass; translations/docs reflect the final UI. |
 
@@ -25,16 +25,22 @@ when its completion gate is met. If blocked, record the concrete blocker below.
 
 ### Current checkpoint
 
-- **Current milestone:** M5 — Complete Distance backend (next to start).
-- **Next action:** Extend assignment snapshots to complete Distance state,
-  including AI/manual evidence, reference dependencies, and saved-scope return
-  eligibility. Reuse existing admin video/distance calibration on return with
-  explicit substitution reporting. M4 schema and write/import alignment are
-  complete. Keep legacy manual v1 semantics separate. Defer visual/layout
-  refinement to M7; fix correctness and workflow-blocking issues as encountered.
+- **Current milestone:** M6 — Distance UI and integration (next to start).
+- **Next action:** Expose Distance preparation, opening, delivery, return preview,
+  reference substitutions, and acceptance through the existing assignment UI.
+  M5 backend round trip is complete, including same-frame different-distance
+  calibration and saved-scope acceptance after Species edits. Keep legacy manual
+  v1 semantics separate. Defer visual/layout refinement to M7; fix correctness and
+  workflow-blocking issues as encountered.
 - **Blockers:** None identified.
-- **Recorded validation:** M4: 580 affected tests passed; one pre-existing
-  reference-deletion assertion failure reproduced on clean pre-M4 commit
+- **Recorded validation:** M5 pre-commit revalidation: 268 affected tests passed,
+  including the Distance assignment cases and reference-deletion follow-up;
+  Ruff lint/format (13 files) and diff checks passed. Full suite not run.
+  Reference-deletion follow-up: operator confirmed reopening clears
+  `completion_outcome`; corrected the test expectation, and all 3 reference-deletion
+  tests passed with Ruff lint/format and diff checks. M4 historically recorded
+  580 affected tests passed; one pre-existing reference-deletion assertion failure
+  reproduced on clean pre-M4 commit
   `4fe5c86` (details below). Ruff lint/format (12 files) and diff checks passed.
   M1 baseline: 115 focused tests passed. M2 completion:
   350 focused handoff, schema, queue, transfer/import, video, path relocation,
@@ -55,6 +61,102 @@ implemented, relevant paths, exact validation command/result, and commit hash
 when committed. Update the next action and any remaining gaps at the same time.
 Do not rely on conversation history to reconstruct progress. Record substantive
 design deviations in this plan before continuing with a changed approach.
+
+### M5 completion — complete Distance backend round trip
+
+Implemented:
+
+- `annotation_package/distance.py` carries task alignment, verified/imported
+  schedules, started/completed/absent state and history, rejected AI evidence,
+  individuals, anchors, first-seen playback positions, infant/carrier relationships,
+  samples, behaviors, individual tags, attribution, timestamps, and resume progress.
+  It is independent of the legacy manual Distance archive contract.
+- `annotation_package/distance_handoff.py` integrates collection, portable identity,
+  return comparison, policy-specific preview, and atomic acceptance behind the
+  existing provider interface. Pristine task scaffolding is not existing work;
+  saved zero-valued clock anchors are state. Identical work performs no annotation,
+  reference, provenance, or identity-map writes under either policy.
+- Distance preparation uses explicit videos and a target scientific species name,
+  confirmed Species context, and optional camera-local `start_time` / `end_time`
+  boundaries. Selected tasks outside a requested window, including unknown times,
+  are rejected rather than silently dropped. Return export/acceptance uses saved
+  scope, not current labels. Species edits warn without blocking acceptance or
+  restoring labels; ordinary local editing remains unrestricted.
+- Setup includes prepared calibration and discoverable reference footage for the
+  selected deployments, even for untouched tasks. Registered-only reference clips
+  become listed dependency media with discovery tags. Delivery includes those
+  dependencies; opening/sync still does not recursively ingest unlisted files.
+- Two people at different distances in the same video frame retain separate masks,
+  precise positions, and evidence. Returns reuse existing admin video/distance
+  calibration without overwriting it; preview exposes structured substitutions.
+  A new distance may be inserted at an occupied timestamp, and saved sample
+  distances remain the returned values rather than the calibration distance.
+- AI sources are projected to selected work/dependencies, including pending
+  suggestions and rejected originals. Original source identity/hash remain distinct
+  from the projected payload hash. Embedded runtime IDs are remapped, unrelated
+  source individuals/predictions/schedules are excluded, and sampling metadata uses
+  portable video identity instead of source-machine absolute paths.
+- Archive validation rejects invalid scope/ownership, wrong-species sources,
+  dangling relationships, cross-task carriers/identity reuse, invalid sample
+  states, and cross-deployment reference evidence. Preview fingerprints include
+  current work and dependencies; acceptance replans under `BEGIN IMMEDIATE` and
+  rolls back work, dependencies, and identity mappings together on failure.
+- Return identity allocations are persisted transactionally so repeated exports
+  use stable portable IDs for newly created local work.
+
+Validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_assignment_distance.py tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py tests/test_assignment_handoff_ui.py tests/test_distance_ai_import.py tests/test_distance_transfer.py tests/test_reference_identity.py tests/test_distance_repository.py
+# 265 passed in 21.38s (17 new Distance assignment cases).
+.venv/bin/ruff check review_app/backend/annotation_package review_app/backend/provider/assignment_handoff.py tests/test_assignment_distance.py
+.venv/bin/ruff format --check review_app/backend/annotation_package review_app/backend/provider/assignment_handoff.py tests/test_assignment_distance.py
+git diff --check
+# Passed.
+```
+
+New tests cover separate-database and repeated same-instance opening, complete
+AI/manual evidence, same-frame calibration, reference discovery and listed-only
+sync, saved-scope returns after Species edits, both policies, true no-ops, empty
+replacement/omission, new work over pristine scaffolding, stale previews, invalid
+returns, and late-failure rollback. Full suite not run. The pre-existing M4
+reference-deletion failure is documented historically below; the subsequent
+operator-approved test correction resolves it without changing production behavior.
+
+Reference-deletion follow-up: the operator confirmed that reopening an affected
+Distance task must clear `completion_outcome` as well as `completed_at` and
+`completed_by`. Updated
+`test_delete_mapping_clears_shared_evidence_and_reopens_affected_reviews` to assert
+that contract explicitly and exclude all three completion fields from its
+unchanged-field comparison. Production behavior already matches this decision.
+
+```bash
+.venv/bin/python -m pytest -q tests/test_reference_frame_deletion.py
+# 3 passed in 0.52s.
+.venv/bin/ruff check tests/test_reference_frame_deletion.py
+.venv/bin/ruff format --check tests/test_reference_frame_deletion.py
+git diff --check
+# Passed.
+```
+
+M5 adds backend functionality only; Distance UI is M6. Legacy manual archive v1
+still retains its frozen timestamp-uniqueness validation. Git records the commit
+identity when these changes are committed.
+
+Pre-commit revalidation at the operator's request to commit M5:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_assignment_distance.py tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py tests/test_assignment_handoff_ui.py tests/test_distance_ai_import.py tests/test_distance_transfer.py tests/test_reference_identity.py tests/test_distance_repository.py tests/test_reference_frame_deletion.py
+# 268 passed in 21.48s.
+.venv/bin/ruff check review_app/backend/annotation_package review_app/backend/provider/assignment_handoff.py tests/test_assignment_distance.py tests/test_reference_frame_deletion.py
+.venv/bin/ruff format --check review_app/backend/annotation_package review_app/backend/provider/assignment_handoff.py tests/test_assignment_distance.py tests/test_reference_frame_deletion.py
+# Passed; 13 files already formatted.
+git diff --check
+# Passed. Full suite not run.
+```
+
+The M5 commit includes the approved reference-deletion expectation correction.
+Next action remains M6; no Distance UI implementation is included.
 
 ### M4 completion — reference video/distance identity
 

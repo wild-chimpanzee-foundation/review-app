@@ -11,7 +11,7 @@ class AssignmentHandoffMixin(ProviderBase):
     def prepare_assignment(
         self, project_id: str, request: AssignmentRequest
     ) -> PreparedAssignment:
-        """Freeze selected Species work and dependencies; never filter away carried labels."""
+        """Freeze selected stage work and dependencies; never reconstruct saved scope."""
         with self.Session.begin() as session:
             # Freeze collection and persistence together despite concurrent editor saves.
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
@@ -88,8 +88,8 @@ class AssignmentHandoffMixin(ProviderBase):
 
     def export_assignment_return(self, working_project_id: str) -> bytes:
         """Return every saved in-scope video, including untouched and empty work."""
-        with self.Session() as session:
-            session.connection().exec_driver_sql("BEGIN")
+        with self.Session.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             return handoff.export_return(session, working_project_id)
 
     def preview_assignment_return(self, project_id: str, data: bytes, policy="use_imported"):

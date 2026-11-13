@@ -90,8 +90,9 @@ def test_delete_mapping_clears_shared_evidence_and_reopens_affected_reviews(dist
         ]
         assert after["review"]["completed_at"] is None
         assert after["review"]["completed_by"] is None
+        assert after["review"]["completion_outcome"] is None
         for key, value in before[video_id]["review"].items():
-            if key not in {"completed_at", "completed_by"}:
+            if key not in {"completed_at", "completed_by", "completion_outcome"}:
                 assert after["review"][key] == value
         individuals = dp.list_distance_individuals(video_id)
         assert {row["id"] for row in individuals}.issubset(affected_individual_ids)

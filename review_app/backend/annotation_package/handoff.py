@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from review_app.backend.annotation_package import species
+from review_app.backend.annotation_package import distance, species
 from review_app.backend.annotation_package.archive import (
     FORMAT,
     VERSION,
@@ -49,7 +49,11 @@ from review_app.backend.db.models import (
 
 def prepare(session: Session, project_id: str, request: AssignmentRequest) -> PreparedAssignment:
     project, videos, roots = select_videos(session, project_id, request)
-    context, work = collect(session, project, videos, roots)
+    context, work = (
+        distance.collect(session, project, videos, roots, request.target_species)
+        if request.stage == "distance"
+        else collect(session, project, videos, roots)
+    )
     assignment_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     manifest = {
@@ -60,7 +64,7 @@ def prepare(session: Session, project_id: str, request: AssignmentRequest) -> Pr
         "source_project_id": project_id,
         "recipient": request.recipient.strip(),
         "stage": request.stage,
-        "target_species": None,
+        "target_species": request.target_species,
         "created_at": now.isoformat(),
         "work_keys": [video.video_id for video in videos],
         "roots": sorted({row["root_id"] for row in context["media"]}),
@@ -73,7 +77,7 @@ def prepare(session: Session, project_id: str, request: AssignmentRequest) -> Pr
         source_project_id=project_id,
         recipient=manifest["recipient"],
         stage=request.stage,
-        target_species=None,
+        target_species=request.target_species,
         created_at=now,
         scope={
             "work_keys": manifest["work_keys"],
@@ -86,12 +90,16 @@ def prepare(session: Session, project_id: str, request: AssignmentRequest) -> Pr
     session.flush()
     identities = IdentityMap(session, handoff.id)
     for kind, ids in (
-        ("video", manifest["work_keys"]),
+        ("video", [r["video_id"] for r in context["media"]]),
         ("root", manifest["roots"]),
         ("prediction", [row["id"] for row in context["predictions"]]),
     ):
         for value in ids:
             identities.bind(kind, value, value)
+    if request.stage == "distance":
+        from review_app.backend.annotation_package.distance_handoff import bind_origin
+
+        bind_origin(identities, context, work)
     for row in session.query(IndividualObservation).filter(
         IndividualObservation.video_id.in_(id_selection(manifest["work_keys"]))
     ):
@@ -106,7 +114,7 @@ def prepare(session: Session, project_id: str, request: AssignmentRequest) -> Pr
         stage=handoff.stage,
         recipient=handoff.recipient,
         video_count=len(videos),
-        missing_video_ids=tuple(row.video_id for row in videos if row.is_missing),
+        missing_video_ids=tuple(row["video_id"] for row in context["media"] if row["is_missing"]),
     )
 
 
@@ -147,7 +155,7 @@ def open_setup(session, data, manifest, context, work, project_name, roots, path
         source_project_id=manifest["source_project_id"],
         recipient=manifest["recipient"],
         stage=manifest["stage"],
-        target_species=None,
+        target_species=manifest["target_species"],
         created_at=timestamp(manifest["created_at"]),
         scope={
             "work_keys": manifest["work_keys"],
@@ -195,7 +203,8 @@ def open_setup(session, data, manifest, context, work, project_name, roots, path
             )
         )
         session.flush()
-        session.add(VideoAssignment(video_id=local_id, assigned_to=manifest["recipient"]))
+        if source["video_id"] in manifest["work_keys"]:
+            session.add(VideoAssignment(video_id=local_id, assigned_to=manifest["recipient"]))
         videos[source["video_id"]] = local_id
     for source in context["predictions"]:
         row = {key: value for key, value in source.items() if key not in {"id", "video_id"}}
@@ -208,14 +217,32 @@ def open_setup(session, data, manifest, context, work, project_name, roots, path
                 **row,
             )
         )
-    for unit in work:
-        restore_work(session, project.id, videos[unit["video_id"]], unit, vocab)
+    if manifest["stage"] == "distance":
+        mapping = distance.restore_dependencies(
+            session, project.id, context, identities, videos, roots, work
+        )
+        for unit in context["distance"]["species_work"]:
+            restore_work(session, project.id, videos[unit["video_id"]], unit, vocab)
+        for unit in work:
+            distance.restore_work(
+                session,
+                project.id,
+                videos[unit["video_id"]],
+                unit,
+                vocab,
+                identities,
+                mapping,
+                manifest["target_species"],
+            )
+    else:
+        for unit in work:
+            restore_work(session, project.id, videos[unit["video_id"]], unit, vocab)
     session.flush()
     return OpenedAssignment(
         binding.id,
         binding.assignment_id,
         project.id,
-        len(videos),
+        len(manifest["work_keys"]),
         tuple(key for key, (_, missing) in paths.items() if missing),
     )
 
@@ -226,8 +253,14 @@ def export_return(session, working_project_id):
         .filter_by(project_id=working_project_id, role="working")
         .one_or_none()
     )
-    if binding is None or binding.stage != "species":
-        raise ValueError("Choose a Species working assignment project")
+    if binding is None:
+        raise ValueError("Choose a working assignment project")
+    if binding.stage == "distance":
+        from review_app.backend.annotation_package.distance_handoff import (
+            export_return as export_distance,
+        )
+
+        return export_distance(session, binding)
     videos = bound_videos(session, binding)
     roots = session.query(ProjectDir).filter_by(project_id=working_project_id).all()
     current, work = collect(
@@ -282,6 +315,10 @@ def plan_return(session, project_id, data, policy):
             )
     if context["media"] != original["media"]:
         raise ValueError("Returned media mapping differs from the saved handout")
+    if binding.stage == "distance":
+        from review_app.backend.annotation_package.distance_handoff import plan
+
+        return plan(session, binding, manifest, context, work, data, policy, original)
     videos = bound_videos(session, binding)
     current_context, current_work = collect(
         session,
@@ -366,6 +403,11 @@ def accept_return(session, project_id, data, policy, preview_token):
     binding, context, selected, preview = plan_return(session, project_id, data, policy)
     if not isinstance(preview_token, str) or preview_token != preview.token:
         raise ValueError("Return preview is stale; preview again before accepting")
+    if selected and binding.stage == "distance":
+        from review_app.backend.annotation_package.distance_handoff import accept
+
+        accept(session, binding, context, selected)
+        return AcceptanceResult(binding.assignment_id, preview.totals)
     if selected:
         vocab = vocabulary(session, context, [unit for _, unit in selected])
         for video_id, unit in selected:

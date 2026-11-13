@@ -25,6 +25,8 @@ class AssignmentRequest:
     video_ids: tuple[str, ...]
     stage: str = "species"
     target_species: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ class ReturnPreview:
     units: tuple[dict, ...]
     totals: dict[str, int]
     warnings: tuple[str, ...]
+    reference_substitutions: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -109,10 +112,12 @@ def id_selection(ids):
 
 
 def select_videos(session: Session, project_id: str, request: AssignmentRequest):
-    if request.stage != "species" or request.target_species is not None:
-        raise ValueError(
-            "Only Species assignment preparation is implemented; Distance is deferred"
-        )
+    if request.stage not in {"species", "distance"}:
+        raise ValueError("Unknown assignment stage")
+    if request.stage == "species" and (
+        request.target_species is not None or request.start_time or request.end_time
+    ):
+        raise ValueError("Species assignments cannot have Distance selection options")
     if not isinstance(request.recipient, str) or not request.recipient.strip():
         raise ValueError("Choose an assignment recipient")
     if (
@@ -137,5 +142,43 @@ def select_videos(session: Session, project_id: str, request: AssignmentRequest)
     )
     if len(videos) != len(request.video_ids):
         raise ValueError("Every selected video must belong to the source project")
+    if request.stage == "distance":
+        from review_app.backend.db.models import DistanceReviewTask, Species
+        from review_app.backend.provider.distance_references import reference_tagged
+        from review_app.backend.provider.distance_tasks import ensure_tasks
+        from review_app.backend.provider.distance_transfer import _manual_presence, _time_window
+
+        target = (
+            session.query(Species).filter_by(scientific_name=request.target_species).one_or_none()
+        )
+        if target is None:
+            raise ValueError("Choose a Distance target species by scientific name")
+        ensure_tasks(session, project_id)
+        eligible = {
+            row.video_id
+            for row in session.query(Video).filter(
+                Video.project_id == project_id,
+                _manual_presence(session, Video.video_id, target.id),
+                ~reference_tagged(session),
+            )
+        }
+        window = _time_window(request.start_time, request.end_time)
+        for video in videos:
+            if video.video_id not in eligible:
+                raise ValueError("Distance preparation requires confirmed target-species labels")
+            if window:
+                task = (
+                    session.query(DistanceReviewTask)
+                    .filter_by(video_id=video.video_id, species_id=target.id)
+                    .one()
+                )
+                start, end = window
+                value = task.recorded_start.time() if task.recorded_start else None
+                if value is None or not (
+                    start <= value < end if start < end else value >= start or value < end
+                ):
+                    raise ValueError(
+                        "Selected Distance task is outside the camera-local time window or has unknown time"
+                    )
     roots = session.query(ProjectDir).filter_by(project_id=project_id).all()
     return project, videos, roots
