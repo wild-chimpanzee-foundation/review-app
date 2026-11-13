@@ -14,6 +14,7 @@ from review_app.app.config import DEFAULT_DB_FILENAME, get_user_data_dir
 from review_app.backend.db.migrations import check_schema_version, run_migrations
 from review_app.backend.db.models import Base
 from review_app.backend.provider.annotation_repository import AnnotationMixin
+from review_app.backend.provider.assignment_handoff import AssignmentHandoffMixin
 from review_app.backend.provider.assignment_service import AssignmentMixin
 from review_app.backend.provider.distance_repository import DistanceMixin
 from review_app.backend.provider.distance_transfer import DistanceTransferMixin
@@ -42,6 +43,7 @@ class LocalDataProvider(
     StatsMixin,
     TagMixin,
     AssignmentMixin,
+    AssignmentHandoffMixin,
     DistanceMixin,
     DistanceTransferMixin,
 ):

@@ -1,16 +1,329 @@
-"""Assignment persistence, portable identities, and fresh/upgrade schema invariants."""
+"""M1: frozen handouts, bounded archives, and portable identity persistence."""
 
+import io
+import json
 import uuid
+import zipfile
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from review_app.backend.annotation_package import archive
 from review_app.backend.annotation_package.identity import IdentityMap
 from review_app.backend.db.migrations import MIGRATIONS, run_migrations
-from review_app.backend.db.models import Base, HandoffAssignment, HandoffIdentityMap
+from review_app.backend.db.models import (
+    Base,
+    HandoffAssignment,
+    HandoffIdentityMap,
+    IndividualObservation,
+    ModelAnnotation,
+    ProjectSpecies,
+    Species,
+    Video,
+    VideoLabel,
+    VideoTag,
+)
+from review_app.backend.provider.assignment_handoff import AssignmentRequest
+from review_app.backend.provider.local_data_provider import LocalDataProvider
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+
+@pytest.fixture
+def prepared(provider_with_project):
+    dp, project, root = provider_with_project
+    ids = dp.get_video_queue({}, active_project_id=project.id)
+    dp.update_manual_review(
+        ids[0],
+        [
+            {
+                "species": "deer",
+                "count": 3,
+                "start_sec": 1.25,
+                "end_sec": 5.5,
+                "tags": ["grazing"],
+                "labeled_by": "alice",
+            }
+        ],
+        is_blank=False,
+        labeled_by="alice",
+        active_project_id=project.id,
+    )
+    dp.set_review_later(ids[0], True)
+    dp.set_video_tags(ids[0], ["reference_video"])
+    with dp.Session.begin() as session:
+        session.query(VideoTag).filter_by(video_id=ids[0]).one().tagged_by = "bob"
+        deer = session.query(Species).filter_by(scientific_name="deer").one()
+        session.add(ProjectSpecies(project_id=project.id, species_id=deer.id))
+        session.add(
+            ModelAnnotation(
+                video_id=ids[0],
+                project_id=project.id,
+                annotation_type="species",
+                model_name="model-a",
+                value_text="deer",
+                probability=0.8,
+                t_start_sec=0.25,
+                t_end_sec=7.75,
+            )
+        )
+    result = dp.prepare_assignment(project.id, AssignmentRequest(" alice ", tuple(ids)))
+    return dp, project, root, ids, result
+
+
+def unpack(prepared):
+    dp, _, _, _, result = prepared
+    return archive.decode_archive(dp.export_assignment(result.id))
+
+
+def repack(manifest, context, work, extra=None):
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, value in zip(archive.MEMBERS, (manifest, context, work), strict=True):
+            zf.writestr(name, json.dumps(value))
+        if extra:
+            zf.writestr(*extra)
+    return output.getvalue()
+
+
+def test_preparation_preserves_complete_species_setup_including_untouched_work(prepared):
+    dp, project, root, ids, result = prepared
+    manifest, context, work = unpack(prepared)
+    assert result.recipient == manifest["recipient"] == "alice"
+    assert manifest["assignment_id"] == result.assignment_id
+    assert manifest["source_project_id"] == project.id
+    assert set(manifest["work_keys"]) == set(ids)
+    assert manifest["roots"] == [root.id]
+    assert result.video_count == 2
+    assert result.missing_video_ids == ()
+    units = {row["video_id"]: row for row in work}
+    reviewed = units[ids[0]]
+    assert reviewed["label"]["is_blank"] is False
+    assert reviewed["label"]["review_later"] is True
+    assert reviewed["label"]["labeled_by"] == "alice"
+    observation = reviewed["observations"][0]
+    assert observation["species"] == "deer"
+    assert observation["behaviors"] == ["grazing"]
+    assert (observation["count"], observation["start_sec"], observation["end_sec"]) == (
+        3,
+        1.25,
+        5.5,
+    )
+    assert reviewed["tags"][0]["key"] == "reference_video"
+    assert reviewed["tags"][0]["tagged_by"] == "bob"
+    assert units[ids[1]] == {"video_id": ids[1], "label": None, "observations": [], "tags": []}
+    assert context["project_species"] == ["deer"]
+    assert {row["scientific_name"] for row in context["species"]} == {"deer", "fox"}
+    assert context["predictions"][0]["probability"] == 0.8
+    assert context["predictions"][0]["t_start_sec"] == 0.25
+    with dp.Session() as session:
+        source = session.query(IndividualObservation).filter_by(video_id=ids[0]).one()
+        assert observation["observation_uuid"] == source.observation_uuid
+        assert observation["labeled_at"] == source.labeled_at.isoformat()
+        assert observation["updated_at"] == source.updated_at.isoformat()
+        label = session.get(VideoLabel, ids[0])
+        assert reviewed["label"]["labeled_at"] == label.labeled_at.isoformat()
+        tag = session.query(VideoTag).filter_by(video_id=ids[0]).one()
+        assert reviewed["tags"][0]["tagged_at"] == tag.tagged_at.isoformat()
+        stored = session.get(HandoffAssignment, result.id)
+        assert stored.role == "origin"
+        assert stored.scope["work_keys"] == manifest["work_keys"]
+        mapping = (
+            session.query(HandoffIdentityMap)
+            .filter_by(handoff_id=result.id, kind="observation")
+            .one()
+        )
+        assert json.loads(mapping.local_id) == [ids[0], source.id]
+        assert json.loads(mapping.portable_id) == [ids[0], source.observation_uuid]
+
+
+def test_download_is_immutable_after_edits_distribution_and_restart(prepared):
+    dp, project, root, ids, result = prepared
+    original = dp.export_assignment(result.id)
+    dp.update_manual_review(ids[0], [], is_blank=True)
+    dp.add_annotator("bob")
+    dp.apply_distribution(project.id, {"bob": ["cam_x"]})
+    dp.update_project_name(project.id, "Changed name")
+    with dp.Session.begin() as session:
+        session.query(ModelAnnotation).filter_by(video_id=ids[0]).delete()
+        session.query(Species).filter_by(scientific_name="deer").one().name_en = "Changed"
+    assert dp.export_assignment(result.id) == original
+    restarted = LocalDataProvider()
+    try:
+        assert restarted.export_assignment(result.id) == original
+        assert str(root.path).encode() not in b"".join(
+            json.dumps(value).encode() for value in archive.decode_archive(original)
+        )
+    finally:
+        restarted.engine.dispose()
+
+
+def test_preparation_uses_explicit_scope_not_distribution_or_missing_filters(
+    provider_with_project,
+):
+    dp, project, _ = provider_with_project
+    ids = dp.get_video_queue({}, active_project_id=project.id)
+    dp.update_manual_review(ids[0], [], is_blank=True)
+    with dp.Session.begin() as session:
+        session.get(Video, ids[0]).is_missing = True
+    result = dp.prepare_assignment(project.id, AssignmentRequest("alice", (ids[0],)))
+    manifest, context, work = archive.decode_archive(dp.export_assignment(result.id))
+    assert manifest["work_keys"] == [ids[0]]
+    assert context["media"][0]["is_missing"] is True
+    assert work[0]["label"]["is_blank"] is True
+    assert result.missing_video_ids == (ids[0],)
+
+
+def test_multi_root_paths_keep_separate_namespaces(provider_with_project, tmp_path):
+    dp, project, _ = provider_with_project
+    second = tmp_path / "second-root"
+    (second / "cam_x").mkdir(parents=True)
+    (second / "cam_x" / "a.mp4").touch()
+    new_root = dp.add_project_dir(project.id, str(second))
+    dp.sync_videos(video_dir=second, active_project_id=project.id)
+    with dp.Session() as session:
+        ids = [row.video_id for row in session.query(Video).filter_by(project_id=project.id)]
+    result = dp.prepare_assignment(project.id, AssignmentRequest("alice", tuple(ids)))
+    _, context, _ = archive.decode_archive(dp.export_assignment(result.id))
+    same_names = [row for row in context["media"] if row["video_path"] == "cam_x/a.mp4"]
+    assert len(same_names) == 2
+    assert len({row["root_id"] for row in same_names}) == 2
+    assert new_root.id in {row["root_id"] for row in same_names}
+
+
+@pytest.mark.parametrize(
+    "selection,recipient,stage,target",
+    [
+        ((), "alice", "species", None),
+        (("unknown",), "alice", "species", None),
+        (("first", "first"), "alice", "species", None),
+        (("first",), " ", "species", None),
+        (("first",), "alice", "distance", "deer"),
+        (("first",), "alice", "species", "deer"),
+    ],
+)
+def test_invalid_preparation_leaves_no_handoff(
+    provider_with_project, selection, recipient, stage, target
+):
+    dp, project, _ = provider_with_project
+    first = dp.get_video_queue({}, active_project_id=project.id)[0]
+    selection = tuple(first if value == "first" else value for value in selection)
+    with pytest.raises(ValueError):
+        dp.prepare_assignment(project.id, AssignmentRequest(recipient, selection, stage, target))
+    with dp.Session() as session:
+        assert session.query(HandoffAssignment).count() == 0
+        assert session.query(HandoffIdentityMap).count() == 0
+
+
+def test_cross_project_or_unregistered_media_is_not_packaged(provider_with_project, tmp_path):
+    dp, project, _ = provider_with_project
+    video_id = dp.get_video_queue({}, active_project_id=project.id)[0]
+    other = dp.create_project("Other", "")
+    with pytest.raises(ValueError, match="belong"):
+        dp.prepare_assignment(other.id, AssignmentRequest("alice", (video_id,)))
+    with dp.Session.begin() as session:
+        session.get(Video, video_id).video_path = str(tmp_path / "elsewhere.mp4")
+    with pytest.raises(ValueError, match="registered"):
+        dp.prepare_assignment(project.id, AssignmentRequest("alice", (video_id,)))
+    with dp.Session() as session:
+        assert session.query(HandoffAssignment).count() == 0
+
+
+def test_late_preparation_failure_rolls_back_handout_and_identity_maps(
+    provider_with_project, monkeypatch
+):
+    dp, project, _ = provider_with_project
+    ids = dp.get_video_queue({}, active_project_id=project.id)
+    original = IdentityMap.bind
+    calls = 0
+
+    def fail_second(self, *args):
+        nonlocal calls
+        calls += 1
+        value = original(self, *args)
+        if calls == 2:
+            raise ValueError("simulated mapping failure")
+        return value
+
+    monkeypatch.setattr(IdentityMap, "bind", fail_second)
+    with pytest.raises(ValueError, match="simulated"):
+        dp.prepare_assignment(project.id, AssignmentRequest("alice", tuple(ids)))
+    with dp.Session() as session:
+        assert session.query(HandoffAssignment).count() == 0
+        assert session.query(HandoffIdentityMap).count() == 0
+        assert session.query(Video).filter_by(project_id=project.id).count() == 2
+
+
+def test_unknown_assignment_download(provider_with_project):
+    with pytest.raises(ValueError, match="not found"):
+        provider_with_project[0].export_assignment("missing")
+
+
+@pytest.mark.parametrize(
+    "change,match",
+    [
+        (lambda m, c, w: m.update(version=True), "version"),
+        (lambda m, c, w: m.update(version=2), "version"),
+        (lambda m, c, w: m.update(direction="return"), "implemented"),
+        (lambda m, c, w: m.update(work_keys=[]), "scope"),
+        (lambda m, c, w: c["media"][0].update(video_path="../escape.mp4"), "relative"),
+        (lambda m, c, w: c["media"][0].update(video_path="C:/absolute.mp4"), "relative"),
+        (lambda m, c, w: c["media"][0].update(root_id="unknown"), "roots"),
+        (lambda m, c, w: c["media"][0].update(duration_sec=float("nan")), "finite"),
+        (lambda m, c, w: c["predictions"][0].update(video_id="unassigned"), "scope"),
+        (
+            lambda m, c, w: w[0].update(
+                tags=[{"key": "missing", "tagged_by": None, "tagged_at": "2025-01-01"}]
+            ),
+            "tag",
+        ),
+        (lambda m, c, w: w.append(w[0]), "Duplicate"),
+        (lambda m, c, w: w.pop(), "scope"),
+        (lambda m, c, w: c.update(unversioned_field="extra"), "fields"),
+    ],
+)
+def test_archive_rejects_invalid_records_and_graphs(prepared, change, match):
+    manifest, context, work = unpack(prepared)
+    change(manifest, context, work)
+    with pytest.raises(ValueError, match=match):
+        archive.decode_archive(repack(manifest, context, work))
+
+
+def test_archive_rejects_bad_zip_extra_duplicate_members_and_duplicate_json(prepared):
+    with pytest.raises(ValueError, match="Invalid assignment archive"):
+        archive.decode_archive(b"not a zip")
+    manifest, context, work = unpack(prepared)
+    for extra in (("../media.mp4", b"video"), ("work.json", b"[]")):
+        with pytest.warns(UserWarning) if extra[0] == "work.json" else nullcontext():
+            data = repack(manifest, context, work, extra=extra)
+        with pytest.raises(ValueError, match="exactly"):
+            archive.decode_archive(data)
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as zf:
+        zf.writestr("manifest.json", '{"version":1,"version":1}')
+        zf.writestr("context.json", "{}")
+        zf.writestr("work.json", "[]")
+    with pytest.raises(ValueError, match="Duplicate JSON"):
+        archive.decode_archive(output.getvalue())
+
+
+def test_archive_limits_apply_on_read_and_write(prepared, monkeypatch):
+    dp, _, _, _, result = prepared
+    data = dp.export_assignment(result.id)
+    manifest, context, work = archive.decode_archive(data)
+    monkeypatch.setattr(archive, "MAX_ARCHIVE_BYTES", len(data) - 1)
+    with pytest.raises(ValueError, match="archive size"):
+        archive.decode_archive(data)
+    with pytest.raises(ValueError, match="archive size"):
+        archive.encode_archive(manifest, context, work)
+    monkeypatch.setattr(archive, "MAX_ARCHIVE_BYTES", len(data) * 2)
+    monkeypatch.setattr(archive, "MAX_UNCOMPRESSED_BYTES", 10)
+    with pytest.raises(ValueError, match="uncompressed"):
+        archive.decode_archive(data)
+    with pytest.raises(ValueError, match="uncompressed"):
+        archive.encode_archive(manifest, context, work)
 
 
 def working(session, project_id, assignment_id="portable-assignment"):
@@ -53,6 +366,10 @@ def test_identity_maps_allocate_stable_local_ids_for_same_portable_graph_twice(
             mapping.bind("video", "source-video", "other-local")
         with pytest.raises(ValueError, match="another entity"):
             mapping.bind("video", "other-source", ids[0])
+    with pytest.raises(ValueError, match="working assignment"):
+        dp.prepare_assignment(project.id, AssignmentRequest("bob", (ids[0],)))
+    with pytest.raises(ValueError, match="originating"):
+        dp.export_assignment(handoff_id)
     dp.delete_project(project.id)
     with dp.Session() as session:
         assert session.get(HandoffAssignment, handoff_id) is None
