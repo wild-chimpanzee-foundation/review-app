@@ -1,7 +1,8 @@
 # Assignment handoff
 
 **Status:** Agreed product design. Not a description of shipped package behavior.
-Serialization and storage design remain undecided.
+Use explicit serialized assignment snapshots; see the
+[implementation plan and milestone tracker](./assignment-handoff-implementation-plan.md).
 
 ## Purpose
 
@@ -57,9 +58,48 @@ Preserve editable state, attribution, alignment, relationships, completion/absen
 resume state, and relevant AI provenance rather than silently discarding them.
 Existing task-level annotation and completion rules remain unchanged.
 
-Opening an assignment creates a **fresh project**, never merges setup data into
-an existing annotator project. A Distance project is focused on its one target
-species. Carried context is not permission to edit or return unrelated work.
+Opening an assignment creates a **fresh project**, never merges assignment setup
+into an existing annotator project. Its assignment remembers the delegated stage,
+selected work, and optional Distance target species; these are not project types
+or annotation permissions.
+
+### Assignment scope is not an editing restriction
+
+Annotators can use the normal annotation workflows regardless of assignment
+context. In particular:
+
+- A Species assignment does not prevent creating or editing Distance tasks.
+- A Distance assignment does not prevent editing Species Review labels or
+  annotating other species.
+- Carried Species context and reference footage are not made read-only just
+  because they were delivered as dependencies.
+- Ordinary task-level integrity, annotation, and completion rules still apply;
+  only assignment-dependent editing restrictions are excluded.
+
+Do not add project-context guards to annotation mutations, hide otherwise valid
+work from ordinary review queues, or disable review stages based on the assignment.
+The assignment can provide a useful initial selection without locking navigation
+or editing to that selection. Annotation happens locally; the admin controls
+acceptance into the originating project through return preview and import.
+
+This separates local editing freedom from transfer authority. Editing another
+stage does not silently expand the frozen assignment or make that work eligible
+for assignment return import. The stage-scoped return and acceptance rules below
+remain in force; this decision does not introduce mixed-stage assignments or a
+new per-record import editor.
+
+### Sync only the delivered media list
+
+Opening and subsequently syncing a project opened from an assignment checks only
+the assignment's listed footage and required dependency footage. Locate/recheck
+those files and report missing footage; do not recursively discover unrelated
+files in the supplied folders or add them to the project during that sync.
+
+The admin normally delivers the selected footage alongside the assignment, but
+folders can contain extra files. Ignoring those files keeps media discovery
+predictable; it is not a security or annotation-permission mechanism. Annotation
+freedom does not require automatically expanding the delivered media list.
+Saved assignment scope and return eligibility remain unchanged by local edits.
 
 ### Footage stays separate
 
@@ -223,6 +263,7 @@ documents shipped behavior, not the future assignment format.
 - Importing assignment setup into an existing annotator project.
 - Mixed-stage or multi-species Distance assignments.
 - Locking admin work while an assignment is away.
+- Assignment-based project types, annotation permissions, or review-stage locks.
 - Baseline-aware change detection, per-record choices, or a merge editor.
 - A pending-return resolution inbox or a general warnings dashboard as a prerequisite.
 - Embedding footage in annotation archives.
@@ -231,14 +272,10 @@ documents shipped behavior, not the future assignment format.
 Analysis exports and external-data imports may exist independently; they must not
 dictate the assignment-handoff interface.
 
-## Next design decision
+## Implementation direction
 
-Compare two implementation designs against this workflow:
-
-1. Explicit serialized assignment snapshots.
-2. Scoped project-database snapshots.
-
-Evaluate interface depth, locality, dependency handling, safe return application,
-and maintenance cost. Inspect existing project storage before choosing. Neither
-is selected yet. ZIP layout, table formats, versioning details, and storage schema
-must follow that decision, not lead it.
+Use explicit serialized assignment snapshots, not scoped database copies. The
+[implementation plan](./assignment-handoff-implementation-plan.md) records the
+module interface, storage/archive design, milestones, validation, and current
+checkpoint. Assignment identity and stage describe the handoff, not a restricted
+annotation mode for its local project.

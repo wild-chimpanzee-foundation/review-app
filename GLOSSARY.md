@@ -5,8 +5,9 @@ Terms for delegated Species Review and Distance Review work.
 ## Language
 
 **Assignment**:
-A defined selection of videos delegated for one review stage. A Distance Review
-assignment targets exactly one species.
+A defined selection of videos delegated for one review stage; a Distance Review
+assignment targets exactly one species. It defines the delegated work, not which
+annotations the recipient is permitted to edit locally.
 _Avoid_: Work package (when referring to the delegated work)
 
 **Assignment handoff**:
