@@ -50,7 +50,7 @@ Cliquez sur **Enregistrer** pour appliquer.
 La répartition et la transmission se trouvent dans **Données & affectations →
 Affectations**, et non dans les Paramètres. La liste compacte affiche les
 affectations préparées. Sélectionnez une ligne pour enregistrer un dossier de
-livraison, télécharger le ZIP ou examiner le périmètre figé. Les identifiants et horodatages précis
+livraison ou examiner le périmètre figé. Les identifiants et horodatages précis
 sont dans **Détails techniques**.
 
 1. Choisissez **Affecter le travail** et l’étape de révision. Ajoutez les noms des
@@ -80,10 +80,14 @@ sont dans **Détails techniques**.
    un brouillon ; une répartition ultérieure ne change pas les ZIP enregistrés.
 3. Sélectionnez une affectation et **Enregistrer le dossier de livraison**.
    Choisissez un dossier sur l’ordinateur exécutant l’application, hors des vidéos
-   du projet. Le nouveau dossier contient **assignment.zip**. L’option **Inclure
+   du projet. **Parcourir…** ouvre le sélecteur système ; le chemin reste aussi
+   saisissable manuellement. Sous Linux, le sélecteur nécessite Zenity ou KDialog.
+   Le nouveau dossier contient **assignment.zip**. L’option **Inclure
    les vidéos** copie aussi le travail et les références nécessaires dans des
    sous-dossiers par racine. Laissez-la désactivée si les dossiers d’origine sont
-   accessibles au destinataire. Le téléchargement du ZIP reste disponible.
+   accessibles au destinataire. Sélectionnez plusieurs affectations pour enregistrer
+   leurs dossiers ensemble. Les résultats affichent une entrée compacte par
+   destinataire ; dépliez-la pour voir les chemins et détails techniques.
    Vérifiez les fichiers manquants et les échecs ; réessayez dans un autre dossier
    sans écraser une livraison.
 4. Le destinataire choisit **Ouvrir un paquet** dans le sélecteur de projet,

@@ -1,7 +1,6 @@
 """Interact with the real assignment UI and database, without launching a browser."""
 
-from io import BytesIO
-from zipfile import ZipFile
+import asyncio
 
 import pytest
 from nicegui import app, ui
@@ -104,7 +103,7 @@ async def test_distribution_uses_saved_delivery_and_keeps_independent_csv_import
     await user.should_not_see(t("distribution_title"))
     table = next(iter(user.find(ui.table).elements))
     user.find(ui.table).trigger("rowClick", [None, table.rows[0], 0])
-    await user.should_see(t("handoff_download"))
+    await user.should_not_see(t("handoff_download"))
     await user.should_see(t("assign_save_delivery"))
     await user.should_not_see(t("batch_import_btn"))
     texts = {getattr(e, "text", None) for e in user.client.elements.values()}
@@ -216,7 +215,7 @@ async def test_new_recipient_can_be_added_without_leaving_creation(user: User, h
     user.find(t("assign_review"), kind=ui.button).click()
     await user.should_see(t("assign_freeze_help"))
     user.find(t("assign_prepare"), kind=ui.button).click()
-    await user.should_see(t("handoff_download"))
+    await user.should_see(t("assign_save_delivery"))
     assert len(dp.get_assigned_video_ids(project.id, "Élodie")) == 2
     saved = dp.list_assignments(project.id)[0]
     technical = next(iter(user.find(t("assign_technical"), kind=ui.expansion).elements))
@@ -230,6 +229,38 @@ async def test_new_recipient_can_be_added_without_leaving_creation(user: User, h
     media_table = next(iter(user.find(marker="assignment-media").elements))
     assert len(media_table.rows) == 2
     assert {row["role"] for row in media_table.rows} == {t("assign_work_media")}
+
+
+@pytest.mark.parametrize("selection", ["chosen", "cancel", "unavailable"])
+async def test_delivery_folder_picker(user: User, handoff_ui, monkeypatch, tmp_path, selection):
+    dp, project, _ = handoff_ui
+    dp.prepare_assignment(
+        project.id, AssignmentRequest("alice", tuple(dp.get_assignment_video_ids(project.id)))
+    )
+    calls = []
+
+    def pick(initial):
+        calls.append(initial)
+        if selection == "unavailable":
+            raise RuntimeError("No desktop picker")
+        return str(tmp_path) if selection == "chosen" else None
+
+    monkeypatch.setattr("review_app.app.components.assignment_handoff.pick_folder", pick)
+    await user.open("/handoff-admin")
+    table = next(iter(user.find(ui.table).elements))
+    user.find(ui.table).trigger("rowClick", [None, table.rows[0], 0])
+    await user.should_see(marker="open-delivery")
+    user.find(marker="open-delivery").click()
+    user.find(t("handoff_copy_output")).type("existing-path")
+    user.find(marker="browse-delivery-folder").click()
+    await asyncio.sleep(0.1)  # Allow the off-thread picker to return, including on cancel.
+    if selection == "unavailable":
+        await user.should_see(t("assign_folder_picker_unavailable"))
+    else:
+        await user.should_see(str(tmp_path) if selection == "chosen" else "existing-path")
+    assert calls == ["existing-path"]
+    output = next(iter(user.find(t("handoff_copy_output"), kind=ui.input).elements))
+    assert output.value == (str(tmp_path) if selection == "chosen" else "existing-path")
 
 
 async def test_save_delivery_defaults_to_zip_only(user: User, handoff_ui, tmp_path):
@@ -276,7 +307,7 @@ async def test_saved_assignment_delivery_control(user: User, handoff_ui, tmp_pat
 
 
 async def test_species_roundtrip_through_prepare_open_return_preview_accept(
-    user: User, handoff_ui, monkeypatch
+    user: User, handoff_ui, monkeypatch, tmp_path
 ):
     dp, project, root = handoff_ui
     dp.add_annotator("alice")
@@ -308,11 +339,15 @@ async def test_species_roundtrip_through_prepare_open_return_preview_accept(
     user.find(t("assign_prepare"), kind=ui.button).click()
     await user.should_see(t("handoff_prepared", count=2))
     assert len(dp.list_assignments(project.id)) == 1
-    user.find(t("handoff_download"), kind=ui.button).click()
-    setup = (await user.download.next()).content
+    user.find(marker="open-delivery").click()
+    user.find(t("handoff_copy_output")).type(str(tmp_path))
+    user.find(marker="save-delivery").click()
+    saved = dp.list_assignments(project.id)[0]
+    path = tmp_path / f"assignment-{saved['assignment_id']}"
+    await user.should_see(t("assign_delivery_saved", path=str(path)))
+    setup = (path / "assignment.zip").read_bytes()
     info = dp.inspect_assignment(setup)
     assert info["recipient"] == "alice" and info["video_count"] == 2
-    assert filenames[-1] == f"assignment-alice-{info['assignment_id']}.zip"
 
     await user.open("/handoff-open")
     assert not button(user, "handoff_open").enabled
@@ -442,7 +477,7 @@ async def test_missing_footage_can_be_corrected_before_creating_project(
     assert len(dp.list_projects()) == 2
 
 
-async def test_bulk_assignment_download_delivery_and_removal(user: User, handoff_ui, tmp_path):
+async def test_bulk_assignment_delivery_and_removal(user: User, handoff_ui, tmp_path):
     dp, project, _ = handoff_ui
     ids = dp.get_assignment_video_ids(project.id)
     saved = [
@@ -458,17 +493,16 @@ async def test_bulk_assignment_download_delivery_and_removal(user: User, handoff
     )
     await user.should_see(t("assign_selected_count", count=2))
     assert {row["id"] for row in table.selected} == {item.id for item in saved[:2]}
-    user.find(marker="download-selected-assignments").click()
-    download = await user.download.next()
-    with ZipFile(BytesIO(download.content)) as bundle:
-        assert len(bundle.namelist()) == 2
-        for item, name in zip(saved[:2], ("alice", "bob"), strict=True):
-            filename = assignment_filename("assignment", name, item.assignment_id)
-            assert bundle.read(filename) == dp.export_assignment(item.id)
+    await user.should_not_see(marker="download-selected-assignments")
 
     user.find(marker="open-delivery").click()
     user.find(t("handoff_copy_output")).type(str(tmp_path))
     user.find(marker="save-delivery").click()
+    await user.should_see(t("assign_deliveries_saved", saved=2, total=2))
+    result_details = user.find(marker="delivery-result").elements
+    assert len(result_details) == 2
+    assert all(isinstance(detail, ui.expansion) and not detail.value for detail in result_details)
+    assert {detail.text for detail in result_details} == {"alice", "bob"}
     for item in saved[:2]:
         path = tmp_path / f"assignment-{item.assignment_id}"
         await user.should_see(t("assign_delivery_saved", path=str(path)))

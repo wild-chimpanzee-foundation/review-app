@@ -49,7 +49,7 @@ Click **Save** to apply.
 
 Work allocation and handoff live in **Data & assignments → Assignments**, not
 Settings. The home screen is a compact list of prepared assignments. Select a row
-to save a delivery folder, download its ZIP, or inspect its frozen scope. Technical
+to save a delivery folder or inspect its frozen scope. Technical
 identifiers and precise timestamps are under **Technical details**.
 
 1. Choose **Assign work** and the review stage. Add annotator names here if needed.
@@ -74,11 +74,15 @@ identifiers and precise timestamps are under **Technical details**.
    if another fails, and retrying skips successful rows. Allocation edits before
    preparation remain a draft; later redistribution does not change saved ZIPs.
 3. Select a prepared assignment and **Save delivery folder**. Choose a folder on
-   the computer running the app, outside the project footage folders. The new
+   the computer running the app, outside the project footage folders. Use **Browse…**
+   for the system folder picker, or enter the path manually. Linux requires Zenity
+   or KDialog for the picker. The new
    folder contains **assignment.zip**. Optionally enable **Include footage** to
    copy assigned and required reference videos alongside it, in separate media-root
    subfolders. Leave footage off if the recipient can access the original folders.
-   Browser ZIP download remains available separately. Check missing/failed counts;
+   Select multiple assignments to save their delivery folders together. Results show
+   one compact entry per recipient; expand it for paths and technical details.
+   Check missing/failed counts;
    retry with a different output folder rather than overwrite an earlier delivery.
 4. The recipient uses **Open package** in the project picker, uploads the ZIP,
    and locates each media-root subfolder to create a fresh project. Footage is not

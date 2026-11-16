@@ -5,6 +5,7 @@ import re
 from nicegui import run, ui
 
 from review_app.app.components.assignment_video_table import AssignmentVideoTable
+from review_app.app.components.folder_picker import pick_folder
 from review_app.app.translations import t
 from review_app.app.utils import (
     get_or_create_data_provider,
@@ -182,27 +183,103 @@ def render_open_assignment(on_complete, *, show_upload=True):
 def render_assignment_delivery(dp, project_id, binding, require_project):
     """Save each selected assignment in its own server-side delivery folder."""
     bindings = binding if isinstance(binding, list) else [binding]
-    label = t("assign_save_deliveries") if len(bindings) > 1 else t("assign_save_delivery")
+    bulk = len(bindings) > 1
+    label = t("assign_save_deliveries") if bulk else t("assign_save_delivery")
     with ui.dialog() as dialog, ui.card().classes("w-full max-w-2xl gap-3"):
         ui.label(label).classes("text-h6")
         ui.label(t("assign_delivery_help")).classes("text-body2 text-grey-7")
-        output = ui.input(t("handoff_copy_output")).classes("w-full")
+
+        async def browse():
+            browse_button.disable()
+            save_button.disable()
+            try:
+                require_project()
+                selected = await run.io_bound(pick_folder, output.value or "")
+                require_project()
+                if selected:
+                    output.set_value(selected)
+            except Exception:
+                ui.notify(t("assign_folder_picker_unavailable"), type="warning")
+            finally:
+                browse_button.enable()
+                save_button.enable()
+
+        with ui.row().classes("w-full items-end gap-2 flex-nowrap"):
+            output = ui.input(t("handoff_copy_output")).classes("grow min-w-0")
+            browse_button = (
+                ui.button(t("assign_browse_folder"), icon="folder_open", on_click=browse)
+                .props("outline")
+                .mark("browse-delivery-folder")
+            )
         include = ui.checkbox(t("assign_include_footage"), value=False)
         ui.label(t("assign_reuse_footage")).classes("text-caption text-grey-7")
-        for item in bindings:
-            if item["stage"] == "distance":
-                ui.label(t("handoff_media_summary", **item)).classes("text-caption")
+        if not bulk and bindings[0]["stage"] == "distance":
+            ui.label(t("handoff_media_summary", **bindings[0])).classes("text-caption")
         status = ui.label("").classes("text-body2 whitespace-pre-wrap")
+        results = ui.column().classes("w-full gap-2 max-h-64 overflow-y-auto")
+
+        def show_result(item, result, with_footage):
+            warning = bool(result.missing_video_ids or result.failures)
+            with results:
+                with (
+                    ui.expansion(
+                        item["recipient"],
+                        icon="warning_amber" if warning else "check_circle_outline",
+                    )
+                    .classes("w-full border rounded")
+                    .mark("delivery-result") as detail
+                ):
+                    detail.props(
+                        "header-class=text-warning" if warning else "header-class=text-positive"
+                    )
+                    ui.label(t("assign_delivery_saved", path=result.path)).classes(
+                        "text-caption break-all"
+                    )
+                    if with_footage:
+                        ui.label(
+                            t(
+                                "handoff_copy_result",
+                                copied=result.copied_count,
+                                missing=len(result.missing_video_ids),
+                                failed=len(result.failures),
+                                path=result.path,
+                            )
+                        ).classes("text-caption break-all")
+                        for root, path in result.media_roots.items():
+                            ui.label(f"{root}: {path}").classes("text-caption break-all")
+                        for video_id in result.missing_video_ids:
+                            ui.label(t("assign_delivery_missing", video=video_id)).classes(
+                                "text-caption text-warning break-all"
+                            )
+                        for key, error in result.failures.items():
+                            ui.label(f"{key}: {error}").classes(
+                                "text-caption text-negative break-all"
+                            )
+                if with_footage:
+                    ui.label(
+                        t(
+                            "assign_delivery_counts",
+                            copied=result.copied_count,
+                            missing=len(result.missing_video_ids),
+                            failed=len(result.failures),
+                        )
+                    ).classes(
+                        "text-caption text-warning" if warning else "text-caption text-grey-7"
+                    )
 
         async def save():
             save_button.disable()
             close_button.disable()
             output.disable()
+            browse_button.disable()
             include.disable()
             with_footage = include.value
             try:
                 require_project()
                 lines = []
+                saved = 0
+                results.clear()
+                status.set_text("")
                 for item in bindings:
                     require_project()
                     try:
@@ -214,6 +291,9 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
                             include_footage=with_footage,
                         )
                         require_project()
+                        saved += 1
+                        if bulk:
+                            show_result(item, result, with_footage)
                         lines.append(t("assign_delivery_saved", path=result.path))
                         if with_footage:
                             lines.append(
@@ -232,14 +312,23 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
                                 f"{key}: {error}" for key, error in result.failures.items()
                             )
                     except Exception as exc:
-                        lines.append(f"{item['recipient']}: {_error_message(exc)}")
-                    status.set_text("\n".join(lines))
+                        message = f"{item['recipient']}: {_error_message(exc)}"
+                        lines.append(message)
+                        if bulk:
+                            with results:
+                                ui.label(message).classes("text-negative break-all")
+                    status.set_text(
+                        t("assign_deliveries_saved", saved=saved, total=len(bindings))
+                        if bulk
+                        else "\n".join(lines)
+                    )
             except Exception as exc:
                 status.set_text(_error_message(exc))
             finally:
                 save_button.enable()
                 close_button.enable()
                 output.enable()
+                browse_button.enable()
                 include.enable()
 
         with ui.row().classes("w-full justify-end gap-2"):

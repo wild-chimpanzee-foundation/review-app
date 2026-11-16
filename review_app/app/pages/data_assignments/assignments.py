@@ -50,15 +50,12 @@ def render_assignment_details(dp, project_id, binding, require_project, on_close
         download_button.disable()
         try:
             require_project()
-            raw = await run.io_bound(
-                dp.export_assignment_return if working else dp.export_assignment,
-                project_id if working else binding["id"],
-            )
+            raw = await run.io_bound(dp.export_assignment_return, project_id)
             require_project()
             ui.download(
                 raw,
                 assignment_filename(
-                    "return" if working else "assignment",
+                    "return",
                     binding["recipient"],
                     binding["assignment_id"],
                 ),
@@ -70,12 +67,9 @@ def render_assignment_details(dp, project_id, binding, require_project, on_close
         finally:
             download_button.enable()
 
-    download_button = ui.button(
-        t("handoff_return" if working else "handoff_download"), on_click=download, icon="download"
-    )
-    if not working:
-        ui.separator().classes("q-my-sm")
-        download_button.props("flat")
+    if working:
+        download_button = ui.button(t("handoff_return"), on_click=download, icon="download")
+    else:
         render_assignment_delivery(dp, project_id, binding, require_project)
     with ui.expansion(t("assign_saved_scope"), icon="list").classes("w-full") as scope:
         media_content = ui.column().classes("w-full")

@@ -670,11 +670,6 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
     assert sum(row["assigned"] for row in media) == 2
     assert sum(not row["assigned"] for row in media) == 1
     # The newly prepared handoff opens directly in the saved-assignment details.
-    click_first_handoff_button(user, "handoff_download")
-    setup = (await user.download.next()).content
-    manifest, context, _ = decode_archive(setup)
-    assert manifest["assignment_id"] == saved["assignment_id"]
-    assert len(context["media"]) == 3
     assert not dp.get_assigned_video_ids(project.id, "alice")
     user.find(marker="open-delivery").click()
     with user:
@@ -692,6 +687,10 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
     await user.should_see(
         t("handoff_copy_result", copied=3, missing=0, failed=0, path=str(delivery))
     )
+    setup = (delivery / "assignment.zip").read_bytes()
+    manifest, context, _ = decode_archive(setup)
+    assert manifest["assignment_id"] == saved["assignment_id"]
+    assert len(context["media"]) == 3
     root_id = manifest["roots"][0]
     delivered_root = delivery / root_id
     (delivered_root / "unlisted.mp4").touch()
