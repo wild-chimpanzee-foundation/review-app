@@ -15,6 +15,7 @@ from .assignment_plan import (
     species_requests,
     species_work_groups,
 )
+from .workload import format_camera_labels
 
 
 def render_assignment_creation(dp, project_id, require_project, on_cancel, on_prepared):
@@ -138,14 +139,24 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                 if totals:
                     with ui.row().classes("gap-3 flex-wrap"):
                         for request in totals:
-                            ui.chip(
-                                t(
-                                    "assign_recipient_count",
-                                    name=request.recipient,
-                                    count=len(request.video_ids),
-                                ),
-                                icon="person_outline",
-                            ).props("outline")
+                            workload = dp.get_assignment_workload(request.video_ids)
+                            description = t(
+                                "assign_recipient_count",
+                                name=request.recipient,
+                                count=workload["video_count"],
+                            )
+                            description += " · " + t(
+                                "assign_camera_count", count=workload["camera_count"]
+                            )
+                            if workload["camera_ids"]:
+                                description += " · " + ", ".join(workload["camera_ids"])
+                            description += " · " + t(
+                                "assign_hours", hours=f"{workload['hours']:.2f}"
+                            )
+                            unknown = workload["video_count"] - workload["duration_count"]
+                            if unknown:
+                                description += " · " + t("assign_unknown_durations", count=unknown)
+                            ui.chip(description, icon="person_outline").props("outline")
                 else:
                     ui.label(t("assign_no_allocation")).classes("text-grey-7")
                 unassigned = sum(len(group.video_ids) for group in groups if not group.recipient)
@@ -169,8 +180,20 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                             allocation.refresh()
 
                         with ui.row().classes("w-full items-center gap-3"):
-                            ui.label(group.label or t("assign_other_videos")).classes("grow")
-                            ui.label(t("assign_video_count", count=len(group.video_ids)))
+                            workload = dp.get_assignment_workload(group.video_ids)
+                            ui.label(
+                                format_camera_labels(
+                                    workload["camera_ids"], group.label or t("assign_other_videos")
+                                )
+                            ).classes("grow")
+                            ui.label(t("assign_video_count", count=workload["video_count"]))
+                            ui.label(t("assign_camera_count", count=workload["camera_count"]))
+                            if workload["camera_ids"]:
+                                ui.label(", ".join(workload["camera_ids"]))
+                            ui.label(t("assign_hours", hours=f"{workload['hours']:.2f}"))
+                            unknown = workload["video_count"] - workload["duration_count"]
+                            if unknown:
+                                ui.label(t("assign_unknown_durations", count=unknown))
                             ui.select(
                                 {
                                     None: t("distribution_unassigned"),
@@ -411,11 +434,31 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                     )
                 for index, request in entries:
                     with ui.row().classes("w-full items-center gap-3"):
+                        workload = dp.get_assignment_workload(request.video_ids)
+                        chunk_labels = (
+                            list(
+                                dict.fromkeys(
+                                    group.label
+                                    for group in groups
+                                    if group.label
+                                    and set(group.video_ids).intersection(request.video_ids)
+                                )
+                            )
+                            if request.stage == "species"
+                            else []
+                        )
+                        workload_labels = [*chunk_labels, *workload["camera_ids"]]
                         ui.label(
                             t(f"handoff_stage_{request.stage}")
                             + (f" · {request.target_species}" if request.target_species else "")
+                            + (" · " + ", ".join(workload_labels) if workload_labels else "")
                         ).classes("grow")
-                        ui.label(t("assign_video_count", count=len(request.video_ids)))
+                        ui.label(t("assign_video_count", count=workload["video_count"]))
+                        ui.label(t("assign_camera_count", count=workload["camera_count"]))
+                        ui.label(t("assign_hours", hours=f"{workload['hours']:.2f}"))
+                        unknown = workload["video_count"] - workload["duration_count"]
+                        if unknown:
+                            ui.label(t("assign_unknown_durations", count=unknown))
                         if index in prepared and not busy:
                             ui.button(
                                 t("assign_view"),

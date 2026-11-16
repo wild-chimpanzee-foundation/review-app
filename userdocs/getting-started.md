@@ -81,17 +81,29 @@ Choosing **Start Fresh** brings you to project creation. A **project** is a name
 3. **Video Directory** — the full path to the folder containing your videos. The app scans it recursively.
 4. Click **Sync your videos to get started**. The app scans the folder, registers every video it finds, and reads basic metadata (duration, and timestamp/GPS where available).
 
-**Import from bundle** — if a colleague prepared a project bundle for you:
+**Open package** — if a colleague prepared an assignment or legacy setup bundle for you:
 
-![Creating a project from a bundle ZIP](img/onboarding-bundle.jpg)
+![Earlier bundle-opening layout; the current entry is Open package](img/onboarding-bundle.jpg)
 
-Upload the `.zip` bundle (it can contain a species list, tags, AI annotations, and metadata), point the **Video Directory** at your local copy of the footage, give the project a name, and the app imports everything in one step. This is the recommended way to distribute a ready-to-review project across multiple annotators — see [Importing model results](importing.md) and [Exporting annotations](exporting.md) for how bundles are produced.
+Upload the setup `.zip`, not a return ZIP. **Included in this package** summarizes
+its vocabulary, predictions, existing annotations and, for Distance assignments,
+task/reference dependencies. Confirm the local annotator name and locate each
+footage root, preserving the displayed relative subfolders. Assignment packages
+create linked working projects and sync only listed footage; use **Download return
+progress** after reviewing. The packaged recipient and historical attribution
+stay unchanged when you map the recipient to your local name.
+
+Older setup bundles still open as independent projects: choose a video directory
+and project name, then confirm any annotator-name mapping. These projects scan
+the directory normally and do not have assignment returns. Use prepared
+[assignments](settings.md#assignments) for new delegated work. **Open package** is
+also available in the project picker after initial setup.
 
 After the sync finishes, the wizard offers to jump straight to **Importing model results** or to open the **Dashboard**.
 
 ## What a project is
 
-A project is just a **name + a video folder**. The app scans that folder recursively and registers every video it finds. Supported formats: `mp4`, `avi`, `mov`, `mkv`, `webm`, `wmv`, `flv`, `m4v`.
+A project has a **name + one or more video folders**. Ordinary projects scan those folders recursively and register the videos they find; assignment working projects check only their packaged footage list. Supported formats: `mp4`, `avi`, `mov`, `mkv`, `webm`, `wmv`, `flv`, `m4v`.
 
 You can keep multiple projects in one database and switch between them from the dropdown at the left of the header. To add more projects later, use the project switcher or **Settings**.
 

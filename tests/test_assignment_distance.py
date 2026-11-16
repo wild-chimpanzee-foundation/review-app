@@ -196,6 +196,14 @@ def test_complete_setup_same_frame_people_and_projected_ai_round_trip(distance_a
     dp, project, root, ids, prepared, data = distance_assignment
     manifest, context, work = decode_archive(data)
     assert manifest["stage"] == "distance"
+    summary = dp.inspect_assignment(data)
+    assert summary["distance_task_count"] == 2
+    assert summary["distance_individual_count"] == sum(len(unit["individuals"]) for unit in work)
+    assert summary["distance_sample_count"] == sum(len(unit["samples"]) for unit in work)
+    assert summary["existing_species_work_count"] >= 2
+    assert summary["distance_ai_import_count"] == 1
+    assert summary["distance_draft_count"] > 0
+    assert summary["distance_reference_count"] == 1
     assert len(context["media"]) == 3  # two tasks plus registered-only calibration footage
     frames = context["distance"]["frames"]
     assert {f["distance_m"] for f in frames} == {5, 10}

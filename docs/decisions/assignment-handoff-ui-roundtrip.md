@@ -20,7 +20,7 @@ with the current code. Use a small test project or a copy of your real project:
 
 ## 1. Prepare in the origin project
 
-1. Open **Data & assignments → Assignments** and choose **Assign work**.
+1. Open **Import / Export → Assignments** and choose **Assign work**.
    Select **Species** or **Distance** under **Assignment stage**. Add annotator
    names here if necessary.
 2. Choose who reviews which work:
@@ -39,12 +39,14 @@ with the current code. Use a small test project or a copy of your real project:
    assignments**. Rows are prepared individually; successful rows remain saved
    if another fails. Retrying skips successes. Species allocation is applied
    during preparation.
-4. Select a saved assignment to see its details and **Download saved assignment**.
-   For a single new assignment, details open automatically. UUIDs and precise
-   timestamps are under **Technical details**, not in the compact home list.
-   Setup and return ZIP filenames include the recipient's name and assignment UUID.
+4. Select a saved assignment to see its frozen camera/video counts and footage
+   hours, then **Save delivery folder**. Planning and review also show recipient
+   workload and camera/chunk labels. For a single new assignment, details open
+   automatically. UUIDs and precise timestamps are under **Technical details**,
+   not in the compact home list. The saved setup file is `assignment.zip`; return
+   download filenames include the recipient and assignment UUID.
 5. Keep track of this origin project's name. Preparing again creates a new
-   assignment; redownloading an existing assignment keeps its original snapshot.
+   assignment; saving another delivery of an existing assignment keeps its original snapshot.
    Changing allocation must not change a saved assignment.
 
 Footage is not inside the ZIP. For same-machine testing, keep the videos where
@@ -55,7 +57,8 @@ Enter an output folder on the machine running the app, outside project footage.
 The new `assignment-<UUID>` folder contains `assignment.zip`. Enable **Include
 footage** to also copy the saved work and dependency files into that folder.
 Without footage, the recipient locates the original folders when opening the ZIP.
-Check copied/missing/failed counts and the displayed root-folder mapping. Send the
+Watch the attempted/total file progress bar during copying, then check
+copied/missing/failed counts and the displayed root-folder mapping. Send the
 generated folder to the recipient.
 Use each root-ID subfolder when locating footage below. If copying is partial,
 inspect the errors and retry with a different output folder: existing delivery
@@ -66,7 +69,7 @@ Video tables support text search and sortable column headings. Distance filters
 only inspect the list; they do not silently deselect hidden videos. Use the
 Select/Deselect matching videos actions to change selection explicitly.
 
-To test removal, first download/open an assignment, then **Remove assignment** in
+To test removal, first save/open an assignment, then **Remove assignment** in
 the origin details and confirm. It disappears and further delivery is blocked.
 Existing files and work remain, and a return from that working project must still
 preview and accept normally, including repeated returns.
@@ -77,8 +80,14 @@ preview and accept normally, including repeated returns.
    **New project → Open package** offers the same format-detecting upload after
    initial setup. Assignment packages open linked working projects; older bundles
    show a warning and create independent projects without assignment returns.
-2. Upload the saved **assignment-….zip**, not a return or legacy bundle ZIP.
-3. Choose a recognizable working project name, such as `Alice roundtrip`.
+2. Upload **assignment.zip** from the delivery folder, not a return ZIP. Check
+   **Included in this package** for vocabulary, predictions, existing human work,
+   and Distance task/reference dependencies. Legacy bundles get their own compact
+   component summary and independent-project warning.
+3. Choose a recognizable working project name, such as `Alice roundtrip`. Confirm
+   the local annotator name for the packaged recipient (the current login is
+   suggested). This changes local Assigned to me filtering, not the portable
+   recipient or attribution of existing work.
 4. For each root, enter the local folder containing the displayed relative paths.
    For example, if the example is `cam_a/clip.mp4`, enter the folder above
    `cam_a`, not `cam_a` itself. Paths refer to the machine running the app, not a
@@ -126,12 +135,18 @@ species' tasks. You can keep annotating and download another return later.
    The preview refreshes automatically and those returned units remain unapplied.
    Read the compact summary and removal warnings;
    click **Show per-video details** to expand the action/count table.
-6. For Distance, check reference-substitution details when the returned
+6. For Species, try **Append**. It adds new observation UUIDs and updates matching
+   observations, including attributes, but retains observations absent from the
+   return. Local-only tags remain; existing video-level labels win conflicts.
+   Matching UUID updates can overwrite newer local observation edits. Check the
+   appended/updated count, composed-state detail counts and warning. Distance
+   does not offer Append.
+7. For Distance, check reference-substitution details when the returned
    calibration differs: reference video, distance, and returned/admin playback
    positions. Acceptance reuses admin position and mask for an existing
    video/distance pair, while preserving returned sample distances. Changed
    Species context warns but does not block saved-scope work or restore labels.
-7. Click **Accept previewed return**, then reopen the delegated Review stage and
+8. Click **Accept previewed return**, then reopen the delegated Review stage and
    verify the change. Other stages/species and unrelated videos stay untouched.
 
 Changing the file clears confirmation. Changing the policy clears the old
@@ -141,10 +156,12 @@ acceptance rejects the stale preview; preview again before accepting.
 
 ## Useful follow-up checks
 
-- Upload the same return again: both policies should report identical work with
-  no changes. Confirmation is disabled if there is nothing to add or replace.
+- Upload the same return again after accepting it without intervening edits:
+  replacement or append should report unchanged composed work. Confirmation is
+  disabled if there is nothing to add, replace or append.
 - Make another working-project edit and return again: **Keep existing** can skip
   later progress already present in the origin; **Use imported** replaces it.
+  Species **Append** updates matching UUIDs without deleting local-only observations.
 - Clear an annotated working video and return it: **Use imported** should warn
   about removals, even when that returned video is unfinished.
 - Add an unrelated video under a located folder, then sync the working project:
@@ -170,8 +187,8 @@ acceptance rejects the stale preview; preview again before accepting.
 - Change admin calibration after preview: acceptance must reject the stale preview.
 - Clear a Distance task and return: removal warnings must be visible before
   replacement; explicit absence remains distinct from an empty unfinished task.
-- The legacy **Manual Distance** workflow still rejects AI-linked tasks. Do not
-  use that format in place of assignment packages.
+- Editable Distance work uses assignment packages. The legacy manual snapshot
+  export and restore controls have been removed; the manual analysis TSV remains.
 
 The UI interactions are covered by `tests/test_assignment_handoff_ui.py`,
 `tests/test_assignment_distance.py`, and `tests/test_open_package_ui.py`. This

@@ -1,6 +1,6 @@
 # Exporter les annotations
 
-Ouvrez **Données & affectations → Exporter les résultats**. Choisissez un jeu de données dans la liste ; sa description, son périmètre et ses commandes de téléchargement/copie s'affichent à côté. Les formats CSV/TSV et les règles d'éligibilité restent inchangés.
+Ouvrez **Importation / Exportation → Exporter les résultats**. Choisissez un jeu de données dans la liste ; sa description, son périmètre et ses commandes de téléchargement/copie s'affichent à côté. Les formats CSV/TSV et les règles d'éligibilité restent inchangés.
 
 ## Exporter les annotations
 
@@ -18,11 +18,13 @@ Exporte les prédictions brutes du modèle au format CSV.
 
 ## Livraison des affectations
 
-Utilisez **Données & affectations → Affectations** pour préparer et télécharger des affectations enregistrées ou copier leurs vidéos. L'ouverture des affectations reçues et des anciens bundles reste dans le sélecteur de projet — voir [Premiers pas](getting-started.md).
+Utilisez **Importation / Exportation → Affectations** pour préparer les affectations, puis **Enregistrer le dossier de livraison**. Cette action écrit `assignment.zip` et copie éventuellement les vidéos nécessaires dans un nouveau dossier sur l’ordinateur exécutant l’application ; ce n’est pas un téléchargement par le navigateur. La barre de progression compte les fichiers traités, et le résultat indique les copies, fichiers manquants et échecs. Transmettez le dossier au destinataire. L’ouverture des affectations reçues et des anciens bundles reste dans le sélecteur de projet — voir [Premiers pas](getting-started.md).
+
+Les annotateurs téléchargent un ZIP de **progression** depuis **Affectations** dans leur projet de travail. Le coordinateur l’examine et l’accepte dans le projet d’origine. Pour Espèces, les règles sont **Ajouter** (ajout/mise à jour par UUID d’observation, sans suppression des observations absentes), **Conserver l’existant** ou **Utiliser l’import**. Distance utilise uniquement les deux dernières règles, par tâche entière. Voir [Affectations](settings.md#affectations) pour les détails.
 
 ## Annotations Distance manuelles
 
-Ouvrez **Données & affectations → Exporter les résultats**, puis choisissez **Mesures de distance** (TSV) ou **Instantané Distance modifiable** (ZIP).
+Ouvrez **Importation / Exportation → Exporter les résultats**, puis choisissez **Mesures de distance** (TSV).
 
 1. Choisissez une espèce avec des **étiquettes de révision des espèces confirmées
    manuellement**.
@@ -34,36 +36,13 @@ Ouvrez **Données & affectations → Exporter les résultats**, puis choisissez 
 3. Cliquez sur **Prévisualiser les vidéos**. Toutes les tâches correspondantes prises en charge sont sélectionnées ; ouvrez la liste uniquement pour les examiner ou réduire la sélection. Les vidéos sans heure caméra connue sont signalées
    séparément lorsqu'un filtre horaire est actif. Seules les heures Distance
    vérifiées sont utilisées, jamais les métadonnées du fichier.
-4. Téléchargez :
-   - Le **ZIP éditable** : tâches entières, individus, alignement,
-     échantillons et sauts de visibilité, références calibrées nécessaires,
-     relations, achèvement et signets.
-   - Le **TSV d'analyse** : une ligne par échantillon enregistré, sauts de
-     visibilité compris. Ce tableau seul ne permet pas de restaurer les tâches
-     éditables ni les résultats d'absence explicite.
+4. Téléchargez le **TSV d'analyse** : une ligne par échantillon enregistré, sauts
+   de visibilité compris. Ce tableau ne permet pas de restaurer les tâches
+   éditables ni les résultats d'absence explicite.
 
-Les affectations ordinaires ne limitent pas la sélection. Les vidéos restent
-séparées. Ce premier format refuse les tâches et références liées à l'IA plutôt
-que de perdre leur provenance. Utilisez les affectations pour déléguer du travail Distance manuel ou lié à l'IA.
-
-### Restaurer un ZIP Distance éditable
-
-Les vidéos doivent déjà être importées et synchronisées dans le projet cible.
-Dans **Données & affectations → Ajouter des données → Annotations existantes → Restaurer les annotations Distance**, chargez le ZIP (50 Mio maximum),
-associez les dossiers médias sources aux dossiers locaux et vérifiez l'aperçu.
-Un unique dossier source et local peut être associé automatiquement.
-
-Choisissez **Remplacer la tâche** ou laissez **Ignorer** pour chaque tâche, puis
-appliquez les choix. Remplacer supprime les données actuelles de cette tâche et
-restaure ensemble l'alignement, les individus, les échantillons, l'achèvement et
-les signets exportés. Les tâches des autres espèces et les étiquettes de révision
-des espèces restent inchangées. Les calibrations de référence partagées en
-conflit ne sont jamais écrasées silencieusement : ignorez la tâche concernée ou
-résolvez ses dépendances séparément.
-
-Une restauration répétée ne duplique pas les données. Le résumé indique les
-tâches importées et ignorées. Conservez le ZIP original pour réessayer :
-l'application n'archive ni les données ignorées ni le fichier chargé.
+Les affectations ordinaires ne limitent pas la sélection. Cet export d'analyse
+prend uniquement en charge les tâches manuelles. Utilisez les lots d'affectation
+pour les travaux Distance modifiables, manuels ou liés à l'IA.
 
 Les TSV utilisent UTF-8, des tabulations et le point décimal, indépendamment de
 la langue de l'interface. Dans un tableur, utilisez l'import Texte/CSV, choisissez

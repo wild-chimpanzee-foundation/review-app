@@ -140,6 +140,36 @@ def restore_work(session, project_id, video_id, unit, vocab):
     session.flush()
 
 
+def meaningful_label(label):
+    return (
+        label
+        if label
+        and any(
+            (
+                label["is_blank"] is not None,
+                label["review_later"],
+                label["labeled_by"],
+                label["labeled_at"],
+            )
+        )
+        else None
+    )
+
+
+def merge_append(local, returned):
+    """Merge returned Species work by stable UUID while retaining local-only evidence."""
+    observations = {row["observation_uuid"]: row for row in local["observations"]}
+    observations.update({row["observation_uuid"]: row for row in returned["observations"]})
+    tags = {row["key"]: row for row in local["tags"]}
+    tags.update({row["key"]: row for row in returned["tags"] if row["key"] not in tags})
+    return {
+        "video_id": returned["video_id"],
+        "label": meaningful_label(local["label"]) or meaningful_label(returned["label"]),
+        "observations": list(observations.values()),
+        "tags": list(tags.values()),
+    }
+
+
 def canonical(unit):
     """Compare saved meaning, ignoring local handles, list ordering, and timestamp spelling."""
     import copy

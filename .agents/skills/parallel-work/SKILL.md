@@ -33,7 +33,7 @@ Example `/absolute/path/to/worker-a.sh`:
 #!/usr/bin/env bash
 set -euo pipefail
 cd /absolute/path/to/worktree
-exec pi --model openai-codex/gpt-6-luna --thinking high \
+exec pi --model openai/gpt-6-luna --thinking high \
   --no-approve --print @/absolute/path/to/task-a-prompt.txt
 ```
 

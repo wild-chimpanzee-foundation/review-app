@@ -1,6 +1,6 @@
 # Exporting Annotations
 
-Open **Data & assignments → Export results**. Choose a dataset from the list; its description, scope and download/copy controls appear alongside it. Existing CSV/TSV formats and eligibility rules are unchanged.
+Open **Import / Export → Export results**. Choose a dataset from the list; its description, scope and download/copy controls appear alongside it. Existing CSV/TSV formats and eligibility rules are unchanged.
 
 ## Export annotations
 
@@ -18,11 +18,13 @@ Exports the raw model predictions as a CSV.
 
 ## Assignment delivery
 
-Use **Data & assignments → Assignments** to prepare and download saved assignments or copy their footage. Opening received assignments and legacy setup bundles remains in the project picker — see [Getting started](getting-started.md).
+Use **Import / Export → Assignments** to prepare assignments, then **Save delivery folder**. This writes `assignment.zip` and optionally copies the required footage into a new folder on the computer running the app; it is not a browser download. The progress bar reports attempted files, and the result lists copied, missing, and failed files. Send the delivery folder to the recipient. Opening received assignments and legacy setup bundles remains in the project picker — see [Getting started](getting-started.md).
+
+Annotators download a **return progress** ZIP from their working project's **Assignments** area. The coordinator previews and accepts it in the origin project. Species returns support **Append** (add/update by observation UUID, without deleting absent observations), **Keep existing**, or **Use imported**. Distance returns use only the last two whole-task policies. See [Assignments](settings.md#assignments) for conflict and replacement details.
 
 ## Manual Distance annotations
 
-Open **Data & assignments → Export results** and choose **Distance measurements** (TSV) or **Editable Distance snapshot** (ZIP).
+Open **Import / Export → Export results** and choose **Distance measurements** (TSV).
 
 1. Choose a species with **manually confirmed Species Review labels**.
 2. Optionally enter a camera-local time-of-day window, such as **18:00–20:00**.
@@ -32,33 +34,12 @@ Open **Data & assignments → Export results** and choose **Distance measurement
 3. Click **Preview videos**. All supported matching tasks start selected; expand the inspection list only if you want to inspect or narrow them.
    Unknown camera times are listed separately when a time filter is active.
    Only verified Distance camera times are used—not file metadata.
-4. Download either:
-   - **Editable ZIP:** whole tasks with individuals, alignment, samples/skips,
-     calibrated reference dependencies, relationships, completion and bookmarks.
-   - **Analysis TSV:** one row per saved sample, including visibility skips.
-     This table alone cannot restore editable tasks or explicit absence outcomes.
+4. Download the **Analysis TSV**: one row per saved sample, including visibility
+   skips. This table cannot restore editable tasks or explicit absence outcomes.
 
-Ordinary annotator assignments do not restrict selection. Videos stay separate.
-This first format rejects AI-linked tasks/references rather than dropping AI
-provenance. Use assignment handoff for delegated manual or AI-linked Distance work.
-
-### Restore an editable Distance ZIP
-
-Videos must already be imported/synced in the destination project. Open
-**Data & assignments → Add data → Existing annotations → Restore Distance annotations** and upload the ZIP (maximum 50 MiB), match source
-media roots to local project folders, and inspect the preview. A single source
-and local root can be matched automatically.
-
-Choose **Replace task** or leave **Skip** for each task, then apply your choices.
-Replace removes the task's current evidence and restores the exported alignment,
-individuals, samples, completion and bookmarks together. Other species tasks
-and ordinary Species Review labels remain unchanged. Conflicting shared reference
-calibration is never silently overwritten; skip that task or resolve its
-dependencies separately.
-
-Repeated restoration does not duplicate evidence. The summary lists imported and
-skipped tasks. Keep the original ZIP for retries: the app does not archive skipped
-evidence or retain your uploaded file.
+Ordinary annotator assignments do not restrict selection. This analysis export
+supports manual tasks only. Use assignment packages for editable manual or
+AI-linked Distance work.
 
 TSV files use UTF-8, tab delimiters and decimal points, regardless of UI language.
 For spreadsheets, use Text/CSV Import, select tab as delimiter and a decimal-point

@@ -1,4 +1,4 @@
-"""Scientific outputs and specialist transfers, using existing export operations."""
+"""Scientific outputs using existing export operations."""
 
 from datetime import datetime
 
@@ -56,7 +56,6 @@ async def render_results(dp, project_id, loading_dialog):
         ("distance", "data_distance_results", "TSV", "data_distance_results_help"),
         ("ai", "data_ai_results", "CSV", "data_ai_results_help"),
         ("footage", "species_video_export_title", "", "data_footage_results_help"),
-        ("snapshot", "data_snapshot_results", "ZIP", "data_snapshot_results_help"),
     ]
     with ui.row().classes("w-full items-start gap-6"):
         with (
@@ -65,9 +64,6 @@ async def render_results(dp, project_id, loading_dialog):
             .classes("w-full md:w-64 shrink-0") as datasets_menu
         ):
             for name, title, _, _ in datasets:
-                if name == "snapshot":
-                    ui.separator().classes("q-my-sm")
-                    ui.label(t("data_specialist_transfer")).classes("text-caption text-grey-6")
                 ui.tab(name, label=t(title)).classes("justify-start")
         with (
             ui.tab_panels(datasets_menu, value="species")
@@ -85,10 +81,8 @@ async def render_results(dp, project_id, loading_dialog):
                         ui.label(t("data_current_scope")).classes("text-caption text-grey-6")
                         if name in {"species", "ai"}:
                             render_csv_export(dp, project_id, ai=name == "ai")
-                        elif name in {"distance", "snapshot"}:
+                        elif name == "distance":
                             ui.label(t("distance_manual_help")).classes("text-caption text-grey-6")
-                            await render_distance_export(
-                                dp, project_id, loading_dialog, analysis=name == "distance"
-                            )
+                            await render_distance_export(dp, project_id, loading_dialog)
                         else:
                             render_species_video_export(dp, project_id, get_language())

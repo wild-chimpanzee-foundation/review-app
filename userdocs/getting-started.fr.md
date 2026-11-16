@@ -81,17 +81,31 @@ Choisir **Nouveau départ** vous amène à la création de projet. Un **projet**
 3. **Répertoire vidéo** — le chemin complet vers le dossier contenant vos vidéos. L'application le parcourt récursivement.
 4. Cliquez sur **Synchronisez vos vidéos pour commencer**. L'application analyse le dossier, enregistre chaque vidéo trouvée et lit les métadonnées de base (durée, ainsi que l'horodatage/GPS si disponibles).
 
-**Importer depuis un bundle** — si un collègue a préparé un bundle de projet pour vous :
+**Ouvrir un paquet** — si un collègue a préparé une affectation ou un ancien bundle de configuration :
 
-![Création d'un projet à partir d'un bundle ZIP](img/onboarding-bundle.jpg)
+![Ancienne présentation des bundles ; l’entrée actuelle est Ouvrir un paquet](img/onboarding-bundle.jpg)
 
-Téléversez le bundle `.zip` (il peut contenir une liste d'espèces, des étiquettes, des annotations IA et des métadonnées), pointez le **Répertoire vidéo** vers votre copie locale des séquences, donnez un nom au projet, et l'application importe tout en une seule étape. C'est la méthode recommandée pour distribuer un projet prêt à revoir entre plusieurs annotateurs — voir [Importer les résultats du modèle](importing.md) et [Exporter les annotations](exporting.md) pour la production des bundles.
+Chargez le ZIP de configuration, pas un ZIP de retour. **Contenu du paquet** résume
+le vocabulaire, les prédictions, les annotations existantes et, pour Distance,
+les tâches et références nécessaires. Confirmez le nom local de l’annotateur et
+indiquez chaque dossier vidéo en conservant les sous-dossiers relatifs affichés.
+Les paquets d’affectation créent des projets de travail liés et synchronisent
+uniquement les vidéos répertoriées ; utilisez **Télécharger la progression** après
+révision. L’association à un nom local ne change ni le destinataire du paquet ni
+les attributions historiques.
+
+Les anciens bundles créent toujours des projets indépendants : choisissez un
+dossier vidéo et un nom de projet, puis confirmez les associations d’annotateurs.
+Ces projets analysent normalement le dossier et ne proposent pas de retour
+d’affectation. Utilisez les [affectations](settings.md#affectations) pour les
+nouvelles délégations. **Ouvrir un paquet** reste disponible dans le sélecteur de
+projet après la configuration initiale.
 
 Une fois la synchronisation terminée, l'assistant propose d'aller directement à **Importer les résultats du modèle** ou d'ouvrir le **Tableau de bord**.
 
 ## Qu'est-ce qu'un projet
 
-Un projet, c'est simplement un **nom + un dossier vidéo**. L'application parcourt ce dossier récursivement et enregistre chaque vidéo trouvée. Formats pris en charge : `mp4`, `avi`, `mov`, `mkv`, `webm`, `wmv`, `flv`, `m4v`.
+Un projet associe un **nom à un ou plusieurs dossiers vidéo**. Les projets ordinaires analysent ces dossiers récursivement ; les projets de travail d’affectation vérifient uniquement les vidéos répertoriées dans le paquet. Formats pris en charge : `mp4`, `avi`, `mov`, `mkv`, `webm`, `wmv`, `flv`, `m4v`.
 
 Vous pouvez conserver plusieurs projets dans une même base de données et basculer entre eux depuis le menu déroulant à gauche de l'en-tête. Pour ajouter d'autres projets ensuite, utilisez le sélecteur de projet ou les **Paramètres**.
 

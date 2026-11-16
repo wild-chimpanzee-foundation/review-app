@@ -139,9 +139,18 @@ def locate_media(manifest, context, media_roots):
     return roots, paths
 
 
-def open_setup(session, data, manifest, context, work, project_name, roots, paths):
+def open_setup(
+    session, data, manifest, context, work, project_name, roots, paths, *, local_recipient=None
+):
     if not isinstance(project_name, str) or not project_name.strip():
         raise ValueError("Choose a project name")
+    recipient = manifest["recipient"]
+    if local_recipient is not None:
+        if not isinstance(local_recipient, str) or not local_recipient.strip():
+            raise ValueError("Choose a registered local annotator")
+        local_recipient = local_recipient.strip()
+        if session.get(Annotator, local_recipient) is None:
+            raise ValueError("Choose a registered local annotator")
     base, name, suffix = project_name.strip(), project_name.strip(), 2
     while session.query(Project).filter_by(name=name).first():
         name, suffix = f"{base} ({suffix})", suffix + 1
@@ -181,8 +190,8 @@ def open_setup(session, data, manifest, context, work, project_name, roots, path
         ProjectSpecies(project_id=project.id, species_id=vocab["species"][name])
         for name in context["project_species"]
     )
-    if session.get(Annotator, manifest["recipient"]) is None:
-        session.add(Annotator(name=manifest["recipient"]))
+    if session.get(Annotator, recipient) is None:
+        session.add(Annotator(name=recipient))
         session.flush()
     videos = {}
     for source in context["media"]:
@@ -204,7 +213,9 @@ def open_setup(session, data, manifest, context, work, project_name, roots, path
         )
         session.flush()
         if source["video_id"] in manifest["work_keys"]:
-            session.add(VideoAssignment(video_id=local_id, assigned_to=manifest["recipient"]))
+            session.add(
+                VideoAssignment(video_id=local_id, assigned_to=local_recipient or recipient)
+            )
         videos[source["video_id"]] = local_id
     for source in context["predictions"]:
         row = {key: value for key, value in source.items() if key not in {"id", "video_id"}}
@@ -284,8 +295,10 @@ def export_return(session, working_project_id):
 
 
 def plan_return(session, project_id, data, policy):
-    if not isinstance(policy, str) or policy not in {"keep_existing", "use_imported"}:
-        raise ValueError("Choose Keep existing or Use imported once for the entire return")
+    if not isinstance(policy, str) or policy not in {"keep_existing", "use_imported", "append"}:
+        raise ValueError(
+            "Choose Keep existing, Use imported, or Append once for the entire return"
+        )
     manifest, context, work = decode_archive(data)
     if manifest["direction"] != "return":
         raise ValueError("Accept a return, not an assignment setup package")
@@ -316,6 +329,8 @@ def plan_return(session, project_id, data, policy):
     if context["media"] != original["media"]:
         raise ValueError("Returned media mapping differs from the saved handout")
     if binding.stage == "distance":
+        if policy == "append":
+            raise ValueError("Append is not supported for Distance assignment returns")
         from review_app.backend.annotation_package.distance_handoff import plan
 
         return plan(session, binding, manifest, context, work, data, policy, original)
@@ -330,7 +345,7 @@ def plan_return(session, project_id, data, policy):
     descriptions = {row["video_id"]: row for row in current_context["media"]}
     units, selected = [], []
     totals = dict.fromkeys(
-        ("added", "unchanged", "replaced", "unapplied", "annotations_removed"), 0
+        ("added", "appended", "unchanged", "replaced", "unapplied", "annotations_removed"), 0
     )
     for returned in sorted(work, key=lambda unit: unit["video_id"]):
         video = videos[returned["video_id"]]
@@ -341,10 +356,19 @@ def plan_return(session, project_id, data, policy):
             classification, action = "new", "added"
         else:
             classification = "different"
-            action = "replaced" if policy == "use_imported" else "unapplied"
+            action = (
+                "appended"
+                if policy == "append"
+                else "replaced"
+                if policy == "use_imported"
+                else "unapplied"
+            )
+        merged = species.merge_append(local, returned) if policy == "append" else returned
+        if policy == "append" and species.canonical(local) == species.canonical(merged):
+            classification, action = "identical", "unchanged"
         removed = (
-            species.removals(local, returned)
-            if action == "replaced"
+            species.removals(local, merged)
+            if action in {"replaced", "appended"}
             else dict.fromkeys(species.counts(local), 0)
         )
         totals[action] += 1
@@ -356,16 +380,20 @@ def plan_return(session, project_id, data, policy):
                 "classification": classification,
                 "action": action,
                 "existing": species.counts(local),
-                "returned": species.counts(returned),
+                "returned": species.counts(merged if policy == "append" else returned),
                 "removed": removed,
             }
         )
-        if action in {"added", "replaced"}:
-            selected.append((video.video_id, returned))
-    used = species.used_vocabulary(work)
+        if action in {"added", "replaced", "appended"}:
+            selected.append((video.video_id, merged))
+    vocabulary_work = [unit for _, unit in selected]
+    used = species.used_vocabulary(vocabulary_work)
     relevant_vocab = {}
     for name, key in (("species", "scientific_name"), ("behaviors", "key"), ("tags", "key")):
-        relevant_vocab[name] = [row for row in current_context[name] if row[key] in used[name]]
+        definitions = {row[key]: row for row in current_context[name]}
+        definitions.update({row[key]: row for row in context[name] if row[key] not in definitions})
+        relevant_vocab[name] = [row for value, row in definitions.items() if value in used[name]]
+    context.update(relevant_vocab)
     state = {
         "payload": hashlib.sha256(data).hexdigest(),
         "policy": policy,
@@ -391,9 +419,16 @@ def plan_return(session, project_id, data, policy):
         )
     if totals["replaced"]:
         warnings.append("Use imported replaces whole video states, including admin corrections.")
+    if totals["appended"]:
+        warnings.append(
+            "Append adds returned observations, updates matching UUIDs, merges video tags, "
+            "keeps local-only observations, and preserves existing video labels."
+        )
     if totals["annotations_removed"]:
         warnings.append(
-            "Replacement removes existing annotations, even for unfinished or empty returned work."
+            "Append updates matching observations' attribute links without deleting observations."
+            if policy == "append"
+            else "Replacement removes existing annotations, even for unfinished or empty returned work."
         )
     preview = ReturnPreview(token, policy, tuple(units), totals, tuple(warnings))
     return binding, context, selected, preview

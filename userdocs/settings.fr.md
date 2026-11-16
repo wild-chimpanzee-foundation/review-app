@@ -47,7 +47,7 @@ Cliquez sur **Enregistrer** pour appliquer.
 
 ### Affectations
 
-La répartition et la transmission se trouvent dans **Données & affectations →
+La répartition et la transmission se trouvent dans **Importation / Exportation →
 Affectations**, et non dans les Paramètres. La liste compacte affiche les
 affectations préparées. Sélectionnez une ligne pour enregistrer un dossier de
 livraison ou examiner le périmètre figé. Les identifiants et horodatages précis
@@ -57,7 +57,10 @@ sont dans **Détails techniques**.
    annotateurs ici si nécessaire.
    - **Espèces** : utilisez la répartition automatique ou ajustez les destinataires.
      Les répartitions existantes sont conservées exactement, même si une caméra
-     est partagée entre plusieurs personnes. La répartition automatique sélectionne
+     est partagée entre plusieurs personnes. Les résumés par destinataire indiquent
+     le nombre de caméras et de vidéos, la durée connue en heures et les groupes
+     caméra/lot affectés. Les détails d’une affectation utilisent le travail figé,
+     pas une répartition ultérieure. La répartition automatique sélectionne
      les vidéos non annotées ayant une caméra. Ajustez la répartition initiale
      pour inclure manuellement les vidéos annotées, manquantes ou sans caméra.
      La préparation utilise toujours la répartition affichée, sans raccourci pour
@@ -86,13 +89,20 @@ sont dans **Détails techniques**.
    les vidéos** copie aussi le travail et les références nécessaires dans des
    sous-dossiers par racine. Laissez-la désactivée si les dossiers d’origine sont
    accessibles au destinataire. Sélectionnez plusieurs affectations pour enregistrer
-   leurs dossiers ensemble. Les résultats affichent une entrée compacte par
-   destinataire ; dépliez-la pour voir les chemins et détails techniques.
+   leurs dossiers ensemble. Pendant la copie, la barre de progression compte les
+   fichiers traités, y compris les fichiers manquants et les échecs. Les résultats
+   affichent une entrée compacte par destinataire ; dépliez-la pour voir les chemins
+   et détails techniques.
    Vérifiez les fichiers manquants et les échecs ; réessayez dans un autre dossier
    sans écraser une livraison.
 4. Le destinataire choisit **Ouvrir un paquet** dans le sélecteur de projet,
    charge le ZIP et indique les dossiers vidéo pour créer un nouveau projet.
-   Les vidéos ne sont pas intégrées au ZIP. L’ouverture synchronise et analyse
+   **Contenu du paquet** résume le vocabulaire, les prédictions, le travail humain
+   existant et les éventuelles tâches/références Distance. Confirmez le nom local
+   de l’annotateur associé au destinataire ; votre connexion actuelle est proposée
+   lorsqu’elle est disponible. Cette association change le filtrage local des
+   affectations, sans modifier le destinataire du paquet ni les attributions
+   historiques. Les vidéos ne sont pas intégrées au ZIP. L’ouverture synchronise et analyse
    uniquement les fichiers répertoriés, sans découvrir de fichiers supplémentaires.
    Une synchronisation échouée peut être réessayée sans créer un autre projet.
 5. Le destinataire utilise **Télécharger la progression** dans **Affectations**
@@ -104,9 +114,15 @@ sont dans **Détails techniques**.
    le retour et examinez l’aperçu avant d’accepter. **Utiliser l’import** remplace
    l’état complet des vidéos Espèces ou tâches Distance différentes, y compris
    les suppressions et corrections de l’administrateur. **Conserver l’existant**
-   préserve le travail local différent. Changer de fichier annule la confirmation ;
-   changer de règle actualise l’aperçu. Les modifications du projet imposent un
-   nouvel aperçu.
+   préserve le travail local différent. Pour Espèces, **Ajouter** ajoute les
+   nouvelles observations, met à jour les UUID correspondants (attributs compris),
+   conserve les observations absentes du retour, fusionne les étiquettes et garde
+   les états vidéo locaux en cas de conflit. Une observation plus récente ayant
+   le même UUID peut être écrasée, mais les observations absentes ne sont jamais
+   supprimées. Distance ne propose pas ce mode : alignement, individus et
+   échantillons doivent rester cohérents dans une tâche entière. Changer de
+   fichier annule la confirmation ; changer de règle actualise l’aperçu.
+   Les modifications du projet imposent un nouvel aperçu.
 
 
 Les listes de vidéos permettent la recherche, le tri par colonne et les filtres
@@ -127,9 +143,7 @@ et les positions retournée/administrateur, et conservent le masque administrate
 Les distances des échantillons retournés sont conservées. De nouvelles distances
 peuvent partager un horodatage sans remplacer les autres calibrations.
 
-L’import CSV par lot est dans **Données & affectations → Ajouter des données → Annotations existantes**. Il reste indépendant et ajoute les annotations dès l'envoi, sans aperçu d'affectation. La restauration **Distance manuelle** est dans le même espace et reste séparée :
-il ne prend en charge ni les tâches liées à l’IA ni l’identité d’affectation.
-Utilisez les paquets d’affectation pour déléguer Distance. **Ouvrir un paquet**
+L’import CSV par lot est dans **Importation / Exportation → Ajouter des données → Annotations existantes**. Il reste indépendant et ajoute les annotations dès l'envoi, sans aperçu d'affectation. Utilisez les paquets d’affectation pour les travaux Distance modifiables, manuels ou liés à l’IA. **Ouvrir un paquet**
 détecte aussi les anciens bundles et explique qu’ils créent un projet indépendant
 sans retours d’affectation.
 

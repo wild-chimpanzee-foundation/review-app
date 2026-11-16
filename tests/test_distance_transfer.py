@@ -8,12 +8,9 @@ from pathlib import Path
 
 import pytest
 from nicegui import app, ui
-from nicegui.elements.upload_files import SmallFileUpload
 from nicegui.testing import User
 from review_app.app.pages.data_assignments.distance_export import render_distance_export
-from review_app.app.pages.data_assignments.imports._distance_manual_tab import (
-    setup_distance_manual_tab,
-)
+from review_app.app.pages.data_assignments.results import render_results
 from review_app.app.translations import t
 from review_app.backend.db.models import (
     DistanceIndividual,
@@ -454,13 +451,26 @@ def test_ai_state_is_rejected_instead_of_silently_dropped(manual_data):
         dp.export_distance_annotations(project.id, [deer])
 
 
+async def test_results_offer_analysis_without_editable_snapshot(user: User, manual_data):
+    dp, project, *_ = manual_data
+
+    @ui.page("/test-distance-results")
+    async def page():
+        app.storage.user["active_project_id"] = project.id
+        await render_results(dp, project.id, ui.dialog())
+
+    await user.open("/test-distance-results")
+    tabs = [e for e in user.client.elements.values() if isinstance(e, ui.tab)]
+    assert {tab._props["name"] for tab in tabs} == {"species", "distance", "ai", "footage"}
+
+
 async def test_manual_export_ui_preview_and_download(user: User, manual_data):
     dp, project, _, _, species, deer, _, _, _ = manual_data
 
     @ui.page("/test-distance-manual-export")
     async def page():
         app.storage.user["active_project_id"] = project.id
-        await render_distance_export(dp, project.id, ui.dialog(), analysis=False)
+        await render_distance_export(dp, project.id, ui.dialog())
         for element in list(ui.context.client.elements.values()):
             if isinstance(element, ui.expansion):
                 element.set_value(True)
@@ -477,54 +487,14 @@ async def test_manual_export_ui_preview_and_download(user: User, manual_data):
     user.find(t("distance_manual_end")).type("20:00")
     user.find(t("distance_manual_preview"), kind=ui.button).click()
     await user.should_see(t("distance_manual_preview_count", count=1))
-    user.find(t("distance_manual_download"), kind=ui.button).click()
+    await user.should_not_see("Download editable ZIP")
+    user.find(t("distance_manual_analysis"), kind=ui.button).click()
     response = await user.download.next()
-    assert decode_archive(response.content)[1]["tasks"][0]["id"] == deer
+    rows = list(csv.DictReader(io.StringIO(response.content.decode()), delimiter="\t"))
+    assert rows
+    assert {row["task_id"] for row in rows} == {deer}
     user.find(t("distance_manual_start")).clear().type("21:00")
-    await user.should_not_see(t("distance_manual_download"))
-
-
-async def test_manual_import_ui_is_explicit_and_does_not_retain_skips(user: User, manual_data):
-    dp, project, _, _, _, deer, fox, _, _ = manual_data
-    archive = dp.export_distance_annotations(project.id, [deer, fox])
-    dp.align_distance_on_even_frame(deer, 800.75, "bob", reset_tracks=True)
-
-    @ui.page("/test-distance-manual-import")
-    async def page():
-        app.storage.user["active_project_id"] = project.id
-        await setup_distance_manual_tab(dp, ui.dialog())
-
-    await user.open("/test-distance-manual-import")
-    upload = next(e for e in user.client.elements.values() if isinstance(e, ui.upload))
-    with user:
-        await upload.handle_uploads([SmallFileUpload("manual.zip", "application/zip", archive)])
-    await user.should_see(t("distance_manual_apply"))
-    assert dp.list_distance_individuals(deer) == []
-    choices = [
-        e
-        for e in user.client.elements.values()
-        if isinstance(e, ui.select) and e.label == t("distance_manual_task_decision")
-    ]
-    assert len(choices) == 2 and all(e.value == "skip" for e in choices)
-    # First apply skips everything and drops the uploaded payload from this UI.
-    user.find(t("distance_manual_apply"), kind=ui.button).click()
-    await user.should_see(t("distance_manual_imported", imported=0, skipped=2))
-    await user.should_not_see(t("distance_manual_apply"))
-    assert dp.list_distance_individuals(deer) == []
-    with user:
-        await upload.handle_uploads([SmallFileUpload("manual.zip", "application/zip", archive)])
-    await user.should_see(t("distance_manual_apply"))
-    with user:
-        choices = [
-            e
-            for e in user.client.elements.values()
-            if isinstance(e, ui.select) and e.label == t("distance_manual_task_decision")
-        ]
-        for choice in choices:
-            choice.set_value("replace")
-    user.find(t("distance_manual_apply"), kind=ui.button).click()
-    await user.should_see(t("distance_manual_imported", imported=2, skipped=0))
-    assert len(dp.list_distance_individuals(deer)) == 2
+    await user.should_not_see(t("distance_manual_analysis"))
 
 
 def test_bad_zip_and_wrong_version_are_rejected(manual_data):

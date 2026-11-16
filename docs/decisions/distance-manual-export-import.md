@@ -1,7 +1,10 @@
 # Manual Distance Annotation Export and Import
 
-**Status:** Implemented initial manual-only round trip and analysis export under
-**Model Import → Manual Distance**. Assignment handoff remains a separate, unimplemented workflow.
+**Status:** Historical format decision. The editable ZIP export and restore UI
+have been removed in favor of assignment packages, which support manual and
+AI-linked work. The manual analysis TSV remains under **Import / Export → Export
+results**. Legacy archive backend code remains internal; the archive contract below
+is historical, not an available user workflow.
 
 Related: [current Distance workflow](./reference-based-distance-annotation.md)
 and [assignment handoff](./assignment-handoff.md).

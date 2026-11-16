@@ -1,6 +1,6 @@
 # Importer les résultats du modèle
 
-Ouvrez **Données & affectations → Ajouter des données**. Choisissez **Prédictions IA**, **Métadonnées vidéo** ou **Annotations existantes**. Les retours sont dans **Affectations** ; l'ouverture d'un paquet reste dans le sélecteur de projet. Le vocabulaire reste dans les Paramètres.
+Ouvrez **Importation / Exportation → Ajouter des données**. Choisissez **Prédictions IA**, **Métadonnées vidéo** ou **Annotations existantes**. Les retours sont dans **Affectations** ; l'ouverture d'un paquet reste dans le sélecteur de projet. Le vocabulaire reste dans les Paramètres.
 
 ![Commandes d'import IA (ancienne disposition de navigation)](img/importing.jpg)
 
@@ -31,7 +31,7 @@ chaque vidéo animale. Les brouillons importés appartiennent à ces tâches par
 les prédictions seules ne créent pas de tâches éligibles. Il n’est pas nécessaire de
 marquer la revue ordinaire comme terminée.
 
-Utilisez **Données & affectations → Ajouter des données → Prédictions IA → Distance IA** pour charger un ZIP `distance-ai` version 1 (32 Mio maximum). Créez/réanalysez d’abord le projet pour enregistrer ses vidéos, puis marquez les clips de référence comme **Vidéo de référence**. La structure appariée `<déploiement>/videos/` et `<déploiement>/references/` applique automatiquement cette étiquette.
+Utilisez **Importation / Exportation → Ajouter des données → Prédictions IA → Distance IA** pour charger un ZIP `distance-ai` version 1 (32 Mio maximum). Créez/réanalysez d’abord le projet pour enregistrer ses vidéos, puis marquez les clips de référence comme **Vidéo de référence**. La structure appariée `<déploiement>/videos/` et `<déploiement>/references/` applique automatiquement cette étiquette.
 
 1. Chargez le ZIP pour valider et prévisualiser les nombres d’enregistrements, les correspondances vidéo, les conflits d’étalonnage et jusqu’à 20 prédictions. L’aperçu n’écrit rien.
 2. Tous les individus importés sont des brouillons IA couvrant la vidéo entière. L’intervalle dominant et la phase sont déduits des prédictions pour compléter les arrêts manquants, du début à la fin. Les temps fournis restent exacts ; le léger décalage dû aux images n’ajoute pas d’arrêts voisins. Une prédiction manquante pour un individu recommande **Absent**, toujours en attente de confirmation humaine. Sans au moins deux prédictions sur une même piste de la vidéo, l’intervalle ne peut pas être déduit. Seuls les brouillons IA intacts peuvent être remplacés, après confirmation.
@@ -82,8 +82,12 @@ La correspondance des UUID est limitée à la vidéo de destination, ce qui perm
 
 Si votre CSV est au format d'export propre à l'application (détecté via les colonnes `video_path`/`video_id` + `is_blank`), l'application affiche un résumé à blanc des vidéos trouvées/ignorées et des observations à insérer/mettre à jour/supprimer avant que vous ne confirmiez l'import.
 
-## Import groupé et par bundle
+## Retours d’affectation, CSV par lot et anciens bundles
 
-Pour répartir le travail entre plusieurs annotateurs, vous pouvez importer plusieurs fichiers à la fois, ou un seul bundle `.zip` contenant `species.csv`, `tags.csv`, `model_annotations.csv` et `metadata.csv`.
+Ces opérations sont distinctes :
+
+- **ZIP de retour d’affectation** : utilisez **Importation / Exportation → Affectations → Accepter le travail retourné** dans le projet d’origine. Examinez l’aperçu avant d’accepter. Pour Espèces uniquement, **Ajouter** ajoute les nouvelles observations, met à jour les UUID correspondants, conserve les observations absentes du retour, fusionne les étiquettes et préserve les états vidéo locaux en cas de conflit. Une observation plus récente ayant le même UUID peut néanmoins être écrasée ; ce n’est pas une résolution automatique des conflits. Distance utilise **Conserver l’existant** ou **Utiliser l’import**, par tâche entière.
+- **CSV historiques par lot** : utilisez **Ajouter des données → Annotations existantes → Import par lot**. Plusieurs CSV sont importés dès l’envoi en mode ajout, sans aperçu d’affectation. L’import CSV Espèces ordinaire permet la validation et le choix entre ajout et remplacement.
+- **ZIP de configuration reçu** : choisissez **Ouvrir un paquet** dans le sélecteur de projet. Le résumé **Contenu du paquet** explique les données incluses. Les nouveaux paquets d’affectation créent des projets de travail liés ; les anciens bundles contenant `species.csv`, `tags.csv`, `model_annotations.csv` et `metadata.csv` créent des projets indépendants sans retour d’affectation. Leur ouverture reste prise en charge, mais utilisez les affectations préparées pour les nouvelles délégations.
 
 Suite : [Espèces](reviewing.md)

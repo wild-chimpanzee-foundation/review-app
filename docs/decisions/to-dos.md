@@ -69,6 +69,42 @@ When a user creates a custom behavior/species from the annotation UI, it's immed
 
 ## Data & Export
 
+### Assignment workflow parity follow-ups — implemented
+
+Compared against `main` at `eb808e5`; implementation starts from `46959cb`.
+
+- [x] Add **Append** to Species assignment-return acceptance. Add new observations
+  and update matching observation UUIDs, never delete observations absent from the
+  return, merge tags, and preserve existing video-level labels on conflict. Keep
+  preview, stale-preview protection, and atomic acceptance. Distance remains
+  whole-task Keep existing / Use imported only. Existing CSV append stays intact.
+- [x] Restore per-recipient planning/review information: camera count, video count,
+  total footage hours, and assigned camera/chunk labels. Show frozen workload
+  information in saved-assignment details where available.
+- [x] Restore live footage-copy progress: attempted/total files and a progress bar,
+  including meaningful feedback while a large individual delivery is running.
+- [x] Add a compact **Included in this package** summary for assignment setup and
+  legacy bundle opening. Explain vocabulary, predictions, existing human work,
+  and Distance task/reference dependencies without foregrounding technical IDs.
+- [x] Reconcile packaged recipient names with local annotator names when opening
+  assignments. Preserve portable assignment identity and historical attribution;
+  make the current user/recipient distinction explicit and ensure local assignment
+  filtering works after reconciliation.
+- [x] Update English and French user documentation, UI help, and relevant workflow
+  decisions to match the actual Import / Export navigation, delivery controls,
+  package types, append semantics, and name reconciliation. Do not describe a
+  browser setup-package download that is not present.
+
+Scope: these follow-ups do not restore the old standalone allocation Apply/Reset
+workflow or add browser setup-package download. Keep implementation and validation
+focused on the requested behaviors. Mark items complete only after integration
+and focused validation.
+
+Validation: focused handoff/append/workload/translation tests, simulated UI checks,
+Ruff lint/format, and the strict English/French documentation build. Copy-progress
+checks pause the backend to assert an intermediate value and retry reset. Real
+browser/media visual confirmation remains a manual check.
+
 ### Figure out a shared import interface
 
 Define a shared import interface and workflow across the supported import types.

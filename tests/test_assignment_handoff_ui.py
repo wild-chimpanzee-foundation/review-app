@@ -1,6 +1,9 @@
 """Interact with the real assignment UI and database, without launching a browser."""
 
 import asyncio
+import io
+import threading
+import zipfile
 
 import pytest
 from nicegui import app, ui
@@ -16,6 +19,8 @@ from review_app.app.pages.data_assignments.assignments import render_assignments
 from review_app.app.pages.data_assignments.legacy_import import render_legacy_annotations_import
 from review_app.app.state import get_active_project_id, set_data_provider
 from review_app.app.translations import t
+from review_app.backend.annotation_package.delivery import CopyResult
+from review_app.backend.annotation_package.detection import inspect_legacy_package
 from review_app.backend.annotation_package.scope import AssignmentRequest
 from review_app.backend.db.models import Video
 
@@ -49,9 +54,10 @@ async def upload(user, raw):
         user.find(t("assign_accept"), kind=ui.button).click()
         await user.should_see(t("handoff_return_upload"))
     with user:
-        await upload_element(user).handle_uploads(
-            [SmallFileUpload("assignment.zip", "application/zip", raw)]
-        )
+        element = upload_element(user)
+        await element.handle_uploads([SmallFileUpload("assignment.zip", "application/zip", raw)])
+    if element.props.get("label") == t("handoff_return_upload"):
+        await user.should_see(t("handoff_return_loaded"))
 
 
 @pytest.fixture
@@ -84,6 +90,45 @@ def handoff_ui(provider_with_project):
 
     yield dp, project, root
     set_data_provider(None)
+
+
+def test_legacy_package_summary_counts_metadata_rows():
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("bundle.json", '{"contents": ["species", "metadata"]}')
+        archive.writestr("species.csv", "video_path,species\na.mp4,deer\n")
+        archive.writestr("metadata.csv", "video_path,assigned_to\na.mp4,Alice\nb.mp4,Bob\n")
+    assert inspect_legacy_package(buffer.getvalue()) == {
+        "species_count": 1,
+        "tag_count": 0,
+        "prediction_count": 0,
+        "metadata_count": 2,
+    }
+
+
+async def test_assignment_package_recipient_mapping_ui_suggests_login_and_keeps_package_name(
+    user: User, handoff_ui
+):
+    dp, project, root = handoff_ui
+    dp.add_annotator("local reviewer")
+    prepared = dp.prepare_assignment(
+        project.id,
+        AssignmentRequest("remote recipient", tuple(dp.get_assignment_video_ids(project.id))),
+    )
+    await user.open("/handoff-open")
+    with user:
+        app.storage.user["annotator_name"] = "local reviewer"
+    await upload(user, dp.export_assignment(prepared.id))
+    await user.should_see(marker="package-local-recipient")
+    await user.should_see(
+        t("package_included_summary", **dp.inspect_assignment(dp.export_assignment(prepared.id)))
+    )
+    await user.should_see(
+        t("package_identity_mapping", recipient="remote recipient", current="local reviewer")
+    )
+    selector = next(iter(user.find(marker="package-local-recipient").elements))
+    assert selector.value == "local reviewer"
+    assert "__package_recipient__" in selector.options
 
 
 async def test_distribution_uses_saved_delivery_and_keeps_independent_csv_import(
@@ -202,6 +247,11 @@ async def test_unified_allocation_prepares_recipients_and_retries_only_failures(
 
 async def test_new_recipient_can_be_added_without_leaving_creation(user: User, handoff_ui):
     dp, project, _ = handoff_ui
+    ids = dp.get_assignment_video_ids(project.id)
+    with dp.Session.begin() as session:
+        first, second = (session.get(Video, video_id) for video_id in ids)
+        first.camera_id, first.duration_sec = "camera-a", 3600
+        second.camera_id, second.duration_sec = "camera-b", None
     await user.open("/handoff-admin")
     user.find(t("assign_title"), kind=ui.button).click()
     await user.should_see(t("distribution_add_annotator"))
@@ -211,11 +261,22 @@ async def test_new_recipient_can_be_added_without_leaving_creation(user: User, h
     assert "Élodie" in dp.get_all_annotators()
     user.find(t("distribution_auto_btn"), kind=ui.button).click()
     await user.should_see(t("assign_recipient_count", name="Élodie", count=2))
+    await user.should_see(t("assign_camera_count", count=2))
+    await user.should_see("camera-a")
+    await user.should_see("camera-b")
+    await user.should_see(t("assign_hours", hours="1.00"))
+    await user.should_see(t("assign_unknown_durations", count=1))
     assert not dp.get_assigned_video_ids(project.id, "Élodie")  # Still only a draft.
     user.find(t("assign_review"), kind=ui.button).click()
     await user.should_see(t("assign_freeze_help"))
+    await user.should_see(t("assign_camera_count", count=2))
+    await user.should_see(t("assign_hours", hours="1.00"))
+    await user.should_see(t("assign_unknown_durations", count=1))
     user.find(t("assign_prepare"), kind=ui.button).click()
     await user.should_see(t("assign_save_delivery"))
+    await user.should_see(t("assign_camera_count", count=2))
+    await user.should_see(t("assign_hours", hours="1.00"))
+    await user.should_see(t("assign_unknown_durations", count=1))
     assert len(dp.get_assigned_video_ids(project.id, "Élodie")) == 2
     saved = dp.list_assignments(project.id)[0]
     technical = next(iter(user.find(t("assign_technical"), kind=ui.expansion).elements))
@@ -299,11 +360,73 @@ async def test_saved_assignment_delivery_control(user: User, handoff_ui, tmp_pat
         )
     user.find(t("handoff_copy_output")).type(str(tmp_path / "delivery"))
     user.find(marker="save-delivery").click()
+    await user.should_see(marker="delivery-copy-progress")
     path = tmp_path / "delivery" / f"assignment-{saved.assignment_id}"
     await user.should_see(t("handoff_copy_result", copied=2, missing=0, failed=0, path=str(path)))
     assert len(list(path.rglob("*.mp4"))) == 2
     assert next(iter(user.find(marker="save-delivery").elements)).enabled
     assert (path / "assignment.zip").read_bytes() == dp.export_assignment(saved.id)
+
+
+async def test_delivery_copy_progress_updates_while_copy_paused_and_resets_on_retry(
+    user: User, handoff_ui, monkeypatch, tmp_path
+):
+    dp, project, _ = handoff_ui
+    saved = dp.prepare_assignment(
+        project.id, AssignmentRequest("alice", tuple(dp.get_assignment_video_ids(project.id)))
+    )
+    gates = [threading.Event(), threading.Event()]
+    entered = [threading.Event(), threading.Event()]
+    calls = [0]
+
+    def paused_copy(
+        project_id, assignment_id, output_dir, *, include_footage=False, progress_callback=None
+    ):
+        index = calls[0]
+        calls[0] += 1
+        if index == 0:
+            progress_callback(1, 2)
+        entered[index].set()
+        assert gates[index].wait(timeout=5)
+        progress_callback(1, 2) if index == 1 else progress_callback(2, 2)
+        if index == 1:
+            progress_callback(2, 2)
+        return CopyResult(str(tmp_path / f"delivery-{index}"), {}, 2, (), {})
+
+    monkeypatch.setattr(dp, "save_assignment_delivery", paused_copy)
+    await user.open("/handoff-admin")
+    table = next(iter(user.find(ui.table).elements))
+    user.find(ui.table).trigger("rowClick", [None, table.rows[0], 0])
+    await user.should_see(marker="open-delivery")
+    user.find(marker="open-delivery").click()
+    with user:
+        next(iter(user.find(t("assign_include_footage"), kind=ui.checkbox).elements)).set_value(
+            True
+        )
+    user.find(t("handoff_copy_output")).type(str(tmp_path))
+    user.find(marker="save-delivery").click()
+
+    assert await asyncio.to_thread(entered[0].wait, 3)
+    await user.should_see(t("assign_delivery_progress", done=1, total=2))
+    progress = next(iter(user.find(marker="delivery-copy-progress").elements))
+    assert progress.value == 0.5
+    assert next(iter(user.find(marker="delivery-copy-status").elements)).text == t(
+        "assign_delivery_progress", done=1, total=2
+    )
+    gates[0].set()
+    await user.should_see(t("assign_delivery_saved", path=str(tmp_path / "delivery-0")))
+
+    user.find(marker="save-delivery").click()
+    assert await asyncio.to_thread(entered[1].wait, 3)
+    await user.should_see(t("assign_delivery_progress", done=0, total=2))
+    assert progress.value == 0
+    assert next(iter(user.find(marker="delivery-copy-status").elements)).text == t(
+        "assign_delivery_progress", done=0, total=2
+    )
+    gates[1].set()
+    await user.should_see(t("assign_delivery_saved", path=str(tmp_path / "delivery-1")))
+    assert calls[0] == 2
+    assert saved.id
 
 
 async def test_species_roundtrip_through_prepare_open_return_preview_accept(

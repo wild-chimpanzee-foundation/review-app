@@ -25,8 +25,8 @@ Replace that fragmentation rather than add another navigation layer over it.
 
 In scope:
 
-- One main **Data & assignments** destination with **Add data**, **Assignments**,
-  and **Export results** areas. The label is provisional.
+- One main **Import / Export** destination (**Importation / Exportation** in French)
+  with **Add data**, **Assignments**, and **Export results** areas.
 - Relocating existing workflows into these areas, with clearer labels, hierarchy,
   help text, counts, busy/error states and summaries.
 - Keeping received-assignment opening in the project picker, vocabulary/configuration
@@ -44,21 +44,24 @@ Not required:
 - Persistent preparation batches, batch history, durable job/entry state or a new
   retry/resume subsystem.
 - Advanced multi-recipient delivery, nested recipient ZIP layouts, coordinated
-  batch footage copying or delivery-attempt management.
+  delivery-attempt management or a durable bulk-copy subsystem.
 - New allocation storage or algorithms, including a new Distance species-allocation
   subsystem.
 - New export schemas, completion columns, scientific dataset eligibility rules,
   or changes to existing CSV/TSV formats.
 - A new scope-resolution framework, expanded filter backend or universal transfer engine.
-- New import/conflict policies or a rewrite of format-specific preview/apply behavior.
+- New import/conflict policies or a rewrite of format-specific preview/apply behavior,
+  except the subsequently requested Species-only Append described in the
+  [handoff contract](assignment-handoff.md#species-only-append).
 - Broader package recognition or a backend rewrite as a prerequisite for the UI.
 
 Small backend adjustments may be appropriate when directly necessary for a UI
 improvement, but they are not a separate workstream. If an improvement requires
 schema changes or materially different transfer behavior, defer it and surface
 that trade-off instead of quietly expanding this plan. The explicitly agreed
-exception is a persistent removal timestamp: hiding delivery while preserving
-future returns requires retaining the original snapshot and its identity maps.
+exceptions are a persistent removal timestamp (retaining return authority),
+Species-only Append, package-content inspection, and local recipient-name
+reconciliation. These are bounded follow-ups, not a universal transfer engine.
 
 ## Domain language and existing contracts
 
@@ -74,12 +77,15 @@ are formats, not top-level user intentions.
 
 The [assignment handoff design](assignment-handoff.md) remains authoritative for
 scope, snapshots, stage isolation, return acceptance, references and provenance.
-The [manual Distance transfer contract](distance-manual-export-import.md) remains
-separate, including its manual-only limitations and restoration rules.
+The legacy [manual Distance transfer contract](distance-manual-export-import.md)
+is historical. Editable Distance work uses assignment packages; standalone
+snapshot export and restoration controls have been removed.
 
 Do not change those contracts merely to make screens look consistent. Existing
 saved assignments already provide frozen scope and saved-package downloads;
-retaining that behavior does not require a new batch concept.
+retaining saved scope does not require a new batch concept. The current UI writes
+setup ZIPs through delivery folders rather than browser downloads; return ZIPs
+remain browser downloads.
 
 ## Information architecture
 
@@ -92,7 +98,7 @@ Inside a project
   Overview
   Species
   Distance
-  Data & assignments
+  Import / Export
     Add data
     Assignments
     Export results
@@ -113,7 +119,7 @@ Choose the meaning of incoming data before its format:
 | --- | --- |
 | AI predictions | Supported Species/behavior/blank/detection predictions and Distance prediction packages |
 | Video metadata | Recording times, camera information and locations supported by the current importer |
-| Existing annotations | Historic/external spreadsheets, app-format Species CSV and editable manual Distance restoration |
+| Existing annotations | Historic/external spreadsheets and app-format Species CSV |
 
 Vocabulary imports remain alongside configuration, with a link from Add data.
 They configure annotation language rather than add observations.
@@ -161,13 +167,19 @@ Preserve one assignment and working project per Distance target species.
 
 The meaningful boundary is editable work planning versus prepared, frozen
 assignments. Preparation freezes each row's work; subsequent redistribution must
-not change existing assignments. On success, expose the saved assignment's download
-and delivery actions rather than another preparation form. **Save delivery folder**
+not change existing assignments. On success, expose the saved assignment's
+delivery action rather than another preparation form. **Save delivery folder**
 writes the saved assignment ZIP and optionally copies its required footage alongside
 it. Footage is off by default when original files can be reused on the same machine.
-Keep browser ZIP download as a secondary alternative; do not embed videos in ZIPs.
+Setup ZIP delivery currently uses this filesystem action only; a secondary browser
+setup download is not part of the current follow-up scope. Return downloads remain
+available. Do not embed videos in ZIPs.
 
-Keep the existing prepare/download/footage-copy and preview/accept operations.
+Keep the existing prepare/delivery and preview/accept operations. During footage
+copying, show attempted/total files and a progress bar, including missing/failed
+attempts. Show per-recipient camera/video counts, known footage hours and assigned
+camera/chunk labels while planning and reviewing; saved details use frozen work
+metadata, not live redistribution.
 **Accept returned work** opens a separate focused flow with full impact warnings,
 not another accordion on the home screen.
 
@@ -180,10 +192,10 @@ control.
 Preparing multiple distribution rows may orchestrate the existing single-assignment
 operation in the UI, with each row's success or failure made explicit. This is not
 an atomic batch or a requirement for persistent batch history, new allocation
-storage, coordinated delivery, or durable retries. Download and footage copy remain
-individual saved-assignment actions, combined in the local delivery-folder action.
+storage, coordinated delivery, or durable retries. ZIP saving and footage copying
+use individual saved assignments, combined in the local delivery-folder action.
 
-Saved downloads and footage copying continue to use saved assignment scope and
+Saved ZIP delivery and footage copying continue to use saved assignment scope and
 automatically collected dependencies. Missing footage and copy failures remain
 visible. Downloads and filesystem delivery must be clearly distinguished.
 Video-detail tables support text search, sortable columns and relevant camera,
@@ -192,6 +204,13 @@ selected work: retain selection outside the filter and provide explicit actions
 to select/deselect matching videos.
 
 ### Annotator workspace
+
+Opening shows a compact **Included in this package** inventory for both assignment
+and legacy setup formats. Explain vocabulary, predictions, existing human work,
+and Distance task/reference dependencies without foregrounding UUIDs. A local
+annotator selector reconciles the recipient with the current login while keeping
+portable identity and historical attribution unchanged; legacy bundles remain
+independent projects without returns.
 
 Make **Continue review** and **Return progress** easy to find. A compact assignment
 summary or shortcut on Overview can reuse the existing assignment operation.
@@ -208,7 +227,7 @@ accepted. Do not invent receipt status.
 Retain originating-project identity, existing whole-return conflict policies,
 impact preview, reference mapping, stale-preview protection and atomic acceptance.
 Make replacement/removal consequences legible without weakening safeguards or
-adding a new conflict editor. Keep manual annotation restoration separate.
+adding a new conflict editor. Use assignment packages for editable Distance work.
 
 ## Export results
 
@@ -221,7 +240,6 @@ annotation-import screens.
 | Distance measurements | Saved samples, including visibility skips | TSV |
 | AI predictions | Supported raw model output for inspection/comparison | CSV |
 | Species-selected footage | Copy footage into species folders | Filesystem copy |
-| Editable annotation snapshot | Specialist restoration/transfer, visually secondary to analysis | Existing archive |
 
 Reuse current export functions and supported scopes. Present dataset choice,
 existing scope controls and contents clearly before download/copy. Put optional

@@ -44,6 +44,40 @@ def by_filename(dp, project_id):
     }
 
 
+def test_open_assignment_maps_package_recipient_to_registered_local_annotator(handout):
+    dp, _, root, ids, data = handout
+    dp.add_annotator("local reviewer")
+    opened = dp.open_assignment(
+        data,
+        "Mapped assignment",
+        {root.id: root.path},
+        local_recipient="local reviewer",
+    )
+    from review_app.backend.db.models import HandoffAssignment, Video, VideoAssignment
+
+    with dp.Session() as session:
+        binding = session.get(HandoffAssignment, opened.id)
+        assert binding.recipient == "alice"
+        assignments = (
+            session.query(VideoAssignment)
+            .join(Video)
+            .filter(Video.project_id == opened.project_id)
+            .all()
+        )
+        assert {row.assigned_to for row in assignments} == {"local reviewer"}
+    manifest, _, work = decode_archive(dp.export_assignment_return(opened.project_id))
+    assert manifest["recipient"] == "alice"
+    assert any(unit["label"] and unit["label"]["labeled_by"] == "alice" for unit in work)
+
+
+def test_open_assignment_rejects_unregistered_local_recipient(handout):
+    dp, _, root, _, data = handout
+    with pytest.raises(ValueError, match="registered local annotator"):
+        dp.open_assignment(
+            data, "Mapped assignment", {root.id: root.path}, local_recipient="unknown"
+        )
+
+
 def test_return_contains_untouched_and_new_work_and_preview_does_not_apply(handout):
     dp, project, root, ids, data = handout
     (Path(root.path) / "unlisted.mp4").touch()

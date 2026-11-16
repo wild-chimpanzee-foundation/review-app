@@ -135,7 +135,10 @@ class SetupWizard:
 
         async def handle_package_upload(e):
             from review_app.backend.annotation_package.archive import MAX_ARCHIVE_BYTES
-            from review_app.backend.annotation_package.detection import detect_setup_package
+            from review_app.backend.annotation_package.detection import (
+                detect_setup_package,
+                inspect_legacy_package,
+            )
 
             nonlocal package_revision
             package_revision += 1
@@ -158,6 +161,10 @@ class SetupWizard:
                         return
                 else:
                     bundle_bytes[0] = raw
+                    counts = await run.io_bound(inspect_legacy_package, raw)
+                    if current != package_revision:
+                        return
+                    package_forms["legacy_summary"].set_text(t("package_legacy_summary", **counts))
                     update_bundle_button()
                 package_forms["status"].set_text(e.file.name)
                 package_forms[kind].set_visibility(True)
@@ -533,6 +540,9 @@ class SetupWizard:
             assignment_form.set_visibility(False)
             with ui.column().classes("w-full") as legacy_form:
                 ui.label(t("package_legacy_warning")).classes("text-warning")
+                package_forms["legacy_summary"] = (
+                    ui.label("").classes("text-body2").mark("package-included-summary")
+                )
                 with ui.card().classes("full-width q-mb-md"):
                     ui.label(t("video_dir_label")).classes(
                         "text-subtitle1 font-weight-medium q-mb-xs"

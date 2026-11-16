@@ -47,7 +47,7 @@ Click **Save** to apply.
 
 ### Assignments
 
-Work allocation and handoff live in **Data & assignments → Assignments**, not
+Work allocation and handoff live in **Import / Export → Assignments**, not
 Settings. The home screen is a compact list of prepared assignments. Select a row
 to save a delivery folder or inspect its frozen scope. Technical
 identifiers and precise timestamps are under **Technical details**.
@@ -55,7 +55,9 @@ identifiers and precise timestamps are under **Technical details**.
 1. Choose **Assign work** and the review stage. Add annotator names here if needed.
    - **Species**: distribute work automatically or inspect and adjust recipients.
      Existing allocations are loaded exactly, even when a camera is split between
-     people. Automatic distribution selects unlabelled videos with a camera.
+     people. Per-recipient summaries show camera and video counts, known footage
+     hours, and assigned camera/chunk labels; saved-assignment details use the frozen
+     work, not a later redistribution. Automatic distribution selects unlabelled videos with a camera.
      Inspect the initial allocation to include annotated, missing or cameraless
      videos manually. Preparation always uses the displayed allocation; there is
      no all-project-videos shortcut or separate Apply allocation step.
@@ -80,13 +82,19 @@ identifiers and precise timestamps are under **Technical details**.
    folder contains **assignment.zip**. Optionally enable **Include footage** to
    copy assigned and required reference videos alongside it, in separate media-root
    subfolders. Leave footage off if the recipient can access the original folders.
-   Select multiple assignments to save their delivery folders together. Results show
-   one compact entry per recipient; expand it for paths and technical details.
+   Select multiple assignments to save their delivery folders together. During
+   copying, a progress bar counts attempted files, including missing files and
+   failures. Results show one compact entry per recipient; expand it for paths
+   and technical details.
    Check missing/failed counts;
    retry with a different output folder rather than overwrite an earlier delivery.
 4. The recipient uses **Open package** in the project picker, uploads the ZIP,
-   and locates each media-root subfolder to create a fresh project. Footage is not
-   embedded in the ZIP. Opening syncs/probes only listed work and reference footage,
+   and locates each media-root subfolder to create a fresh project. **Included in
+   this package** summarizes vocabulary, predictions, existing human work and any
+   Distance tasks/reference dependencies. Confirm the local annotator name for
+   the packaged recipient; your current login is suggested when available. This
+   changes local assignment filtering, not the package recipient or historical
+   attribution. Footage is not embedded in the ZIP. Opening syncs/probes only listed work and reference footage,
    without discovering unrelated files. A failed sync can be retried without
    creating another project.
 5. The recipient uses **Download return progress** in **Assignments** (also linked
@@ -97,8 +105,14 @@ identifiers and precise timestamps are under **Technical details**.
    inspect the policy-specific preview before accepting. **Use imported** replaces
    whole differing Species video states or Distance task states, including
    deletions and admin corrections. **Keep existing** leaves differing local work
-   untouched. Changing the file invalidates confirmation; changing policy
-   refreshes the preview. Destination changes require a new preview.
+   untouched. Species also offers **Append**: add new observations, update matching
+   UUIDs (including their attributes), keep observations absent from the return,
+   merge tags, and preserve existing video-level labels on conflict. Append can
+   overwrite newer edits to a matching observation, but never removes absent
+   observations. Distance has no append option: its alignment, individuals and
+   samples must stay consistent as one task. Changing the file invalidates
+   confirmation; changing policy refreshes the preview. Destination changes
+   require a new preview.
 
 Video-detail lists support search, column sorting and relevant camera, footage,
 role or return-action filters. Distance inspection filters do not change selected
@@ -116,9 +130,7 @@ show the video, distance, and returned/admin playback positions, and keep the
 admin mask. Returned sample distances are preserved. New distances can share a
 frame timestamp without replacing other calibration.
 
-Legacy CSV batch import now lives under **Data & assignments → Add data → Existing annotations**. It remains separate and appends annotations immediately on upload without an assignment preview. Manual Distance restoration is in the same area;
-its manual-only format does not support AI-linked tasks or assignment identity.
-Use assignment packages for delegated Distance work. **Open package** also detects
+Legacy CSV batch import now lives under **Import / Export → Add data → Existing annotations**. It remains separate and appends annotations immediately on upload without an assignment preview. Use assignment packages for editable manual or AI-linked Distance work. **Open package** also detects
 legacy setup bundles and explains that they create independent projects without
 assignment returns.
 

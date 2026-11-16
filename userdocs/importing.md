@@ -1,6 +1,6 @@
 # Importing Model Results
 
-Open **Data & assignments → Add data**. Choose **AI predictions**, **Video metadata**, or **Existing annotations**. Assignment returns belong under **Assignments**, while opening a received assignment/package stays in the project picker. Vocabulary configuration stays in Settings.
+Open **Import / Export → Add data**. Choose **AI predictions**, **Video metadata**, or **Existing annotations**. Assignment returns belong under **Assignments**, while opening a received assignment/package stays in the project picker. Vocabulary configuration stays in Settings.
 
 ![AI output import controls (earlier navigation layout)](img/importing.jpg)
 
@@ -31,7 +31,7 @@ Distance imports attach drafts to those species-specific tasks; model prediction
 alone do not create eligible tasks. A separate ordinary Review completion flag is
 not required.
 
-Use **Data & assignments → Add data → AI predictions → AI Distance** to upload a `distance-ai` version 1 ZIP (maximum 32 MiB). First create/rescan the destination project so its videos are registered, and tag reference clips as **Reference Video**. The paired `<deployment>/videos/` and `<deployment>/references/` layout applies this tag automatically.
+Use **Import / Export → Add data → AI predictions → AI Distance** to upload a `distance-ai` version 1 ZIP (maximum 32 MiB). First create/rescan the destination project so its videos are registered, and tag reference clips as **Reference Video**. The paired `<deployment>/videos/` and `<deployment>/references/` layout applies this tag automatically.
 
 1. Upload the ZIP to validate it and preview counts, video matches, calibration conflicts, and up to 20 predictions. Preview does not write anything.
 2. Imported individuals are complete AI drafts covering the full video. The dominant within-track interval and fractional-time phase are inferred to fill missing stops from the opening frame through the end (excluding the endpoint). Supplied timestamps stay exact; nearby frame-timing jitter does not add duplicate stops. Missing predictions for an individual recommend **Absent**, still pending human confirmation. At least two predictions on one track in the video are needed to infer cadence. Only untouched AI drafts can be replaced, with confirmation.
@@ -82,8 +82,12 @@ UUID matching is scoped to the destination video, so annotations can also be cop
 
 If your CSV is the app's own exported format (detected via `video_path`/`video_id` + `is_blank` columns), the app shows a dry-run summary of matched/skipped videos and observations to insert/update/delete before you confirm the import.
 
-## Batch and bundle import
+## Assignment returns, batch CSVs, and legacy bundles
 
-For distributing work across multiple annotators, you can import several files at once, or a single `.zip` bundle containing `species.csv`, `tags.csv`, `model_annotations.csv`, and `metadata.csv`.
+These are separate workflows:
+
+- **Assignment return ZIP:** use **Import / Export → Assignments → Accept returned work** in the origin project. Inspect the impact preview before accepting. **Append** is available for Species only: it adds new observations, updates matching UUIDs, retains observations absent from the return, merges tags, and preserves existing video-level labels on conflict. It can still overwrite a newer observation with the same UUID; it is not automatic conflict resolution. Distance returns use whole-task **Keep existing** or **Use imported**.
+- **Legacy batch CSV:** use **Add data → Existing annotations → Batch import**. Multiple CSVs are imported immediately on upload in append mode, without an assignment preview. Use the ordinary Species CSV importer when you need validation and a choice of append/override.
+- **Received setup ZIP:** choose **Open package** in the project picker. The **Included in this package** summary explains the contents. New assignment packages create linked working projects; older bundles containing `species.csv`, `tags.csv`, `model_annotations.csv`, and `metadata.csv` create independent projects with no assignment-return action. Legacy setup import remains supported, but new delegated work should use prepared assignments.
 
 Next: [Species](reviewing.md)

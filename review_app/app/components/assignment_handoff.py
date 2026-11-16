@@ -1,8 +1,10 @@
 """Assignment controls; serialization, scope and acceptance stay in the backend."""
 
+import asyncio
 import re
+import threading
 
-from nicegui import run, ui
+from nicegui import app, run, ui
 
 from review_app.app.components.assignment_video_table import AssignmentVideoTable
 from review_app.app.components.folder_picker import pick_folder
@@ -60,6 +62,8 @@ def render_open_assignment(on_complete, *, show_upload=True):
     busy = False
     revision = 0
     root_inputs = {}
+    recipient_select = None
+    recipient_package_value = "__package_recipient__"
     if show_upload:
         ui.label(t("handoff_open_help")).classes("text-body2")
     details = ui.column().classes("w-full")
@@ -81,6 +85,8 @@ def render_open_assignment(on_complete, *, show_upload=True):
         name.set_enabled(not busy and opened is None)
         for field in root_inputs.values():
             field.set_enabled(not busy and opened is None)
+        if recipient_select is not None:
+            recipient_select.set_enabled(not busy and opened is None)
 
     def folders_changed():
         status.set_text("")
@@ -88,7 +94,7 @@ def render_open_assignment(on_complete, *, show_upload=True):
         update_enabled()
 
     async def uploaded(event, *, raw=None):
-        nonlocal data, revision, opened
+        nonlocal data, revision, opened, recipient_select
         if busy:
             return
         revision += 1
@@ -96,6 +102,7 @@ def render_open_assignment(on_complete, *, show_upload=True):
         data = None
         opened = None
         root_inputs.clear()
+        recipient_select = None
         details.clear()
         continue_button.set_visibility(False)
         status.set_text("")
@@ -109,12 +116,45 @@ def render_open_assignment(on_complete, *, show_upload=True):
             info = await run.io_bound(dp.inspect_assignment, raw)
             if current != revision:
                 return
+            local_annotators = await run.io_bound(dp.get_all_annotators)
+            if current != revision:
+                return
             data = raw
             name.set_value(f"{info['project_name']} — {info['recipient']}")
             with details:
                 ui.label(assignment_identity(info)).classes("text-body2")
                 if info["stage"] == "distance":
                     ui.label(t("handoff_media_summary", **info)).classes("text-caption")
+                ui.label(t("package_included_summary", **info)).classes("text-body2").mark(
+                    "package-included-summary"
+                )
+                if info["stage"] == "distance":
+                    ui.label(t("package_distance_summary", **info)).classes("text-caption")
+                ui.label(
+                    t(
+                        "package_identity_mapping",
+                        recipient=info["recipient"],
+                        current=app.storage.user.get("annotator_name", "") or "—",
+                    )
+                ).classes("text-caption").mark("package-identity-mapping")
+                current_user = app.storage.user.get("annotator_name", "")
+                recipient_options = {
+                    recipient_package_value: t(
+                        "package_keep_recipient", recipient=info["recipient"]
+                    )
+                } | {annotator: annotator for annotator in local_annotators}
+                default_recipient = (
+                    current_user if current_user in local_annotators else recipient_package_value
+                )
+                recipient_select = (
+                    ui.select(
+                        recipient_options,
+                        value=default_recipient,
+                        label=t("package_local_annotator"),
+                    )
+                    .classes("w-full")
+                    .mark("package-local-recipient")
+                )
                 ui.label(t("handoff_roots_help")).classes("text-caption")
                 for index, (root, paths) in enumerate(info["roots"].items(), 1):
                     ui.label(t("handoff_root_files", count=len(paths), example=paths[0]))
@@ -142,7 +182,17 @@ def render_open_assignment(on_complete, *, show_upload=True):
                     status.set_text(t("handoff_missing_folders", count=len(missing)))
                     continue_button.set_visibility(True)
                     return
-                opened = await run.io_bound(dp.open_assignment, data, name.value.strip(), roots)
+                opened = await run.io_bound(
+                    dp.open_assignment,
+                    data,
+                    name.value.strip(),
+                    roots,
+                    local_recipient=(
+                        recipient_select.value
+                        if recipient_select and recipient_select.value != recipient_package_value
+                        else None
+                    ),
+                )
             continue_button.set_visibility(False)
             update_enabled()
             status.set_text(t("syncing_videos_label"))
@@ -216,6 +266,15 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
         if not bulk and bindings[0]["stage"] == "distance":
             ui.label(t("handoff_media_summary", **bindings[0])).classes("text-caption")
         status = ui.label("").classes("text-body2 whitespace-pre-wrap")
+        delivery_progress = (
+            ui.linear_progress(value=0, show_value=False)
+            .classes("w-full")
+            .mark("delivery-copy-progress")
+        )
+        delivery_progress.set_visibility(False)
+        progress_status = ui.label("").classes("text-caption").mark("delivery-copy-status")
+        progress_status.set_visibility(False)
+        progress_generation = 0
         results = ui.column().classes("w-full gap-2 max-h-64 overflow-y-auto")
 
         def show_result(item, result, with_footage):
@@ -268,6 +327,9 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
                     )
 
         async def save():
+            nonlocal progress_generation
+            progress_generation += 1
+            current_progress_generation = progress_generation
             save_button.disable()
             close_button.disable()
             output.disable()
@@ -279,16 +341,57 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
                 lines = []
                 saved = 0
                 results.clear()
+                total_attempted = sum(item.get("media_count", 0) for item in bindings)
+                attempted_count = [0]
+                callback_lock = threading.Lock()
+                last_done = [0]
+                event_loop = asyncio.get_running_loop()
+                delivery_progress.set_value(0)
+                delivery_progress.set_visibility(with_footage)
+                progress_status.set_text(
+                    t("assign_delivery_progress", done=0, total=total_attempted)
+                )
+                progress_status.set_visibility(with_footage)
                 status.set_text("")
                 for item in bindings:
                     require_project()
+                    with callback_lock:
+                        last_done[0] = 0
                     try:
+
+                        def on_copy_progress(done, total):
+                            with callback_lock:
+                                attempted_count[0] += max(0, done - last_done[0])
+                                last_done[0] = done
+                                attempted = attempted_count[0]
+
+                            def update_progress():
+                                if (
+                                    current_progress_generation != progress_generation
+                                    or delivery_progress.is_deleted
+                                    or progress_status.is_deleted
+                                ):
+                                    return
+                                delivery_progress.set_value(
+                                    attempted / total_attempted if total_attempted else 0
+                                )
+                                progress_status.set_text(
+                                    t(
+                                        "assign_delivery_progress",
+                                        done=attempted,
+                                        total=total_attempted,
+                                    )
+                                )
+
+                            event_loop.call_soon_threadsafe(update_progress)
+
                         result = await run.io_bound(
                             dp.save_assignment_delivery,
                             project_id,
                             item["id"],
                             output.value,
                             include_footage=with_footage,
+                            progress_callback=on_copy_progress if with_footage else None,
                         )
                         require_project()
                         saved += 1
@@ -365,27 +468,43 @@ def render_return_acceptance(dp, project_id, require_project):
     async def uploaded(event):
         nonlocal raw
         raw = None
+        preview_button.disable()
+        policy.disable()
+        policy.set_options(base_policies, value="use_imported")
         invalidate()
         current = revision
         try:
             if event.file.size() > MAX_ARCHIVE_BYTES:
                 raise ValueError(t("handoff_upload_limit"))
             content = await event.file.read()
+            try:
+                info = await run.io_bound(dp.inspect_assignment_return, content)
+            except ValueError:
+                # Keep malformed-file feedback in the explicit preview flow.
+                info = None
             if current == revision:
+                if info and info["stage"] == "species":
+                    policy.set_options(
+                        {**base_policies, "append": t("handoff_append")}, value="use_imported"
+                    )
                 raw = content
+                preview_button.enable()
                 status.set_text(t("handoff_return_loaded"))
         except Exception as exc:
             if current == revision:
                 status.set_text(_error_message(exc))
+        finally:
+            if current == revision:
+                policy.enable()
 
     async def policy_changed():
-        invalidate()
         if raw is not None:
             await show_preview()
 
     assignment_upload(uploaded, "handoff_return_upload")
+    base_policies = {"keep_existing": t("handoff_keep"), "use_imported": t("handoff_use")}
     policy = ui.select(
-        {"keep_existing": t("handoff_keep"), "use_imported": t("handoff_use")},
+        base_policies,
         value="use_imported",
         label=t("handoff_policy"),
         on_change=policy_changed,
@@ -415,6 +534,11 @@ def render_return_acceptance(dp, project_id, require_project):
                     )
                 ).classes("text-body2")
                 ui.label(t("handoff_totals", **result.totals)).classes("text-body1")
+                if policy.value == "append":
+                    ui.label(
+                        t("handoff_append_totals", count=result.totals.get("appended", 0))
+                    ).classes("text-body1")
+                    ui.label(t("handoff_append_warning")).classes("text-warning")
                 if result.species_context_changed:
                     ui.label(t("handoff_species_changed")).classes("text-warning")
                 if result.reference_substitutions:
@@ -438,7 +562,14 @@ def render_return_acceptance(dp, project_id, require_project):
                 if result.totals["replaced"]:
                     ui.label(t("handoff_replace_warning")).classes("text-warning")
                 if result.totals["annotations_removed"]:
-                    ui.label(t("handoff_remove_warning")).classes("text-negative")
+                    ui.label(
+                        t(
+                            "handoff_append_links_warning",
+                            count=result.totals["annotations_removed"],
+                        )
+                        if policy.value == "append"
+                        else t("handoff_remove_warning")
+                    ).classes("text-warning" if policy.value == "append" else "text-negative")
                 rows = [
                     {
                         "video": unit["video_path"],
@@ -452,14 +583,25 @@ def render_return_acceptance(dp, project_id, require_project):
                 with ui.expansion(t("handoff_details"), icon="table_rows").classes("w-full"):
                     table = AssignmentVideoTable(
                         [
-                            (key, t(f"handoff_column_{key}"))
+                            (
+                                key,
+                                t("handoff_column_append_result")
+                                if key == "after" and policy.value == "append"
+                                else t(f"handoff_column_{key}"),
+                            )
                             for key in ("video", "action", "before", "after", "removed")
                         ],
                         filters=[("action", t("handoff_column_action"))],
                         marker="assignment-return-videos",
                     )
                     table.set_rows([{**row, "id": row["video"]} for row in rows])
-            accept_button.set_enabled(bool(result.totals["added"] + result.totals["replaced"]))
+            accept_button.set_enabled(
+                bool(
+                    result.totals["added"]
+                    + result.totals["replaced"]
+                    + result.totals.get("appended", 0)
+                )
+            )
         except Exception as exc:
             if current == revision:
                 status.set_text(_error_message(exc))
@@ -480,6 +622,7 @@ def render_return_acceptance(dp, project_id, require_project):
         finally:
             busy = False
 
-    ui.button(t("handoff_preview"), on_click=show_preview, icon="preview")
+    preview_button = ui.button(t("handoff_preview"), on_click=show_preview, icon="preview")
+    preview_button.disable()
     accept_button = ui.button(t("handoff_accept"), on_click=accept, icon="check")
     accept_button.disable()

@@ -61,7 +61,10 @@ Existing task-level annotation and completion rules remain unchanged.
 Opening an assignment creates a **fresh project**, never merges assignment setup
 into an existing annotator project. Its assignment remembers the delegated stage,
 selected work, and optional Distance target species; these are not project types
-or annotation permissions.
+or annotation permissions. At opening, the packaged recipient may be associated
+with a local annotator name for local assignment filtering. Suggest the logged-in
+name, make the choice explicit, and preserve the portable recipient and historical
+annotation attribution. Returns retain the original package identity.
 
 ### Assignment scope is not an editing restriction
 
@@ -177,10 +180,27 @@ per-video or per-task policy selection:
 | Identical work | No-op | No-op |
 | Different existing work | Preserve local unit; do not apply returned unit | Replace local unit with returned unit |
 
-Do not merge individual fields, individuals, observations, or samples within a
-replacement unit. For example, an extra observation within an existing Species
-video snapshot is a difference between whole video states, not an independent
-addition to merge automatically.
+These two policies act on whole replacement units; neither silently merges
+individual fields, observations, individuals or samples.
+
+### Species-only Append
+
+Species also supports an explicit **Append** policy, chosen once for the return:
+
+- Add observations with new UUIDs and update matching observation UUIDs with the
+  returned observation, including its attributes and attribution.
+- Keep existing observations absent from the return; an empty return does not
+  delete local observations.
+- Merge video tags without deleting local-only tags. Preserve existing video-level
+  labels on conflict rather than overwrite local blank/review state.
+- Preview the composed result, explain that matching UUIDs can overwrite newer
+  observation edits, and retain stale-preview protection and atomic acceptance.
+- Repeated acceptance of the same composed state is a no-op.
+
+This is an explicit alternative to whole-video replacement, not baseline-aware
+synchronization or a per-record conflict editor. Distance does not support Append:
+its alignment, individuals, relationships, samples and completion remain a
+consistent whole-task unit under Keep existing / Use imported.
 
 Existing work includes progress accepted from an earlier return, not just admin
 edits. **Keep existing can leave an annotator's later updates unapplied.** Make
@@ -212,8 +232,10 @@ For the selected policy, quantify:
 
 - New work added.
 - Identical work left unchanged.
-- Existing work replaced.
-- Existing annotations removed as part of replacement.
+- Existing work replaced, or Species videos appended/updated under Append.
+- Existing annotations removed as part of replacement. Append does not remove
+  observations absent from the return, but attribute-link changes on matching
+  UUIDs are counted and explained separately from observation deletion.
 - Returned work left unapplied because existing work is kept.
 
 Show affected video/task counts and meaningful annotation counts, with affected
@@ -254,7 +276,9 @@ These are implementation inputs, not sufficient implementations of this design:
   and per-annotator bundle export.
 - `review_app/backend/provider/assignment_service.py`: assignment selection and
   `export_annotator_videos()` footage copying with progress reporting.
-- `review_app/app/pages/distribution/page.py`: existing bundle and footage controls.
+- `main:review_app/app/pages/distribution/page.py`: previous bundle/footage controls
+  and camera/video/hour/chunk workload summaries. The current UI is under
+  `review_app/app/pages/data_assignments/`.
 - `review_app/backend/provider/distance_transfer.py` and
   `review_app/backend/distance_transfer.py`: current manual Distance snapshots.
 

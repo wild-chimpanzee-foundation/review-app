@@ -1,4 +1,4 @@
-"""Existing manual Distance exports, presented separately from restoration."""
+"""Manual Distance measurements for analysis."""
 
 from nicegui import run, ui
 
@@ -7,7 +7,7 @@ from review_app.app.translations import t
 from review_app.app.utils import ignore_deleted_client
 
 
-async def render_distance_export(dp, project_id, loading_dialog, *, analysis=True):
+async def render_distance_export(dp, project_id, loading_dialog):
     selection = None
     busy = False
     task_table = None
@@ -73,14 +73,9 @@ async def render_distance_export(dp, project_id, loading_dialog, *, analysis=Tru
         loading_dialog.open()
         try:
             check_project()
-            method = (
-                dp.export_distance_measurements if analysis else dp.export_distance_annotations
-            )
-            content = await run.io_bound(method, project_id, ids)
+            content = await run.io_bound(dp.export_distance_measurements, project_id, ids)
             check_project()
-            ui.download(
-                content, "distance-measurements.tsv" if analysis else "distance-annotations.zip"
-            )
+            ui.download(content, "distance-measurements.tsv")
         except Exception as exc:
             with ignore_deleted_client():
                 report(exc)
@@ -120,8 +115,8 @@ async def render_distance_export(dp, project_id, loading_dialog, *, analysis=Tru
             ).classes("w-full")
             task_table.selected = [row for row in rows if not row["error"]]
         ui.button(
-            t("distance_manual_analysis" if analysis else "distance_manual_download"),
-            icon="table_view" if analysis else "folder_zip",
+            t("distance_manual_analysis"),
+            icon="table_view",
             on_click=download,
         ).props("unelevated").set_enabled(any(not row["error"] for row in rows))
 

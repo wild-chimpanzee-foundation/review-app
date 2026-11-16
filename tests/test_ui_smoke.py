@@ -34,6 +34,8 @@ def smoke_app(provider_with_project):
         @ui.page(path)
         async def _page():
             await handler()
+            if path == "/data-assignments":
+                ui.label("Import / Export ready").mark("data-assignments-ready")
 
     _register("/overview", gui.overview_page)
     _register("/review", gui.review_page)
@@ -64,6 +66,9 @@ async def test_page_renders(user: User, smoke_app, path: str) -> None:
         "/model-import": "/data-assignments?area=add",
         "/distribution": "/data-assignments?area=assignments",
     }.get(path, path)
+    if expected != path:
+        # Navigation schedules another asynchronous page build in the User simulator.
+        await user.should_see(marker="data-assignments-ready", retries=10)
     assert user.back_history[-1] == expected
 
 

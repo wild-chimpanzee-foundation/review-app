@@ -6,7 +6,6 @@ from review_app.app.translations import t
 
 from .imports._annotations_tab import setup_annotations_tab
 from .imports._distance_ai_tab import setup_distance_ai_tab
-from .imports._distance_manual_tab import setup_distance_manual_tab
 from .imports._metadata_tab import setup_metadata_tab
 from .imports._model_tab import setup_model_tab
 from .legacy_import import render_legacy_annotations_import
@@ -33,8 +32,6 @@ async def render_add_data(dp, project_id, loading_dialog):
                 "w-full"
             ):
                 setup_annotations_tab(dp, loading_dialog)
-            with ui.expansion(t("distance_manual_import_title"), icon="restore").classes("w-full"):
-                await setup_distance_manual_tab(dp, loading_dialog)
             with ui.expansion(t("batch_import_title"), icon="playlist_add").classes("w-full"):
                 render_legacy_annotations_import(dp, project_id)
     ui.button(

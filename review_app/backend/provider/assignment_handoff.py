@@ -15,6 +15,18 @@ from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
 
 
+def summarize_workload(rows):
+    work_cameras = sorted({media["camera_id"] for media in rows if media["camera_id"]})
+    durations = [media["duration_sec"] for media in rows]
+    return {
+        "video_count": len(rows),
+        "camera_ids": work_cameras,
+        "camera_count": len(work_cameras),
+        "hours": sum(value for value in durations if value is not None) / 3600,
+        "duration_count": sum(value is not None for value in durations),
+    }
+
+
 class AssignmentHandoffMixin(ProviderBase):
     def prepare_assignment(
         self, project_id: str, request: AssignmentRequest
@@ -24,6 +36,17 @@ class AssignmentHandoffMixin(ProviderBase):
             # Freeze collection and persistence together despite concurrent editor saves.
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             return handoff.prepare(session, project_id, request)
+
+    def get_assignment_workload(self, video_ids: list[str] | tuple[str, ...]) -> dict:
+        """Summarize selected footage metadata without estimating unknown durations."""
+        if not video_ids:
+            return summarize_workload([])
+        with self.Session() as session:
+            rows = [
+                {"camera_id": video.camera_id, "duration_sec": video.duration_sec}
+                for video in session.query(Video).filter(Video.video_id.in_(set(video_ids)))
+            ]
+        return summarize_workload(rows)
 
     def get_assignment_video_ids(self, project_id: str) -> list[str]:
         """All project media for explicit preparation, including labeled/missing videos.
@@ -77,23 +100,32 @@ class AssignmentHandoffMixin(ProviderBase):
     def list_assignments(self, project_id: str) -> list[dict]:
         """Describe persisted handouts/bindings without rebuilding their saved scope."""
         with self.Session() as session:
-            return [
-                {
-                    "id": row.id,
-                    "assignment_id": row.assignment_id,
-                    "role": row.role,
-                    "recipient": row.recipient,
-                    "stage": row.stage,
-                    "target_species": row.target_species,
-                    "video_count": len(row.scope["work_keys"]),
-                    "reference_video_count": len(row.scope["media"]) - len(row.scope["work_keys"]),
-                    "media_count": len(row.scope["media"]),
-                    "created_at": row.created_at.isoformat(),
-                }
-                for row in session.query(HandoffAssignment)
+            assignments = []
+            for row in (
+                session.query(HandoffAssignment)
                 .filter_by(project_id=project_id, removed_at=None)
                 .order_by(HandoffAssignment.created_at.desc())
-            ]
+            ):
+                work = set(row.scope["work_keys"])
+                footage = [media for media in row.scope["media"] if media["video_id"] in work]
+                workload = summarize_workload(footage)
+                assignments.append(
+                    {
+                        "id": row.id,
+                        "assignment_id": row.assignment_id,
+                        "role": row.role,
+                        "recipient": row.recipient,
+                        "stage": row.stage,
+                        "target_species": row.target_species,
+                        "video_count": len(row.scope["work_keys"]),
+                        **workload,
+                        "reference_video_count": len(row.scope["media"])
+                        - len(row.scope["work_keys"]),
+                        "media_count": len(row.scope["media"]),
+                        "created_at": row.created_at.isoformat(),
+                    }
+                )
+            return assignments
 
     def remove_assignment(self, project_id: str, assignment_id: str) -> None:
         """Remove an origin handoff from delivery while retaining return authority."""
@@ -117,6 +149,7 @@ class AssignmentHandoffMixin(ProviderBase):
                     "root_id": media["root_id"],
                     "video_path": media["video_path"],
                     "camera_id": media["camera_id"],
+                    "duration_sec": media["duration_sec"],
                     "assigned": media["video_id"] in work,
                 }
                 for media in row.scope["media"]
@@ -124,9 +157,23 @@ class AssignmentHandoffMixin(ProviderBase):
 
     def inspect_assignment(self, data: bytes) -> dict:
         """Validate setup and describe root requirements before creating a project."""
-        manifest, context, _ = decode_archive(data)
+        manifest, context, work = decode_archive(data)
         if manifest["direction"] != "setup":
             raise ValueError("Open an assignment setup package, not a return")
+        distance_work = context.get("distance", {})
+        species_work = distance_work.get("species_work", [])
+        source_species_work = species_work if manifest["stage"] == "distance" else work
+        existing_species_work_count = sum(
+            bool(unit.get("label") is not None or unit.get("observations") or unit.get("tags"))
+            for unit in source_species_work
+        )
+        distance_individual_count = sum(len(unit.get("individuals", [])) for unit in work)
+        distance_sample_count = sum(len(unit.get("samples", [])) for unit in work)
+        distance_draft_count = sum(
+            int(bool(row.get("ai_original")))
+            for unit in work
+            for row in unit.get("individuals", []) + unit.get("samples", [])
+        ) + sum(int(bool(unit.get("task") and unit["task"].get("rejected_ai"))) for unit in work)
         return {
             "assignment_id": manifest["assignment_id"],
             "recipient": manifest["recipient"],
@@ -136,6 +183,19 @@ class AssignmentHandoffMixin(ProviderBase):
             "video_count": len(manifest["work_keys"]),
             "reference_video_count": len(context["media"]) - len(manifest["work_keys"]),
             "media_count": len(context["media"]),
+            "species_count": len(context.get("species", [])),
+            "behavior_count": len(context.get("behaviors", [])),
+            "tag_count": len(context.get("tags", [])),
+            "prediction_count": len(context.get("predictions", [])),
+            "existing_species_work_count": existing_species_work_count,
+            "distance_individual_count": distance_individual_count,
+            "distance_sample_count": distance_sample_count,
+            "distance_ai_import_count": len(distance_work.get("imports", [])),
+            "distance_draft_count": distance_draft_count,
+            "distance_task_count": sum(unit.get("task") is not None for unit in work)
+            if manifest["stage"] == "distance"
+            else 0,
+            "distance_reference_count": len(distance_work.get("references", [])),
             "roots": {
                 root: [row["video_path"] for row in context["media"] if row["root_id"] == root]
                 for root in manifest["roots"]
@@ -150,7 +210,9 @@ class AssignmentHandoffMixin(ProviderBase):
         _, paths = handoff.locate_media(manifest, context, media_roots)
         return tuple(key for key, (_, missing) in paths.items() if missing)
 
-    def open_assignment(self, data: bytes, project_name: str, media_roots: dict):
+    def open_assignment(
+        self, data: bytes, project_name: str, media_roots: dict, *, local_recipient=None
+    ):
         """Open only packaged work in a fresh project, atomically; never scan whole folders."""
         manifest, context, work = decode_archive(data)
         if manifest["direction"] != "setup":
@@ -159,7 +221,15 @@ class AssignmentHandoffMixin(ProviderBase):
         with self.Session.begin() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             return handoff.open_setup(
-                session, data, manifest, context, work, project_name, roots, paths
+                session,
+                data,
+                manifest,
+                context,
+                work,
+                project_name,
+                roots,
+                paths,
+                local_recipient=local_recipient,
             )
 
     def export_assignment_return(self, working_project_id: str) -> bytes:
@@ -167,6 +237,17 @@ class AssignmentHandoffMixin(ProviderBase):
         with self.Session.begin() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             return handoff.export_return(session, working_project_id)
+
+    def inspect_assignment_return(self, data: bytes) -> dict:
+        """Read return metadata for policy choices without inspecting project state."""
+        manifest, _, _ = decode_archive(data)
+        if manifest["direction"] != "return":
+            raise ValueError("Inspect an assignment return package")
+        return {
+            "stage": manifest["stage"],
+            "target_species": manifest["target_species"],
+            "recipient": manifest["recipient"],
+        }
 
     def preview_assignment_return(self, project_id: str, data: bytes, policy="use_imported"):
         """Read-only, policy-specific impact preview; invalid returns raise ValueError."""

@@ -32,6 +32,13 @@ def render_assignment_details(dp, project_id, binding, require_project, on_close
             ui.button(icon="close", on_click=on_close).props("flat round").tooltip(t("close"))
     ui.label(assignment_stage_label(binding)).classes("text-subtitle1")
     ui.label(t("assign_video_count", count=binding["video_count"]))
+    ui.label(t("assign_camera_count", count=binding.get("camera_count", 0)))
+    if binding.get("camera_ids"):
+        ui.label(" · ".join(binding["camera_ids"])).classes("text-body2")
+    ui.label(t("assign_hours", hours=f"{binding.get('hours', 0):.2f}"))
+    unknown_durations = binding["video_count"] - binding.get("duration_count", 0)
+    if unknown_durations:
+        ui.label(t("assign_unknown_durations", count=unknown_durations))
     ui.label(t("assign_prepared_date", date=assignment_date(binding["created_at"]))).classes(
         "text-caption text-grey-7"
     )
@@ -96,6 +103,7 @@ def render_assignment_details(dp, project_id, binding, require_project, on_close
                             ("path", t("handoff_column_video")),
                             ("camera", t("distribution_camera_col")),
                             ("role", t("assign_media_role")),
+                            ("duration", t("assign_duration")),
                         ],
                         filters=[
                             ("camera", t("distribution_camera_col")),
@@ -117,6 +125,11 @@ def render_assignment_details(dp, project_id, binding, require_project, on_close
                                     "assign_work_media"
                                     if row["assigned"]
                                     else "assign_reference_media"
+                                ),
+                                "duration": (
+                                    t("assign_hours", hours=f"{row['duration_sec'] / 3600:.2f}")
+                                    if row["duration_sec"] is not None
+                                    else ""
                                 ),
                             }
                             for row in media
