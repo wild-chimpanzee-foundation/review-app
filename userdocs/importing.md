@@ -26,14 +26,13 @@ A downloadable CSV template is available on the import page if you're unsure of 
 
 ## AI Distance packages
 
-Confirm the target species/counts in Species Review for each animal video first.
-Distance imports attach drafts to those species-specific tasks; model predictions
-alone do not create eligible tasks. A separate ordinary Review completion flag is
-not required.
+Distance imports attach drafts to species-specific tasks. Use existing Species
+annotations or explicitly accept missing species from the package in the import
+preview. A separate ordinary Review completion flag is not required.
 
 Use **Import / Export → Add data → AI predictions → AI Distance** to upload a `distance-ai` version 1 ZIP (maximum 32 MiB). First create/rescan the destination project so its videos are registered, and tag reference clips as **Reference Video**. The paired `<deployment>/videos/` and `<deployment>/references/` layout applies this tag automatically.
 
-1. Upload the ZIP to validate it and preview counts, video matches, calibration conflicts, and up to 20 predictions. Preview does not write anything.
+1. Upload the ZIP to validate it and preview counts, video matches, calibration conflicts, and up to 20 predictions. Preview does not write anything. If Species labels are missing, **Accept missing species annotations** adds them as accepted annotations with AI attribution. No additional Species Review or re-upload is required. Existing annotations and counts are unchanged; new annotations record presence with an unknown count, rather than treating AI tracks as animal counts.
 2. Imported individuals are complete AI drafts covering the full video. The dominant within-track interval and fractional-time phase are inferred to fill missing stops from the opening frame through the end (excluding the endpoint). Supplied timestamps stay exact; nearby frame-timing jitter does not add duplicate stops. Missing predictions for an individual recommend **Absent**, still pending human confirmation. At least two predictions on one track in the video are needed to infer cadence. Only untouched AI drafts can be replaced, with confirmation.
 3. Click **Import AI Distance package**. Creating individuals and pending samples, replacing untouched drafts, and importing references and provenance are atomic: an error leaves the project unchanged.
 4. Prepared reference frames become available in Distance's reference browser. Use **View imported predictions** to inspect a saved run (up to 100 rows).
@@ -64,11 +63,11 @@ Use `null` for an unknown model version. Source/run IDs are retained as provenan
 - IDs are stable strings, unique within their respective CSV. Prediction individual/reference IDs link to the other CSVs.
 - `video_path` is an exact project-root-relative path, not a filename-only or fuzzy match. Ambiguous paths across multiple project roots must be resolved before import. Suggested references must belong to the animal video's deployment.
 - `time_s` is precise, zero-based playback time within the video, **not camera wall time**. Distances must be finite and positive. `species` must be a scientific name already in the vocabulary; add or map unknown species before importing.
-- `known_distance_m` is reference calibration; `predicted_distance_m` is the animal estimate. They may differ. Existing calibration at the same millisecond frame is reused only when distance and precise position agree; conflicting calibration is never overwritten.
+- `known_distance_m` is reference calibration; `predicted_distance_m` is the animal estimate. They may differ. Existing calibration at the same millisecond frame is reused only when distance and precise position agree; conflicting calibration blocks import unless you explicitly choose **Overwrite conflicting reference frames and clear their affected measurements**. Preview compares saved and imported timestamps and shows the number of affected measurements. Overwrite replaces the frame and mask, clears saved measurements using that reference (including behaviors and carrying links), and reopens affected reviews. Other references and individuals are retained. This is irreversible, and occurs atomically with the Distance import.
 - Optional fields may be omitted or empty. Each mask path is ZIP-relative and points to one COCO RLE JSON object: `size: [height, width]` in original-frame dimensions, and `counts` as an integer list or compressed string in column-major order. Videos are not included.
 
 !!! warning "Predictions are not reviewed annotations"
-    Imported individuals are ordinary Distance individuals; their predictions are **pending samples**, not human answers. Suggestions prefill choices for confirmation or correction. Original AI values (time, estimate, suggested reference and mask) remain preserved after confirmation. Identifying boxes use the first usable mask; without one, no box is invented. Inferred absences are AI recommendations, not confirmed absence or human completion. Pending samples do not count toward progress or reviewed graph distances. Absolute camera date/time stays unknown. Use **Show AI animal masks** to overlay them on their exact prediction frames; they hide during playback, seeking, and box drawing. Only untouched AI drafts can be replaced; import never resets human work.
+    Imported individuals are ordinary Distance individuals; their predictions are **pending samples**, not human answers. Suggestions prefill choices for confirmation or correction. Original AI values (time, estimate, suggested reference and mask) remain preserved after confirmation. Identifying boxes use the first usable mask; without one, no box is invented. Inferred absences are AI recommendations, not confirmed absence or human completion. Pending samples do not count toward progress or reviewed graph distances. Absolute camera date/time stays unknown. Use **Show AI animal masks** to overlay them on their exact prediction frames; they hide during playback, seeking, and box drawing. Only untouched AI drafts can be replaced; human work is preserved except when explicitly clearing measurements that use an overwritten reference.
 
 ## Historic / manual annotations
 

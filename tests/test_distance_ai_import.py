@@ -20,6 +20,7 @@ from review_app.app.translations import t
 from review_app.backend.db.models import (
     Base,
     DistanceImport,
+    DistanceIndividual,
     DistanceSample,
     ReferenceFrame,
     Video,
@@ -738,6 +739,174 @@ def test_ai_import_rejects_duplicate_video_distance_before_writing(distance_data
     with pytest.raises(ValueError, match="same video/distance"):
         dp.import_distance_ai_package(project_id, data)
     assert snapshot(dp) == before
+
+
+def test_missing_species_are_accepted_and_idempotent(distance_data, ai_package):
+    from review_app.backend.db.models import (
+        DistanceReviewTask,
+        IndividualObservation,
+        ModelAnnotation,
+    )
+
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    video_id = distance_data["videos"][0]
+    with dp.Session.begin() as session:
+        session.query(IndividualObservation).filter_by(video_id=video_id).delete()
+        session.query(DistanceReviewTask).filter_by(video_id=video_id).delete()
+    data = package_zip(ai_package)
+    before = snapshot(dp)
+    preview = dp.preview_distance_ai_package(project_id, data)
+    assert len(preview["missing_species_labels"]) == 1
+    assert snapshot(dp) == before
+    assert dp.add_distance_ai_species_annotations(project_id, data) == 1
+    accepted = snapshot(dp)
+    assert dp.add_distance_ai_species_annotations(project_id, data) == 0
+    assert snapshot(dp) == accepted
+    with dp.Session() as session:
+        observation = session.query(IndividualObservation).filter_by(video_id=video_id).one()
+        assert observation.species_id == distance_data["species_id"]
+        assert observation.count is None
+        assert observation.labeled_by == "Distance AI: test-model"
+        assert observation.labeled_at is not None
+        assert session.query(ModelAnnotation).filter_by(video_id=video_id).count() == 0
+    assert dp.preview_distance_ai_package(project_id, data)["errors"] == []
+    dp.import_distance_ai_package(project_id, data)
+
+
+def test_accepting_package_species_preserves_existing_annotations(distance_data, ai_package):
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    before = snapshot(dp)
+    assert dp.add_distance_ai_species_annotations(project_id, package_zip(ai_package)) == 0
+    assert snapshot(dp) == before
+
+
+def test_reference_overwrite_requires_consent_and_clears_affected_measurements(
+    distance_data, ai_package
+):
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    reference = dp.register_reference_video(
+        project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
+    )
+    frame = dp.add_reference_frame(reference["id"], 3125, 3.5, playback_offset_ms=3125.125)
+    individual = distance_data["individual"]
+    dp.verify_distance_recording_time(distance_data["videos"][1], datetime(2024, 1, 1), "alice")
+    dp.save_distance_sample(
+        individual["id"],
+        2000,
+        reference_frame_id=frame["id"],
+        behavior_ids=[distance_data["behavior_id"]],
+        labeled_by="alice",
+    )
+    data = package_zip(ai_package)
+    before = snapshot(dp)
+    preview = dp.preview_distance_ai_package(project_id, data)
+    assert preview["reference_conflicts"][0]["affected_samples"] == 1
+    assert preview["reference_conflicts"][0]["existing_time_s"] == 3.125125
+    assert snapshot(dp) == before
+    with pytest.raises(ValueError, match="Conflicting prepared reference"):
+        dp.import_distance_ai_package(project_id, data)
+    assert snapshot(dp) == before
+    result = dp.import_distance_ai_package(project_id, data, overwrite_reference_ids=["ref-1"])
+    with dp.Session() as session:
+        updated = session.get(ReferenceFrame, frame["id"])
+        assert updated.playback_offset_ms == pytest.approx(2125.125)
+        assert updated.mask == ai_package["masks/ref.json"]
+        assert updated.import_id == result["import_id"]
+        assert session.query(DistanceSample).filter_by(reference_frame_id=frame["id"]).count() == 0
+        assert session.get(DistanceIndividual, individual["id"]) is not None
+    assert dp.preview_distance_ai_package(project_id, data)["already_imported"]
+
+
+def test_failed_reference_overwrite_rolls_back(distance_data, ai_package):
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    reference = dp.register_reference_video(
+        project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
+    )
+    frame = dp.add_reference_frame(reference["id"], 3125, 3.5)
+    dp.verify_distance_recording_time(distance_data["videos"][1], datetime(2024, 1, 1), "alice")
+    dp.save_distance_sample(
+        distance_data["individual"]["id"], 2000, reference_frame_id=frame["id"], labeled_by="alice"
+    )
+    before = snapshot(dp)
+
+    def fail(*args):
+        raise RuntimeError("interrupted overwrite")
+
+    event.listen(DistanceSample, "before_insert", fail)
+    try:
+        with pytest.raises(RuntimeError, match="interrupted overwrite"):
+            dp.import_distance_ai_package(
+                project_id, package_zip(ai_package), overwrite_reference_ids=["ref-1"]
+            )
+    finally:
+        event.remove(DistanceSample, "before_insert", fail)
+    assert snapshot(dp) == before
+
+
+async def test_ui_accept_missing_species_enables_distance_import(
+    user: User, distance_data, ai_package
+):
+    from review_app.backend.db.models import (
+        DistanceReviewTask,
+        IndividualObservation,
+        ModelAnnotation,
+    )
+
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    video_id = distance_data["videos"][0]
+    with dp.Session.begin() as session:
+        session.query(IndividualObservation).filter_by(video_id=video_id).delete()
+        session.query(DistanceReviewTask).filter_by(video_id=video_id).delete()
+
+    @ui.page("/test-ai-species-suggestions")
+    async def page():
+        app.storage.user["active_project_id"] = project_id
+        await setup_distance_ai_tab(dp, ui.dialog())
+
+    await user.open("/test-ai-species-suggestions")
+    upload = next(e for e in user.client.elements.values() if isinstance(e, ui.upload))
+    with user:
+        await upload.handle_uploads(
+            [SmallFileUpload("proposals.zip", "application/zip", package_zip(ai_package))]
+        )
+    await user.should_see(t("distance_ai_add_species"))
+    user.find(t("distance_ai_add_species"), kind=ui.button).click()
+    await user.should_see(t("distance_ai_species_added"))
+    assert all(e.enabled for e in user.find(t("distance_ai_import"), kind=ui.button).elements)
+    with dp.Session() as session:
+        assert session.query(ModelAnnotation).filter_by(video_id=video_id).count() == 0
+        assert session.query(IndividualObservation).filter_by(video_id=video_id).count() == 1
+    user.find(t("distance_ai_import"), kind=ui.button).click()
+    await user.should_see(t("distance_ai_imported"))
+
+
+async def test_ui_reference_overwrite_requires_confirmation(user: User, distance_data, ai_package):
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    reference = dp.register_reference_video(
+        project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
+    )
+    dp.add_reference_frame(reference["id"], 3125, 3.5)
+
+    @ui.page("/test-ai-overwrite")
+    async def page():
+        app.storage.user["active_project_id"] = project_id
+        await setup_distance_ai_tab(dp, ui.dialog())
+
+    await user.open("/test-ai-overwrite")
+    upload = next(e for e in user.client.elements.values() if isinstance(e, ui.upload))
+    with user:
+        await upload.handle_uploads(
+            [SmallFileUpload("proposals.zip", "application/zip", package_zip(ai_package))]
+        )
+    await user.should_see(t("distance_ai_overwrite_warning"))
+    assert all(not e.enabled for e in user.find(t("distance_ai_import"), kind=ui.button).elements)
+    user.find(t("distance_ai_overwrite_confirm"), kind=ui.checkbox).click()
+    for _ in range(50):
+        if all(e.enabled for e in user.find(t("distance_ai_import"), kind=ui.button).elements):
+            break
+        await asyncio.sleep(0.01)
+    user.find(t("distance_ai_import"), kind=ui.button).click()
+    await user.should_see(t("distance_ai_imported"))
 
 
 def test_import_revalidates_calibration_after_preview(distance_data, ai_package):

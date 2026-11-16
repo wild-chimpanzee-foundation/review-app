@@ -320,14 +320,21 @@ def delete_reference_frame(session, frame_id: str, *, clear_samples: bool = Fals
     samples = session.query(DistanceSample).filter_by(reference_frame_id=frame_id).all()
     if samples and not clear_samples:
         raise ValueError("Confirm deletion to clear saved annotations using this reference frame")
+    count = clear_reference_frame_samples(session, frame_id)
+    session.delete(frame)
+    session.flush()
+    return count
+
+
+def clear_reference_frame_samples(session, frame_id: str) -> int:
+    """Clear measurements before explicitly replacing or deleting their reference image."""
+    samples = session.query(DistanceSample).filter_by(reference_frame_id=frame_id).all()
     individual_ids = {sample.individual_id for sample in samples}
     for sample in samples:
         session.delete(sample)
     session.flush()
     for individual_id in individual_ids:
         reopen_individual_review(session, session.get(DistanceIndividual, individual_id))
-    session.delete(frame)
-    session.flush()
     return len(samples)
 
 

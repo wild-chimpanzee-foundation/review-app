@@ -10,7 +10,24 @@ from review_app.backend.distance_ai_package import MAX_ZIP_BYTES
 
 async def setup_distance_ai_tab(dp, loading_dialog):
     project_id = get_active_project_id()
-    state = {"bytes": None, "preview": None, "busy": False, "replace_confirmed": False}
+    state = {
+        "bytes": None,
+        "preview": None,
+        "busy": False,
+        "replace_confirmed": False,
+        "overwrite_confirmed": False,
+    }
+
+    def blocking_errors(preview):
+        allowed = (
+            {
+                f"Conflicting prepared reference frame: {row['reference_id']}; existing calibration is unchanged"
+                for row in preview["reference_conflicts"]
+            }
+            if state["overwrite_confirmed"]
+            else set()
+        )
+        return [error for error in preview["errors"] if error not in allowed]
 
     def check_project():
         if not project_id or get_active_project_id() != project_id:
@@ -52,14 +69,28 @@ async def setup_distance_ai_tab(dp, loading_dialog):
                 value=state["replace_confirmed"],
                 on_change=lambda event: confirm_replace(event.value),
             )
-        for error in preview["errors"][:20]:
+        if preview["missing_species_labels"]:
+            ui.label(t("distance_ai_species_help")).classes("text-warning")
+            ui.button(t("distance_ai_add_species"), on_click=add_species).set_enabled(
+                not state["busy"]
+            )
+        if preview["reference_conflicts"]:
+            ui.label(t("distance_ai_overwrite_warning")).classes("text-warning")
+            for conflict in preview["reference_conflicts"]:
+                ui.label(t("distance_ai_reference_conflict", **conflict)).classes("break-all")
+            ui.checkbox(
+                t("distance_ai_overwrite_confirm"),
+                value=state["overwrite_confirmed"],
+                on_change=lambda event: confirm_overwrite(event.value),
+            ).set_enabled(not state["busy"])
+        for error in blocking_errors(preview)[:20]:
             ui.label(error).classes("text-negative break-all")
         if preview["already_imported"]:
             ui.label(t("distance_ai_already_imported")).classes("text-positive")
         prediction_table(preview["preview"])
         ui.button(t("distance_ai_import"), icon="file_upload", on_click=do_import).set_enabled(
             not state["busy"]
-            and not preview["errors"]
+            and not blocking_errors(preview)
             and not preview["already_imported"]
             and (not preview["replace_video_ids"] or state["replace_confirmed"])
         )
@@ -68,10 +99,39 @@ async def setup_distance_ai_tab(dp, loading_dialog):
         state["replace_confirmed"] = value
         preview_ui.refresh()
 
+    def confirm_overwrite(value):
+        state["overwrite_confirmed"] = value
+        preview_ui.refresh()
+
+    async def add_species():
+        if state["busy"] or not state["bytes"]:
+            return
+        state["busy"] = True
+        preview_ui.refresh()
+        loading_dialog.open()
+        try:
+            check_project()
+            await run.io_bound(dp.add_distance_ai_species_annotations, project_id, state["bytes"])
+            check_project()
+            state["preview"] = await run.io_bound(
+                dp.preview_distance_ai_package, project_id, state["bytes"]
+            )
+            ui.notify(t("distance_ai_species_added"), type="positive")
+        except Exception as exc:
+            with ignore_deleted_client():
+                ui.notify(t("import_failed", error=str(exc)), type="negative")
+        finally:
+            state["busy"] = False
+            with ignore_deleted_client():
+                preview_ui.refresh()
+                loading_dialog.close()
+
     async def handle_upload(event):
         if state["busy"]:
             return
-        state.update(bytes=None, preview=None, busy=True, replace_confirmed=False)
+        state.update(
+            bytes=None, preview=None, busy=True, replace_confirmed=False, overwrite_confirmed=False
+        )
         preview_ui.refresh()
         loading_dialog.open()
         try:
@@ -100,7 +160,9 @@ async def setup_distance_ai_tab(dp, loading_dialog):
         if state["busy"] or not state["bytes"]:
             return
         preview = state["preview"]
-        if preview["errors"] or (preview["replace_video_ids"] and not state["replace_confirmed"]):
+        if blocking_errors(preview) or (
+            preview["replace_video_ids"] and not state["replace_confirmed"]
+        ):
             return
         state["busy"] = True
         preview_ui.refresh()
@@ -112,8 +174,14 @@ async def setup_distance_ai_tab(dp, loading_dialog):
                 project_id,
                 state["bytes"],
                 replace_video_ids=preview["replace_video_ids"],
+                overwrite_reference_ids=[
+                    row["reference_id"] for row in preview["reference_conflicts"]
+                ]
+                if state["overwrite_confirmed"]
+                else [],
             )
             state["replace_confirmed"] = False
+            state["overwrite_confirmed"] = False
             state["preview"] = await run.io_bound(
                 dp.preview_distance_ai_package, project_id, state["bytes"]
             )

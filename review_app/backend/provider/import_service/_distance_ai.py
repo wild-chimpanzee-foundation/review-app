@@ -11,6 +11,7 @@ from review_app.backend.db.models import (
     DistanceIndividual,
     DistanceReviewTask,
     DistanceSample,
+    IndividualObservation,
     Project,
     ProjectDir,
     ReferenceFrame,
@@ -22,7 +23,10 @@ from review_app.backend.distance_ai_package import mask_bounding_box, read_dista
 from review_app.backend.distance_timing import infer_imported_schedule
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
-from review_app.backend.provider.distance_references import reference_tagged
+from review_app.backend.provider.distance_references import (
+    clear_reference_frame_samples,
+    reference_tagged,
+)
 from review_app.backend.provider.distance_review import reset_video_evidence
 from review_app.backend.provider.distance_tasks import ensure_tasks
 
@@ -45,6 +49,8 @@ def _plan(session, project_id, package):
         sampling=[],
         new_reference_frames=0,
         reused_reference_frames=0,
+        reference_conflicts=[],
+        missing_species_labels=[],
         already_imported=existing is not None,
         import_id=existing.id if existing else None,
         errors=[],
@@ -127,6 +133,18 @@ def _plan(session, project_id, package):
             if frame.distance_m != row["known_distance_m"] or not math.isclose(
                 position, precise, rel_tol=0, abs_tol=0.000001
             ):
+                summary["reference_conflicts"].append(
+                    {
+                        "reference_id": row["reference_id"],
+                        "video_path": row["video_path"],
+                        "distance_m": row["known_distance_m"],
+                        "existing_time_s": position / 1000,
+                        "imported_time_s": row["time_s"],
+                        "affected_samples": session.query(DistanceSample)
+                        .filter_by(reference_frame_id=frame.id)
+                        .count(),
+                    }
+                )
                 errors.append(
                     f"Conflicting prepared reference frame: {row['reference_id']}; existing calibration is unchanged"
                 )
@@ -151,8 +169,18 @@ def _plan(session, project_id, package):
         video = videos.get(row["video_path"])
         if video:
             if (video.video_id, species.get(row["species"])) not in tasks:
+                suggestion = {
+                    "video_id": video.video_id,
+                    "video_path": row["video_path"],
+                    "species": row["species"],
+                }
+                if (
+                    row["species"] in species
+                    and suggestion not in summary["missing_species_labels"]
+                ):
+                    summary["missing_species_labels"].append(suggestion)
                 errors.append(
-                    f"Confirm Species Review labels for {row['species']} in {row['video_path']} before importing."
+                    f"Accept missing species annotations or add Species Review labels for {row['species']} in {row['video_path']} before importing."
                 )
             schedules.setdefault((video.video_id, row["species"]), set())
             if video.video_id in tagged:
@@ -262,15 +290,62 @@ class DistanceAIImportMixin(ProviderBase):
             ],
         }
 
+    def add_distance_ai_species_annotations(self, project_id: str, zip_bytes: bytes) -> int:
+        """Accept missing package species without replacing existing observations."""
+        package = read_distance_ai_package(zip_bytes)
+        with self.Session.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            summary, _, _, _ = _plan(session, project_id, package)
+            added = 0
+            species = {row.scientific_name: row.id for row in session.query(Species)}
+            for row in summary["missing_species_labels"]:
+                observations = (
+                    session.query(IndividualObservation).filter_by(video_id=row["video_id"]).all()
+                )
+                if any(
+                    observation.species_id == species[row["species"]]
+                    for observation in observations
+                ):
+                    continue
+                session.add(
+                    IndividualObservation(
+                        project_id=project_id,
+                        video_id=row["video_id"],
+                        id=max((observation.id for observation in observations), default=0) + 1,
+                        species_id=species[row["species"]],
+                        # Presence is accepted; track counts are not reliable animal counts.
+                        count=None,
+                        labeled_by=f"Distance AI: {package.manifest['model']['name']}",
+                        labeled_at=self._utcnow_dt(),
+                    )
+                )
+                session.flush()
+                added += 1
+            ensure_tasks(session, project_id)
+        return added
+
     def import_distance_ai_package(
-        self, project_id: str, zip_bytes: bytes, *, replace_video_ids: list[str] | None = None
+        self,
+        project_id: str,
+        zip_bytes: bytes,
+        *,
+        replace_video_ids: list[str] | None = None,
+        overwrite_reference_ids: list[str] | None = None,
     ) -> dict:
         package = read_distance_ai_package(zip_bytes)
         with self.Session.begin() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             summary, videos, frames, schedules = _plan(session, project_id, package)
-            if summary["errors"]:
-                raise ValueError("\n".join(summary["errors"][:20]))
+            conflicts = {row["reference_id"] for row in summary["reference_conflicts"]}
+            confirmed = set(overwrite_reference_ids or [])
+            conflict_errors = {
+                f"Conflicting prepared reference frame: {reference_id}; existing calibration is unchanged"
+                for reference_id in conflicts & confirmed
+            }
+            errors = [error for error in summary["errors"] if error not in conflict_errors]
+            if errors:
+                raise ValueError("\n".join(errors[:20]))
+            summary["errors"] = errors
             if summary["already_imported"]:
                 return summary
             if not set(summary["replace_video_ids"]).issubset(set(replace_video_ids or [])):
@@ -316,6 +391,14 @@ class DistanceAIImportMixin(ProviderBase):
                     session.add(frame)
                     session.flush()
                     frames[row["reference_id"]] = frame
+                elif row["reference_id"] in conflicts:
+                    # Preserve frame identity/provenance links, but never silently move
+                    # the reference image beneath saved human measurements.
+                    clear_reference_frame_samples(session, frame.id)
+                    frame.offset_ms = math.floor(row["time_s"] * 1000 + 0.5)
+                    frame.playback_offset_ms = row["time_s"] * 1000
+                    frame.mask = row["mask"]
+                    frame.import_id = imported.id
                 refs.append({**row, "reference_frame_id": frame.id})
             species = {row.scientific_name: row.id for row in session.query(Species)}
             tasks = {}
