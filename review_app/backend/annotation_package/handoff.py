@@ -421,4 +421,6 @@ def export(session: Session, assignment_id: str) -> bytes:
         raise ValueError("Assignment not found")
     if handoff.role != "origin":
         raise ValueError("Download setup from the originating assignment, not a working project")
+    if handoff.removed_at is not None:
+        raise ValueError("This assignment has been removed from delivery")
     return handoff.setup_archive

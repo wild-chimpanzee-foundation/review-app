@@ -768,6 +768,10 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (24, lambda conn: _migration_v24(conn)),
     (25, lambda conn: _migration_v25(conn)),
     (26, lambda conn: _migration_v26(conn)),
+    (
+        27,
+        lambda conn: _add_column_if_missing(conn, "handoff_assignments", "removed_at", "DATETIME"),
+    ),
 ]
 
 # Frozen upgrade DDL. Keep independent of evolving ORM metadata.

@@ -23,7 +23,7 @@ class CopyResult:
 def resolve_delivery(session, assignment_id):
     """Freeze source paths while retaining the original root-relative destinations."""
     binding = session.get(HandoffAssignment, assignment_id)
-    if binding is None or binding.role != "origin":
+    if binding is None or binding.role != "origin" or binding.removed_at is not None:
         raise ValueError("Choose an originating saved assignment")
     manifest, context, _ = decode_archive(binding.setup_archive)
     videos = bound_videos(session, binding)
@@ -52,7 +52,16 @@ def resolve_delivery(session, assignment_id):
     return manifest["assignment_id"], roots, manifest["roots"], media
 
 
-def copy_media(assignment_id, project_roots, root_ids, media, output_dir, progress_callback=None):
+def copy_media(
+    assignment_id,
+    project_roots,
+    root_ids,
+    media,
+    output_dir,
+    progress_callback=None,
+    *,
+    setup_archive=None,
+):
     """Copy a resolved list to a new directory; never overwrite an earlier delivery.
 
     Progress counts attempted files, including missing/failed files. Partial results
@@ -64,6 +73,8 @@ def copy_media(assignment_id, project_roots, root_ids, media, output_dir, progre
     if any(destination.is_relative_to(root) for root in project_roots):
         raise ValueError("Delivery must be outside the project footage folders")
     destination.mkdir(parents=True, exist_ok=False)
+    if setup_archive is not None:
+        (destination / "assignment.zip").write_bytes(setup_archive)
     media_roots = {key: str(destination / safe_relative(key)) for key in root_ids}
     for path in media_roots.values():
         Path(path).mkdir(parents=True)

@@ -1,6 +1,7 @@
 # Data, assignments, and results: UX rework
 
-**Status:** Agreed UI direction; ready for implementation planning.
+**Status:** Agreed UI direction; initial implementation and unified assignment
+workspace are in place, with operator visual confirmation pending.
 **Scope clarification:** This is a reorganization and simplification of the
 existing UI, not a transfer-functionality expansion. The operator is happy with
 functionality in general. Earlier requirements for persistent preparation batches,
@@ -55,7 +56,9 @@ Not required:
 Small backend adjustments may be appropriate when directly necessary for a UI
 improvement, but they are not a separate workstream. If an improvement requires
 schema changes or materially different transfer behavior, defer it and surface
-that trade-off instead of quietly expanding this plan.
+that trade-off instead of quietly expanding this plan. The explicitly agreed
+exception is a persistent removal timestamp: hiding delivery while preserving
+future returns requires retaining the original snapshot and its identity maps.
 
 ## Domain language and existing contracts
 
@@ -136,27 +139,57 @@ atomicity and mutation rules remain format-specific.
 
 ### Coordinator workspace
 
-Lead with saved assignments and their actions, then provide preparation and
-allocation controls in a secondary section. Show recipient, stage, target species
-where relevant, saved scope/counts and preparation date using existing data.
+Use a compact saved-assignment list as the home screen, with recipient, stage,
+target species where relevant, saved scope/counts and a readable preparation date.
+Open download/copy actions and scope details in a detail panel; put technical IDs
+and raw timestamps behind disclosure. Do not invent delivery or acceptance status.
+Offer confirmed removal from delivery, retaining the original snapshot and identity
+for future returns. This requires a small persistent removal-state migration, not
+physical deletion of the handoff or its annotation work.
+
+The primary **Assign work** action opens one focused workflow to choose the stage,
+distribute work to recipients, inspect counts, and prepare assignments. Allocation
+and preparation are not separate user-facing workflows: do not require saving an
+allocation, navigating elsewhere, and selecting that allocation again.
+
+For Species, prepare only from the displayed allocation; remove the separate
+all-project-videos shortcut. Reuse automatic distribution and manual adjustment.
+For Distance, show compact rows of target species, recipient, count and an options
+action. Hide video/time controls until requested, select the full matching set by
+default, and group review entries by annotator without merging their assignments.
+Preserve one assignment and working project per Distance target species.
+
+The meaningful boundary is editable work planning versus prepared, frozen
+assignments. Preparation freezes each row's work; subsequent redistribution must
+not change existing assignments. On success, expose the saved assignment's download
+and delivery actions rather than another preparation form. **Save delivery folder**
+writes the saved assignment ZIP and optionally copies its required footage alongside
+it. Footage is off by default when original files can be reused on the same machine.
+Keep browser ZIP download as a secondary alternative; do not embed videos in ZIPs.
 
 Keep the existing prepare/download/footage-copy and preview/accept operations.
-Allocation is an input to preparation, not itself a prepared assignment. Preserve
-one assignment and working project per Distance target species.
+**Accept returned work** opens a separate focused flow with full impact warnings,
+not another accordion on the home screen.
 
-Prefer existing all/allocated-work defaults over unnecessary video picking.
+Prefer existing allocation and matching-set defaults over unnecessary video picking.
 Where current controls already support a complete matching set, select it by
 default and make inspection or narrowing optional. Preserve eligibility and
 completion rules; do not add a new allocation or filtering system to remove a
 control.
 
-Single-recipient preparation and individual download/copy are sufficient for
-this rework. Existing bulk actions can be retained where useful; new batch
-infrastructure is not a completion requirement.
+Preparing multiple distribution rows may orchestrate the existing single-assignment
+operation in the UI, with each row's success or failure made explicit. This is not
+an atomic batch or a requirement for persistent batch history, new allocation
+storage, coordinated delivery, or durable retries. Download and footage copy remain
+individual saved-assignment actions, combined in the local delivery-folder action.
 
 Saved downloads and footage copying continue to use saved assignment scope and
 automatically collected dependencies. Missing footage and copy failures remain
-visible. Downloads and filesystem copies must be clearly distinguished.
+visible. Downloads and filesystem delivery must be clearly distinguished.
+Video-detail tables support text search, sortable columns and relevant camera,
+footage, role or return-action filters. Inspection filters do not silently drop
+selected work: retain selection outside the filter and provide explicit actions
+to select/deselect matching videos.
 
 ### Annotator workspace
 

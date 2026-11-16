@@ -45,59 +45,75 @@ Trois curseurs de seuil de confiance (0.0–1.0) qui contrôlent l'affichage des
 
 Cliquez sur **Enregistrer** pour appliquer.
 
-### Distribution
+### Affectations
 
-La répartition et le transfert sont maintenant dans **Données & affectations → Affectations**, et non dans les Paramètres. Ouvrez la section de répartition pour distribuer les vidéos. Les affectations enregistrées apparaissent en premier ; ouvrez **Préparer une affectation** pour déléguer du travail.
+La répartition et la transmission se trouvent dans **Données & affectations →
+Affectations**, et non dans les Paramètres. La liste compacte affiche les
+affectations préparées. Sélectionnez une ligne pour enregistrer un dossier de
+livraison, télécharger le ZIP ou examiner le périmètre figé. Les identifiants et horodatages précis
+sont dans **Détails techniques**.
 
-1. Ajoutez les noms des annotateurs à qui répartir.
-2. Affectez les caméras aux annotateurs manuellement, ou utilisez **Distribution automatique** pour répartir les caméras équitablement.
-3. **Appliquer** pour enregistrer les affectations ; **Réinitialiser** les efface.
+1. Choisissez **Affecter le travail** et l’étape de révision. Ajoutez les noms des
+   annotateurs ici si nécessaire.
+   - **Espèces** : utilisez la répartition automatique ou ajustez les destinataires.
+     Les répartitions existantes sont conservées exactement, même si une caméra
+     est partagée entre plusieurs personnes. La répartition automatique sélectionne
+     les vidéos non annotées ayant une caméra. Ajustez la répartition initiale
+     pour inclure manuellement les vidéos annotées, manquantes ou sans caméra.
+     La préparation utilise toujours la répartition affichée, sans raccourci pour
+     toutes les vidéos ni étape distincte d’application.
+   - **Distance** : choisissez une espèce cible confirmée et son destinataire.
+     Les vidéos correspondantes sont chargées et sélectionnées automatiquement.
+     Le bouton d’options de chaque ligne permet d’examiner ou réduire la sélection. Ajoutez une ligne pour une
+     autre espèce cible : chaque espèce produit une affectation et un projet de
+     travail distincts. Les tâches manuelles et liées à l’IA sont prises en charge,
+     indépendamment de la répartition Espèces. Les références et calibrations
+     nécessaires sont collectées automatiquement. Les heures locales caméra
+     facultatives utilisent le format 24 heures : début inclus, fin exclue,
+     plages nocturnes possibles. Les heures inconnues sont exclues uniquement
+     avec une plage. Modifier les filtres efface et recharge la sélection.
+2. Cliquez sur **Vérifier les affectations**, vérifiez le travail regroupé par
+   annotateur, puis **Préparer les affectations**. Chaque périmètre est figé. La
+   répartition Espèces est appliquée pendant la préparation. Les lignes sont
+   préparées séparément : les réussites restent enregistrées si une autre échoue,
+   et réessayer ignore les réussites. Les modifications avant préparation restent
+   un brouillon ; une répartition ultérieure ne change pas les ZIP enregistrés.
+3. Sélectionnez une affectation et **Enregistrer le dossier de livraison**.
+   Choisissez un dossier sur l’ordinateur exécutant l’application, hors des vidéos
+   du projet. Le nouveau dossier contient **assignment.zip**. L’option **Inclure
+   les vidéos** copie aussi le travail et les références nécessaires dans des
+   sous-dossiers par racine. Laissez-la désactivée si les dossiers d’origine sont
+   accessibles au destinataire. Le téléchargement du ZIP reste disponible.
+   Vérifiez les fichiers manquants et les échecs ; réessayez dans un autre dossier
+   sans écraser une livraison.
+4. Le destinataire choisit **Ouvrir un paquet** dans le sélecteur de projet,
+   charge le ZIP et indique les dossiers vidéo pour créer un nouveau projet.
+   Les vidéos ne sont pas intégrées au ZIP. L’ouverture synchronise et analyse
+   uniquement les fichiers répertoriés, sans découvrir de fichiers supplémentaires.
+   Une synchronisation échouée peut être réessayée sans créer un autre projet.
+5. Le destinataire utilise **Télécharger la progression** dans **Affectations**
+   (également accessible depuis la vue d’ensemble). Le retour inclut tout l’état
+   enregistré dans le périmètre, même inchangé, inachevé ou vide. L’annotation
+   peut continuer. Les deux étapes restent modifiables localement ; les autres
+   travaux n’entrent pas dans le retour.
+6. Dans le projet d’origine, choisissez **Accepter le travail retourné**. Chargez
+   le retour et examinez l’aperçu avant d’accepter. **Utiliser l’import** remplace
+   l’état complet des vidéos Espèces ou tâches Distance différentes, y compris
+   les suppressions et corrections de l’administrateur. **Conserver l’existant**
+   préserve le travail local différent. Changer de fichier annule la confirmation ;
+   changer de règle actualise l’aperçu. Les modifications du projet imposent un
+   nouvel aperçu.
 
-Un tableau récapitulatif montre les caméras, vidéos et heures de chaque annotateur.
-Dans le même onglet **Affectations**, transmettez un travail Espèces ou Distance :
 
-1. Ouvrez **Préparer une affectation**, puis choisissez l’**Étape de l’affectation** et un destinataire enregistré :
-   - **Espèces** : choisissez sa répartition appliquée ou toutes les vidéos du projet.
-   - **Distance** : choisissez une **Espèce cible Distance** confirmée, puis
-     **Charger les vidéos Distance admissibles**. Toutes sont sélectionnées par
-     défaut ; retirez celles que vous ne souhaitez pas déléguer. Cette sélection
-     est indépendante de la répartition Espèces et comprend les tâches manuelles
-     ou liées à l’IA, même avec une vidéo manquante. Les vidéos de référence et
-     leur calibration sont collectées automatiquement.
-     Vous pouvez saisir deux heures locales caméra sur 24 heures : début inclus,
-     fin exclue, plages nocturnes possibles. Les tâches sans heure connue sont
-     exclues uniquement lorsqu’une plage est définie ; leur nombre est affiché.
-     Modifier l’espèce ou les heures efface la sélection : rechargez les vidéos.
-   Cliquez sur **Préparer une affectation**. La sélection et l’état enregistré
-   sont figés ; les modifications ultérieures ne changent pas ce paquet.
-2. Téléchargez l’affectation enregistrée. Pour livrer les vidéos, ouvrez la copie
-   des vidéos de l’affectation et choisissez un dossier sur l’ordinateur qui
-   exécute l’application, hors des dossiers vidéo du projet. Envoyez le dossier
-   créé avec le ZIP. Chaque racine possède son propre sous-dossier. Pour Distance,
-   le panneau indique les vidéos affectées + les références = le total des fichiers.
-   Les résultats de copie incluent les deux ; les références sont des dépendances,
-   pas du travail affecté supplémentaire. Vérifiez les fichiers absents et les échecs ; réessayez dans un autre dossier de sortie
-   plutôt que d’écraser une livraison existante.
-3. Le destinataire choisit **Ouvrir un paquet** dans le sélecteur de projet,
-   charge le ZIP et indique chaque sous-dossier racine pour créer un nouveau projet. Les
-   vidéos ne sont pas intégrées au ZIP. Sur le même ordinateur, les dossiers
-   vidéo d’origine peuvent être réutilisés. L’ouverture synchronise et analyse
-   automatiquement les vidéos de travail et de référence répertoriées, sans
-   découvrir les fichiers non répertoriés. En cas d’échec,
-   réessayez dans le même formulaire sans créer un autre projet.
-4. Après annotation, le destinataire utilise **Télécharger la progression** dans
-   **Affectations** (également accessible depuis la vue d'ensemble). Le retour contient l’état enregistré de chaque vidéo pour
-   l’étape déléguée et, pour Distance, son unique espèce cible, même inchangé,
-   inachevé ou vide. L’annotation peut continuer après un retour. Les deux étapes
-   restent modifiables localement ; les autres travaux n’entrent pas dans le retour.
-5. Dans le projet d’origine, chargez le retour dans **Prévisualiser et accepter le
-   retour**. Vérifiez l’étape, l’espèce cible, les nombres et les avertissements.
-   Par défaut, **Utiliser l’import** remplace l’état Espèces complet d’une vidéo ou
-   l’état complet d’une tâche Distance, y compris les suppressions et corrections
-   de l’administrateur. **Conserver l’existant** préserve les unités différentes
-   du projet d’origine ; leurs mises à jour retournées ne sont pas appliquées.
-   Changer de fichier annule la confirmation ; changer de règle actualise l’aperçu.
-   Des modifications du projet destinataire après l’aperçu imposent un nouvel aperçu.
+Les listes de vidéos permettent la recherche, le tri par colonne et les filtres
+pertinents par caméra, disponibilité, rôle ou action du retour. Les filtres
+Distance ne modifient pas la sélection hors filtre ; utilisez explicitement les
+boutons pour sélectionner ou désélectionner les vidéos correspondantes.
+
+**Retirer l’affectation** la masque et désactive les livraisons après confirmation,
+sans supprimer vidéos, annotations, projets de travail ou fichiers déjà enregistrés.
+Les retours futurs restent acceptables : l’instantané initial est conservé en
+interne pour validation et son espace dans la base n’est donc pas libéré.
 
 Pour Distance, un changement du contexte Espèces déclenche un avertissement sans
 bloquer les tâches du périmètre enregistré. L’acceptation ne restaure ni ne modifie

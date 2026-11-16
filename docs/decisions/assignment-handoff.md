@@ -123,6 +123,16 @@ assignment/
 
 Return exports contain annotation data, not another copy of the videos.
 
+## Remove from delivery
+
+The coordinator can remove a prepared assignment from the delivery list with
+confirmation. This disables further setup downloads and footage deliveries, not
+return acceptance. Videos, annotations, working projects and already-saved delivery
+files are untouched. Retain the original snapshot, frozen scope and identity maps
+internally so future and repeated returns still receive the same validation and
+acceptance safeguards. Removal is not revocation or physical erasure of that
+validation record, and does not free its stored snapshot.
+
 ## Partial progress and repeated returns
 
 Annotators may return partial progress and continue working. A return is a

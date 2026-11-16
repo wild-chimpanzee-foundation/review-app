@@ -45,57 +45,65 @@ Three confidence-threshold sliders (0.0–1.0) that control how AI predictions a
 
 Click **Save** to apply.
 
-### Distribution
+### Assignments
 
-Work allocation and handoff now live in **Data & assignments → Assignments**, not Settings. Expand the allocation section to split a project's videos across annotators. Saved assignments appear first; expand **Prepare assignment** to delegate new work.
+Work allocation and handoff live in **Data & assignments → Assignments**, not
+Settings. The home screen is a compact list of prepared assignments. Select a row
+to save a delivery folder, download its ZIP, or inspect its frozen scope. Technical
+identifiers and precise timestamps are under **Technical details**.
 
-1. Add the annotator names to distribute to.
-2. Assign cameras to annotators manually, or use **Auto-distribute** to spread cameras evenly.
-3. **Apply** to write the assignments; **Reset** clears them.
+1. Choose **Assign work** and the review stage. Add annotator names here if needed.
+   - **Species**: distribute work automatically or inspect and adjust recipients.
+     Existing allocations are loaded exactly, even when a camera is split between
+     people. Automatic distribution selects unlabelled videos with a camera.
+     Inspect the initial allocation to include annotated, missing or cameraless
+     videos manually. Preparation always uses the displayed allocation; there is
+     no all-project-videos shortcut or separate Apply allocation step.
+   - **Distance**: choose a confirmed target species and its recipient. Matching
+     videos load automatically and start selected. Inspect or narrow the work
+     through the row's options button. Add a row for another target species; each species produces a
+     separate assignment and working project. Manual and AI-linked tasks are
+     supported, independently of Species allocation. Calibration/reference
+     dependencies are collected automatically. Optional camera-local start/end
+     times use 24-hour format: start included, end excluded, overnight windows
+     supported. Unknown times are excluded only when a window is set. Changing
+     filters clears and automatically reloads selection.
+2. Choose **Review assignments**, check work grouped by annotator, then **Prepare
+   assignments**. This freezes each assignment. Species allocation is applied
+   during preparation. Rows are prepared individually: successful rows stay saved
+   if another fails, and retrying skips successful rows. Allocation edits before
+   preparation remain a draft; later redistribution does not change saved ZIPs.
+3. Select a prepared assignment and **Save delivery folder**. Choose a folder on
+   the computer running the app, outside the project footage folders. The new
+   folder contains **assignment.zip**. Optionally enable **Include footage** to
+   copy assigned and required reference videos alongside it, in separate media-root
+   subfolders. Leave footage off if the recipient can access the original folders.
+   Browser ZIP download remains available separately. Check missing/failed counts;
+   retry with a different output folder rather than overwrite an earlier delivery.
+4. The recipient uses **Open package** in the project picker, uploads the ZIP,
+   and locates each media-root subfolder to create a fresh project. Footage is not
+   embedded in the ZIP. Opening syncs/probes only listed work and reference footage,
+   without discovering unrelated files. A failed sync can be retried without
+   creating another project.
+5. The recipient uses **Download return progress** in **Assignments** (also linked
+   from Overview). Returns include all saved in-scope state, even untouched,
+   unfinished or empty work. Reviewing can continue. Both stages remain editable
+   locally; unrelated stages/species do not enter the return.
+6. In the origin project, choose **Accept returned work**. Upload the return and
+   inspect the policy-specific preview before accepting. **Use imported** replaces
+   whole differing Species video states or Distance task states, including
+   deletions and admin corrections. **Keep existing** leaves differing local work
+   untouched. Changing the file invalidates confirmation; changing policy
+   refreshes the preview. Destination changes require a new preview.
 
-A summary table shows each annotator's cameras, videos, and hours. In the same
-**Assignments** tab, hand off Species or Distance work:
+Video-detail lists support search, column sorting and relevant camera, footage,
+role or return-action filters. Distance inspection filters do not change selected
+work outside the filter; use **Select/Deselect matching videos** explicitly.
 
-1. Expand **Prepare assignment**, then choose the **Assignment stage** and a registered recipient:
-   - **Species**: choose their applied distribution or all project videos.
-   - **Distance**: choose one confirmed **Distance target species**, then **Load
-     eligible Distance videos**. All eligible videos start selected; remove any
-     you do not want to delegate. This selection is independent of Species
-     distribution, includes manual and AI-linked tasks, and can include missing
-     footage. Reference footage and calibration are collected automatically.
-     Optionally enter both camera-local start/end times (24-hour format). The
-     start is included, the end excluded, and overnight windows are supported.
-     Tasks with unknown times are excluded only when a window is set; their
-     count is shown. Changing the species/time filters clears the selection;
-     load it again before preparing.
-   Click **Prepare assignment**. Preparation freezes the selected work and saved
-   state; later edits do not change that package.
-2. **Download saved assignment**. For footage delivery, expand **Copy saved
-   assignment footage** and choose an output folder on the computer running the
-   app, outside the project footage folders. Send the generated folder and ZIP
-   together. Each media root has its own subfolder. For Distance, the copy panel
-   shows assigned videos + reference videos = total footage files. Copy results
-   count both; references are dependencies, not additional assigned work. Check missing/failed counts;
-   retry in a different output folder rather than overwriting an earlier delivery.
-3. The recipient uses **Open package** in the project picker to create a fresh
-   project, uploads the ZIP, and locates each media-root subfolder. Footage is not
-   embedded in the ZIP. On the same machine, the original footage can be reused.
-   Opening automatically syncs and probes listed work and reference footage,
-   without discovering unlisted files. If
-   that sync fails, retry it in the same form without creating another project.
-4. After annotating, the recipient uses **Download return progress** in **Assignments** (also linked from Overview).
-   Returns include every assigned video's saved state for the delegated stage
-   and, for Distance, its one target species—even untouched, unfinished, or empty
-   work. Annotation can continue after a return. Both review stages remain
-   editable locally; other stages/species do not enter that assignment return.
-5. In the origin project, upload the return under **Preview and accept returned
-   work**. Review the stage, target species, counts, and warnings before accepting.
-   The default **Use imported** replaces complete differing Species video states
-   or Distance task states, including deletions and admin corrections. Choose
-   **Keep existing** to leave differing origin work untouched; later annotator
-   updates to those units are not applied. Changing the file invalidates
-   confirmation; changing policy refreshes the preview. Destination changes after
-   preview require a new preview.
+**Remove assignment** hides it and disables further delivery after confirmation.
+It does not delete videos, annotations, working projects or files already saved.
+Future returns remain acceptable: the original snapshot is retained internally for
+validation, so removal does not free that snapshot's database storage.
 
 For Distance returns, changed Species context warns but does not prevent accepting
 saved-scope tasks. Acceptance does not restore or modify Species labels. Existing

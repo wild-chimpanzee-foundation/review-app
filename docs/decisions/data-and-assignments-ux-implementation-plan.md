@@ -1,6 +1,7 @@
 # Data & assignments UI implementation plan
 
-**Status:** UI implementation in place; operator walkthrough pending.
+**Status:** Unified assignment-workspace overhaul implemented; operator visual
+walkthrough pending.
 **Direction:** [Data, assignments, and results: UX rework](data-and-assignments-ux.md).
 **Scope:** Reorganize and simplify the existing UI. Preserve functionality and
 transfer contracts rather than build a new batch or transfer subsystem.
@@ -14,20 +15,32 @@ schema changes and new import policies are not required.
 **UI decision:** Operator selected prototype **Variant A — Three clear tabs**.
 Use Add data / Assignments / Export results as top-level tabs within the existing
 app shell, with a main content panel below. Saved assignments lead the Assignments
-tab; preparation/allocation are secondary. Results use a dataset list alongside
-its details and action, with optional controls collapsed. The sidebar-workspace
+tab; the follow-up below replaces the separate preparation/allocation sections.
+Results use a dataset list alongside its details and action, with optional controls
+collapsed. The sidebar-workspace
 and action-led alternatives were not selected. Prototype code was removed at the
 operator's request; implement this layout using production-quality existing UI.
 
-**Next action:** Operator check of `/data-assignments` in the actual app, especially
-Add data, saved assignment actions and the results dataset list. No UI smoke tests
-or browser automation were run, as requested. Remaining presentation adjustments
-should follow that feedback rather than expand backend scope.
+**Assignment feedback and agreed follow-up:** The initial accordion layout is still
+too crowded. Replace it with a compact saved-assignment list and detail panel,
+a primary **Assign work** flow, and a separate **Accept returned work** flow.
+Assign work combines stage selection, allocation to recipients, scope/count review,
+and preparation. Do not preserve a separate allocation screen or a save-allocation /
+choose-allocated-work / prepare sequence. Species uses the existing distribution
+controls; Distance groups matching videos by target species and recipient. Multiple
+rows may invoke existing preparation individually, without persistent batch state.
+Editable planning ends at preparation; saved assignments remain frozen.
+
+**Checkpoint:** `7c35ede` records the initial UI reorganization before this follow-up.
+The assignment overhaul is now implemented in the working tree. Focused NiceGUI
+user-simulation tests were run without launching a browser; no broad UI smoke suite
+or browser automation was run. Visual confirmation of the assignment layout,
+Add data and results remains the operator's next action.
 
 | Slice | Status | Completion gate |
 | --- | --- | --- |
 | S1 — Destination and results | Implemented; operator check pending | Main navigation reaches Data & assignments; existing exports have their own area rather than living in import screens. |
-| S2 — Assignments | Implemented; operator check pending | Saved assignments/actions lead the workspace; existing allocation, prepare, copy, return and acceptance remain usable. |
+| S2 — Assignments | Unified flow implemented; visual check pending | Compact saved list/details; unified assign-and-prepare flow; separate return acceptance; existing transfer safeguards preserved. |
 | S3 — Add data | Implemented; operator check pending | Existing imports are organized by intent, with clearer presentation and unchanged format-specific behavior. |
 | S4 — Cleanup and contextual entry points | Implemented; walkthrough pending | Superseded forms are removed, shortcuts reuse canonical flows, translations/help and focused UI regressions are updated. |
 
@@ -78,13 +91,15 @@ No new columns, dataset collector or shared filtering framework is needed.
 
 ## S2 — Clearer assignment workspace
 
-1. Lead with saved assignments and download/copy/return actions. Keep stage,
-   recipient, target species, scope/count and date visible using existing data.
-2. Put existing preparation and allocation controls in secondary sections. Keep
-   current single-assignment operations; persistent batch records and batch
-   history are not part of this slice.
-3. Simplify unnecessary selection steps using existing complete/all/allocated
-   defaults. The Distance selection already loads a matching set: keep it
+1. Lead with a compact saved-assignment list. Keep stage, recipient, target species,
+   scope/count and readable date visible; show download/copy and technical details
+   in a detail panel rather than repeated full-width blocks.
+2. Combine allocation and preparation in a focused **Assign work** flow. Reuse
+   Species distribution controls and Distance matching selection, with recipient
+   and count per row. Prepare through current single-assignment operations and
+   show individual outcomes; no persistent batch records or batch history.
+3. Simplify unnecessary selection steps using existing allocation/matching-set
+   defaults; do not expose an all-project-videos bypass. The Distance selection already loads a matching set: keep it
    selected by default and make inspection/narrowing secondary where safe.
    Do not build new eligibility rules or allocation storage to achieve this.
 4. Keep return acceptance distinct from preparation, with existing policy,
@@ -138,7 +153,9 @@ from automated NiceGUI tests.
 
 ## Implementation guardrails
 
-- No schema migrations or new persistent batch/allocation models are planned.
+- The agreed removal action adds only migration v27's nullable removal timestamp.
+  Retain the original snapshot and identity maps for future returns. No new
+  persistent batch/allocation models are planned.
 - No archive/CSV/TSV changes, new transfer policies or silent eligibility changes.
 - Preserve frozen assignment scope, identity, provenance and existing safeguards.
 - Prefer moving/reusing renderers, then extracting small repeated UI helpers.
@@ -148,7 +165,7 @@ from automated NiceGUI tests.
   applicable existing backend regressions, Ruff checks for changed Python files
   and `git diff --check`. Broaden validation only if integration risk warrants it.
 
-## Implementation checkpoint
+## Initial implementation checkpoint (`7c35ede`)
 
 - Added `app/pages/data_assignments/` with Variant A's three top-level NiceGUI
   tabs. Results use a dataset list and detail panel; imports retain their existing
@@ -181,3 +198,79 @@ from automated NiceGUI tests.
 - Validation also includes Ruff lint/format on changed Python files, module import
   verification and `git diff --check`. Visual/layout confirmation remains the
   operator's check, not an automated claim.
+
+## Unified assignment-workspace checkpoint (initial overhaul)
+
+- `app/pages/data_assignments/assignments.py` now renders the compact saved list
+  and responsive detail panel. Download, separate footage copy, saved-scope
+  inspection and collapsed technical details live in the selected assignment.
+  Working projects show Continue review / Return progress without coordinator forms.
+- `assignment_creation.py` combines editable allocation, scope review and
+  preparation in one focused flow. Species uses existing distribution and manual
+  group adjustment, preserving split-camera allocations and labelled/missing/
+  cameraless media in the initial draft. Automatic distribution retains its
+  existing unlabelled-camera eligibility, explicitly explained in the UI.
+  The all-project-videos alternative remains available.
+- `assignment_plan.py` keeps exact Species selections and immutable review
+  requests separate from controls. Allocation is applied during preparation,
+  including explicitly unallocated work; no separate Apply step is exposed.
+  These existing allocation writes and assignment preparation are not one atomic
+  transaction. A preparation error can leave allocation applied, but cannot
+  change an earlier saved assignment.
+- Distance rows combine target species, recipient, matching count and optional
+  narrowing/time filters. Selection reloads automatically, with revision checks
+  against stale responses. Each species produces an independent saved assignment.
+- Preparation records per-row success/failure in this UI session and retries only
+  unsuccessful rows. Successful single-row preparation opens delivery details.
+  No persistent batch state, schema migration, archive change or new algorithm.
+- `app/components/assignment_handoff.py` retains shared package opening and
+  footage delivery, and extracts existing return preview/accept into its own
+  focused screen. Existing replacement/removal warnings and stale-preview checks
+  remain intact. The old render entry delegates to the canonical workspace.
+- The only new provider read, `get_assignment_media(project_id, assignment_id)`,
+  describes frozen assigned/dependency footage and validates project ownership;
+  it does not recompute scope from live allocation.
+- English/French labels, user help and the manual round-trip guide reflect the flow.
+- Combined handoff/distribution regression run: **129 passed** across
+  `test_assignment_planning.py`, `test_assignment_handoff_ui.py`,
+  `test_assignment_distance.py`, `test_translations.py`,
+  `test_assignment_handoff.py`, `test_assignment_handoff_roundtrip.py`,
+  `test_assignment_delivery.py`, `test_distribution_bundle.py` and
+  `test_assignments_import_export.py`.
+- After the explicit-unallocation adjustment and added regression, the latest
+  focused run of planning, simulated-user handoff, Distance and translation tests
+  passed **54 tests**. Reused the earlier unaffected regression results rather
+  than repeating the broad run. Ruff lint/format and whitespace checks passed.
+  No full suite, broad UI smoke suite or browser automation run. Operator visual
+  confirmation, including narrow-screen layout, remains pending.
+
+## Operator-feedback follow-up
+
+- **Remove assignment** is confirmed removal from delivery, not revocation or
+  physical deletion. The nullable `removed_at` field (migration v27) hides the
+  origin assignment and blocks new setup downloads/copies. Original snapshots
+  and identity maps remain so future/repeated Species and Distance returns still
+  validate and accept. Existing annotations, projects, footage and exported files
+  are untouched. This deliberately does not free the retained snapshot's storage.
+- **Save delivery folder** uses the original assignment ZIP with an optional
+  footage checkbox, off by default. It creates one new folder containing
+  `assignment.zip` and, when requested, the same saved-scope footage/root layout.
+  Package formats are unchanged. Browser ZIP download remains secondary.
+- Removed the all-project-videos shortcut. Species preparation always uses the
+  displayed allocation; manual allocation retains access to annotated/missing/
+  cameraless work without inheriting review-queue exclusions.
+- Compact Distance rows expose species, annotator, count and options; video/time
+  controls stay hidden until requested. Review groups rows by annotator while
+  preparing separate per-species assignments and retaining per-row retry outcomes.
+- `components/assignment_video_table.py` provides sortable headings, search and
+  relevant camera/availability/role/action filters in Distance selection, saved
+  media and return-impact details. Filters only inspect; hidden selection is
+  retained, with explicit select/deselect-matching actions.
+- Focused workflow/translation checks: **58 passed**. Migration, schema parity
+  and legacy Distance upgrade checks: **31 passed**. Expanded handoff round-trip
+  and footage-delivery regression results were reused from the integration run.
+  The v22 schema fixture is deliberately retained because legacy upgrade tests
+  depend on its original shape; the populated-v26 removal-state upgrade is also
+  tested directly.
+- English/French help, glossary and handoff contract updated. No full suite,
+  broad UI smoke suite or browser automation run; visual confirmation is pending.

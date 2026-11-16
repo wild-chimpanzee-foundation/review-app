@@ -4,8 +4,8 @@ import re
 
 from nicegui import run, ui
 
-from review_app.app.state import get_active_project_id
-from review_app.app.translations import get_language, t
+from review_app.app.components.assignment_video_table import AssignmentVideoTable
+from review_app.app.translations import t
 from review_app.app.utils import (
     get_or_create_data_provider,
     switch_project,
@@ -13,7 +13,6 @@ from review_app.app.utils import (
     user_error_message,
 )
 from review_app.backend.annotation_package.archive import MAX_ARCHIVE_BYTES
-from review_app.backend.annotation_package.scope import AssignmentRequest
 
 
 def assignment_filename(direction, recipient, assignment_id):
@@ -180,399 +179,218 @@ def render_open_assignment(on_complete, *, show_upload=True):
     return uploaded
 
 
-def render_assignment_delivery(dp, binding, require_project):
-    """Each saved handout owns its output controls and result display."""
-    with ui.expansion(t("handoff_copy"), icon="folder_copy").classes("w-full"):
-        if binding["stage"] == "distance":
-            ui.label(t("handoff_media_summary", **binding)).classes("text-body2")
-        ui.label(t("handoff_copy_help")).classes("text-caption")
+def render_assignment_delivery(dp, project_id, binding, require_project):
+    """Save each selected assignment in its own server-side delivery folder."""
+    bindings = binding if isinstance(binding, list) else [binding]
+    label = t("assign_save_deliveries") if len(bindings) > 1 else t("assign_save_delivery")
+    with ui.dialog() as dialog, ui.card().classes("w-full max-w-2xl gap-3"):
+        ui.label(label).classes("text-h6")
+        ui.label(t("assign_delivery_help")).classes("text-body2 text-grey-7")
         output = ui.input(t("handoff_copy_output")).classes("w-full")
+        include = ui.checkbox(t("assign_include_footage"), value=False)
+        ui.label(t("assign_reuse_footage")).classes("text-caption text-grey-7")
+        for item in bindings:
+            if item["stage"] == "distance":
+                ui.label(t("handoff_media_summary", **item)).classes("text-caption")
         status = ui.label("").classes("text-body2 whitespace-pre-wrap")
 
-        async def copy():
-            copy_button.disable()
+        async def save():
+            save_button.disable()
+            close_button.disable()
+            output.disable()
+            include.disable()
+            with_footage = include.value
             try:
                 require_project()
-                result = await run.io_bound(
-                    dp.copy_assignment_footage, binding["id"], output.value
-                )
-                lines = [
-                    t(
-                        "handoff_copy_result",
-                        copied=result.copied_count,
-                        missing=len(result.missing_video_ids),
-                        failed=len(result.failures),
-                        path=result.path,
-                    )
-                ]
-                lines.extend(f"{root}: {path}" for root, path in result.media_roots.items())
-                lines.extend(f"{key}: {error}" for key, error in result.failures.items())
-                status.set_text("\n".join(lines))
+                lines = []
+                for item in bindings:
+                    require_project()
+                    try:
+                        result = await run.io_bound(
+                            dp.save_assignment_delivery,
+                            project_id,
+                            item["id"],
+                            output.value,
+                            include_footage=with_footage,
+                        )
+                        require_project()
+                        lines.append(t("assign_delivery_saved", path=result.path))
+                        if with_footage:
+                            lines.append(
+                                t(
+                                    "handoff_copy_result",
+                                    copied=result.copied_count,
+                                    missing=len(result.missing_video_ids),
+                                    failed=len(result.failures),
+                                    path=result.path,
+                                )
+                            )
+                            lines.extend(
+                                f"{root}: {path}" for root, path in result.media_roots.items()
+                            )
+                            lines.extend(
+                                f"{key}: {error}" for key, error in result.failures.items()
+                            )
+                    except Exception as exc:
+                        lines.append(f"{item['recipient']}: {_error_message(exc)}")
+                    status.set_text("\n".join(lines))
             except Exception as exc:
                 status.set_text(_error_message(exc))
             finally:
-                copy_button.enable()
+                save_button.enable()
+                close_button.enable()
+                output.enable()
+                include.enable()
 
-        copy_button = ui.button(t("handoff_copy_start"), on_click=copy)
+        with ui.row().classes("w-full justify-end gap-2"):
+            close_button = ui.button(t("close"), on_click=dialog.close).props("flat")
+            save_button = ui.button(label, on_click=save, icon="folder_zip").mark("save-delivery")
+    ui.button(label, icon="folder_zip", on_click=dialog.open).mark("open-delivery")
 
 
 def render_assignment_handoff(dp, project_id):
-    """Prepare/download, return progress, and policy-specific preview/accept."""
+    """Compatibility entry point for the canonical assignment workspace."""
+    from review_app.app.pages.data_assignments.assignments import render_assignments
 
-    def require_project():
-        if get_active_project_id() != project_id:
-            raise ValueError(t("handoff_project_changed"))
+    render_assignments(dp, project_id)
 
-    is_working = any(row["role"] == "working" for row in dp.list_assignments(project_id))
 
-    with ui.card().classes("w-full q-mb-lg"):
-        ui.label(t("data_saved_assignments")).classes("text-h6")
-        ui.label(
-            t("handoff_working_help" if is_working else "data_saved_assignments_help")
-        ).classes("text-body2 text-grey-6")
+def render_return_acceptance(dp, project_id, require_project):
+    """Focused return flow; preserve impact preview and atomic acceptance."""
+    ui.label(t("handoff_policy_help")).classes("text-body2")
+    raw = None
+    preview = None
+    revision = 0
+    busy = False
+    impact = ui.column().classes("w-full")
+    status = ui.label("").classes("text-body2")
 
-        @ui.refreshable
-        def saved_assignments():
-            bindings = dp.list_assignments(project_id)
-            if not bindings:
-                ui.label(t("data_no_assignments")).classes("text-grey-6")
-            for binding in bindings:
-                ui.separator().classes("q-my-sm")
-                ui.label(assignment_identity(binding)).classes("text-body1 font-medium")
-                ui.label(binding["created_at"]).classes("text-caption")
-
-                async def download(row=binding):
-                    try:
-                        require_project()
-                        if row["role"] == "working":
-                            raw = await run.io_bound(dp.export_assignment_return, project_id)
-                            filename = assignment_filename(
-                                "return", row["recipient"], row["assignment_id"]
-                            )
-                        else:
-                            raw = await run.io_bound(dp.export_assignment, row["id"])
-                            filename = assignment_filename(
-                                "assignment", row["recipient"], row["assignment_id"]
-                            )
-                        require_project()
-                        ui.download(raw, filename)
-                        if row["role"] == "working":
-                            ui.notify(t("data_return_downloaded"), type="positive")
-                    except Exception as exc:
-                        ui.notify(_error_message(exc), type="negative")
-
-                ui.button(
-                    t("handoff_return" if binding["role"] == "working" else "handoff_download"),
-                    on_click=download,
-                    icon="download",
-                )
-                if binding["role"] == "origin":
-                    render_assignment_delivery(dp, binding, require_project)
-                else:
-                    ui.button(
-                        t("data_continue_review"),
-                        icon="play_arrow",
-                        on_click=lambda stage=binding["stage"]: ui.navigate.to(
-                            "/distance-review" if stage == "distance" else "/review"
-                        ),
-                    ).props("outline")
-
-        saved_assignments()
-
-    with ui.expansion(t("handoff_prepare"), icon="inventory_2").classes(
-        "w-full q-mb-md"
-    ) as preparation:
-        preparation.set_visibility(not is_working)
-        ui.label(t("handoff_help")).classes("text-body2 text-grey-6")
-        stage = ui.select(
-            {"species": t("handoff_stage_species"), "distance": t("handoff_stage_distance")},
-            value="species",
-            label=t("handoff_stage"),
-        ).classes("w-full")
-        recipient = ui.select(dp.get_all_annotators(), label=t("handoff_recipient")).classes(
-            "w-full"
-        )
-        # Distribution below can register annotators without navigating away.
-        recipient.on("focus", lambda: recipient.set_options(dp.get_all_annotators()))
-        ui.label(t("handoff_recipient_help")).classes("text-caption")
-        scope = ui.select(
-            {"assigned": t("handoff_scope_assigned"), "all": t("handoff_scope_all")},
-            value="assigned",
-            label=t("handoff_scope"),
-        ).classes("w-full")
-
-        selection_revision = 0
-        loaded_filters = None
-        with ui.column().classes("w-full") as distance_fields:
-            ui.label(t("handoff_distance_help")).classes("text-caption")
-            target = ui.select(
-                dp.get_assignment_distance_species_options(project_id, get_language()),
-                label=t("handoff_target"),
-            ).classes("w-full")
-            with ui.expansion(t("data_advanced"), icon="tune").classes("w-full"):
-                with ui.row():
-                    start = ui.input(t("handoff_start"), placeholder="18:00")
-                    end = ui.input(t("handoff_end"), placeholder="06:00")
-                ui.label(t("handoff_time_help")).classes("text-caption")
-            selection_status = ui.label("").classes("text-body2")
-            with ui.expansion(t("handoff_distance_videos"), icon="list").classes("w-full"):
-                selected_videos = (
-                    ui.select({}, multiple=True, value=[], label=t("handoff_distance_videos"))
-                    .props("use-chips")
-                    .classes("w-full")
-                )
-
-            def filters():
-                return (
-                    target.value,
-                    (start.value or "").strip() or None,
-                    (end.value or "").strip() or None,
-                )
-
-            def clear_selection():
-                nonlocal loaded_filters, selection_revision
-                selection_revision += 1
-                loaded_filters = None
-                selected_videos.set_value([])
-                selected_videos.set_options({})
-                selection_status.set_text("")
-
-            async def load_selection():
-                nonlocal loaded_filters
-                clear_selection()
-                current, chosen = selection_revision, filters()
-                try:
-                    require_project()
-                    if not chosen[0]:
-                        raise ValueError(t("handoff_choose_target"))
-                    result = await run.io_bound(
-                        dp.preview_assignment_distance_selection,
-                        project_id,
-                        chosen[0],
-                        start_time=chosen[1],
-                        end_time=chosen[2],
-                    )
-                    if current != selection_revision:
-                        return
-                    options = {
-                        row["video_id"]: t(
-                            "handoff_distance_video",
-                            path=row["video_path"],
-                            time=row["recorded_start"] or t("handoff_unknown_time"),
-                            missing=t("handoff_missing_marker") if row["is_missing"] else "",
-                        )
-                        for row in result["videos"]
-                    }
-                    selected_videos.set_options(options)
-                    selected_videos.set_value(list(options))
-                    loaded_filters = chosen
-                    selection_status.set_text(
-                        t(
-                            "handoff_selection_result",
-                            count=len(options),
-                            unknown=result["unknown_time_count"],
-                        )
-                    )
-                except Exception as exc:
-                    if current == selection_revision:
-                        selection_status.set_text(_error_message(exc))
-
-            target.on(
-                "focus",
-                lambda: target.set_options(
-                    dp.get_assignment_distance_species_options(project_id, get_language())
-                ),
-            )
-            for field in (target, start, end):
-                field.on_value_change(clear_selection)
-            ui.button(t("handoff_load_videos"), on_click=load_selection, icon="search")
-        distance_fields.set_visibility(False)
-
-        async def prepare():
-            prepare_button.disable()
-            try:
-                require_project()
-                name = (recipient.value or "").strip()
-                chosen_stage, chosen_scope = stage.value, scope.value
-                chosen_filters = filters()
-                if chosen_stage == "distance":
-                    if loaded_filters != chosen_filters or not selected_videos.value:
-                        raise ValueError(t("handoff_select_distance"))
-                    request = AssignmentRequest(
-                        name, tuple(selected_videos.value), chosen_stage, *chosen_filters
-                    )
-                else:
-                    if chosen_scope == "assigned":
-                        ids = await run.io_bound(dp.get_assigned_video_ids, project_id, name)
-                    else:
-                        ids = await run.io_bound(dp.get_assignment_video_ids, project_id)
-                    request = AssignmentRequest(name, tuple(ids))
-                result = await run.io_bound(dp.prepare_assignment, project_id, request)
-                ui.notify(t("handoff_prepared", count=result.video_count), type="positive")
-                if result.missing_video_ids:
-                    ui.notify(
-                        t("handoff_missing", count=len(result.missing_video_ids)),
-                        type="warning",
-                        timeout=0,
-                    )
-                saved_assignments.refresh()
-            except Exception as exc:
-                ui.notify(_error_message(exc), type="negative")
-            finally:
-                prepare_button.enable()
-
-        prepare_button = ui.button(t("handoff_prepare"), on_click=prepare, icon="inventory_2")
-
-        def stage_changed():
-            scope.set_visibility(stage.value == "species")
-            distance_fields.set_visibility(stage.value == "distance")
-            clear_selection()
-
-        stage.on_value_change(stage_changed)
-
-    with ui.expansion(t("handoff_accept_title"), icon="move_to_inbox").classes(
-        "w-full q-mb-md"
-    ) as acceptance:
-        acceptance.set_visibility(not is_working)
-        ui.label(t("handoff_policy_help")).classes("text-body2")
-        raw = None
+    def invalidate():
+        nonlocal preview, revision
+        revision += 1
         preview = None
-        revision = 0
-        busy = False
-        impact = ui.column().classes("w-full")
-        status = ui.label("").classes("text-body2")
-
-        def invalidate():
-            nonlocal preview, revision
-            revision += 1
-            preview = None
-            impact.clear()
-            accept_button.disable()
-            status.set_text("")
-
-        async def uploaded(event):
-            nonlocal raw
-            raw = None
-            invalidate()
-            current = revision
-            try:
-                if event.file.size() > MAX_ARCHIVE_BYTES:
-                    raise ValueError(t("handoff_upload_limit"))
-                content = await event.file.read()
-                if current == revision:
-                    raw = content
-                    status.set_text(t("handoff_return_loaded"))
-            except Exception as exc:
-                if current == revision:
-                    status.set_text(_error_message(exc))
-
-        async def policy_changed():
-            invalidate()
-            if raw is not None:
-                await show_preview()
-
-        assignment_upload(uploaded, "handoff_return_upload")
-        policy = ui.select(
-            {"keep_existing": t("handoff_keep"), "use_imported": t("handoff_use")},
-            value="use_imported",
-            label=t("handoff_policy"),
-            on_change=policy_changed,
-        ).classes("w-full")
-
-        async def show_preview():
-            nonlocal preview
-            if raw is None or busy:
-                return
-            invalidate()
-            current = revision
-            try:
-                require_project()
-                result = await run.io_bound(
-                    dp.preview_assignment_return, project_id, raw, policy.value
-                )
-                if current != revision:
-                    return
-                preview = result
-                with impact:
-                    ui.label(
-                        t(
-                            "handoff_preview_scope",
-                            stage_label=assignment_stage_label(
-                                {"stage": result.stage, "target_species": result.target_species}
-                            ),
-                        )
-                    ).classes("text-body2")
-                    ui.label(t("handoff_totals", **result.totals)).classes("text-body1")
-                    if result.species_context_changed:
-                        ui.label(t("handoff_species_changed")).classes("text-warning")
-                    if result.reference_substitutions:
-                        ui.label(t("handoff_substitution_help")).classes("text-warning")
-                        for reference in result.reference_substitutions:
-                            ui.label(
-                                t(
-                                    "handoff_substitution",
-                                    path=reference["video_path"],
-                                    distance=reference["distance_m"],
-                                    returned=reference["returned_playback_ms"]
-                                    if reference["returned_playback_ms"] is not None
-                                    else reference["returned_offset_ms"],
-                                    existing=reference["existing_playback_ms"]
-                                    if reference["existing_playback_ms"] is not None
-                                    else reference["existing_offset_ms"],
-                                )
-                            ).classes("text-body2")
-                    if result.totals["unapplied"]:
-                        ui.label(t("handoff_keep_warning")).classes("text-warning")
-                    if result.totals["replaced"]:
-                        ui.label(t("handoff_replace_warning")).classes("text-warning")
-                    if result.totals["annotations_removed"]:
-                        ui.label(t("handoff_remove_warning")).classes("text-negative")
-                    rows = [
-                        {
-                            "video": unit["video_path"],
-                            "action": t(f"handoff_action_{unit['action']}"),
-                            "before": sum(unit["existing"].values()),
-                            "after": sum(unit["returned"].values()),
-                            "removed": sum(unit["removed"].values()),
-                        }
-                        for unit in result.units
-                    ]
-                    with ui.expansion(t("handoff_details"), icon="table_rows").classes("w-full"):
-                        ui.table(
-                            columns=[
-                                {
-                                    "name": key,
-                                    "label": t(f"handoff_column_{key}"),
-                                    "field": key,
-                                    "align": "left",
-                                }
-                                for key in ("video", "action", "before", "after", "removed")
-                            ],
-                            rows=rows,
-                            row_key="video",
-                            pagination=10,
-                        ).classes("w-full")
-                accept_button.set_enabled(bool(result.totals["added"] + result.totals["replaced"]))
-            except Exception as exc:
-                if current == revision:
-                    status.set_text(_error_message(exc))
-
-        async def accept():
-            nonlocal busy
-            if preview is None or raw is None or busy:
-                return
-            busy = True
-            payload, chosen, token = raw, policy.value, preview.token
-            invalidate()
-            try:
-                require_project()
-                await run.io_bound(dp.accept_assignment_return, project_id, payload, chosen, token)
-                status.set_text(t("handoff_accepted"))
-            except Exception as exc:
-                status.set_text(_error_message(exc))
-            finally:
-                busy = False
-
-        ui.button(t("handoff_preview"), on_click=show_preview, icon="preview")
-        accept_button = ui.button(t("handoff_accept"), on_click=accept, icon="check")
+        impact.clear()
         accept_button.disable()
+        status.set_text("")
+
+    async def uploaded(event):
+        nonlocal raw
+        raw = None
+        invalidate()
+        current = revision
+        try:
+            if event.file.size() > MAX_ARCHIVE_BYTES:
+                raise ValueError(t("handoff_upload_limit"))
+            content = await event.file.read()
+            if current == revision:
+                raw = content
+                status.set_text(t("handoff_return_loaded"))
+        except Exception as exc:
+            if current == revision:
+                status.set_text(_error_message(exc))
+
+    async def policy_changed():
+        invalidate()
+        if raw is not None:
+            await show_preview()
+
+    assignment_upload(uploaded, "handoff_return_upload")
+    policy = ui.select(
+        {"keep_existing": t("handoff_keep"), "use_imported": t("handoff_use")},
+        value="use_imported",
+        label=t("handoff_policy"),
+        on_change=policy_changed,
+    ).classes("w-full")
+
+    async def show_preview():
+        nonlocal preview
+        if raw is None or busy:
+            return
+        invalidate()
+        current = revision
+        try:
+            require_project()
+            result = await run.io_bound(
+                dp.preview_assignment_return, project_id, raw, policy.value
+            )
+            if current != revision:
+                return
+            preview = result
+            with impact:
+                ui.label(
+                    t(
+                        "handoff_preview_scope",
+                        stage_label=assignment_stage_label(
+                            {"stage": result.stage, "target_species": result.target_species}
+                        ),
+                    )
+                ).classes("text-body2")
+                ui.label(t("handoff_totals", **result.totals)).classes("text-body1")
+                if result.species_context_changed:
+                    ui.label(t("handoff_species_changed")).classes("text-warning")
+                if result.reference_substitutions:
+                    ui.label(t("handoff_substitution_help")).classes("text-warning")
+                    for reference in result.reference_substitutions:
+                        ui.label(
+                            t(
+                                "handoff_substitution",
+                                path=reference["video_path"],
+                                distance=reference["distance_m"],
+                                returned=reference["returned_playback_ms"]
+                                if reference["returned_playback_ms"] is not None
+                                else reference["returned_offset_ms"],
+                                existing=reference["existing_playback_ms"]
+                                if reference["existing_playback_ms"] is not None
+                                else reference["existing_offset_ms"],
+                            )
+                        ).classes("text-body2")
+                if result.totals["unapplied"]:
+                    ui.label(t("handoff_keep_warning")).classes("text-warning")
+                if result.totals["replaced"]:
+                    ui.label(t("handoff_replace_warning")).classes("text-warning")
+                if result.totals["annotations_removed"]:
+                    ui.label(t("handoff_remove_warning")).classes("text-negative")
+                rows = [
+                    {
+                        "video": unit["video_path"],
+                        "action": t(f"handoff_action_{unit['action']}"),
+                        "before": sum(unit["existing"].values()),
+                        "after": sum(unit["returned"].values()),
+                        "removed": sum(unit["removed"].values()),
+                    }
+                    for unit in result.units
+                ]
+                with ui.expansion(t("handoff_details"), icon="table_rows").classes("w-full"):
+                    table = AssignmentVideoTable(
+                        [
+                            (key, t(f"handoff_column_{key}"))
+                            for key in ("video", "action", "before", "after", "removed")
+                        ],
+                        filters=[("action", t("handoff_column_action"))],
+                        marker="assignment-return-videos",
+                    )
+                    table.set_rows([{**row, "id": row["video"]} for row in rows])
+            accept_button.set_enabled(bool(result.totals["added"] + result.totals["replaced"]))
+        except Exception as exc:
+            if current == revision:
+                status.set_text(_error_message(exc))
+
+    async def accept():
+        nonlocal busy
+        if preview is None or raw is None or busy:
+            return
+        busy = True
+        payload, chosen, token = raw, policy.value, preview.token
+        invalidate()
+        try:
+            require_project()
+            await run.io_bound(dp.accept_assignment_return, project_id, payload, chosen, token)
+            status.set_text(t("handoff_accepted"))
+        except Exception as exc:
+            status.set_text(_error_message(exc))
+        finally:
+            busy = False
+
+    ui.button(t("handoff_preview"), on_click=show_preview, icon="preview")
+    accept_button = ui.button(t("handoff_accept"), on_click=accept, icon="check")
+    accept_button.disable()

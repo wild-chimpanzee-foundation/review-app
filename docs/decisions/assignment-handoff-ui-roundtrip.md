@@ -1,7 +1,7 @@
 # Try a Species or Distance assignment round trip
 
 Species and Distance handoff and saved-assignment footage copying are available.
-Distribution delivers assignments only through saved handoffs; the old
+The Assignments workspace delivers work only through saved handoffs; the old
 live-distribution bundle/copy controls were removed.
 Legacy CSV batch import remains independent and is not an assignment return.
 Legacy setup import is still available when creating a project.
@@ -20,41 +20,56 @@ with the current code. Use a small test project or a copy of your real project:
 
 ## 1. Prepare in the origin project
 
-1. Open **Distribution** and find **Assignment handoff**. Choose **Species** or
-   **Distance** under **Assignment stage**.
-2. Select a registered recipient, for example `alice`. If needed, add the
-   annotator in Work Distribution below first.
-3. Choose the work:
-   - **Species**: for a quick smoke test, choose **All videos in this project**,
-     ideally in a small test project. This includes labeled and known-missing
-     videos. Alternatively, apply the normal distribution below first, then
-     choose **Applied distribution for this recipient**. Unsaved distribution
-     edits do not affect the prepared package.
-   - **Distance**: confirm the target species in Species Review first. Choose
-     **Distance target species**, then **Load eligible Distance videos** and
-     adjust the selected videos. No Species distribution is required. AI-linked
-     and manual tasks can be selected together. Optionally set both camera-local
-     start/end times: start included, end excluded, overnight windows supported.
-     Unknown times are excluded and counted only when a window is set. Changing
-     filters clears selection and requires reloading. Include a deployment with
-     prepared calibration/reference footage to exercise dependency delivery.
-4. Click **Prepare assignment**, then **Download saved assignment**.
+1. Open **Data & assignments → Assignments** and choose **Assign work**.
+   Select **Species** or **Distance** under **Assignment stage**. Add annotator
+   names here if necessary.
+2. Choose who reviews which work:
+   - **Species**: distribute automatically or inspect and adjust the allocation.
+     To include labelled, missing or cameraless videos, inspect and adjust the
+     initial allocation manually. Automatic distribution uses unlabelled videos
+     with cameras. There is no all-project shortcut or separate Apply step.
+   - **Distance**: choose a confirmed target species and recipient. Matching
+     videos load automatically and start selected. The row's options button
+     exposes sortable/searchable video details, camera/footage filters and time controls. Add a row for another target species and recipient; each species
+     produces its own assignment. No Species distribution is required. AI-linked
+     and manual tasks can be selected together. Optional camera-local start/end
+     times retain their existing boundary/unknown-time rules. Changing filters
+     clears and automatically reloads the selection.
+3. Choose **Review assignments**, inspect work grouped by annotator, then **Prepare
+   assignments**. Rows are prepared individually; successful rows remain saved
+   if another fails. Retrying skips successes. Species allocation is applied
+   during preparation.
+4. Select a saved assignment to see its details and **Download saved assignment**.
+   For a single new assignment, details open automatically. UUIDs and precise
+   timestamps are under **Technical details**, not in the compact home list.
    Setup and return ZIP filenames include the recipient's name and assignment UUID.
-5. Keep track of this origin project's name. Preparing another package creates
-   another assignment; redownloading an existing one keeps its original snapshot.
+5. Keep track of this origin project's name. Preparing again creates a new
+   assignment; redownloading an existing assignment keeps its original snapshot.
+   Changing allocation must not change a saved assignment.
 
 Footage is not inside the ZIP. For same-machine testing, keep the videos where
 they are: both projects can point at the same footage folders.
 
-To test delivery, expand **Copy saved assignment footage** under the saved
-assignment. Enter an output folder on the machine running the app, outside all
-project footage folders, and click **Copy footage**. Check copied/missing/failed
-counts and the displayed root-folder mapping. Send the generated
-`assignment-<UUID>` folder together with the downloaded ZIP to the recipient.
+To test delivery, choose **Save delivery folder** under the saved assignment.
+Enter an output folder on the machine running the app, outside project footage.
+The new `assignment-<UUID>` folder contains `assignment.zip`. Enable **Include
+footage** to also copy the saved work and dependency files into that folder.
+Without footage, the recipient locates the original folders when opening the ZIP.
+Check copied/missing/failed counts and the displayed root-folder mapping. Send the
+generated folder to the recipient.
 Use each root-ID subfolder when locating footage below. If copying is partial,
 inspect the errors and retry with a different output folder: existing delivery
 folders are deliberately never overwritten. Try a multi-root project with the
 same relative filename in two roots and verify both copies remain separate.
+
+Video tables support text search and sortable column headings. Distance filters
+only inspect the list; they do not silently deselect hidden videos. Use the
+Select/Deselect matching videos actions to change selection explicitly.
+
+To test removal, first download/open an assignment, then **Remove assignment** in
+the origin details and confirm. It disappears and further delivery is blocked.
+Existing files and work remain, and a return from that working project must still
+preview and accept normally, including repeated returns.
 
 ## 2. Open in a fresh working project
 
@@ -88,8 +103,9 @@ same relative filename in two roots and verify both copies remain separate.
    For Distance, select the target species normally, verify timing, edit/confirm
    a sample and check carried AI evidence and reference footage. Both stages
    remain editable; unrelated local work does not enter the assignment return.
-2. Open **Distribution**. The saved binding shows the stage, target species (for
-   Distance), recipient, assignment UUID, and video count.
+2. Open **Assignments**. The working assignment shows its stage, target species
+   (for Distance), recipient and video count. Coordinator preparation and return
+   acceptance actions are not shown; ordinary annotation remains unrestricted.
 3. Click **Download return progress** to save **return-….zip**.
 
 All assigned saved states are returned, including untouched, unfinished, and
@@ -100,7 +116,7 @@ species' tasks. You can keep annotating and download another return later.
 ## 4. Preview and accept in the origin project
 
 1. Switch back to the **origin project** using the project picker.
-2. Open **Distribution → Preview and accept returned work**.
+2. Open **Assignments → Accept returned work**.
 3. Upload **return-….zip**.
 4. Leave the default **Use imported** selected and click **Preview return**.
    Check the returned stage and target species. New work is added; identical

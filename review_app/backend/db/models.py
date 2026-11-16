@@ -285,6 +285,8 @@ class HandoffAssignment(Base):
     target_species: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     scope: Mapped[dict] = mapped_column(JSON)
+    # Removal hides delivery, but retains validation context for future returns.
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime)
     setup_archive: Mapped[bytes] = mapped_column(LargeBinary)
 
 

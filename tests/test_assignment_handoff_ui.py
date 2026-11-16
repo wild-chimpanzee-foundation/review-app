@@ -1,5 +1,8 @@
 """Interact with the real assignment UI and database, without launching a browser."""
 
+from io import BytesIO
+from zipfile import ZipFile
+
 import pytest
 from nicegui import app, ui
 from nicegui.elements.upload_files import SmallFileUpload
@@ -9,6 +12,7 @@ from review_app.app.components.assignment_handoff import (
     render_assignment_handoff,
     render_open_assignment,
 )
+from review_app.app.pages.data_assignments.assignment_plan import apply_species_request
 from review_app.app.pages.data_assignments.assignments import render_assignments
 from review_app.app.pages.data_assignments.legacy_import import render_legacy_annotations_import
 from review_app.app.state import get_active_project_id, set_data_provider
@@ -42,6 +46,9 @@ def button(user, key):
 
 
 async def upload(user, raw):
+    if not any(isinstance(e, ui.upload) for e in user.client.elements.values()):
+        user.find(t("assign_accept"), kind=ui.button).click()
+        await user.should_see(t("handoff_return_upload"))
     with user:
         await upload_element(user).handle_uploads(
             [SmallFileUpload("assignment.zip", "application/zip", raw)]
@@ -57,10 +64,6 @@ def handoff_ui(provider_with_project):
     def admin():
         app.storage.user["active_project_id"] = project.id
         render_assignment_handoff(dp, project.id)
-        # Exercise the existing operations with their secondary sections expanded.
-        for element in list(ui.context.client.elements.values()):
-            if isinstance(element, ui.expansion):
-                element.set_value(True)
 
     @ui.page("/handoff-distribution")
     def distribution():
@@ -96,9 +99,13 @@ async def test_distribution_uses_saved_delivery_and_keeps_independent_csv_import
     dp.update_manual_review(video_id, [], active_project_id=project.id)
     saved = dp.prepare_assignment(project.id, AssignmentRequest("alice", (video_id,)))
     await user.open("/handoff-distribution")
+    await user.should_see(t("assign_title"))
+    await user.should_not_see(t("handoff_download"))
+    await user.should_not_see(t("distribution_title"))
+    table = next(iter(user.find(ui.table).elements))
+    user.find(ui.table).trigger("rowClick", [None, table.rows[0], 0])
     await user.should_see(t("handoff_download"))
-    await user.should_see(t("handoff_copy"))
-    await user.should_see(t("distribution_title"))
+    await user.should_see(t("assign_save_delivery"))
     await user.should_not_see(t("batch_import_btn"))
     texts = {getattr(e, "text", None) for e in user.client.elements.values()}
     assert t("bundle_download_all_btn") not in texts
@@ -117,21 +124,155 @@ async def test_distribution_uses_saved_delivery_and_keeps_independent_csv_import
     assert dp.list_assignments(project.id)[0]["id"] == saved.id
 
 
-async def test_saved_assignment_copy_control(user: User, handoff_ui, tmp_path):
+async def test_remove_assignment_requires_confirmation_and_keeps_return_acceptance(
+    user: User, handoff_ui
+):
+    dp, project, root = handoff_ui
+    origin_id = dp.get_assignment_video_ids(project.id)[0]
+    saved = dp.prepare_assignment(project.id, AssignmentRequest("alice", (origin_id,)))
+    opened = dp.open_assignment(dp.export_assignment(saved.id), "Working", {root.id: root.path})
+    local_id = dp.get_assignment_video_ids(opened.project_id)[0]
+    dp.update_manual_review(
+        local_id, [{"species": "deer", "count": 3}], active_project_id=opened.project_id
+    )
+    returned = dp.export_assignment_return(opened.project_id)
+    await user.open("/handoff-admin")
+    table = next(iter(user.find(ui.table).elements))
+    user.find(ui.table).trigger("rowClick", [None, table.rows[0], 0])
+    await user.should_see(marker="remove-assignment")
+    user.find(marker="remove-assignment").click()
+    await user.should_see(t("assign_remove_help"))
+    assert dp.list_assignments(project.id)[0]["id"] == saved.id
+    user.find(marker="confirm-remove-assignment").click()
+    await user.should_see(t("assign_removed"))
+    await user.should_see(t("data_no_assignments"))
+    assert not dp.list_assignments(project.id)
+    await upload(user, returned)
+    user.find(t("handoff_preview"), kind=ui.button).click()
+    await user.should_see(
+        t("handoff_totals", added=1, unchanged=0, replaced=0, unapplied=0, annotations_removed=0)
+    )
+    user.find(t("handoff_accept"), kind=ui.button).click()
+    await user.should_see(t("handoff_accepted"))
+    assert dp.get_video_detail(origin_id)["manual_selections"][0]["count"] == 3
+
+
+async def test_unified_allocation_prepares_recipients_and_retries_only_failures(
+    user: User, handoff_ui, monkeypatch
+):
+    dp, project, _ = handoff_ui
+    ids = dp.get_assignment_video_ids(project.id)
+    for name, video_id in zip(("alice", "bob"), ids, strict=True):
+        dp.add_annotator(name)
+        apply_species_request(dp, project.id, AssignmentRequest(name, (video_id,)))
+    original = dp.prepare_assignment
+    calls = []
+
+    def prepare(project_id, request):
+        calls.append(request.recipient)
+        if request.recipient == "bob" and calls.count("bob") == 1:
+            raise ValueError("Temporary preparation failure")
+        return original(project_id, request)
+
+    monkeypatch.setattr(dp, "prepare_assignment", prepare)
+    await user.open("/handoff-admin")
+    user.find(t("assign_title"), kind=ui.button).click()
+    await user.should_see(t("assign_recipient_count", name="alice", count=1))
+    await user.should_not_see(t("distribution_apply_btn"))
+    await user.should_not_see(t("handoff_prepare"), kind=ui.button)
+    assert not dp.list_assignments(project.id)
+    user.find(t("assign_review"), kind=ui.button).click()
+    await user.should_see(t("assign_freeze_help"))
+    user.find(t("assign_prepare"), kind=ui.button).click().click()
+    await user.should_see("Temporary preparation failure")
+    await user.should_see(t("assign_view"))
+    assert calls == ["alice", "bob"]
+    assert len(dp.list_assignments(project.id)) == 1
+    user.find(t("assign_prepare"), kind=ui.button).click()
+    await user.should_not_see("Temporary preparation failure")
+    assert calls == ["alice", "bob", "bob"]
+    assert len(dp.list_assignments(project.id)) == 2
+    assert not button(user, "assign_prepare").enabled
+    # Draft/allocation changes cannot change either saved handoff.
+    snapshots = {
+        row["id"]: dp.export_assignment(row["id"]) for row in dp.list_assignments(project.id)
+    }
+    apply_species_request(dp, project.id, AssignmentRequest("alice", tuple(ids)))
+    assert all(dp.export_assignment(key) == raw for key, raw in snapshots.items())
+
+
+async def test_new_recipient_can_be_added_without_leaving_creation(user: User, handoff_ui):
+    dp, project, _ = handoff_ui
+    await user.open("/handoff-admin")
+    user.find(t("assign_title"), kind=ui.button).click()
+    await user.should_see(t("distribution_add_annotator"))
+    user.find(t("distribution_annotator_placeholder"), kind=ui.input).type("Élodie")
+    user.find(t("distribution_add_annotator"), kind=ui.button).click()
+    await user.should_see(kind=ui.select, content="Élodie")
+    assert "Élodie" in dp.get_all_annotators()
+    user.find(t("distribution_auto_btn"), kind=ui.button).click()
+    await user.should_see(t("assign_recipient_count", name="Élodie", count=2))
+    assert not dp.get_assigned_video_ids(project.id, "Élodie")  # Still only a draft.
+    user.find(t("assign_review"), kind=ui.button).click()
+    await user.should_see(t("assign_freeze_help"))
+    user.find(t("assign_prepare"), kind=ui.button).click()
+    await user.should_see(t("handoff_download"))
+    assert len(dp.get_assigned_video_ids(project.id, "Élodie")) == 2
+    saved = dp.list_assignments(project.id)[0]
+    technical = next(iter(user.find(t("assign_technical"), kind=ui.expansion).elements))
+    assert not technical.value
+    table = next(iter(user.find(ui.table).elements))
+    assert saved["assignment_id"] not in str(table.rows)
+    assert saved["created_at"] not in str(table.rows)
+    with user:
+        next(iter(user.find(t("assign_saved_scope"), kind=ui.expansion).elements)).set_value(True)
+    await user.should_see(marker="assignment-media")
+    media_table = next(iter(user.find(marker="assignment-media").elements))
+    assert len(media_table.rows) == 2
+    assert {row["role"] for row in media_table.rows} == {t("assign_work_media")}
+
+
+async def test_save_delivery_defaults_to_zip_only(user: User, handoff_ui, tmp_path):
     dp, project, _ = handoff_ui
     saved = dp.prepare_assignment(
         project.id, AssignmentRequest("alice", tuple(dp.get_assignment_video_ids(project.id)))
     )
     await user.open("/handoff-admin")
-    with user:
-        expansion = next(iter(user.find(t("handoff_copy"), kind=ui.expansion).elements))
-        expansion.set_value(True)
+    table = next(iter(user.find(ui.table).elements))
+    user.find(ui.table).trigger("rowClick", [None, table.rows[0], 0])
+    await user.should_see(marker="open-delivery")
+    user.find(marker="open-delivery").click()
+    include = next(iter(user.find(t("assign_include_footage"), kind=ui.checkbox).elements))
+    assert not include.value
     user.find(t("handoff_copy_output")).type(str(tmp_path / "delivery"))
-    user.find(t("handoff_copy_start"), kind=ui.button).click()
+    user.find(marker="save-delivery").click()
+    path = tmp_path / "delivery" / f"assignment-{saved.assignment_id}"
+    await user.should_see(t("assign_delivery_saved", path=str(path)))
+    assert (path / "assignment.zip").read_bytes() == dp.export_assignment(saved.id)
+    assert not list(path.rglob("*.mp4"))
+
+
+async def test_saved_assignment_delivery_control(user: User, handoff_ui, tmp_path):
+    dp, project, _ = handoff_ui
+    saved = dp.prepare_assignment(
+        project.id, AssignmentRequest("alice", tuple(dp.get_assignment_video_ids(project.id)))
+    )
+    await user.open("/handoff-admin")
+    table = next(iter(user.find(ui.table).elements))
+    user.find(ui.table).trigger("rowClick", [None, table.rows[0], 0])
+    await user.should_see(marker="open-delivery")
+    user.find(marker="open-delivery").click()
+    with user:
+        next(iter(user.find(t("assign_include_footage"), kind=ui.checkbox).elements)).set_value(
+            True
+        )
+    user.find(t("handoff_copy_output")).type(str(tmp_path / "delivery"))
+    user.find(marker="save-delivery").click()
     path = tmp_path / "delivery" / f"assignment-{saved.assignment_id}"
     await user.should_see(t("handoff_copy_result", copied=2, missing=0, failed=0, path=str(path)))
     assert len(list(path.rglob("*.mp4"))) == 2
-    assert button(user, "handoff_copy_start").enabled
+    assert next(iter(user.find(marker="save-delivery").elements)).enabled
+    assert (path / "assignment.zip").read_bytes() == dp.export_assignment(saved.id)
 
 
 async def test_species_roundtrip_through_prepare_open_return_preview_accept(
@@ -148,17 +289,23 @@ async def test_species_roundtrip_through_prepare_open_return_preview_accept(
         return original_download(self, src, filename, media_type)
 
     monkeypatch.setattr(download_type, "__call__", capture_download)
-    # 'All videos' must not inherit the Review queue's missing-footage filter.
+    # Manual allocation must not inherit the Review queue's missing-footage filter.
     with dp.Session.begin() as session:
         session.query(Video).filter_by(project_id=project.id).first().is_missing = True
     assert len(dp.get_video_queue({}, active_project_id=project.id)) == 1
     await user.open("/handoff-admin")
+    user.find(t("assign_title"), kind=ui.button).click()
+    await user.should_see(t("assign_adjust"))
+    await user.should_not_see(t("handoff_scope_all"))
     with user:
+        next(iter(user.find(t("assign_adjust"), kind=ui.expansion).elements)).set_value(True)
         recipient = next(iter(user.find(t("handoff_recipient"), kind=ui.select).elements))
         assert "alice" in recipient.options
         recipient.set_value("alice")
-        next(iter(user.find(t("handoff_scope"), kind=ui.select).elements)).set_value("all")
-    user.find(t("handoff_prepare"), kind=ui.button).click()
+    await user.should_see(t("assign_recipient_count", name="alice", count=2))
+    user.find(t("assign_review"), kind=ui.button).click()
+    await user.should_see(t("assign_freeze_help"))
+    user.find(t("assign_prepare"), kind=ui.button).click()
     await user.should_see(t("handoff_prepared", count=2))
     assert len(dp.list_assignments(project.id)) == 1
     user.find(t("handoff_download"), kind=ui.button).click()
@@ -199,6 +346,8 @@ async def test_species_roundtrip_through_prepare_open_return_preview_accept(
         origin_id, [{"species": "fox", "count": 9}], active_project_id=project.id
     )
     await user.open("/handoff-admin")
+    user.find(t("assign_accept"), kind=ui.button).click()
+    await user.should_see(t("handoff_return_upload"))
     assert not button(user, "handoff_accept").enabled
     await upload(user, returned)
     await user.should_see(t("handoff_return_loaded"))
@@ -286,11 +435,67 @@ async def test_missing_footage_can_be_corrected_before_creating_project(
         )
     await user.should_not_see(t("handoff_open_missing"))
     user.find(t("handoff_open"), kind=ui.button).click()
-    await user.should_see("Working project opened")
+    await user.should_see("Working project opened", retries=10)
     with user:
         working = get_active_project_id()
     assert working != project.id and dp.get_project_video_count(working) == 2
     assert len(dp.list_projects()) == 2
+
+
+async def test_bulk_assignment_download_delivery_and_removal(user: User, handoff_ui, tmp_path):
+    dp, project, _ = handoff_ui
+    ids = dp.get_assignment_video_ids(project.id)
+    saved = [
+        dp.prepare_assignment(project.id, AssignmentRequest(name, (ids[0],)))
+        for name in ("alice", "bob", "unselected")
+    ]
+    await user.open("/handoff-admin")
+    table = next(iter(user.find(ui.table).elements))
+    assert table.selection == "multiple"
+    selected = [row for row in table.rows if row["id"] in {item.id for item in saved[:2]}]
+    user.find(ui.table).trigger(
+        "selection", {"added": True, "rows": selected, "keys": [row["id"] for row in selected]}
+    )
+    await user.should_see(t("assign_selected_count", count=2))
+    assert {row["id"] for row in table.selected} == {item.id for item in saved[:2]}
+    user.find(marker="download-selected-assignments").click()
+    download = await user.download.next()
+    with ZipFile(BytesIO(download.content)) as bundle:
+        assert len(bundle.namelist()) == 2
+        for item, name in zip(saved[:2], ("alice", "bob"), strict=True):
+            filename = assignment_filename("assignment", name, item.assignment_id)
+            assert bundle.read(filename) == dp.export_assignment(item.id)
+
+    user.find(marker="open-delivery").click()
+    user.find(t("handoff_copy_output")).type(str(tmp_path))
+    user.find(marker="save-delivery").click()
+    for item in saved[:2]:
+        path = tmp_path / f"assignment-{item.assignment_id}"
+        await user.should_see(t("assign_delivery_saved", path=str(path)))
+        assert (path / "assignment.zip").read_bytes() == dp.export_assignment(item.id)
+    assert not (tmp_path / f"assignment-{saved[2].assignment_id}").exists()
+    user.find(t("close"), kind=ui.button).click()
+    user.find(marker="remove-selected-assignments").click()
+    await user.should_see(t("assign_remove_selected_title", count=2))
+    assert len(dp.list_assignments(project.id)) == 3
+    user.find(marker="confirm-remove-selected-assignments").click()
+    await user.should_not_see(marker="assignment-bulk-actions")
+    assert [row["id"] for row in dp.list_assignments(project.id)] == [saved[2].id]
+
+
+async def test_bulk_selection_can_be_cleared(user: User, handoff_ui):
+    dp, project, _ = handoff_ui
+    ids = dp.get_assignment_video_ids(project.id)
+    for name in ("alice", "bob"):
+        dp.prepare_assignment(project.id, AssignmentRequest(name, (ids[0],)))
+    await user.open("/handoff-admin")
+    table = next(iter(user.find(ui.table).elements))
+    keys = [row["id"] for row in table.rows]
+    user.find(ui.table).trigger("selection", {"added": True, "rows": table.rows, "keys": keys})
+    await user.should_see(marker="assignment-bulk-actions")
+    user.find(ui.table).trigger("selection", {"added": False, "rows": table.rows, "keys": keys})
+    await user.should_not_see(marker="assignment-bulk-actions")
+    assert not table.selected
 
 
 async def test_open_with_missing_footage_requires_explicit_confirmation(

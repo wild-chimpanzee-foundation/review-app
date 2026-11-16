@@ -1,242 +1,315 @@
-"""Assignment workspace and existing work-allocation controls."""
+"""Compact assignment workspace with focused creation and return-acceptance flows."""
 
-from __future__ import annotations
+from datetime import datetime
 
 from nicegui import run, ui
 
-from review_app.app.translations import t
+from review_app.app.components.assignment_handoff import (
+    _error_message,
+    assignment_filename,
+    assignment_stage_label,
+    render_assignment_delivery,
+    render_return_acceptance,
+)
+from review_app.app.components.assignment_video_table import AssignmentVideoTable
+from review_app.app.state import get_active_project_id
+from review_app.app.translations import get_language, t
+
+from .assignment_bulk import render_bulk_actions
+from .assignment_creation import render_assignment_creation
 
 
-class AllocationSection:
-    def __init__(self, dp, project_id: str, on_change=None):
-        self.dp = dp
-        self.project_id = project_id
-        self.on_change = on_change
-        self._pending: dict[str, str | None] = {}
-        self._active_annotators: set[str] | None = None
-        self.camera_stats: list[dict] = []
-        self.chunks: list[dict] = []
+def assignment_date(value):
+    """A readable display date; retain the precise original in technical details."""
+    date = datetime.fromisoformat(value)
+    return date.strftime("%d/%m/%Y %H:%M" if get_language() == "fr" else "%Y-%m-%d %H:%M")
 
-    @ui.refreshable_method
-    def render(self) -> None:
-        dp = self.dp
-        pid = self.project_id
-        annotators = dp.get_all_annotators()
-        self.camera_stats = dp.get_camera_stats(pid)
-        if not self.chunks:
-            self.chunks = dp.get_video_chunks(pid)
-        chunk_assignment = dp.get_chunk_assignment_map(pid, self.chunks)
-        for chunk_id in chunk_assignment:
-            if chunk_id not in self._pending:
-                self._pending[chunk_id] = chunk_assignment[chunk_id]
 
-        if self._active_annotators is None:
-            self._active_annotators = {v for v in self._pending.values() if v is not None}
+def render_assignment_details(dp, project_id, binding, require_project, on_close, on_removed=None):
+    with ui.row().classes("w-full items-start justify-between gap-3"):
+        ui.label(binding["recipient"]).classes("text-h6")
+        if on_close is not None:
+            ui.button(icon="close", on_click=on_close).props("flat round").tooltip(t("close"))
+    ui.label(assignment_stage_label(binding)).classes("text-subtitle1")
+    ui.label(t("assign_video_count", count=binding["video_count"]))
+    ui.label(t("assign_prepared_date", date=assignment_date(binding["created_at"]))).classes(
+        "text-caption text-grey-7"
+    )
+    working = binding["role"] == "working"
+    if working:
+        ui.label(t("handoff_working_help")).classes("text-body2 text-grey-7")
+        ui.button(
+            t("data_continue_review"),
+            icon="play_arrow",
+            on_click=lambda: ui.navigate.to(
+                "/distance-review" if binding["stage"] == "distance" else "/review"
+            ),
+        )
 
-        # ── Annotator registry ─────────────────────────────────────────────────
-        ui.label(t("distribution_annotators_label")).classes("text-caption text-grey-6 q-mb-xs")
-
-        name_input: list[ui.input] = []
-
-        async def add_annotator():
-            name = (name_input[0].value or "").strip()
-            if not name:
-                return
-            await run.io_bound(dp.add_annotator, name)
-            self._active_annotators.add(name)
-            name_input[0].value = ""
-            self.render.refresh()
-            self.render_summary.refresh()
-
-        with ui.row().classes("items-center gap-sm q-mb-sm"):
-            inp = (
-                ui.input(placeholder=t("distribution_annotator_placeholder"))
-                .props("outlined dense")
-                .classes("flex-grow")
+    async def download():
+        download_button.disable()
+        try:
+            require_project()
+            raw = await run.io_bound(
+                dp.export_assignment_return if working else dp.export_assignment,
+                project_id if working else binding["id"],
             )
-            inp.on("keydown.enter", add_annotator)
-            name_input.append(inp)
-            ui.button(t("distribution_add_btn"), on_click=add_annotator).props(
-                "outline color=primary size=sm"
+            require_project()
+            ui.download(
+                raw,
+                assignment_filename(
+                    "return" if working else "assignment",
+                    binding["recipient"],
+                    binding["assignment_id"],
+                ),
             )
+            if working:
+                ui.notify(t("data_return_downloaded"), type="positive")
+        except Exception as exc:
+            ui.notify(_error_message(exc), type="negative")
+        finally:
+            download_button.enable()
 
-        if not annotators:
-            ui.label(t("distribution_no_annotators")).classes("text-caption text-grey-5 q-mb-md")
-        else:
-            with ui.row().classes("gap-xs flex-wrap q-mb-md"):
-                for ann in annotators:
-                    active = ann in self._active_annotators
-
-                    def _toggle(a=ann):
-                        if a in self._active_annotators:
-                            self._active_annotators.discard(a)
-                            self._pending = {
-                                k: None if v == a else v for k, v in self._pending.items()
-                            }
-                        else:
-                            self._active_annotators.add(a)
-                        self.render.refresh()
-                        self.render_summary.refresh()
-
-                    chip = ui.chip(ann, icon="person", on_click=_toggle)
-                    chip.props("clickable")
-                    if active:
-                        chip.props("color=primary")
-                    else:
-                        chip.props("outline color=grey-6")
-
-        # ── Distribution controls ──────────────────────────────────────────────
+    download_button = ui.button(
+        t("handoff_return" if working else "handoff_download"), on_click=download, icon="download"
+    )
+    if not working:
         ui.separator().classes("q-my-sm")
+        download_button.props("flat")
+        render_assignment_delivery(dp, project_id, binding, require_project)
+    with ui.expansion(t("assign_saved_scope"), icon="list").classes("w-full") as scope:
+        media_content = ui.column().classes("w-full")
+        loaded = False
 
-        if not self.camera_stats:
-            ui.label(t("distribution_no_cameras")).classes("text-caption text-grey-5")
-            return
-
-        async def auto_distribute():
-            if not self._active_annotators:
-                ui.notify(t("distribution_no_annotators"), type="warning")
+        async def load_media():
+            nonlocal loaded
+            if loaded or not scope.value:
                 return
-            result, chunks = await run.io_bound(
-                dp.auto_distribute_flexible, pid, list(self._active_annotators)
-            )
-            self.chunks = chunks
-            self._pending = {ch["chunk_id"]: None for ch in chunks}
-            for ann, chunk_ids in result.items():
-                for cid in chunk_ids:
-                    self._pending[cid] = ann
-            self.render.refresh()
-            self.render_summary.refresh()
-
-        async def apply_distribution():
-            chunk_assignment: dict[str, list[str]] = {}
-            clear_chunks: list[str] = []
-            for chunk_id, ann in self._pending.items():
-                if ann:
-                    chunk_assignment.setdefault(ann, []).append(chunk_id)
-                else:
-                    clear_chunks.append(chunk_id)
-            n = await run.io_bound(
-                dp.apply_chunk_assignment, pid, chunk_assignment, self.chunks, clear_chunks
-            )
-            filled = len(chunk_assignment)
-            ui.notify(t("distribution_applied", n=n, annotators=filled), type="positive")
-            self.render.refresh()
-            self.render_summary.refresh()
-            if self.on_change:
-                self.on_change()
-
-        async def reset_assignments():
-            with ui.dialog() as confirm_dialog, ui.card():
-                ui.label(t("distribution_reset_confirm")).classes("text-body1 q-mb-md")
-                with ui.row().classes("gap-sm justify-end"):
-                    ui.button(t("cancel"), on_click=confirm_dialog.close).props("outline size=sm")
-
-                    async def _do_reset():
-                        confirm_dialog.close()
-                        await run.io_bound(dp.clear_all_assignments, pid)
-                        self._pending = {}
-                        self.chunks = []
-                        self.render.refresh()
-                        self.render_summary.refresh()
-                        if self.on_change:
-                            self.on_change()
-                        ui.notify(t("distribution_reset_done"), type="positive")
-
-                    ui.button(
-                        t("distribution_reset_btn"), icon="delete_sweep", on_click=_do_reset
-                    ).props("unelevated color=negative size=sm")
-            confirm_dialog.open()
-
-        # Check if pending distribution differs from database (applied) distribution
-        has_unsaved_changes = False
-        for chunk_id, saved_ann in chunk_assignment.items():
-            if self._pending.get(chunk_id) != saved_ann:
-                has_unsaved_changes = True
-                break
-
-        with ui.row().classes("gap-sm q-mb-sm items-center"):
-            ui.button(
-                t("distribution_auto_btn"), icon="auto_fix_high", on_click=auto_distribute
-            ).props("outline color=secondary size=sm").tooltip(t("distribution_auto_tooltip"))
-            if has_unsaved_changes:
-                ui.button(
-                    t("distribution_apply_btn"), icon="check", on_click=apply_distribution
-                ).props("unelevated color=primary size=sm")
-                with ui.row().classes("items-center gap-xs text-warning q-ml-sm"):
-                    ui.icon("warning", size="xs")
-                    ui.label(t("distribution_status_unsaved")).classes(
-                        "text-caption font-weight-medium"
-                    )
-            else:
-                with ui.row().classes("items-center gap-xs text-positive q-ml-sm"):
-                    ui.icon("check_circle", size="xs")
-                    ui.label(t("distribution_status_saved")).classes(
-                        "text-caption font-weight-medium"
-                    )
-            ui.button(
-                t("distribution_reset_btn"), icon="delete_sweep", on_click=reset_assignments
-            ).props("flat color=negative size=sm")
-
-    @ui.refreshable_method
-    def render_summary(self) -> None:
-        annotator_map: dict[str, dict] = {}
-        seen_cameras: dict[str, set[str]] = {}
-        chunks_by_annotator: dict[str, list[str]] = {}
-        for chunk in self.chunks:
-            ann = self._pending.get(chunk["chunk_id"])
-            if ann is None:
-                continue
-            if ann not in annotator_map:
-                annotator_map[ann] = {
-                    "annotator": ann,
-                    "cameras": 0,
-                    "video_count": 0,
-                    "hours": 0.0,
+            try:
+                require_project()
+                media = await run.io_bound(dp.get_assignment_media, project_id, binding["id"])
+                if media_content.is_deleted:
+                    return
+                require_project()
+                media_content.clear()
+                roots = {
+                    key: index
+                    for index, key in enumerate(dict.fromkeys(row["root_id"] for row in media), 1)
                 }
-                seen_cameras[ann] = set()
-                chunks_by_annotator[ann] = []
-            seen_cameras[ann].add(chunk["camera_id"])
-            annotator_map[ann]["cameras"] = len(seen_cameras[ann])
-            annotator_map[ann]["video_count"] += chunk["video_count"]
-            annotator_map[ann]["hours"] = round(annotator_map[ann]["hours"] + chunk["hours"], 2)
-            chunks_by_annotator[ann].append(chunk["label"])
-        summary = sorted(annotator_map.values(), key=lambda r: r["annotator"])
-        if summary:
-            ui.separator().classes("q-my-sm")
-            ui.label(t("distribution_summary_label")).classes("text-caption text-grey-6 q-mb-xs")
-            with ui.grid(columns="1fr auto auto auto").classes(
-                "w-full gap-x-md gap-y-xs items-center"
-            ):
-                for header in [
-                    t("distribution_summary_annotator"),
-                    t("distribution_summary_cameras"),
-                    t("distribution_summary_videos"),
-                    t("distribution_summary_hours"),
-                ]:
-                    ui.label(header).classes("text-caption text-grey-6 font-weight-bold")
-                for row in summary:
-                    ui.label(row["annotator"]).classes("text-body2")
-                    ui.label(str(row["cameras"])).classes("text-body2 text-right")
-                    ui.label(str(row["video_count"])).classes("text-body2 text-right")
-                    ui.label(str(row["hours"])).classes("text-body2 text-right")
+                with media_content:
+                    table = AssignmentVideoTable(
+                        [
+                            ("path", t("handoff_column_video")),
+                            ("camera", t("distribution_camera_col")),
+                            ("role", t("assign_media_role")),
+                        ],
+                        filters=[
+                            ("camera", t("distribution_camera_col")),
+                            ("role", t("assign_media_role")),
+                        ],
+                        marker="assignment-media",
+                    )
+                    table.set_rows(
+                        [
+                            {
+                                "id": f"{row['root_id']}/{row['video_path']}",
+                                "path": t(
+                                    "assign_media_path",
+                                    number=roots[row["root_id"]],
+                                    path=row["video_path"],
+                                ),
+                                "camera": row["camera_id"] or "",
+                                "role": t(
+                                    "assign_work_media"
+                                    if row["assigned"]
+                                    else "assign_reference_media"
+                                ),
+                            }
+                            for row in media
+                        ]
+                    )
+                loaded = True
+            except Exception as exc:
+                if not media_content.is_deleted:
+                    with media_content:
+                        ui.label(_error_message(exc)).classes("text-negative")
 
-            ui.separator().classes("q-my-sm")
-            for row in summary:
-                ann = row["annotator"]
-                labels = chunks_by_annotator.get(ann, [])
-                with ui.row().classes("gap-xs items-start q-mb-xs flex-wrap"):
-                    ui.label(ann).classes("text-caption text-grey-6 font-weight-bold")
-                    ui.label("·").classes("text-caption text-grey-4")
-                    ui.label(", ".join(labels)).classes("text-caption text-grey-7")
+        scope.on_value_change(load_media)
+    with ui.expansion(t("assign_technical"), icon="info_outline").classes("w-full"):
+        ui.label(binding["assignment_id"]).classes("text-caption break-all")
+        ui.label(binding["created_at"]).classes("text-caption")
+
+    if not working:
+        with ui.dialog() as confirm, ui.card().classes("w-full max-w-xl gap-3"):
+            ui.label(t("assign_remove_title")).classes("text-h6")
+            ui.label(t("assign_remove_help")).classes("text-body2")
+            removal_status = ui.label("").classes("text-negative")
+
+            async def remove():
+                remove_button.disable()
+                cancel_button.disable()
+                try:
+                    require_project()
+                    await run.io_bound(dp.remove_assignment, project_id, binding["id"])
+                    require_project()
+                    confirm.close()
+                    ui.notify(t("assign_removed"), type="positive")
+                    if on_removed is not None:
+                        on_removed()
+                except Exception as exc:
+                    removal_status.set_text(_error_message(exc))
+                finally:
+                    remove_button.enable()
+                    cancel_button.enable()
+
+            with ui.row().classes("w-full justify-end gap-2"):
+                cancel_button = ui.button(t("cancel"), on_click=confirm.close).props("flat")
+                remove_button = (
+                    ui.button(t("assign_remove"), on_click=remove)
+                    .props("color=negative")
+                    .mark("confirm-remove-assignment")
+                )
+        ui.button(t("assign_remove"), icon="delete_outline", on_click=confirm.open).props(
+            "flat color=negative"
+        ).mark("remove-assignment")
 
 
 def render_assignments(dp, project_id: str) -> None:
-    from review_app.app.components.assignment_handoff import render_assignment_handoff
+    def require_project():
+        if get_active_project_id() != project_id:
+            raise ValueError(t("handoff_project_changed"))
 
-    render_assignment_handoff(dp, project_id)
-    # Allocation remains an input, not a saved assignment.
-    with ui.expansion(t("distribution_title"), icon="group").classes("w-full"):
-        ui.label(t("distribution_desc")).classes("text-caption text-grey-6 q-mb-md")
-        section = AllocationSection(dp, project_id)
-        section.render()
-        section.render_summary()
+    screen = "home"
+    selected_id = None
+
+    def show_home(assignment_id=None):
+        nonlocal screen, selected_id
+        screen, selected_id = "home", assignment_id
+        workspace.refresh()
+
+    def show_screen(value):
+        nonlocal screen
+        require_project()
+        screen = value
+        workspace.refresh()
+
+    @ui.refreshable
+    def workspace():
+        bindings = dp.list_assignments(project_id)
+        working = next((row for row in bindings if row["role"] == "working"), None)
+        if screen == "create" and working is None:
+            render_assignment_creation(dp, project_id, require_project, show_home, show_home)
+            return
+        if screen == "accept" and working is None:
+            ui.button(t("assign_back"), on_click=show_home, icon="arrow_back").props("flat")
+            ui.label(t("handoff_accept_title")).classes("text-h6")
+            render_return_acceptance(dp, project_id, require_project)
+            return
+        if working:
+            with ui.card().props("flat bordered").classes("w-full gap-3"):
+                render_assignment_details(dp, project_id, working, require_project, None)
+            return
+
+        with ui.row().classes("w-full items-center justify-between gap-3 q-mb-md"):
+            with ui.column().classes("gap-1"):
+                ui.label(t("data_assignments")).classes("text-h6")
+                ui.label(t("data_saved_assignments_help")).classes("text-body2 text-grey-7")
+            with ui.row().classes("gap-2"):
+                ui.button(
+                    t("assign_accept"),
+                    icon="move_to_inbox",
+                    on_click=lambda: show_screen("accept"),
+                ).props("outline")
+                ui.button(t("assign_title"), icon="add", on_click=lambda: show_screen("create"))
+        if not bindings:
+            with ui.column().classes("w-full items-center q-pa-xl gap-3"):
+                ui.icon("assignment", size="lg").classes("text-grey-5")
+                ui.label(t("data_no_assignments")).classes("text-grey-7")
+            return
+        selected_ids = {selected_id} if selected_id else set()
+
+        @ui.refreshable
+        def bulk_actions():
+            render_bulk_actions(
+                dp,
+                project_id,
+                [row for row in bindings if row["id"] in selected_ids],
+                require_project,
+                show_home,
+            )
+
+        bulk_actions()
+        with ui.row().classes("w-full items-start gap-4 flex-wrap"):
+            rows = [
+                {
+                    "id": row["id"],
+                    "recipient": row["recipient"],
+                    "review": assignment_stage_label(row),
+                    "videos": row["video_count"],
+                    "prepared": assignment_date(row["created_at"]),
+                }
+                for row in bindings
+            ]
+
+            def select(assignment_id):
+                nonlocal selected_id
+                selected_id = assignment_id
+                details.refresh()
+
+            def selection_changed(event):
+                nonlocal selected_ids
+                selected_ids = {row["id"] for row in event.selection}
+                select(event.selection[0]["id"] if len(event.selection) == 1 else None)
+                bulk_actions.refresh()
+
+            table = (
+                ui.table(
+                    columns=[
+                        {
+                            "name": key,
+                            "field": key,
+                            "label": t(label),
+                            "align": "left",
+                            "sortable": True,
+                        }
+                        for key, label in (
+                            ("recipient", "handoff_recipient"),
+                            ("review", "handoff_stage"),
+                            ("videos", "distribution_videos_col"),
+                            ("prepared", "assign_prepared_column"),
+                        )
+                    ],
+                    rows=rows,
+                    row_key="id",
+                    pagination=10,
+                    selection="multiple",
+                    on_select=selection_changed,
+                )
+                .props("flat dense bordered")
+                .classes("grow min-w-0 w-full lg:w-1/2")
+            )
+            table.on("rowClick", lambda event: select(event.args[1]["id"]))
+            table.selected = [row for row in rows if row["id"] in selected_ids]
+
+            @ui.refreshable
+            def details():
+                binding = next((row for row in bindings if row["id"] == selected_id), None)
+                if binding:
+                    with ui.card().props("flat bordered").classes("w-full gap-3"):
+                        render_assignment_details(
+                            dp,
+                            project_id,
+                            binding,
+                            require_project,
+                            lambda: select(None),
+                            on_removed=show_home,
+                        )
+                else:
+                    ui.label(t("assign_select_details")).classes("text-grey-7 q-pa-md")
+                table.selected = [row for row in rows if row["id"] in selected_ids]
+                table.update()
+
+            with ui.column().classes("grow min-w-0 w-full lg:w-1/3"):
+                details()
+
+    workspace()
