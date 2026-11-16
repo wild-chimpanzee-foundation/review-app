@@ -45,7 +45,6 @@ async def setup_data_assignments(area="assignments"):
         .style("max-width: 1400px; margin: 0 auto")
     ):
         ui.label(t("nav_data_assignments")).classes("text-h5 text-primary font-bold")
-        ui.label(t("data_destination_help")).classes("text-body2 text-grey-6")
         if project:
             with ui.row().classes("items-center gap-2"):
                 ui.icon("folder_open", size="sm").classes("text-grey-6")

@@ -1,9 +1,11 @@
 """Assignment controls; serialization, scope and acceptance stay in the backend."""
 
 import asyncio
+import io
 import re
 import threading
 
+import pandas as pd
 from nicegui import app, run, ui
 
 from review_app.app.components.assignment_video_table import AssignmentVideoTable
@@ -451,6 +453,7 @@ def render_return_acceptance(dp, project_id, require_project):
     """Focused return flow; preserve impact preview and atomic acceptance."""
     ui.label(t("handoff_policy_help")).classes("text-body2")
     raw = None
+    legacy_csv = None
     preview = None
     revision = 0
     busy = False
@@ -466,8 +469,9 @@ def render_return_acceptance(dp, project_id, require_project):
         status.set_text("")
 
     async def uploaded(event):
-        nonlocal raw
+        nonlocal raw, legacy_csv
         raw = None
+        legacy_csv = None
         preview_button.disable()
         policy.disable()
         policy.set_options(base_policies, value="use_imported")
@@ -476,7 +480,20 @@ def render_return_acceptance(dp, project_id, require_project):
         try:
             if event.file.size() > MAX_ARCHIVE_BYTES:
                 raise ValueError(t("handoff_upload_limit"))
+            require_project()
             content = await event.file.read()
+            if event.file.name.lower().endswith(".csv"):
+                frame = await run.io_bound(pd.read_csv, io.StringIO(content.decode("utf-8-sig")))
+                require_project()
+                if current == revision:
+                    legacy_csv = frame
+                    policy.set_visibility(False)
+                    preview_button.set_visibility(False)
+                    status.set_text(t("handoff_legacy_csv_loaded"))
+                    accept_button.enable()
+                return
+            policy.set_visibility(True)
+            preview_button.set_visibility(True)
             try:
                 info = await run.io_bound(dp.inspect_assignment_return, content)
             except ValueError:
@@ -501,7 +518,7 @@ def render_return_acceptance(dp, project_id, require_project):
         if raw is not None:
             await show_preview()
 
-    assignment_upload(uploaded, "handoff_return_upload")
+    assignment_upload(uploaded, "handoff_return_upload").props("accept=.zip,.csv")
     base_policies = {"keep_existing": t("handoff_keep"), "use_imported": t("handoff_use")}
     policy = ui.select(
         base_policies,
@@ -607,8 +624,33 @@ def render_return_acceptance(dp, project_id, require_project):
                 status.set_text(_error_message(exc))
 
     async def accept():
-        nonlocal busy
-        if preview is None or raw is None or busy:
+        nonlocal busy, legacy_csv
+        if busy:
+            return
+        if legacy_csv is not None:
+            busy = True
+            accept_button.disable()
+            try:
+                require_project()
+                result = await run.io_bound(
+                    dp.import_annotations_csv, legacy_csv, project_id, "append"
+                )
+                legacy_csv = None
+                require_project()
+                status.set_text(
+                    t(
+                        "batch_import_summary",
+                        files=1,
+                        imported=result.get("imported", 0),
+                        skipped=len(result.get("skipped", [])),
+                    )
+                )
+            except Exception as exc:
+                status.set_text(_error_message(exc))
+            finally:
+                busy = False
+            return
+        if preview is None or raw is None:
             return
         busy = True
         payload, chosen, token = raw, policy.value, preview.token

@@ -154,15 +154,19 @@ async def test_distribution_uses_saved_delivery_and_keeps_independent_csv_import
     texts = {getattr(e, "text", None) for e in user.client.elements.values()}
     assert t("bundle_download_all_btn") not in texts
     assert t("video_zip_btn") not in texts
-    await user.open("/handoff-legacy-import")
-    await user.should_see(t("data_legacy_upload_warning"))
+    user.find(t("assign_accept"), kind=ui.button).click()
+    await user.should_see(t("handoff_return_upload"))
+    await user.should_not_see(t("batch_import_title"))
     csv_upload = next(
         e
         for e in user.client.elements.values()
-        if isinstance(e, ui.upload) and e.props.get("label") == t("batch_import_btn")
+        if isinstance(e, ui.upload) and e.props.get("label") == t("handoff_return_upload")
     )
     with user:
         await csv_upload.handle_uploads([SmallFileUpload("annotations.csv", "text/csv", csv)])
+    await user.should_see(t("handoff_legacy_csv_loaded"))
+    assert dp.get_video_detail(video_id)["manual_selections"] == []
+    user.find(t("handoff_accept"), kind=ui.button).click()
     await user.should_see(t("batch_import_summary", files=1, imported=2, skipped=0))
     assert dp.get_video_detail(video_id)["manual_selections"][0]["count"] == 3
     assert dp.list_assignments(project.id)[0]["id"] == saved.id

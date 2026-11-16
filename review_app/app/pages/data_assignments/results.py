@@ -78,7 +78,6 @@ async def render_results(dp, project_id, loading_dialog):
                             if fmt:
                                 ui.badge(fmt).props("outline")
                         ui.label(t(description)).classes("text-body2 text-grey-6")
-                        ui.label(t("data_current_scope")).classes("text-caption text-grey-6")
                         if name in {"species", "ai"}:
                             render_csv_export(dp, project_id, ai=name == "ai")
                         elif name == "distance":

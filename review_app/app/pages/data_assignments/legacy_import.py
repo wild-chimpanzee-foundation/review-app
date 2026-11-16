@@ -14,11 +14,6 @@ def render_legacy_annotations_import(dp, project_id):
     ui.label(t("data_legacy_upload_warning")).classes("text-warning text-body2")
     # ── Batch Annotation Import ───────────────────────────────────────────
     with ui.card().classes("full-width q-mb-lg"):
-        with ui.row().classes("items-center q-mb-sm"):
-            ui.icon("playlist_add", size="sm").classes("text-primary q-mr-sm")
-            ui.label(t("batch_import_title")).classes("text-subtitle1 font-weight-medium")
-        ui.label(t("batch_import_desc")).classes("text-caption text-grey-6 q-mb-md")
-
         batch_status = ui.label("").classes("text-body2")
         _batch_state: dict = {"total_imported": 0, "total_skipped": 0, "file_count": 0}
 

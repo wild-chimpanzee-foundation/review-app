@@ -220,7 +220,6 @@ def render_assignments(dp, project_id: str) -> None:
         with ui.row().classes("w-full items-center justify-between gap-3 q-mb-md"):
             with ui.column().classes("gap-1"):
                 ui.label(t("data_assignments")).classes("text-h6")
-                ui.label(t("data_saved_assignments_help")).classes("text-body2 text-grey-7")
             with ui.row().classes("gap-2"):
                 ui.button(
                     t("assign_accept"),
