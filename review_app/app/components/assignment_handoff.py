@@ -223,15 +223,22 @@ def render_assignment_handoff(dp, project_id):
         if get_active_project_id() != project_id:
             raise ValueError(t("handoff_project_changed"))
 
+    is_working = any(row["role"] == "working" for row in dp.list_assignments(project_id))
+
     with ui.card().classes("w-full q-mb-lg"):
-        ui.label(t("handoff_title")).classes("text-h6")
-        ui.label(t("handoff_help")).classes("text-body2")
+        ui.label(t("data_saved_assignments")).classes("text-h6")
+        ui.label(
+            t("handoff_working_help" if is_working else "data_saved_assignments_help")
+        ).classes("text-body2 text-grey-6")
 
         @ui.refreshable
         def saved_assignments():
             bindings = dp.list_assignments(project_id)
+            if not bindings:
+                ui.label(t("data_no_assignments")).classes("text-grey-6")
             for binding in bindings:
-                ui.label(assignment_identity(binding)).classes("text-body2")
+                ui.separator().classes("q-my-sm")
+                ui.label(assignment_identity(binding)).classes("text-body1 font-medium")
                 ui.label(binding["created_at"]).classes("text-caption")
 
                 async def download(row=binding):
@@ -247,7 +254,10 @@ def render_assignment_handoff(dp, project_id):
                             filename = assignment_filename(
                                 "assignment", row["recipient"], row["assignment_id"]
                             )
+                        require_project()
                         ui.download(raw, filename)
+                        if row["role"] == "working":
+                            ui.notify(t("data_return_downloaded"), type="positive")
                     except Exception as exc:
                         ui.notify(_error_message(exc), type="negative")
 
@@ -258,9 +268,22 @@ def render_assignment_handoff(dp, project_id):
                 )
                 if binding["role"] == "origin":
                     render_assignment_delivery(dp, binding, require_project)
-            if any(row["role"] == "working" for row in bindings):
-                ui.label(t("handoff_working_help")).classes("text-caption")
+                else:
+                    ui.button(
+                        t("data_continue_review"),
+                        icon="play_arrow",
+                        on_click=lambda stage=binding["stage"]: ui.navigate.to(
+                            "/distance-review" if stage == "distance" else "/review"
+                        ),
+                    ).props("outline")
 
+        saved_assignments()
+
+    with ui.expansion(t("handoff_prepare"), icon="inventory_2").classes(
+        "w-full q-mb-md"
+    ) as preparation:
+        preparation.set_visibility(not is_working)
+        ui.label(t("handoff_help")).classes("text-body2 text-grey-6")
         stage = ui.select(
             {"species": t("handoff_stage_species"), "distance": t("handoff_stage_distance")},
             value="species",
@@ -286,16 +309,18 @@ def render_assignment_handoff(dp, project_id):
                 dp.get_assignment_distance_species_options(project_id, get_language()),
                 label=t("handoff_target"),
             ).classes("w-full")
-            with ui.row():
-                start = ui.input(t("handoff_start"), placeholder="18:00")
-                end = ui.input(t("handoff_end"), placeholder="06:00")
-            ui.label(t("handoff_time_help")).classes("text-caption")
+            with ui.expansion(t("data_advanced"), icon="tune").classes("w-full"):
+                with ui.row():
+                    start = ui.input(t("handoff_start"), placeholder="18:00")
+                    end = ui.input(t("handoff_end"), placeholder="06:00")
+                ui.label(t("handoff_time_help")).classes("text-caption")
             selection_status = ui.label("").classes("text-body2")
-            selected_videos = (
-                ui.select({}, multiple=True, value=[], label=t("handoff_distance_videos"))
-                .props("use-chips")
-                .classes("w-full")
-            )
+            with ui.expansion(t("handoff_distance_videos"), icon="list").classes("w-full"):
+                selected_videos = (
+                    ui.select({}, multiple=True, value=[], label=t("handoff_distance_videos"))
+                    .props("use-chips")
+                    .classes("w-full")
+                )
 
             def filters():
                 return (
@@ -404,10 +429,11 @@ def render_assignment_handoff(dp, project_id):
             clear_selection()
 
         stage.on_value_change(stage_changed)
-        saved_assignments()
 
-    with ui.card().classes("w-full q-mb-lg"):
-        ui.label(t("handoff_accept_title")).classes("text-h6")
+    with ui.expansion(t("handoff_accept_title"), icon="move_to_inbox").classes(
+        "w-full q-mb-md"
+    ) as acceptance:
+        acceptance.set_visibility(not is_working)
         ui.label(t("handoff_policy_help")).classes("text-body2")
         raw = None
         preview = None

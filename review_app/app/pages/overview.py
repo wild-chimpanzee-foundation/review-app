@@ -70,6 +70,27 @@ async def setup_overview():
         ui.navigate.to("/review")
 
     with ui.column().classes("w-full q-pa-lg").style("max-width: 1600px; margin: 0 auto"):
+        bindings = await run.io_bound(dp.list_assignments, pid)
+        working = next((row for row in bindings if row["role"] == "working"), None)
+        if working:
+            from review_app.app.components.assignment_handoff import assignment_identity
+
+            with ui.card().classes("w-full q-pa-md q-mb-md"):
+                ui.label(assignment_identity(working)).classes("text-subtitle1 font-medium")
+                ui.label(t("handoff_working_help")).classes("text-caption text-grey-6")
+                with ui.row():
+                    ui.button(
+                        t("data_continue_review"),
+                        icon="play_arrow",
+                        on_click=lambda: ui.navigate.to(
+                            "/distance-review" if working["stage"] == "distance" else "/review"
+                        ),
+                    ).props("unelevated")
+                    ui.button(
+                        t("handoff_return"),
+                        icon="outbox",
+                        on_click=lambda: ui.navigate.to("/data-assignments?area=assignments"),
+                    ).props("outline")
         v = stats.get("videos", {})
         lb = stats.get("labeling", {})
         total = max(int(lb.get("total_videos", 1)), 1)
@@ -78,6 +99,11 @@ async def setup_overview():
         with ui.row().classes("items-center justify-between q-mb-lg"):
             ui.label(t("overview_title")).classes("text-h5 text-primary font-weight-bold")
             with ui.row().classes("gap-2"):
+                ui.button(
+                    t("data_results"),
+                    icon="ios_share",
+                    on_click=lambda: ui.navigate.to("/data-assignments?area=results"),
+                ).props("flat")
                 ui.button(
                     t("quick_review_unannotated"),
                     icon="rate_review",

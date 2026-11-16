@@ -9,7 +9,7 @@ from nicegui import app, ui
 from nicegui.elements.upload_files import SmallFileUpload
 from nicegui.testing import User
 from review_app.app.components.assignment_handoff import render_assignment_handoff
-from review_app.app.pages.distribution.page import render_distribution_section
+from review_app.app.pages.data_assignments.assignments import render_assignments
 from review_app.app.setup_wizard import SetupWizard
 from review_app.app.state import get_active_project_id, set_data_provider
 from review_app.app.translations import t
@@ -566,7 +566,10 @@ def distance_ui(distance_assignment, monkeypatch):
     @ui.page("/distance-handoff-admin")
     def admin():
         app.storage.user["active_project_id"] = project.id
-        render_distribution_section(dp, project.id)
+        render_assignments(dp, project.id)
+        for element in list(ui.context.client.elements.values()):
+            if isinstance(element, ui.expansion):
+                element.set_value(True)
 
     @ui.page("/distance-handoff-open")
     def opening():

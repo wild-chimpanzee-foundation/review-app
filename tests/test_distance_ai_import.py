@@ -14,8 +14,8 @@ import pytest
 from nicegui import app, ui
 from nicegui.elements.upload_files import SmallFileUpload
 from nicegui.testing import User
+from review_app.app.pages.data_assignments.imports._distance_ai_tab import setup_distance_ai_tab
 from review_app.app.pages.distance_review.page import DistanceReviewPage
-from review_app.app.pages.model_import._distance_ai_tab import setup_distance_ai_tab
 from review_app.app.translations import t
 from review_app.backend.db.models import (
     Base,

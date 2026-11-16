@@ -50,7 +50,7 @@ A horizontally scrollable strip of camera cards, each showing a sample thumbnail
 
 ## Assignment summary
 
-When videos are assigned to annotators (see [Settings → Distribution](settings.md#distribution)), this panel lists each annotator with their labeled percentage, video/camera counts, hours, and a blank/not-blank/unlabeled progress bar. Click a row to review that annotator's assigned videos.
+When videos are assigned to annotators (see [Data & assignments → Assignments](settings.md#distribution)), this panel lists each annotator with their labeled percentage, video/camera counts, hours, and a blank/not-blank/unlabeled progress bar. Click a row to review that annotator's assigned videos.
 
 ## Location map
 

@@ -9,7 +9,8 @@ from review_app.app.components.assignment_handoff import (
     render_assignment_handoff,
     render_open_assignment,
 )
-from review_app.app.pages.distribution.page import render_distribution_section
+from review_app.app.pages.data_assignments.assignments import render_assignments
+from review_app.app.pages.data_assignments.legacy_import import render_legacy_annotations_import
 from review_app.app.state import get_active_project_id, set_data_provider
 from review_app.app.translations import t
 from review_app.backend.annotation_package.scope import AssignmentRequest
@@ -56,11 +57,20 @@ def handoff_ui(provider_with_project):
     def admin():
         app.storage.user["active_project_id"] = project.id
         render_assignment_handoff(dp, project.id)
+        # Exercise the existing operations with their secondary sections expanded.
+        for element in list(ui.context.client.elements.values()):
+            if isinstance(element, ui.expansion):
+                element.set_value(True)
 
     @ui.page("/handoff-distribution")
     def distribution():
         app.storage.user["active_project_id"] = project.id
-        render_distribution_section(dp, project.id)
+        render_assignments(dp, project.id)
+
+    @ui.page("/handoff-legacy-import")
+    def legacy_import():
+        app.storage.user["active_project_id"] = project.id
+        render_legacy_annotations_import(dp, project.id)
 
     @ui.page("/handoff-open")
     def opening():
@@ -89,10 +99,12 @@ async def test_distribution_uses_saved_delivery_and_keeps_independent_csv_import
     await user.should_see(t("handoff_download"))
     await user.should_see(t("handoff_copy"))
     await user.should_see(t("distribution_title"))
-    await user.should_see(t("handoff_legacy_help"))
+    await user.should_not_see(t("batch_import_btn"))
     texts = {getattr(e, "text", None) for e in user.client.elements.values()}
     assert t("bundle_download_all_btn") not in texts
     assert t("video_zip_btn") not in texts
+    await user.open("/handoff-legacy-import")
+    await user.should_see(t("data_legacy_upload_warning"))
     csv_upload = next(
         e
         for e in user.client.elements.values()

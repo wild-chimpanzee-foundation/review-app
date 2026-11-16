@@ -1,10 +1,10 @@
-from review_app.app.pages.model_import._helpers import (
+from review_app.app.pages.data_assignments.imports._helpers import (
     auto_suggest_mappings as _auto_suggest_mappings,
 )
-from review_app.app.pages.model_import._helpers import (
+from review_app.app.pages.data_assignments.imports._helpers import (
     auto_suggest_path_col as _auto_suggest_path_col,
 )
-from review_app.app.pages.model_import._helpers import (
+from review_app.app.pages.data_assignments.imports._helpers import (
     is_long_format as _is_long_format,
 )
 

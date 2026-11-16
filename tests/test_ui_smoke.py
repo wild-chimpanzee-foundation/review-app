@@ -39,6 +39,7 @@ def smoke_app(provider_with_project):
     _register("/review", gui.review_page)
     _register("/distance-review", gui.distance_review_page)
     _register("/settings", gui.settings_page)
+    _register("/data-assignments", gui.data_assignments_page)
     _register("/model-import", gui.model_import_page)
     _register("/distribution", gui.distribution_page)
 
@@ -59,7 +60,11 @@ async def test_page_renders(user: User, smoke_app, path: str) -> None:
     await user.open("/test-login")
     await user.open(path)
     # require_login()/setup redirects would land us somewhere else
-    assert user.back_history[-1] == path
+    expected = {
+        "/model-import": "/data-assignments?area=add",
+        "/distribution": "/data-assignments?area=assignments",
+    }.get(path, path)
+    assert user.back_history[-1] == expected
 
 
 @pytest.mark.parametrize("saved_focus", [False, True])

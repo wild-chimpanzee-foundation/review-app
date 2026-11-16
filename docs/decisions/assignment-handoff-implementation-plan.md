@@ -1,8 +1,14 @@
 # Assignment handoff implementation plan
 
-**Status:** M1–M6 complete. M7 — final cross-workflow UI/UX refinement — is next.
+**Status:** M1–M6 complete. M7 UI rework implemented; operator walkthrough pending.
 **Direction:** Explicit serialized assignment snapshots, not database snapshots.
 **Product contract:** [Assignment handoff](./assignment-handoff.md).
+
+**UX planning update:** The [Data & assignments UI implementation plan](./data-and-assignments-ux-implementation-plan.md)
+now sequences navigation and presentation changes, including the outstanding M7
+refinement below. This is a UI rework preserving existing functionality, not new
+persistent batches or advanced delivery infrastructure. M1–M6 and their recorded
+validation remain complete; M7 has not been marked complete.
 
 ## Milestone tracker
 
@@ -18,16 +24,18 @@ this tracker records readiness, validation, and the next action.
 | M4 — Reference identity | Done | Video/distance uniqueness on fresh and upgraded databases; dependent samples preserved; reference write paths and affected legacy imports tested. |
 | M5 — Complete Distance backend | Done | AI/manual state and reference dependencies round-trip; saved-scope import eligibility and reference substitution tested, without restricting local annotation. |
 | M6 — Distance UI and integration | Done | Distance handoff usable end to end; translations/docs updated; combined workflow and relevant legacy regressions pass. |
-| M7 — Final UI/UX refinement | Not started | Species and Distance handoff screens are clear and compact across origin/working roles; prepare/open/deliver/return/accept actions are discoverable; operator walkthrough and focused UI regressions pass; translations/docs reflect the final UI. |
+| M7 — Final UI/UX refinement | In progress | Species and Distance handoff screens are clear and compact across origin/working roles; prepare/open/deliver/return/accept actions are discoverable; operator walkthrough and focused UI regressions pass; translations/docs reflect the final UI. |
 
 Use `Not started`, `In progress`, `Blocked`, or `Done`. Mark a milestone Done only
 when its completion gate is met. If blocked, record the concrete blocker below.
 
 ### Current checkpoint
 
-- **Current milestone:** M7 — Final UI/UX refinement (next to start).
-- **Next action:** Operator walkthrough of Species and Distance handoff together,
-  followed by the final information-hierarchy/layout refinement tracked in M7.
+- **Current milestone:** M7 — Final UI/UX refinement (implemented; operator check pending).
+- **Next action:** Operator walkthrough of the actual NiceGUI Data & assignments
+  destination. The [UI implementation plan](./data-and-assignments-ux-implementation-plan.md)
+  records the implementation and 138 passing focused non-UI regressions. UI smoke
+  tests/browser automation were not run, as requested; M7 remains In progress.
   Functional Distance preparation, delivery, common package opening, return
   preview, substitutions, and acceptance are implemented and tested. The manual
   round-trip guide includes Distance checks; real browser/playback validation

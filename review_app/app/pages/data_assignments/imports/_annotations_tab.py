@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 import pandas as pd
 from nicegui import run, ui
 
 from review_app.app.state import (
     get_active_project_id,
-    get_annotator_name,
 )
 from review_app.app.translations import t
 from review_app.app.utils import ignore_deleted_client, user_error_message
@@ -57,50 +54,6 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
     # die on navigate.
     frames: dict[str, pd.DataFrame | None] = {}
     state: dict = {}
-
-    # ── Export ────────────────────────────────────────────────────────────────
-    with ui.card().classes("full-width q-pa-md q-mb-md"):
-        ui.label(t("export_annotations")).classes("text-subtitle2 font-weight-medium q-mb-xs")
-        ui.label(t("annotation_export_desc")).classes("text-caption q-mb-md")
-
-        async def do_export() -> None:
-            try:
-                df = await run.io_bound(dp.export_annotations_csv, get_active_project_id())
-                project_name = (
-                    df["project_name"].iloc[0].replace(" ", "_")
-                    if not df.empty and "project_name" in df.columns
-                    else "project"
-                )
-                annotator = get_annotator_name().replace(" ", "_")
-                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                filename = f"annotations_{project_name}_{annotator}_{timestamp}.csv"
-                with ignore_deleted_client():
-                    ui.download(df.to_csv(index=False).encode("utf-8"), filename)
-            except Exception as exc:
-                with ignore_deleted_client():
-                    ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
-
-        async def do_export_ai() -> None:
-            try:
-                project_id = get_active_project_id()
-                df = await run.io_bound(dp.export_model_annotations_csv, project_id)
-                project = dp.get_project(project_id) if project_id else None
-                project_name = project.name.replace(" ", "_") if project else "project"
-                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                filename = f"ai_annotations_{project_name}_{timestamp}.csv"
-                with ignore_deleted_client():
-                    ui.download(df.to_csv(index=False).encode("utf-8"), filename)
-            except Exception as exc:
-                with ignore_deleted_client():
-                    ui.notify(t("export_failed", error=user_error_message(exc)), type="negative")
-
-        with ui.row().classes("gap-sm"):
-            ui.button(t("export_annotations"), icon="download", on_click=do_export).props(
-                "flat color=primary"
-            )
-            ui.button(t("export_ai_annotations"), icon="download", on_click=do_export_ai).props(
-                "flat color=primary"
-            )
 
     # ── Import ────────────────────────────────────────────────────────────────
     with ui.card().classes("full-width q-pa-md q-mb-md"):

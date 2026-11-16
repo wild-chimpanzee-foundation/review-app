@@ -243,9 +243,9 @@ def shared_header(
                 ui.button(
                     t("nav_distance"), on_click=lambda: ui.navigate.to("/distance-review")
                 ).props("flat color=white").classes("gt-sm")
-                ui.button(t("nav_import"), on_click=lambda: ui.navigate.to("/model-import")).props(
-                    "flat color=white"
-                ).classes("gt-sm")
+                ui.button(
+                    t("nav_data_assignments"), on_click=lambda: ui.navigate.to("/data-assignments")
+                ).props("flat color=white").classes("gt-sm")
                 ui.button(t("nav_settings"), on_click=lambda: ui.navigate.to("/settings")).props(
                     "flat color=white"
                 ).classes("gt-sm")
@@ -259,7 +259,8 @@ def shared_header(
                             t("nav_distance"), on_click=lambda: ui.navigate.to("/distance-review")
                         )
                         ui.menu_item(
-                            t("nav_import"), on_click=lambda: ui.navigate.to("/model-import")
+                            t("nav_data_assignments"),
+                            on_click=lambda: ui.navigate.to("/data-assignments"),
                         )
                         ui.menu_item(
                             t("nav_settings"), on_click=lambda: ui.navigate.to("/settings")
@@ -464,14 +465,24 @@ class GUI:
 
         await setup_review()
 
-    async def model_import_page(self):
+    async def data_assignments_page(self, area: str = "assignments"):
         from review_app.app.utils import require_login
 
         if not require_login():
             return
-        from review_app.app.pages.model_import import setup_model_import
+        from review_app.app.pages.data_assignments import setup_data_assignments
 
-        await setup_model_import()
+        await setup_data_assignments(area)
+
+    async def model_import_page(self):
+        """Keep old bookmarks working without retaining a separate page package."""
+        from nicegui import ui
+
+        from review_app.app.utils import require_login
+
+        if not require_login():
+            return
+        ui.navigate.to("/data-assignments?area=add")
 
     async def distance_review_page(self):
         from review_app.app.utils import require_login
@@ -492,13 +503,14 @@ class GUI:
         await setup_settings()
 
     async def distribution_page(self):
+        """Redirect the former allocation page into the assignment workspace."""
+        from nicegui import ui
+
         from review_app.app.utils import require_login
 
         if not require_login():
             return
-        from review_app.app.pages.distribution import setup_distribution
-
-        await setup_distribution()
+        ui.navigate.to("/data-assignments?area=assignments")
 
     def setup_page(self):
         from nicegui import ui
@@ -582,6 +594,7 @@ class GUI:
         ui.page("/review")(self.review_page)
         ui.page("/distance-review")(self.distance_review_page)
         ui.page("/setup")(self.setup_page)
+        ui.page("/data-assignments")(self.data_assignments_page)
         ui.page("/model-import")(self.model_import_page)
         ui.page("/distribution")(self.distribution_page)
         ui.page("/settings")(self.settings_page)

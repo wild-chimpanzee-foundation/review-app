@@ -1,8 +1,8 @@
 # Importer les résultats du modèle
 
-Les importations se font sur la page **Import de modèle**, qui comporte des onglets séparés pour les annotations du modèle, les paquets Distance IA, les annotations historiques/manuelles et les métadonnées. Les bundles de projet disposent d’un parcours d’import distinct.
+Ouvrez **Données & affectations → Ajouter des données**. Choisissez **Prédictions IA**, **Métadonnées vidéo** ou **Annotations existantes**. Les retours sont dans **Affectations** ; l'ouverture d'un paquet reste dans le sélecteur de projet. Le vocabulaire reste dans les Paramètres.
 
-![La page Import / Export avec l'onglet d'import des sorties de l'IA sélectionné](img/importing.jpg)
+![Commandes d'import IA (ancienne disposition de navigation)](img/importing.jpg)
 
 ## Annotations du modèle IA
 
@@ -31,7 +31,7 @@ chaque vidéo animale. Les brouillons importés appartiennent à ces tâches par
 les prédictions seules ne créent pas de tâches éligibles. Il n’est pas nécessaire de
 marquer la revue ordinaire comme terminée.
 
-Utilisez **Import de modèle → Distance IA** pour charger un ZIP `distance-ai` version 1 (32 Mio maximum). Créez/réanalysez d’abord le projet pour enregistrer ses vidéos, puis marquez les clips de référence comme **Vidéo de référence**. La structure appariée `<déploiement>/videos/` et `<déploiement>/references/` applique automatiquement cette étiquette.
+Utilisez **Données & affectations → Ajouter des données → Prédictions IA → Distance IA** pour charger un ZIP `distance-ai` version 1 (32 Mio maximum). Créez/réanalysez d’abord le projet pour enregistrer ses vidéos, puis marquez les clips de référence comme **Vidéo de référence**. La structure appariée `<déploiement>/videos/` et `<déploiement>/references/` applique automatiquement cette étiquette.
 
 1. Chargez le ZIP pour valider et prévisualiser les nombres d’enregistrements, les correspondances vidéo, les conflits d’étalonnage et jusqu’à 20 prédictions. L’aperçu n’écrit rien.
 2. Tous les individus importés sont des brouillons IA couvrant la vidéo entière. L’intervalle dominant et la phase sont déduits des prédictions pour compléter les arrêts manquants, du début à la fin. Les temps fournis restent exacts ; le léger décalage dû aux images n’ajoute pas d’arrêts voisins. Une prédiction manquante pour un individu recommande **Absent**, toujours en attente de confirmation humaine. Sans au moins deux prédictions sur une même piste de la vidéo, l’intervalle ne peut pas être déduit. Seuls les brouillons IA intacts peuvent être remplacés, après confirmation.

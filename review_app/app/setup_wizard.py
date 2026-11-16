@@ -229,7 +229,10 @@ class SetupWizard:
                             t("wizard_go_to_import_btn"),
                             icon="upload_file",
                             color="primary",
-                            on_click=lambda: (dialog.close(), ui.navigate.to("/model-import")),
+                            on_click=lambda: (
+                                dialog.close(),
+                                ui.navigate.to("/data-assignments?area=add"),
+                            ),
                         ).props("size=lg").classes("full-width")
                         ui.button(
                             t("go_to_overview_btn"),

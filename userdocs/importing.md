@@ -1,8 +1,8 @@
 # Importing Model Results
 
-Imports happen on the **Model Import** page, which has separate tabs for model annotations, AI Distance packages, historic/manual annotations, and metadata. Project bundles have a separate import flow.
+Open **Data & assignments → Add data**. Choose **AI predictions**, **Video metadata**, or **Existing annotations**. Assignment returns belong under **Assignments**, while opening a received assignment/package stays in the project picker. Vocabulary configuration stays in Settings.
 
-![The Import / Export page with the AI output import tab selected](img/importing.jpg)
+![AI output import controls (earlier navigation layout)](img/importing.jpg)
 
 ## AI model annotations
 
@@ -31,7 +31,7 @@ Distance imports attach drafts to those species-specific tasks; model prediction
 alone do not create eligible tasks. A separate ordinary Review completion flag is
 not required.
 
-Use **Model Import → AI Distance** to upload a `distance-ai` version 1 ZIP (maximum 32 MiB). First create/rescan the destination project so its videos are registered, and tag reference clips as **Reference Video**. The paired `<deployment>/videos/` and `<deployment>/references/` layout applies this tag automatically.
+Use **Data & assignments → Add data → AI predictions → AI Distance** to upload a `distance-ai` version 1 ZIP (maximum 32 MiB). First create/rescan the destination project so its videos are registered, and tag reference clips as **Reference Video**. The paired `<deployment>/videos/` and `<deployment>/references/` layout applies this tag automatically.
 
 1. Upload the ZIP to validate it and preview counts, video matches, calibration conflicts, and up to 20 predictions. Preview does not write anything.
 2. Imported individuals are complete AI drafts covering the full video. The dominant within-track interval and fractional-time phase are inferred to fill missing stops from the opening frame through the end (excluding the endpoint). Supplied timestamps stay exact; nearby frame-timing jitter does not add duplicate stops. Missing predictions for an individual recommend **Absent**, still pending human confirmation. At least two predictions on one track in the video are needed to infer cadence. Only untouched AI drafts can be replaced, with confirmation.

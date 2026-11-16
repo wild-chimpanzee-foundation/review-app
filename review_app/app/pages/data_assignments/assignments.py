@@ -1,20 +1,13 @@
+"""Assignment workspace and existing work-allocation controls."""
+
 from __future__ import annotations
 
-import io
-
-import pandas as pd
 from nicegui import run, ui
 
-from review_app.app.state import get_active_project_id
 from review_app.app.translations import t
-from review_app.app.utils import (
-    get_or_create_data_provider,
-    render_uninitialized_state,
-    user_error_message,
-)
 
 
-class DistributionSection:
+class AllocationSection:
     def __init__(self, dp, project_id: str, on_change=None):
         self.dp = dp
         self.project_id = project_id
@@ -237,71 +230,13 @@ class DistributionSection:
                     ui.label(", ".join(labels)).classes("text-caption text-grey-7")
 
 
-def render_distribution_section(dp, project_id: str) -> None:
+def render_assignments(dp, project_id: str) -> None:
     from review_app.app.components.assignment_handoff import render_assignment_handoff
 
     render_assignment_handoff(dp, project_id)
-    # Distribution is a selection input; only saved handoffs deliver assignments.
-    with ui.card().classes("full-width q-mb-lg"):
-        with ui.row().classes("items-center q-mb-sm"):
-            ui.icon("group", size="sm").classes("text-primary q-mr-sm")
-            ui.label(t("distribution_title")).classes("text-subtitle1 font-weight-medium")
+    # Allocation remains an input, not a saved assignment.
+    with ui.expansion(t("distribution_title"), icon="group").classes("w-full"):
         ui.label(t("distribution_desc")).classes("text-caption text-grey-6 q-mb-md")
-        section = DistributionSection(dp, project_id)
+        section = AllocationSection(dp, project_id)
         section.render()
         section.render_summary()
-
-    ui.label(t("handoff_legacy_help")).classes("text-caption text-grey-6 q-mb-md")
-
-    # ── Batch Annotation Import ───────────────────────────────────────────
-    with ui.card().classes("full-width q-mb-lg"):
-        with ui.row().classes("items-center q-mb-sm"):
-            ui.icon("playlist_add", size="sm").classes("text-primary q-mr-sm")
-            ui.label(t("batch_import_title")).classes("text-subtitle1 font-weight-medium")
-        ui.label(t("batch_import_desc")).classes("text-caption text-grey-6 q-mb-md")
-
-        batch_status = ui.label("").classes("text-body2")
-        _batch_state: dict = {"total_imported": 0, "total_skipped": 0, "file_count": 0}
-
-        async def handle_batch_upload(e):
-            try:
-                content = (await e.file.read()).decode("utf-8")
-                df = pd.read_csv(io.StringIO(content))
-                result = await run.io_bound(dp.import_annotations_csv, df, project_id, "append")
-                _batch_state["total_imported"] += result.get("imported", 0)
-                _batch_state["total_skipped"] += len(result.get("skipped", []))
-                _batch_state["file_count"] += 1
-                batch_status.set_text(
-                    t(
-                        "batch_import_summary",
-                        files=_batch_state["file_count"],
-                        imported=_batch_state["total_imported"],
-                        skipped=_batch_state["total_skipped"],
-                    )
-                )
-            except Exception as exc:
-                ui.notify(f"{e.name}: {user_error_message(exc)}", type="negative")
-
-        ui.upload(
-            on_upload=handle_batch_upload,
-            multiple=True,
-            label=t("batch_import_btn"),
-            auto_upload=True,
-        ).props("accept=.csv")
-
-
-async def setup_distribution():
-    from review_app.app.entry_point import shared_header
-
-    dp = await get_or_create_data_provider()
-    shared_header()
-
-    project_id = get_active_project_id()
-
-    if not dp or not project_id:
-        render_uninitialized_state()
-        return
-
-    with ui.column().classes("w-full q-pa-lg").style("max-width: 1400px; margin: 0 auto"):
-        ui.label(t("nav_distribution")).classes("text-h5 font-weight-bold q-mb-lg")
-        render_distribution_section(dp, project_id)

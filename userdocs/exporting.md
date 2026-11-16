@@ -1,6 +1,6 @@
 # Exporting Annotations
 
-Exports are available on the **Model Import** page, under the **Annotations** tab.
+Open **Data & assignments → Export results**. Choose a dataset from the list; its description, scope and download/copy controls appear alongside it. Existing CSV/TSV formats and eligibility rules are unchanged.
 
 ## Export annotations
 
@@ -16,20 +16,20 @@ Exports the raw model predictions as a CSV.
 
 - Filename: `ai_annotations_{project_name}_{YYYY-MM-DD_HH-MM-SS}.csv`
 
-## Bundle export
+## Assignment delivery
 
-Also from the Model Import page, you can export a `.zip` bundle containing the project's species list, tags, model annotations, and metadata as separate CSVs. This is meant for distributing project setup to other annotators — see [Getting started](getting-started.md) for the matching bundle import flow.
+Use **Data & assignments → Assignments** to prepare and download saved assignments or copy their footage. Opening received assignments and legacy setup bundles remains in the project picker — see [Getting started](getting-started.md).
 
 ## Manual Distance annotations
 
-Open **Model Import → Manual Distance**.
+Open **Data & assignments → Export results** and choose **Distance measurements** (TSV) or **Editable Distance snapshot** (ZIP).
 
 1. Choose a species with **manually confirmed Species Review labels**.
 2. Optionally enter a camera-local time-of-day window, such as **18:00–20:00**.
    It applies across all days and checks **video start time only**, not overlap.
    Start is included, end is excluded; an earlier end crosses midnight. Leave both
    fields empty for all times.
-3. Click **Preview videos**, inspect the list, and select the tasks to export.
+3. Click **Preview videos**. All supported matching tasks start selected; expand the inspection list only if you want to inspect or narrow them.
    Unknown camera times are listed separately when a time filter is active.
    Only verified Distance camera times are used—not file metadata.
 4. Download either:
@@ -40,12 +40,12 @@ Open **Model Import → Manual Distance**.
 
 Ordinary annotator assignments do not restrict selection. Videos stay separate.
 This first format rejects AI-linked tasks/references rather than dropping AI
-provenance; annotator work packages are not implemented yet.
+provenance. Use assignment handoff for delegated manual or AI-linked Distance work.
 
 ### Restore an editable Distance ZIP
 
-Videos must already be imported/synced in the destination project. Under
-**Restore Distance annotations**, upload the ZIP (maximum 50 MiB), match source
+Videos must already be imported/synced in the destination project. Open
+**Data & assignments → Add data → Existing annotations → Restore Distance annotations** and upload the ZIP (maximum 50 MiB), match source
 media roots to local project folders, and inspect the preview. A single source
 and local root can be matched automatically.
 

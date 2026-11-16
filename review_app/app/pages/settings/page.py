@@ -4,7 +4,6 @@ from pathlib import Path
 from nicegui import run, ui
 
 from review_app.app.config import get_default_db_path, get_user_data_dir
-from review_app.app.pages.distribution import render_distribution_section
 from review_app.app.state import (
     get_active_project_id,
     get_blank_threshold,
@@ -32,7 +31,6 @@ from .database import render_database_section
 from .species import render_species_section
 from .tags import TagsSection
 from .users import render_users_section
-from .video_export import render_species_video_export
 
 
 def _build_settings_content(container: ui.column):
@@ -332,13 +330,11 @@ def _build_settings_content(container: ui.column):
                         ).props("dense")
 
                 if active_project_id:
-                    with ui.expansion(t("nav_distribution"), icon="group").classes("full-width"):
-                        render_distribution_section(_dp, active_project_id)
-
-                    with ui.expansion(
-                        t("species_video_export_title"), icon="video_library"
-                    ).classes("full-width"):
-                        render_species_video_export(_dp, active_project_id, lang)
+                    ui.button(
+                        t("nav_data_assignments"),
+                        icon="swap_horiz",
+                        on_click=lambda: ui.navigate.to("/data-assignments"),
+                    ).props("outline")
 
                 with ui.expansion(t("users_section_title"), icon="manage_accounts").classes(
                     "full-width"

@@ -10,7 +10,10 @@ import pytest
 from nicegui import app, ui
 from nicegui.elements.upload_files import SmallFileUpload
 from nicegui.testing import User
-from review_app.app.pages.model_import._distance_manual_tab import setup_distance_manual_tab
+from review_app.app.pages.data_assignments.distance_export import render_distance_export
+from review_app.app.pages.data_assignments.imports._distance_manual_tab import (
+    setup_distance_manual_tab,
+)
 from review_app.app.translations import t
 from review_app.backend.db.models import (
     DistanceIndividual,
@@ -457,7 +460,10 @@ async def test_manual_export_ui_preview_and_download(user: User, manual_data):
     @ui.page("/test-distance-manual-export")
     async def page():
         app.storage.user["active_project_id"] = project.id
-        await setup_distance_manual_tab(dp, ui.dialog())
+        await render_distance_export(dp, project.id, ui.dialog(), analysis=False)
+        for element in list(ui.context.client.elements.values()):
+            if isinstance(element, ui.expansion):
+                element.set_value(True)
 
     await user.open("/test-distance-manual-export")
     with user:

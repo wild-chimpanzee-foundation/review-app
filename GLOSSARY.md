@@ -4,6 +4,15 @@ Terms for delegated Species Review and Distance Review work.
 
 ## Language
 
+**Allocation**:
+The distribution of review work among annotators, independently for Species
+Review and Distance Review. Distance Review is allocated by target species: all
+eligible videos for one species belong to the same annotator.
+
+**Preparation batch**:
+A saved group of assignments prepared together for delivery. Each assignment
+retains its own recipient, scope, and identity.
+
 **Assignment**:
 A defined selection of videos delegated for one review stage; a Distance Review
 assignment targets exactly one species. It defines the delegated work, not which

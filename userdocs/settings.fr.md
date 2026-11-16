@@ -47,16 +47,16 @@ Cliquez sur **Enregistrer** pour appliquer.
 
 ### Distribution
 
-Répartissez les vidéos d'un projet entre plusieurs annotateurs afin que chacun revoie sa propre part.
+La répartition et le transfert sont maintenant dans **Données & affectations → Affectations**, et non dans les Paramètres. Ouvrez la section de répartition pour distribuer les vidéos. Les affectations enregistrées apparaissent en premier ; ouvrez **Préparer une affectation** pour déléguer du travail.
 
 1. Ajoutez les noms des annotateurs à qui répartir.
 2. Affectez les caméras aux annotateurs manuellement, ou utilisez **Distribution automatique** pour répartir les caméras équitablement.
 3. **Appliquer** pour enregistrer les affectations ; **Réinitialiser** les efface.
 
 Un tableau récapitulatif montre les caméras, vidéos et heures de chaque annotateur.
-Ouvrez la page **Distribution** pour transmettre un travail Espèces ou Distance :
+Dans le même onglet **Affectations**, transmettez un travail Espèces ou Distance :
 
-1. Choisissez l’**Étape de l’affectation** et un destinataire enregistré :
+1. Ouvrez **Préparer une affectation**, puis choisissez l’**Étape de l’affectation** et un destinataire enregistré :
    - **Espèces** : choisissez sa répartition appliquée ou toutes les vidéos du projet.
    - **Distance** : choisissez une **Espèce cible Distance** confirmée, puis
      **Charger les vidéos Distance admissibles**. Toutes sont sélectionnées par
@@ -86,7 +86,7 @@ Ouvrez la page **Distribution** pour transmettre un travail Espèces ou Distance
    découvrir les fichiers non répertoriés. En cas d’échec,
    réessayez dans le même formulaire sans créer un autre projet.
 4. Après annotation, le destinataire utilise **Télécharger la progression** dans
-   Distribution. Le retour contient l’état enregistré de chaque vidéo pour
+   **Affectations** (également accessible depuis la vue d'ensemble). Le retour contient l’état enregistré de chaque vidéo pour
    l’étape déléguée et, pour Distance, son unique espèce cible, même inchangé,
    inachevé ou vide. L’annotation peut continuer après un retour. Les deux étapes
    restent modifiables localement ; les autres travaux n’entrent pas dans le retour.
@@ -107,8 +107,7 @@ et les positions retournée/administrateur, et conservent le masque administrate
 Les distances des échantillons retournés sont conservées. De nouvelles distances
 peuvent partager un horodatage sans remplacer les autres calibrations.
 
-L’import CSV par lot reste indépendant et ajoute des annotations sans aperçu
-d’affectation. Le format d’archive **Distance manuelle** reste également séparé :
+L’import CSV par lot est dans **Données & affectations → Ajouter des données → Annotations existantes**. Il reste indépendant et ajoute les annotations dès l'envoi, sans aperçu d'affectation. La restauration **Distance manuelle** est dans le même espace et reste séparée :
 il ne prend en charge ni les tâches liées à l’IA ni l’identité d’affectation.
 Utilisez les paquets d’affectation pour déléguer Distance. **Ouvrir un paquet**
 détecte aussi les anciens bundles et explique qu’ils créent un projet indépendant

@@ -47,7 +47,7 @@ def render_species_video_export(dp, project_id: str, lang: str) -> None:
             return
 
         dialog = ui.dialog().props("persistent")
-        with dialog, ui.card().classes("q-pa-lg").style("min-width: 420px"):
+        with dialog, ui.card().classes("w-96 max-w-full q-pa-lg"):
             ui.label(t("species_video_export_title")).classes("text-h6 q-mb-md")
             count_label = ui.label("0 / …").classes("text-body2 q-mb-xs")
             progress = ui.linear_progress(value=0).props("color=primary")
@@ -76,7 +76,7 @@ def render_species_video_export(dp, project_id: str, lang: str) -> None:
             return
 
         dialog.clear()
-        with dialog, ui.card().classes("q-pa-lg items-center gap-md").style("min-width: 420px"):
+        with dialog, ui.card().classes("w-96 max-w-full q-pa-lg items-center gap-md"):
             ui.icon("check_circle", size="lg").classes("text-positive")
             ui.label(
                 t("species_video_export_done", count=result["video_count"], path=result["path"])

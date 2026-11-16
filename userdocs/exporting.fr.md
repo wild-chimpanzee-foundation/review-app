@@ -1,6 +1,6 @@
 # Exporter les annotations
 
-Les exports sont disponibles sur la page **Import de modèle**, sous l'onglet **Annotations**.
+Ouvrez **Données & affectations → Exporter les résultats**. Choisissez un jeu de données dans la liste ; sa description, son périmètre et ses commandes de téléchargement/copie s'affichent à côté. Les formats CSV/TSV et les règles d'éligibilité restent inchangés.
 
 ## Exporter les annotations
 
@@ -16,13 +16,13 @@ Exporte les prédictions brutes du modèle au format CSV.
 
 - Nom de fichier : `ai_annotations_{project_name}_{YYYY-MM-DD_HH-MM-SS}.csv`
 
-## Export par bundle
+## Livraison des affectations
 
-Toujours depuis la page Import de modèle, vous pouvez exporter un bundle `.zip` contenant la liste d'espèces du projet, les étiquettes, les annotations du modèle et les métadonnées sous forme de CSV séparés. Ceci est destiné à distribuer la configuration d'un projet à d'autres annotateurs — voir [Premiers pas](getting-started.md) pour le flux d'import correspondant.
+Utilisez **Données & affectations → Affectations** pour préparer et télécharger des affectations enregistrées ou copier leurs vidéos. L'ouverture des affectations reçues et des anciens bundles reste dans le sélecteur de projet — voir [Premiers pas](getting-started.md).
 
 ## Annotations Distance manuelles
 
-Ouvrez **Import de modèle → Distance manuelle**.
+Ouvrez **Données & affectations → Exporter les résultats**, puis choisissez **Mesures de distance** (TSV) ou **Instantané Distance modifiable** (ZIP).
 
 1. Choisissez une espèce avec des **étiquettes de révision des espèces confirmées
    manuellement**.
@@ -31,8 +31,7 @@ Ouvrez **Import de modèle → Distance manuelle**.
    **l'heure de début de la vidéo**, pas le chevauchement. Début inclus, fin
    exclue ; une fin antérieure traverse minuit. Laissez les deux champs vides
    pour toutes les heures.
-3. Cliquez sur **Prévisualiser les vidéos**, vérifiez la liste et sélectionnez
-   les tâches à exporter. Les vidéos sans heure caméra connue sont signalées
+3. Cliquez sur **Prévisualiser les vidéos**. Toutes les tâches correspondantes prises en charge sont sélectionnées ; ouvrez la liste uniquement pour les examiner ou réduire la sélection. Les vidéos sans heure caméra connue sont signalées
    séparément lorsqu'un filtre horaire est actif. Seules les heures Distance
    vérifiées sont utilisées, jamais les métadonnées du fichier.
 4. Téléchargez :
@@ -45,12 +44,12 @@ Ouvrez **Import de modèle → Distance manuelle**.
 
 Les affectations ordinaires ne limitent pas la sélection. Les vidéos restent
 séparées. Ce premier format refuse les tâches et références liées à l'IA plutôt
-que de perdre leur provenance. Les lots de travail ne sont pas encore disponibles.
+que de perdre leur provenance. Utilisez les affectations pour déléguer du travail Distance manuel ou lié à l'IA.
 
 ### Restaurer un ZIP Distance éditable
 
 Les vidéos doivent déjà être importées et synchronisées dans le projet cible.
-Sous **Restaurer les annotations Distance**, chargez le ZIP (50 Mio maximum),
+Dans **Données & affectations → Ajouter des données → Annotations existantes → Restaurer les annotations Distance**, chargez le ZIP (50 Mio maximum),
 associez les dossiers médias sources aux dossiers locaux et vérifiez l'aperçu.
 Un unique dossier source et local peut être associé automatiquement.
 

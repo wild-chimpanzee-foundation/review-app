@@ -47,16 +47,16 @@ Click **Save** to apply.
 
 ### Distribution
 
-Split a project's videos across multiple annotators so each person reviews their own share.
+Work allocation and handoff now live in **Data & assignments → Assignments**, not Settings. Expand the allocation section to split a project's videos across annotators. Saved assignments appear first; expand **Prepare assignment** to delegate new work.
 
 1. Add the annotator names to distribute to.
 2. Assign cameras to annotators manually, or use **Auto-distribute** to spread cameras evenly.
 3. **Apply** to write the assignments; **Reset** clears them.
 
-A summary table shows each annotator's cameras, videos, and hours. Open the
-**Distribution** page to hand off Species or Distance work:
+A summary table shows each annotator's cameras, videos, and hours. In the same
+**Assignments** tab, hand off Species or Distance work:
 
-1. Choose the **Assignment stage** and a registered recipient:
+1. Expand **Prepare assignment**, then choose the **Assignment stage** and a registered recipient:
    - **Species**: choose their applied distribution or all project videos.
    - **Distance**: choose one confirmed **Distance target species**, then **Load
      eligible Distance videos**. All eligible videos start selected; remove any
@@ -83,7 +83,7 @@ A summary table shows each annotator's cameras, videos, and hours. Open the
    Opening automatically syncs and probes listed work and reference footage,
    without discovering unlisted files. If
    that sync fails, retry it in the same form without creating another project.
-4. After annotating, the recipient uses **Download return progress** in Distribution.
+4. After annotating, the recipient uses **Download return progress** in **Assignments** (also linked from Overview).
    Returns include every assigned video's saved state for the delegated stage
    and, for Distance, its one target species—even untouched, unfinished, or empty
    work. Annotation can continue after a return. Both review stages remain
@@ -104,8 +104,7 @@ show the video, distance, and returned/admin playback positions, and keep the
 admin mask. Returned sample distances are preserved. New distances can share a
 frame timestamp without replacing other calibration.
 
-Legacy CSV batch import remains separate and appends annotations without an
-assignment preview. The **Manual Distance** archive workflow also remains separate;
+Legacy CSV batch import now lives under **Data & assignments → Add data → Existing annotations**. It remains separate and appends annotations immediately on upload without an assignment preview. Manual Distance restoration is in the same area;
 its manual-only format does not support AI-linked tasks or assignment identity.
 Use assignment packages for delegated Distance work. **Open package** also detects
 legacy setup bundles and explains that they create independent projects without

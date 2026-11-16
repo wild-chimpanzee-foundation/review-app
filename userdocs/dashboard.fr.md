@@ -50,7 +50,7 @@ Une bande déroulable horizontalement de cartes de caméra, chacune montrant une
 
 ## Récapitulatif des affectations
 
-Lorsque des vidéos sont affectées à des annotateurs (voir [Paramètres → Distribution](settings.md#distribution)), ce panneau liste chaque annotateur avec son pourcentage d'annotation, le nombre de vidéos/caméras, les heures, et une barre de progression vide/non vide/non annotée. Cliquez sur une ligne pour revoir les vidéos affectées à cet annotateur.
+Lorsque des vidéos sont affectées à des annotateurs (voir [Données & affectations → Affectations](settings.md#distribution)), ce panneau liste chaque annotateur avec son pourcentage d'annotation, le nombre de vidéos/caméras, les heures, et une barre de progression vide/non vide/non annotée. Cliquez sur une ligne pour revoir les vidéos affectées à cet annotateur.
 
 ## Carte des emplacements
 
