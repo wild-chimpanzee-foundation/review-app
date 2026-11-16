@@ -2,8 +2,12 @@
 
 from review_app.backend.annotation_package import delivery, handoff
 from review_app.backend.annotation_package.archive import decode_archive
-from review_app.backend.annotation_package.scope import AssignmentRequest, PreparedAssignment
-from review_app.backend.db.models import HandoffAssignment, Video
+from review_app.backend.annotation_package.scope import (
+    AssignmentRequest,
+    PreparedAssignment,
+    distance_selection,
+)
+from review_app.backend.db.models import HandoffAssignment, Species, Video
 from review_app.backend.provider.base import ProviderBase
 
 
@@ -31,6 +35,40 @@ class AssignmentHandoffMixin(ProviderBase):
                 .order_by(Video.video_id)
             ]
 
+    def get_assignment_distance_species_options(self, project_id, lang="en") -> dict[str, str]:
+        """Use scientific names as portable target keys, including saved vocabulary."""
+        options = self.get_distance_target_species_options(project_id, lang)
+        with self.Session() as session:
+            return {
+                row.scientific_name: options[row.id]
+                for row in session.query(Species)
+                .filter(Species.id.in_(options))
+                .order_by(Species.scientific_name)
+            }
+
+    def preview_assignment_distance_selection(
+        self, project_id, target_species, *, start_time=None, end_time=None
+    ) -> dict:
+        """List eligible work without the legacy format's AI/manual restriction."""
+        with self.Session.begin() as session:
+            rows, unknown = distance_selection(
+                session, project_id, target_species, start_time, end_time
+            )
+            return {
+                "videos": [
+                    {
+                        "video_id": video.video_id,
+                        "video_path": video.video_path,
+                        "recorded_start": task.recorded_start.isoformat()
+                        if task.recorded_start
+                        else None,
+                        "is_missing": video.is_missing,
+                    }
+                    for task, video in rows
+                ],
+                "unknown_time_count": len(unknown),
+            }
+
     def list_assignments(self, project_id: str) -> list[dict]:
         """Describe persisted handouts/bindings without rebuilding their saved scope."""
         with self.Session() as session:
@@ -41,7 +79,10 @@ class AssignmentHandoffMixin(ProviderBase):
                     "role": row.role,
                     "recipient": row.recipient,
                     "stage": row.stage,
+                    "target_species": row.target_species,
                     "video_count": len(row.scope["work_keys"]),
+                    "reference_video_count": len(row.scope["media"]) - len(row.scope["work_keys"]),
+                    "media_count": len(row.scope["media"]),
                     "created_at": row.created_at.isoformat(),
                 }
                 for row in session.query(HandoffAssignment)
@@ -58,8 +99,11 @@ class AssignmentHandoffMixin(ProviderBase):
             "assignment_id": manifest["assignment_id"],
             "recipient": manifest["recipient"],
             "stage": manifest["stage"],
+            "target_species": manifest["target_species"],
             "project_name": context["project_name"],
             "video_count": len(manifest["work_keys"]),
+            "reference_video_count": len(context["media"]) - len(manifest["work_keys"]),
+            "media_count": len(context["media"]),
             "roots": {
                 root: [row["video_path"] for row in context["media"] if row["root_id"] == root]
                 for root in manifest["roots"]

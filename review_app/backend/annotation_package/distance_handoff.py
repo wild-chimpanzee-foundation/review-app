@@ -240,8 +240,15 @@ def plan(session, binding, manifest, context, work, data, policy, original):
                     "returned_frame_id": frame["id"],
                     "existing_frame_id": existing["id"],
                     "distance_m": frame["distance_m"],
+                    "video_path": next(
+                        row["video_path"]
+                        for row in context["media"]
+                        if row["video_id"] == returned_refs[frame["reference_video_id"]]
+                    ),
                     "returned_offset_ms": frame["offset_ms"],
                     "existing_offset_ms": existing["offset_ms"],
+                    "returned_playback_ms": frame["playback_offset_ms"],
+                    "existing_playback_ms": existing["playback_offset_ms"],
                 }
             )
     if substitutions:
@@ -265,7 +272,15 @@ def plan(session, binding, manifest, context, work, data, policy, original):
     token = distance.digest(state)
     # Reference substitutions are structured preview data, not merely prose.
     preview = ReturnPreview(
-        token, policy, tuple(units), totals, tuple(warnings), tuple(substitutions)
+        token,
+        policy,
+        tuple(units),
+        totals,
+        tuple(warnings),
+        tuple(substitutions),
+        stage="distance",
+        target_species=manifest["target_species"],
+        species_context_changed=original_labels != now_labels,
     )
     return binding, dependencies, selected, preview
 

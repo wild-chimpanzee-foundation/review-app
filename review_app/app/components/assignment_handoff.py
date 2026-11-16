@@ -1,11 +1,11 @@
-"""Species assignment controls; serialization, scope and acceptance stay in the backend."""
+"""Assignment controls; serialization, scope and acceptance stay in the backend."""
 
 import re
 
 from nicegui import run, ui
 
 from review_app.app.state import get_active_project_id
-from review_app.app.translations import t
+from review_app.app.translations import get_language, t
 from review_app.app.utils import (
     get_or_create_data_provider,
     switch_project,
@@ -20,6 +20,17 @@ def assignment_filename(direction, recipient, assignment_id):
     """Keep names recognizable without allowing paths or unsafe filename characters."""
     name = re.sub(r"[^\w.-]+", "_", recipient).strip("._")[:80] or "recipient"
     return f"{direction}-{name}-{assignment_id}.zip"
+
+
+def assignment_stage_label(row):
+    label = t(f"handoff_stage_{row['stage']}")
+    if row.get("target_species"):
+        label += f" — {row['target_species']}"
+    return label
+
+
+def assignment_identity(row):
+    return t("handoff_identity", **row, stage_label=assignment_stage_label(row))
 
 
 def _error_message(exc):
@@ -101,7 +112,9 @@ def render_open_assignment(on_complete, *, show_upload=True):
             data = raw
             name.set_value(f"{info['project_name']} — {info['recipient']}")
             with details:
-                ui.label(t("handoff_identity", **info)).classes("text-body2")
+                ui.label(assignment_identity(info)).classes("text-body2")
+                if info["stage"] == "distance":
+                    ui.label(t("handoff_media_summary", **info)).classes("text-caption")
                 ui.label(t("handoff_roots_help")).classes("text-caption")
                 for index, (root, paths) in enumerate(info["roots"].items(), 1):
                     ui.label(t("handoff_root_files", count=len(paths), example=paths[0]))
@@ -170,6 +183,8 @@ def render_open_assignment(on_complete, *, show_upload=True):
 def render_assignment_delivery(dp, binding, require_project):
     """Each saved handout owns its output controls and result display."""
     with ui.expansion(t("handoff_copy"), icon="folder_copy").classes("w-full"):
+        if binding["stage"] == "distance":
+            ui.label(t("handoff_media_summary", **binding)).classes("text-body2")
         ui.label(t("handoff_copy_help")).classes("text-caption")
         output = ui.input(t("handoff_copy_output")).classes("w-full")
         status = ui.label("").classes("text-body2 whitespace-pre-wrap")
@@ -216,7 +231,7 @@ def render_assignment_handoff(dp, project_id):
         def saved_assignments():
             bindings = dp.list_assignments(project_id)
             for binding in bindings:
-                ui.label(t("handoff_identity", **binding)).classes("text-body2")
+                ui.label(assignment_identity(binding)).classes("text-body2")
                 ui.label(binding["created_at"]).classes("text-caption")
 
                 async def download(row=binding):
@@ -246,6 +261,11 @@ def render_assignment_handoff(dp, project_id):
             if any(row["role"] == "working" for row in bindings):
                 ui.label(t("handoff_working_help")).classes("text-caption")
 
+        stage = ui.select(
+            {"species": t("handoff_stage_species"), "distance": t("handoff_stage_distance")},
+            value="species",
+            label=t("handoff_stage"),
+        ).classes("w-full")
         recipient = ui.select(dp.get_all_annotators(), label=t("handoff_recipient")).classes(
             "w-full"
         )
@@ -258,18 +278,111 @@ def render_assignment_handoff(dp, project_id):
             label=t("handoff_scope"),
         ).classes("w-full")
 
+        selection_revision = 0
+        loaded_filters = None
+        with ui.column().classes("w-full") as distance_fields:
+            ui.label(t("handoff_distance_help")).classes("text-caption")
+            target = ui.select(
+                dp.get_assignment_distance_species_options(project_id, get_language()),
+                label=t("handoff_target"),
+            ).classes("w-full")
+            with ui.row():
+                start = ui.input(t("handoff_start"), placeholder="18:00")
+                end = ui.input(t("handoff_end"), placeholder="06:00")
+            ui.label(t("handoff_time_help")).classes("text-caption")
+            selection_status = ui.label("").classes("text-body2")
+            selected_videos = (
+                ui.select({}, multiple=True, value=[], label=t("handoff_distance_videos"))
+                .props("use-chips")
+                .classes("w-full")
+            )
+
+            def filters():
+                return (
+                    target.value,
+                    (start.value or "").strip() or None,
+                    (end.value or "").strip() or None,
+                )
+
+            def clear_selection():
+                nonlocal loaded_filters, selection_revision
+                selection_revision += 1
+                loaded_filters = None
+                selected_videos.set_value([])
+                selected_videos.set_options({})
+                selection_status.set_text("")
+
+            async def load_selection():
+                nonlocal loaded_filters
+                clear_selection()
+                current, chosen = selection_revision, filters()
+                try:
+                    require_project()
+                    if not chosen[0]:
+                        raise ValueError(t("handoff_choose_target"))
+                    result = await run.io_bound(
+                        dp.preview_assignment_distance_selection,
+                        project_id,
+                        chosen[0],
+                        start_time=chosen[1],
+                        end_time=chosen[2],
+                    )
+                    if current != selection_revision:
+                        return
+                    options = {
+                        row["video_id"]: t(
+                            "handoff_distance_video",
+                            path=row["video_path"],
+                            time=row["recorded_start"] or t("handoff_unknown_time"),
+                            missing=t("handoff_missing_marker") if row["is_missing"] else "",
+                        )
+                        for row in result["videos"]
+                    }
+                    selected_videos.set_options(options)
+                    selected_videos.set_value(list(options))
+                    loaded_filters = chosen
+                    selection_status.set_text(
+                        t(
+                            "handoff_selection_result",
+                            count=len(options),
+                            unknown=result["unknown_time_count"],
+                        )
+                    )
+                except Exception as exc:
+                    if current == selection_revision:
+                        selection_status.set_text(_error_message(exc))
+
+            target.on(
+                "focus",
+                lambda: target.set_options(
+                    dp.get_assignment_distance_species_options(project_id, get_language())
+                ),
+            )
+            for field in (target, start, end):
+                field.on_value_change(clear_selection)
+            ui.button(t("handoff_load_videos"), on_click=load_selection, icon="search")
+        distance_fields.set_visibility(False)
+
         async def prepare():
             prepare_button.disable()
             try:
                 require_project()
                 name = (recipient.value or "").strip()
-                if scope.value == "assigned":
-                    ids = await run.io_bound(dp.get_assigned_video_ids, project_id, name)
+                chosen_stage, chosen_scope = stage.value, scope.value
+                chosen_filters = filters()
+                if chosen_stage == "distance":
+                    if loaded_filters != chosen_filters or not selected_videos.value:
+                        raise ValueError(t("handoff_select_distance"))
+                    request = AssignmentRequest(
+                        name, tuple(selected_videos.value), chosen_stage, *chosen_filters
+                    )
                 else:
-                    ids = await run.io_bound(dp.get_assignment_video_ids, project_id)
-                result = await run.io_bound(
-                    dp.prepare_assignment, project_id, AssignmentRequest(name, tuple(ids))
-                )
+                    if chosen_scope == "assigned":
+                        ids = await run.io_bound(dp.get_assigned_video_ids, project_id, name)
+                    else:
+                        ids = await run.io_bound(dp.get_assignment_video_ids, project_id)
+                    request = AssignmentRequest(name, tuple(ids))
+                result = await run.io_bound(dp.prepare_assignment, project_id, request)
                 ui.notify(t("handoff_prepared", count=result.video_count), type="positive")
                 if result.missing_video_ids:
                     ui.notify(
@@ -284,6 +397,13 @@ def render_assignment_handoff(dp, project_id):
                 prepare_button.enable()
 
         prepare_button = ui.button(t("handoff_prepare"), on_click=prepare, icon="inventory_2")
+
+        def stage_changed():
+            scope.set_visibility(stage.value == "species")
+            distance_fields.set_visibility(stage.value == "distance")
+            clear_selection()
+
+        stage.on_value_change(stage_changed)
         saved_assignments()
 
     with ui.card().classes("w-full q-mb-lg"):
@@ -348,7 +468,33 @@ def render_assignment_handoff(dp, project_id):
                     return
                 preview = result
                 with impact:
+                    ui.label(
+                        t(
+                            "handoff_preview_scope",
+                            stage_label=assignment_stage_label(
+                                {"stage": result.stage, "target_species": result.target_species}
+                            ),
+                        )
+                    ).classes("text-body2")
                     ui.label(t("handoff_totals", **result.totals)).classes("text-body1")
+                    if result.species_context_changed:
+                        ui.label(t("handoff_species_changed")).classes("text-warning")
+                    if result.reference_substitutions:
+                        ui.label(t("handoff_substitution_help")).classes("text-warning")
+                        for reference in result.reference_substitutions:
+                            ui.label(
+                                t(
+                                    "handoff_substitution",
+                                    path=reference["video_path"],
+                                    distance=reference["distance_m"],
+                                    returned=reference["returned_playback_ms"]
+                                    if reference["returned_playback_ms"] is not None
+                                    else reference["returned_offset_ms"],
+                                    existing=reference["existing_playback_ms"]
+                                    if reference["existing_playback_ms"] is not None
+                                    else reference["existing_offset_ms"],
+                                )
+                            ).classes("text-body2")
                     if result.totals["unapplied"]:
                         ui.label(t("handoff_keep_warning")).classes("text-warning")
                     if result.totals["replaced"]:

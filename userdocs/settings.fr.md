@@ -54,38 +54,65 @@ Répartissez les vidéos d'un projet entre plusieurs annotateurs afin que chacun
 3. **Appliquer** pour enregistrer les affectations ; **Réinitialiser** les efface.
 
 Un tableau récapitulatif montre les caméras, vidéos et heures de chaque annotateur.
-Ouvrez la page **Distribution** pour transmettre un travail Espèces :
+Ouvrez la page **Distribution** pour transmettre un travail Espèces ou Distance :
 
-1. Choisissez un destinataire enregistré et sa distribution appliquée ou toutes
-   les vidéos du projet, puis préparez l’affectation Espèces. La sélection et
-   l’état Espèces enregistré sont figés ; les modifications ultérieures ne
-   changent pas ce paquet.
+1. Choisissez l’**Étape de l’affectation** et un destinataire enregistré :
+   - **Espèces** : choisissez sa répartition appliquée ou toutes les vidéos du projet.
+   - **Distance** : choisissez une **Espèce cible Distance** confirmée, puis
+     **Charger les vidéos Distance admissibles**. Toutes sont sélectionnées par
+     défaut ; retirez celles que vous ne souhaitez pas déléguer. Cette sélection
+     est indépendante de la répartition Espèces et comprend les tâches manuelles
+     ou liées à l’IA, même avec une vidéo manquante. Les vidéos de référence et
+     leur calibration sont collectées automatiquement.
+     Vous pouvez saisir deux heures locales caméra sur 24 heures : début inclus,
+     fin exclue, plages nocturnes possibles. Les tâches sans heure connue sont
+     exclues uniquement lorsqu’une plage est définie ; leur nombre est affiché.
+     Modifier l’espèce ou les heures efface la sélection : rechargez les vidéos.
+   Cliquez sur **Préparer une affectation**. La sélection et l’état enregistré
+   sont figés ; les modifications ultérieures ne changent pas ce paquet.
 2. Téléchargez l’affectation enregistrée. Pour livrer les vidéos, ouvrez la copie
    des vidéos de l’affectation et choisissez un dossier sur l’ordinateur qui
    exécute l’application, hors des dossiers vidéo du projet. Envoyez le dossier
-   créé avec le ZIP. Chaque racine possède son propre sous-dossier. Vérifiez les
-   fichiers absents et les échecs ; réessayez dans un autre dossier de sortie
+   créé avec le ZIP. Chaque racine possède son propre sous-dossier. Pour Distance,
+   le panneau indique les vidéos affectées + les références = le total des fichiers.
+   Les résultats de copie incluent les deux ; les références sont des dépendances,
+   pas du travail affecté supplémentaire. Vérifiez les fichiers absents et les échecs ; réessayez dans un autre dossier de sortie
    plutôt que d’écraser une livraison existante.
 3. Le destinataire choisit **Ouvrir un paquet** dans le sélecteur de projet,
    charge le ZIP et indique chaque sous-dossier racine pour créer un nouveau projet. Les
    vidéos ne sont pas intégrées au ZIP. Sur le même ordinateur, les dossiers
    vidéo d’origine peuvent être réutilisés. L’ouverture synchronise et analyse
-   automatiquement les vidéos répertoriées avant de continuer. En cas d’échec,
+   automatiquement les vidéos de travail et de référence répertoriées, sans
+   découvrir les fichiers non répertoriés. En cas d’échec,
    réessayez dans le même formulaire sans créer un autre projet.
-4. Après annotation, le destinataire télécharge le retour depuis Distribution.
-   Il contient l’état Espèces enregistré de chaque vidéo affectée, même inchangé,
-   inachevé ou vide. L’annotation peut continuer après un retour.
-5. Dans le projet d’origine, chargez le retour dans l’aperçu des travaux Espèces
-   retournés. Vérifiez l’impact avant d’accepter. Par défaut, **Utiliser l’import**
-   remplace les états Espèces différents de vidéos entières, y compris les
-   suppressions ; choisissez **Conserver l’existant** pour préserver le travail
-   différent du projet d’origine.
+4. Après annotation, le destinataire utilise **Télécharger la progression** dans
+   Distribution. Le retour contient l’état enregistré de chaque vidéo pour
+   l’étape déléguée et, pour Distance, son unique espèce cible, même inchangé,
+   inachevé ou vide. L’annotation peut continuer après un retour. Les deux étapes
+   restent modifiables localement ; les autres travaux n’entrent pas dans le retour.
+5. Dans le projet d’origine, chargez le retour dans **Prévisualiser et accepter le
+   retour**. Vérifiez l’étape, l’espèce cible, les nombres et les avertissements.
+   Par défaut, **Utiliser l’import** remplace l’état Espèces complet d’une vidéo ou
+   l’état complet d’une tâche Distance, y compris les suppressions et corrections
+   de l’administrateur. **Conserver l’existant** préserve les unités différentes
+   du projet d’origine ; leurs mises à jour retournées ne sont pas appliquées.
+   Changer de fichier annule la confirmation ; changer de règle actualise l’aperçu.
+   Des modifications du projet destinataire après l’aperçu imposent un nouvel aperçu.
 
-La transmission Distance n’est pas encore disponible. L’annotation locale reste
-libre ; seul le périmètre Espèces enregistré peut être accepté au retour.
+Pour Distance, un changement du contexte Espèces déclenche un avertissement sans
+bloquer les tâches du périmètre enregistré. L’acceptation ne restaure ni ne modifie
+les annotations Espèces. La calibration de l’administrateur est réutilisée par
+vidéo de référence et distance ; les substitutions affichent la vidéo, la distance
+et les positions retournée/administrateur, et conservent le masque administrateur.
+Les distances des échantillons retournés sont conservées. De nouvelles distances
+peuvent partager un horodatage sans remplacer les autres calibrations.
+
 L’import CSV par lot reste indépendant et ajoute des annotations sans aperçu
-d’affectation. **Ouvrir un paquet** détecte aussi les anciens bundles et explique qu’ils créent
-un projet indépendant sans retours d’affectation.
+d’affectation. Le format d’archive **Distance manuelle** reste également séparé :
+il ne prend en charge ni les tâches liées à l’IA ni l’identité d’affectation.
+Utilisez les paquets d’affectation pour déléguer Distance. **Ouvrir un paquet**
+détecte aussi les anciens bundles et explique qu’ils créent un projet indépendant
+sans retours d’affectation.
 
 Les affectations apparaissent sur le [tableau de bord](dashboard.md#recapitulatif-des-affectations) et comme filtre d'annotateur sur l'écran Espèces.
 

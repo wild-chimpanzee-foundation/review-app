@@ -1,10 +1,18 @@
-"""Distance assignment contract at the public provider boundary (not legacy v1)."""
+"""Distance assignment backend and functional UI round trips (not legacy v1)."""
 
 import copy
 from datetime import datetime
 from pathlib import Path
 
 import pytest
+from nicegui import app, ui
+from nicegui.elements.upload_files import SmallFileUpload
+from nicegui.testing import User
+from review_app.app.components.assignment_handoff import render_assignment_handoff
+from review_app.app.pages.distribution.page import render_distribution_section
+from review_app.app.setup_wizard import SetupWizard
+from review_app.app.state import get_active_project_id, set_data_provider
+from review_app.app.translations import t
 from review_app.backend.annotation_package.archive import decode_archive, encode_archive
 from review_app.backend.annotation_package.scope import AssignmentRequest
 from review_app.backend.db.models import (
@@ -24,6 +32,9 @@ from review_app.backend.db.models import (
     Video,
 )
 from review_app.backend.provider.distance_tasks import ensure_tasks
+from review_app.backend.video_tools import VideoToolsStatus
+
+pytest_plugins = ["nicegui.testing.user_plugin"]
 
 
 @pytest.fixture
@@ -424,8 +435,22 @@ def test_reference_dependencies_discovered_on_untouched_task_and_listed_only_syn
         progress_callback=None, video_dir=Path(root.path), active_project_id=opened.project_id
     )
     with dp.Session() as session:
-        assert session.query(Video).filter_by(project_id=opened.project_id).count() == 3
+        videos = session.query(Video).filter_by(project_id=opened.project_id).all()
+        assert len(videos) == 3
+        assert all(video.is_valid is True for video in videos)
+        reference = next(video for video in videos if video.video_path.endswith("reference.mp4"))
+        reference_id = reference.video_id
+        reference_path = Path(reference.video_path)
     assert len(dp.get_distance_reference_videos(local)) == 1
+    reference_path.unlink()
+    dp.sync_videos(progress_callback=None, active_project_id=opened.project_id)
+    with dp.Session() as session:
+        assert session.get(Video, reference_id).is_missing is True
+    reference_path.touch()
+    dp.sync_videos(progress_callback=None, active_project_id=opened.project_id)
+    with dp.Session() as session:
+        assert session.get(Video, reference_id).is_missing is False
+        assert session.query(Video).filter_by(project_id=opened.project_id).count() == 3
 
 
 @pytest.mark.parametrize(
@@ -492,3 +517,304 @@ def test_distance_opens_and_returns_from_another_database(
         assert "alice" in worker.get_all_annotators()
     finally:
         worker.engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "start,end,count,unknown",
+    [
+        (None, None, 2, 0),
+        ("17:00", "06:00", 1, 1),
+        ("19:00", "17:00", 0, 1),
+        ("17:00", "18:00", 0, 1),
+    ],
+)
+def test_distance_assignment_selection_includes_ai_and_reports_unknown_times(
+    distance_assignment, start, end, count, unknown
+):
+    dp, project, _, ids, _, _ = distance_assignment
+    with dp.Session.begin() as session:
+        session.get(Video, ids[0]).is_missing = True
+    options = dp.get_assignment_distance_species_options(project.id)
+    assert set(options) == {"deer"}
+    result = dp.preview_assignment_distance_selection(
+        project.id, "deer", start_time=start, end_time=end
+    )
+    assert len(result["videos"]) == count
+    assert result["unknown_time_count"] == unknown
+    if count:
+        assert any(row["is_missing"] for row in result["videos"])
+    # The assignment selector must not inherit or change the legacy manual restriction.
+    with dp.Session() as session:
+        species_id = session.query(Species).filter_by(scientific_name="deer").one().id
+    legacy = dp.preview_distance_export(project.id, species_id)
+    assert any(row["error"] and "AI" in row["error"] for row in legacy["tasks"])
+
+
+@pytest.fixture
+def distance_ui(distance_assignment, monkeypatch):
+    dp, project, _, _, _, _ = distance_assignment
+    set_data_provider(dp)
+    dp.add_annotator("alice")
+    monkeypatch.setattr(
+        "review_app.app.setup_wizard.check_video_tools",
+        lambda: VideoToolsStatus({"ffmpeg": "ffmpeg", "ffprobe": "ffprobe"}),
+    )
+    monkeypatch.setattr(
+        "review_app.app.setup_wizard.get_default_db_path", lambda: Path(dp.engine.url.database)
+    )
+
+    @ui.page("/distance-handoff-admin")
+    def admin():
+        app.storage.user["active_project_id"] = project.id
+        render_distribution_section(dp, project.id)
+
+    @ui.page("/distance-handoff-open")
+    def opening():
+        SetupWizard(lambda: ui.label("Distance package opened")).build(package_only=True)
+
+    @ui.page("/distance-handoff-working")
+    def working():
+        render_assignment_handoff(dp, get_active_project_id())
+
+    yield distance_assignment
+    set_data_provider(None)
+
+
+def select_field(user, key):
+    return next(iter(user.find(t(key), kind=ui.select).elements))
+
+
+def handoff_button(user, key):
+    return min(user.find(t(key), kind=ui.button).elements, key=lambda element: element.id)
+
+
+def click_first_handoff_button(user, key):
+    with user:
+        handoff_button(user, key).mark(f"first-{key}")
+    user.find(f"first-{key}", kind=ui.button).click()
+
+
+async def upload_distance_zip(user, raw, key="handoff_return_upload"):
+    uploader = next(
+        e
+        for e in user.client.elements.values()
+        if isinstance(e, ui.upload) and e.props.get("label") == t(key)
+    )
+    with user:
+        await uploader.handle_uploads([SmallFileUpload("distance.zip", "application/zip", raw)])
+
+
+async def load_distance_selection(user):
+    with user:
+        select_field(user, "handoff_stage").set_value("distance")
+        select_field(user, "handoff_recipient").set_value("alice")
+        select_field(user, "handoff_target").set_value("deer")
+    user.find(t("handoff_load_videos"), kind=ui.button).click()
+    await user.should_see(t("handoff_selection_result", count=2, unknown=0))
+
+
+async def test_distance_ui_prepare_copy_open_return_preview_accept(
+    user: User, distance_ui, tmp_path
+):
+    dp, project, _, ids, _, _ = distance_ui
+    await user.open("/distance-handoff-admin")
+    await load_distance_selection(user)
+    user.find(t("handoff_prepare"), kind=ui.button).click()
+    await user.should_see(t("handoff_prepared", count=2))
+    saved = dp.list_assignments(project.id)[0]
+    assert saved["stage"] == "distance" and saved["target_species"] == "deer"
+    assert saved["video_count"] == 2
+    assert saved["reference_video_count"] == 1
+    assert saved["media_count"] == 3
+    # Multiple handouts exist: the newest saved handout owns these first controls.
+    click_first_handoff_button(user, "handoff_download")
+    setup = (await user.download.next()).content
+    manifest, context, _ = decode_archive(setup)
+    assert manifest["assignment_id"] == saved["assignment_id"]
+    assert len(context["media"]) == 3
+    assert not dp.get_assigned_video_ids(project.id, "alice")
+    expansion = min(user.find(t("handoff_copy"), kind=ui.expansion).elements, key=lambda e: e.id)
+    with user:
+        expansion.set_value(True)
+        min(
+            user.find(t("handoff_copy_output"), kind=ui.input).elements, key=lambda e: e.id
+        ).set_value(str(tmp_path / "delivery"))
+    await user.should_see(
+        t("handoff_media_summary", video_count=2, reference_video_count=1, media_count=3)
+    )
+    click_first_handoff_button(user, "handoff_copy_start")
+    delivery = tmp_path / "delivery" / f"assignment-{saved['assignment_id']}"
+    await user.should_see(
+        t("handoff_copy_result", copied=3, missing=0, failed=0, path=str(delivery))
+    )
+    root_id = manifest["roots"][0]
+    delivered_root = delivery / root_id
+    (delivered_root / "unlisted.mp4").touch()
+
+    await user.open("/distance-handoff-open")
+    await upload_distance_zip(user, setup, "package_upload")
+    await user.should_see(t("handoff_root", number=1))
+    await user.should_see(
+        t(
+            "handoff_identity",
+            **dp.inspect_assignment(setup),
+            stage_label=t("handoff_stage_distance") + " — deer",
+        )
+    )
+    await user.should_see(
+        t("handoff_media_summary", video_count=2, reference_video_count=1, media_count=3)
+    )
+    user.find(t("handoff_root", number=1)).type(str(delivered_root))
+    user.find(t("handoff_open"), kind=ui.button).click()
+    await user.should_see("Distance package opened", retries=10)
+    with user:
+        working_id = get_active_project_id()
+    working = dp.list_assignments(working_id)[0]
+    stats = dp.get_overview_stats(working_id)["videos"]
+    assert stats["total"] == 3 and stats["unprobed"] == 0
+    with dp.Session() as session:
+        local_frame = session.get(
+            HandoffIdentityMap, (working["id"], "distance_frame", "frame-0")
+        ).local_id
+        local_individual = session.get(
+            HandoffIdentityMap, (working["id"], "distance_individual", "individual-1")
+        ).local_id
+        local_video = session.get(HandoffIdentityMap, (working["id"], "video", ids[0])).local_id
+    dp.update_reference_frame_position(local_frame, 1500, playback_offset_ms=1500.25)
+    dp.save_distance_sample(
+        local_individual, 2000, reference_frame_id=local_frame, labeled_by="alice"
+    )
+    # Both roles can edit Species; these edits do not shrink or expand Distance scope.
+    for video_id, pid in ((ids[0], project.id), (local_video, working_id)):
+        dp.update_manual_review(video_id, [{"species": "fox", "count": 1}], active_project_id=pid)
+    await user.open("/distance-handoff-working")
+    await user.should_see(t("handoff_working_help"))
+    user.find(t("handoff_return"), kind=ui.button).click()
+    returned = (await user.download.next()).content
+    assert len(decode_archive(returned)[2]) == 2
+
+    await user.open("/distance-handoff-admin")
+    await upload_distance_zip(user, returned)
+    await user.should_see(t("handoff_return_loaded"))
+    user.find(t("handoff_preview"), kind=ui.button).click()
+    await user.should_see(t("handoff_species_changed"))
+    await user.should_see(t("handoff_substitution_help"))
+    await user.should_see(
+        t(
+            "handoff_substitution",
+            path="cam_x/reference.mp4",
+            distance=5,
+            returned=1500.25,
+            existing=1000.25,
+        )
+    )
+    assert handoff_button(user, "handoff_accept").enabled
+    with user:
+        select_field(user, "handoff_policy").set_value("keep_existing")
+    await user.should_see(t("handoff_keep_warning"))
+    await user.should_not_see(t("handoff_substitution_help"))
+    assert not handoff_button(user, "handoff_accept").enabled
+    with user:
+        select_field(user, "handoff_policy").set_value("use_imported")
+    await user.should_see(t("handoff_substitution_help"))
+    # Calibration edits also stale an otherwise confirmed preview.
+    dp.update_reference_frame_position("frame-0", 1200, playback_offset_ms=1200.25)
+    user.find(t("handoff_accept"), kind=ui.button).click()
+    await user.should_see("Return preview is stale")
+    assert not handoff_button(user, "handoff_accept").enabled
+    user.find(t("handoff_preview"), kind=ui.button).click()
+    await user.should_see(
+        t(
+            "handoff_substitution",
+            path="cam_x/reference.mp4",
+            distance=5,
+            returned=1500.25,
+            existing=1200.25,
+        )
+    )
+    user.find(t("handoff_accept"), kind=ui.button).click()
+    await user.should_see(t("handoff_accepted"))
+    with dp.Session() as session:
+        assert session.get(DistanceSample, "sample-1").distance_m == 5.5
+        assert session.get(ReferenceFrame, "frame-0").offset_ms == 1200
+        assert session.get(ReferenceFrame, "frame-0").mask == {"person": 0}
+    assert dp.get_video_detail(ids[0])["manual_selections"][0]["species"] == "fox"
+    assert dp.preview_assignment_return(project.id, returned).totals["unchanged"] == 2
+    # Repeat downloads/returns remain frozen in scope and identical on acceptance.
+    with user:
+        app.storage.user["active_project_id"] = working_id
+    await user.open("/distance-handoff-working")
+    user.find(t("handoff_return"), kind=ui.button).click()
+    repeated = (await user.download.next()).content
+    await user.open("/distance-handoff-admin")
+    await upload_distance_zip(user, repeated)
+    await user.should_see(t("handoff_return_loaded"))
+    user.find(t("handoff_preview"), kind=ui.button).click()
+    await user.should_see(
+        t("handoff_totals", added=0, unchanged=2, replaced=0, unapplied=0, annotations_removed=0)
+    )
+    assert not handoff_button(user, "handoff_accept").enabled
+
+
+async def test_distance_ui_selection_filters_subset_and_prepare_revalidation(
+    user: User, distance_ui
+):
+    dp, project, _, ids, _, _ = distance_ui
+    await user.open("/distance-handoff-admin")
+    await load_distance_selection(user)
+    with user:
+        next(iter(user.find(t("handoff_start"), kind=ui.input).elements)).set_value("17:00")
+    assert select_field(user, "handoff_distance_videos").value == []
+    user.find(t("handoff_prepare"), kind=ui.button).click()
+    await user.should_see(t("handoff_select_distance"))
+    user.find(t("handoff_load_videos"), kind=ui.button).click()
+    await user.should_see("Provide both start and end times")
+    with user:
+        next(iter(user.find(t("handoff_end"), kind=ui.input).elements)).set_value("06:00")
+    user.find(t("handoff_load_videos"), kind=ui.button).click()
+    await user.should_see(t("handoff_selection_result", count=1, unknown=1))
+    assert select_field(user, "handoff_distance_videos").value == [ids[0]]
+    with user:
+        next(iter(user.find(t("handoff_start"), kind=ui.input).elements)).set_value("")
+        next(iter(user.find(t("handoff_end"), kind=ui.input).elements)).set_value("")
+    user.find(t("handoff_load_videos"), kind=ui.button).click()
+    await user.should_see(t("handoff_selection_result", count=2, unknown=0))
+    with user:
+        select_field(user, "handoff_distance_videos").set_value([ids[1]])
+    user.find(t("handoff_prepare"), kind=ui.button).click()
+    await user.should_see(t("handoff_prepared", count=1))
+    saved = dp.list_assignments(project.id)[0]
+    assert decode_archive(dp.export_assignment(saved["id"]))[0]["work_keys"] == [ids[1]]
+    # A label edit after loading must fail preparation, never silently drop selection.
+    dp.update_manual_review(ids[1], [], active_project_id=project.id)
+    user.find(t("handoff_prepare"), kind=ui.button).click()
+    await user.should_see("Distance preparation requires confirmed target-species labels")
+    assert len(dp.list_assignments(project.id)) == 2
+
+
+async def test_distance_ui_empty_replacement_warns_and_preserves_omitted_task(
+    user: User, distance_ui
+):
+    dp, project, _, ids, _, setup = distance_ui
+    manifest, context, work = decode_archive(setup)
+    manifest["direction"] = "return"
+    unit = next(unit for unit in work if unit["samples"])
+    unit.update(task=None, individuals=[], samples=[], progress=[])
+    from review_app.backend.annotation_package.distance_handoff import scoped_context
+
+    returned = encode_archive(manifest, scoped_context(context, [unit]), [unit])
+    await user.open("/distance-handoff-admin")
+    await upload_distance_zip(user, returned)
+    await user.should_see(t("handoff_return_loaded"))
+    user.find(t("handoff_preview"), kind=ui.button).click()
+    await user.should_see(t("handoff_remove_warning"))
+    await user.should_see(t("handoff_replace_warning"))
+    await user.should_see(
+        t("handoff_preview_scope", stage_label=t("handoff_stage_distance") + " — deer")
+    )
+    user.find(t("handoff_accept"), kind=ui.button).click()
+    await user.should_see(t("handoff_accepted"))
+    assert dp.list_distance_individuals(ids[0]) == []
+    with dp.Session() as session:
+        assert session.query(DistanceReviewTask).filter_by(video_id=ids[1]).count() == 1
+        assert session.get(ReferenceFrame, "frame-0") is not None

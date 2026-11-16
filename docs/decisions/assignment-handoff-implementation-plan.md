@@ -1,6 +1,6 @@
 # Assignment handoff implementation plan
 
-**Status:** M1–M5 complete. M6 is next; cross-workflow UI/UX refinement is deferred to final M7.
+**Status:** M1–M6 complete. M7 — final cross-workflow UI/UX refinement — is next.
 **Direction:** Explicit serialized assignment snapshots, not database snapshots.
 **Product contract:** [Assignment handoff](./assignment-handoff.md).
 
@@ -17,7 +17,7 @@ this tracker records readiness, validation, and the next action.
 | M3 — Species UI and delivery | Done | Usable prepare/open/return/accept flow; package and footage copy use saved scope; focused UI and multi-root copy tests pass. |
 | M4 — Reference identity | Done | Video/distance uniqueness on fresh and upgraded databases; dependent samples preserved; reference write paths and affected legacy imports tested. |
 | M5 — Complete Distance backend | Done | AI/manual state and reference dependencies round-trip; saved-scope import eligibility and reference substitution tested, without restricting local annotation. |
-| M6 — Distance UI and integration | Not started | Distance handoff usable end to end; translations/docs updated; combined workflow and relevant legacy regressions pass. |
+| M6 — Distance UI and integration | Done | Distance handoff usable end to end; translations/docs updated; combined workflow and relevant legacy regressions pass. |
 | M7 — Final UI/UX refinement | Not started | Species and Distance handoff screens are clear and compact across origin/working roles; prepare/open/deliver/return/accept actions are discoverable; operator walkthrough and focused UI regressions pass; translations/docs reflect the final UI. |
 
 Use `Not started`, `In progress`, `Blocked`, or `Done`. Mark a milestone Done only
@@ -25,15 +25,19 @@ when its completion gate is met. If blocked, record the concrete blocker below.
 
 ### Current checkpoint
 
-- **Current milestone:** M6 — Distance UI and integration (next to start).
-- **Next action:** Expose Distance preparation, opening, delivery, return preview,
-  reference substitutions, and acceptance through the existing assignment UI.
-  M5 backend round trip is complete, including same-frame different-distance
-  calibration and saved-scope acceptance after Species edits. Keep legacy manual
-  v1 semantics separate. Defer visual/layout refinement to M7; fix correctness and
-  workflow-blocking issues as encountered.
+- **Current milestone:** M7 — Final UI/UX refinement (next to start).
+- **Next action:** Operator walkthrough of Species and Distance handoff together,
+  followed by the final information-hierarchy/layout refinement tracked in M7.
+  Functional Distance preparation, delivery, common package opening, return
+  preview, substitutions, and acceptance are implemented and tested. The manual
+  round-trip guide includes Distance checks; real browser/playback validation
+  has not been performed by the coding agent. Keep legacy manual v1 separate.
 - **Blockers:** None identified.
-- **Recorded validation:** M5 pre-commit revalidation: 268 affected tests passed,
+- **Recorded validation:** M6: 342 affected tests passed, including combined
+  Species/Distance handoff, common opening/delivery, media sync, AI/manual legacy
+  transfer, reference, translation, and UI regressions. Ruff lint/format (7 changed
+  Python files) and diff checks passed. Full suite not run.
+  M5 pre-commit revalidation: 268 affected tests passed,
   including the Distance assignment cases and reference-deletion follow-up;
   Ruff lint/format (13 files) and diff checks passed. Full suite not run.
   Reference-deletion follow-up: operator confirmed reopening clears
@@ -61,6 +65,92 @@ implemented, relevant paths, exact validation command/result, and commit hash
 when committed. Update the next action and any remaining gaps at the same time.
 Do not rely on conversation history to reconstruct progress. Record substantive
 design deviations in this plan before continuing with a changed approach.
+
+### M6 completion — Distance UI and integration
+
+Implemented:
+
+- `review_app/app/components/assignment_handoff.py`: one stage selector in the
+  existing Distribution handoff controls. Distance chooses a confirmed target
+  scientific species and loads eligible videos, with all initially selected and
+  an editable subset. Optional recurring camera-local start/end filtering supports
+  overnight windows and reports excluded unknown-time tasks. Changing filters
+  clears loaded selection; superseded loads cannot repopulate it. Preparation
+  revalidates current eligibility and never silently drops selected tasks.
+- `annotation_package/scope.py` and provider `assignment_handoff.py`: one shared
+  Distance eligibility implementation for selection and preparation, including
+  AI-linked and manual work, known-missing media, and exclusion of reference work.
+  This selection neither reads nor changes Species distribution. Saved bindings
+  and setup inspection expose stage and target species.
+- Return preview carries structured stage/target/context-change metadata and
+  reference substitutions with footage identity and precise playback positions.
+  The UI localizes these details and warns that existing admin position/mask is
+  reused while returned sample distances are retained. Existing overwrite,
+  removal, skipped-progress, file/policy invalidation, and stale-preview behavior
+  applies to both stages. Changed Species context does not block saved-scope
+  acceptance or restore labels. Ordinary local review remains unrestricted.
+- The shared saved download/copy and format-detecting Open package flow now
+  serves Distance end to end. Integration testing exposed that working-project
+  sync used only `work_keys`, omitting dependency footage. Updated provider
+  `video.py` to use the immutable listed `scope.media` identities for scanning
+  and rechecking. Listed reference footage is now probed, marked missing, and
+  rechecked; unrelated files are still never discovered. This corrects the
+  existing listed-media contract, not a new scope rule.
+- English/French translations and `userdocs/settings.md` /
+  `userdocs/settings.fr.md` document both workflows, timing, reference reuse,
+  changed context, unrestricted local editing, and legacy-format distinctions.
+  `assignment-handoff-ui-roundtrip.md` now includes the Distance operator checklist.
+- `tests/test_assignment_distance.py`: seven additional selection/UI cases and
+  extended dependency-sync regression. Real database/UI interactions cover
+  preparation, saved delivery, common package opening and probing, AI/manual
+  eligibility, subset selection, time filtering and invalidation, post-selection
+  eligibility revalidation, both conflict policies, reference substitution,
+  stale calibration previews, acceptance, repeated identical returns, and empty
+  replacement warnings with omitted-task preservation.
+
+Validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_assignment_distance.py tests/test_assignment_handoff.py tests/test_assignment_handoff_roundtrip.py tests/test_assignment_handoff_ui.py tests/test_assignment_delivery.py tests/test_open_package_ui.py tests/test_video_sync.py tests/test_distance_ai_import.py tests/test_distance_transfer.py tests/test_reference_identity.py tests/test_distance_repository.py tests/test_reference_frame_deletion.py tests/test_translations.py tests/test_ui_smoke.py tests/test_distribution_bundle.py tests/test_assignments_import_export.py tests/test_onboarding.py tests/test_update_project_dir.py
+# 342 passed in 44.68s.
+.venv/bin/ruff check review_app/app/components/assignment_handoff.py review_app/app/translations.py review_app/backend/annotation_package/scope.py review_app/backend/annotation_package/distance_handoff.py review_app/backend/provider/assignment_handoff.py review_app/backend/provider/video.py tests/test_assignment_distance.py
+.venv/bin/ruff format --check review_app/app/components/assignment_handoff.py review_app/app/translations.py review_app/backend/annotation_package/scope.py review_app/backend/annotation_package/distance_handoff.py review_app/backend/provider/assignment_handoff.py review_app/backend/provider/video.py tests/test_assignment_distance.py
+# Passed; 7 files already formatted.
+git diff --check
+# Passed.
+```
+
+Full suite and real-browser/playback walkthrough not run. Functional M6 is complete;
+final visual refinement and operator walkthrough remain M7. Legacy manual Distance
+v1 and legacy setup/CSV semantics are unchanged. Included in the M6 checkpoint
+commit; Git records its identity.
+
+### M6 operator feedback — explain reference footage in copy totals
+
+The operator observed 78 assigned videos but 106 copied files. The saved header
+now explicitly says **assigned videos**. Distance copy controls and package-opening
+details show the immutable saved breakdown: assigned videos + reference videos =
+total footage files, with an explanation that copy results count both and references
+are dependencies, not additional delegated annotation work. Counts come from the
+saved media list, not current distribution or folder contents. English/French UI
+and user docs updated. The real Distance UI round trip asserts the two assigned /
+one reference / three total breakdown at delivery and opening.
+
+Validation:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_assignment_distance.py tests/test_assignment_handoff_ui.py tests/test_assignment_delivery.py tests/test_open_package_ui.py tests/test_translations.py
+# 58 passed in 14.59s.
+.venv/bin/ruff check review_app/backend/provider/assignment_handoff.py review_app/app/components/assignment_handoff.py review_app/app/translations.py tests/test_assignment_distance.py
+.venv/bin/ruff format --check review_app/backend/provider/assignment_handoff.py review_app/app/components/assignment_handoff.py review_app/app/translations.py tests/test_assignment_distance.py
+git diff --check
+# Passed.
+```
+
+Included in the M6 checkpoint commit. Pre-commit revalidation: the same 58
+focused tests passed in 13.53s; Ruff lint/format passed for all 7 changed Python
+files, and `git diff --check` passed. M7 visual refinement and browser walkthrough
+remain pending.
 
 ### M5 completion — complete Distance backend round trip
 

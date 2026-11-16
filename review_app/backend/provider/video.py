@@ -275,7 +275,7 @@ class VideoMixin(ProviderBase):
                         ),
                         {
                             "hid": binding.id,
-                            "keys": json.dumps(scope["work_keys"]),
+                            "keys": json.dumps([row["video_id"] for row in scope["media"]]),
                             "pid": active_project_id,
                         },
                     ).all()
@@ -358,7 +358,10 @@ class VideoMixin(ProviderBase):
                             "WHERE handoff_id=:hid AND kind='video' "
                             "AND portable_id IN (SELECT value FROM json_each(:keys))"
                         ),
-                        {"hid": working_binding.id, "keys": json.dumps(scope["work_keys"])},
+                        {
+                            "hid": working_binding.id,
+                            "keys": json.dumps([row["video_id"] for row in scope["media"]]),
+                        },
                     )
                     .scalars()
                     .all()
