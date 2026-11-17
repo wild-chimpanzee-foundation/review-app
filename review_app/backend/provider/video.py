@@ -19,7 +19,7 @@ from sqlalchemy import literal, select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from review_app.app.config import VIDEO_EXTENSIONS
-from review_app.backend.camera_layout import camera_id_for_path, is_reference_video_path
+from review_app.backend.camera_layout import video_layout_for_path
 from review_app.backend.db.models import ProjectDir, Tag, Video, VideoTag
 from review_app.backend.errors import VideoError
 from review_app.backend.path_matching import normalize_path_str
@@ -294,6 +294,7 @@ class VideoMixin(ProviderBase):
                             columns=["video_path", "camera_id", "is_reference_video"]
                         )
                     return pd.DataFrame(rows)
+        directory_cache: dict[Path, list[Path]] = {}
         for scan_dir in scan_dirs:
             if not scan_dir.exists():
                 continue
@@ -303,12 +304,14 @@ class VideoMixin(ProviderBase):
                 # Skip hidden files/dirs (e.g. macOS ._* resource forks, .Trashes)
                 if any(part.startswith(".") for part in p.relative_to(scan_dir).parts):
                     continue
-                camera_id = camera_id_for_path(p, scan_dir)
+                camera_id, is_reference = video_layout_for_path(
+                    p, scan_dir, directory_cache=directory_cache
+                )
                 rows.append(
                     {
                         "video_path": normalize_path_str(str(p)),
                         "camera_id": camera_id,
-                        "is_reference_video": is_reference_video_path(p, scan_dir),
+                        "is_reference_video": is_reference,
                     }
                 )
 

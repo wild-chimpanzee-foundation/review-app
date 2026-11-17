@@ -1,5 +1,6 @@
 """Infer camera deployments without treating clip categories as cameras."""
 
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -21,22 +22,121 @@ def _paired_layout(path: Path, scan_dir: Path) -> tuple[Path, str] | None:
     return None
 
 
-def is_reference_video_path(path: Path, scan_dir: Path) -> bool:
-    """Recognize references only inside an explicit paired deployment layout."""
-    layout = _paired_layout(path, scan_dir)
-    return layout is not None and layout[1] == "references"
+def _normalized_folder_name(name: str) -> str:
+    """Comparison key only; never rewrite filesystem paths or stored camera IDs."""
+    return re.sub(r"[\s_-]+", "_", name).strip("_").lower()
 
 
-def camera_id_for_path(path: Path, scan_dir: Path) -> str:
+def _reference_deployment_name(name: str) -> str | None:
+    """Strip one boundary-delimited reference marker, not embedded letters."""
+    name = _normalized_folder_name(name)
+    for marker in ("v_r", "vr", "ref", "reference", "references"):
+        # Bare textual categories retain the existing paired-layout semantics.
+        if name == marker and marker in {"v_r", "vr"}:
+            return ""
+        if name.startswith(f"{marker}_"):
+            return name[len(marker) + 1 :]
+        if name.endswith(f"_{marker}"):
+            return name[: -len(marker) - 1]
+    return None
+
+
+def _marked_layout(
+    path: Path, scan_dir: Path, directory_cache: dict[Path, list[Path]]
+) -> tuple[Path, str] | None:
+    # Outermost deployment wins: nested copies and processing folders must not
+    # turn one reference deployment into several camera IDs. Never inspect a
+    # folder outside the registered import root, or infer a role from the root.
+    if not path.is_relative_to(scan_dir):
+        return None
+    folders = path.parent.relative_to(scan_dir).parts
+    parent = scan_dir
+    ordinary_layout: tuple[Path, str] | None = None
+    ordinary_ancestors: list[Path] = []
+    for name in folders:
+        folder = parent / name
+        reference_name = _reference_deployment_name(name)
+        if parent not in directory_cache:
+            directory_cache[parent] = (
+                [child for child in parent.iterdir() if child.is_dir()] if parent.is_dir() else []
+            )
+        siblings = directory_cache[parent]
+        ordinary = [child for child in siblings if _reference_deployment_name(child.name) is None]
+        if reference_name is not None:
+            # Standalone V_R/Video categories use the same enclosing deployment.
+            key = reference_name
+            matches = [
+                child
+                for child in ordinary
+                if (
+                    _normalized_folder_name(child.name) == key
+                    if key
+                    else _normalized_folder_name(child.name) in {"video", "videos"}
+                )
+            ]
+            if not matches and key:
+                # Some exports put cam_a_VR under cam_a/Pantro instead of
+                # beside cam_a. The enclosing name must still match exactly.
+                matches = [
+                    ancestor
+                    for ancestor in ordinary_ancestors
+                    if _normalized_folder_name(ancestor.name) == key
+                ]
+            if len(matches) == 1:
+                return (matches[0] if key else parent), "references"
+            # A clear marker still identifies reference footage, but unmatched
+            # or colliding names must not be attached to an ordinary deployment.
+            return folder, "references"
+
+        key = _normalized_folder_name(name)
+        matches = [child for child in ordinary if _normalized_folder_name(child.name) == key]
+        if len(matches) == 1 and ordinary_layout is None:
+            reference_names = [_reference_deployment_name(child.name) for child in siblings]
+            if key in reference_names:
+                ordinary_layout = folder, "videos"
+            if key in {"video", "videos"} and "" in reference_names:
+                video_categories = [
+                    child
+                    for child in ordinary
+                    if _normalized_folder_name(child.name) in {"video", "videos"}
+                ]
+                if len(video_categories) == 1:
+                    ordinary_layout = parent, "videos"
+        ordinary_ancestors.append(folder)
+        parent = folder
+    return ordinary_layout
+
+
+def video_layout_for_path(
+    path: Path,
+    scan_dir: Path,
+    *,
+    directory_cache: dict[Path, list[Path]] | None = None,
+) -> tuple[str, bool]:
+    """Shared camera/role inference; optional directory cache lives for one scan only."""
+    # Explicit reference markers also apply inside a legacy videos/references layout.
     # A lone folder called "videos" or "references" can be an ordinary camera.
-    layout = _paired_layout(path, scan_dir)
+    layout = _marked_layout(
+        path, scan_dir, directory_cache if directory_cache is not None else {}
+    ) or _paired_layout(path, scan_dir)
     parent = layout[0] if layout else path.parent
     relative = parent.relative_to(scan_dir)
     if relative != Path("."):
-        return normalize_path_str(str(relative))
-    if (scan_dir / "videos").is_dir() and (scan_dir / "references").is_dir():
-        return scan_dir.name
-    return "default"
+        camera_id = normalize_path_str(str(relative))
+    elif layout or ((scan_dir / "videos").is_dir() and (scan_dir / "references").is_dir()):
+        camera_id = scan_dir.name
+    else:
+        camera_id = "default"
+    return camera_id, layout is not None and layout[1] == "references"
+
+
+def is_reference_video_path(path: Path, scan_dir: Path) -> bool:
+    """Recognize paired reference categories and boundary-marked reference subtrees."""
+    return video_layout_for_path(path, scan_dir)[1]
+
+
+def camera_id_for_path(path: Path, scan_dir: Path) -> str:
+    return video_layout_for_path(path, scan_dir)[0]
 
 
 def deployment_key(

@@ -87,6 +87,9 @@ def test_sync_automatically_tags_paired_references(tmp_db, mock_probe, nested, c
         }
     assert dp.get_video_tags(ids["references"]) == ["reference_video"]
     assert dp.get_video_tags(ids["videos"]) == []
+    # Queue eligibility requires Species annotations, even for reference clips.
+    for video_id in ids.values():
+        dp.update_manual_review(video_id, [{"species": "deer"}], is_blank=False)
     assert [row["video_id"] for row in dp.get_distance_video_queue(project.id)] == [ids["videos"]]
     assert [row["source_video_id"] for row in dp.get_distance_reference_videos(ids["videos"])] == [
         ids["references"]
@@ -123,6 +126,10 @@ def test_category_first_references_match_only_their_camera(tmp_db, mock_probe):
     dp = LocalDataProvider()
     project = dp.create_project("Category-first clips", str(root))
     dp.sync_videos(active_project_id=project.id)
+    with dp.Session() as session:
+        ids = [video.video_id for video in session.query(Video).filter_by(project_id=project.id)]
+    for video_id in ids:
+        dp.update_manual_review(video_id, [{"species": "deer"}], is_blank=False)
     queue = dp.get_distance_video_queue(project.id)
     assert {video["camera_id"] for video in queue} == {"cam_a", "cam_b"}
     for video in queue:
@@ -162,6 +169,195 @@ def test_sync_does_not_infer_reference_role_outside_the_import_root(tmp_db, mock
     with dp.Session() as session:
         video_id = session.query(Video).filter_by(project_id=project.id).one().video_id
     assert dp.get_video_tags(video_id) == []
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "188_Cam508_0795487_1135723_20260220_VR",
+        "188-Cam508 _0795487_1135723_20260220 vr",
+        "188_cam508__0795487_1135723_20260220_V_R",
+        "VR_188_Cam508_0795487_1135723_20260220",
+        "v-r 188-Cam508-0795487-1135723-20260220",
+    ],
+)
+@pytest.mark.parametrize("nested", [False, True])
+def test_marked_references_share_exact_normalized_deployment(tmp_path, reference, nested):
+    site = tmp_path / "DS_E5" / "T188"
+    name = "188_Cam508_0795487_1135723_20260220"
+    ordinary = site / name
+    reference_folder = site / reference
+    ordinary.mkdir(parents=True)
+    reference_folder.mkdir()
+    reference_parent = reference_folder / reference / "copies" if nested else reference_folder
+    reference_parent.mkdir(parents=True, exist_ok=True)
+    reference_path = reference_parent / "clip.mp4"
+    expected = f"DS_E5/T188/{name}"
+    assert is_reference_video_path(reference_path, tmp_path)
+    assert camera_id_for_path(reference_path, tmp_path) == expected
+    assert camera_id_for_path(ordinary / "clip.mp4", tmp_path) == expected
+    assert not is_reference_video_path(ordinary / "clip.mp4", tmp_path)
+    # Processing folders within the paired ordinary deployment keep its identity.
+    (ordinary / "Pantro" / "traite").mkdir(parents=True)
+    assert camera_id_for_path(ordinary / "Pantro/traite/clip.mp4", tmp_path) == expected
+    assert not is_reference_video_path(ordinary / "Pantro/traite/clip.mp4", tmp_path)
+
+
+def test_nested_marked_reference_matches_enclosing_deployment(tmp_path):
+    deployment = tmp_path / "T110/110_cam392_0180912_1112313_20260214"
+    nested = deployment / "Pantro/110-cam392_0180912_1112313_20260214_VR"
+    nested.mkdir(parents=True)
+    # A sibling reference must not hide a reference subtree inside ordinary footage.
+    deployment.with_name(deployment.name + "_VR").mkdir()
+    path = nested / "copy/clip.mp4"
+    assert is_reference_video_path(path, tmp_path)
+    assert camera_id_for_path(path, tmp_path) == str(deployment.relative_to(tmp_path))
+
+
+@pytest.mark.parametrize("marker", ["ref", "reference", "references"])
+@pytest.mark.parametrize("prefix", [False, True])
+@pytest.mark.parametrize("separator", ["_", "--", " _ "])
+def test_textual_reference_aliases_match_normalized_deployment(
+    tmp_path, marker, prefix, separator
+):
+    ordinary = tmp_path / "cam_a_20260220"
+    marked_name = (
+        f"{marker.upper()}{separator}CAM-A_20260220"
+        if prefix
+        else f"CAM-A_20260220{separator}{marker.upper()}"
+    )
+    reference = tmp_path / marked_name
+    ordinary.mkdir()
+    (reference / "copy").mkdir(parents=True)
+    path = reference / "copy/clip.mp4"
+    assert is_reference_video_path(path, tmp_path)
+    assert camera_id_for_path(path, tmp_path) == ordinary.name
+    assert not is_reference_video_path(ordinary / "clip.mp4", tmp_path)
+
+
+@pytest.mark.parametrize("reference", ["VR", "V_R", "v-r"])
+def test_standalone_marker_pairs_with_video_category(tmp_path, reference):
+    deployment = tmp_path / "cam_a"
+    for category in (reference, "Video"):
+        (deployment / category).mkdir(parents=True)
+    assert camera_id_for_path(deployment / reference / "clip.mp4", tmp_path) == "cam_a"
+    assert is_reference_video_path(deployment / reference / "clip.mp4", tmp_path)
+    assert camera_id_for_path(deployment / "Video/clip.mp4", tmp_path) == "cam_a"
+    assert not is_reference_video_path(deployment / "Video/clip.mp4", tmp_path)
+
+
+@pytest.mark.parametrize(
+    "folder",
+    [
+        "cam_vr_copy",
+        "cam_v_r_copy",
+        "VRcam",
+        "camVR",
+        "survey",
+        "cam_ref_copy",
+        "cam_reference_copy",
+        "cam_references_copy",
+        "refcam",
+        "camreference",
+        "cam_referencesExtra",
+    ],
+)
+def test_embedded_marker_is_not_a_reference(tmp_path, folder):
+    (tmp_path / folder).mkdir()
+    path = tmp_path / folder / "clip_VR.mp4"
+    assert not is_reference_video_path(path, tmp_path)
+    assert camera_id_for_path(path, tmp_path) == folder
+
+
+@pytest.mark.parametrize(
+    "ordinary,reference",
+    [
+        ("187_Cam328_0791930_1132398_20260702", "187_Cam328_0791930_1132398_20260207_VR"),
+        ("38_cam565_806440_1113432_20260209", "VR-Cam_473"),
+        ("44_cam559_802831_1104239_20260210", "VR-Cam_559"),
+        ("cam_12_3", "cam_1_23_VR"),
+    ],
+)
+def test_marked_references_do_not_guess_partial_matches(tmp_path, ordinary, reference):
+    (tmp_path / ordinary).mkdir()
+    (tmp_path / reference).mkdir()
+    path = tmp_path / reference / "clip.mp4"
+    assert is_reference_video_path(path, tmp_path)
+    assert camera_id_for_path(path, tmp_path) == reference
+    assert camera_id_for_path(tmp_path / ordinary / "clip.mp4", tmp_path) == ordinary
+
+
+def test_marked_subtree_inside_legacy_video_category_is_still_reference(tmp_path):
+    deployment = tmp_path / "cam_a"
+    for category in ("videos", "references"):
+        (deployment / category).mkdir(parents=True)
+    reference = deployment / "videos/cam_a_VR"
+    reference.mkdir()
+    path = reference / "clip.mp4"
+    assert is_reference_video_path(path, tmp_path)
+    assert camera_id_for_path(path, tmp_path) == "cam_a"
+    assert camera_id_for_path(deployment / "videos/animal.mp4", tmp_path) == "cam_a"
+
+
+def test_normalized_deployment_collisions_are_not_matched(tmp_path):
+    for folder in ("cam_1", "CAM-1", "cam 1_VR"):
+        (tmp_path / folder).mkdir()
+    path = tmp_path / "cam 1_VR" / "clip.mp4"
+    assert is_reference_video_path(path, tmp_path)
+    assert camera_id_for_path(path, tmp_path) == "cam 1_VR"
+
+
+def test_marked_matching_stays_in_same_parent_and_import_root(tmp_path):
+    (tmp_path / "T1/cam_a").mkdir(parents=True)
+    reference = tmp_path / "T2/cam_a_VR"
+    reference.mkdir(parents=True)
+    assert camera_id_for_path(reference / "clip.mp4", tmp_path) == "T2/cam_a_VR"
+    # Importing a marked folder itself must not inspect siblings outside the root.
+    assert camera_id_for_path(reference / "clip.mp4", reference) == "default"
+    assert not is_reference_video_path(reference / "clip.mp4", reference)
+
+
+def test_missing_directories_keep_camera_inference(tmp_path):
+    path = tmp_path / "missing/nested/clip.mp4"
+    assert camera_id_for_path(path, tmp_path) == "missing/nested"
+    assert not is_reference_video_path(path, tmp_path)
+
+
+@pytest.mark.parametrize("marker", ["V_R", "ref", "reference", "references"])
+def test_rescan_detects_marked_references_and_preserves_tags(tmp_db, mock_probe, marker):
+    root = tmp_db["video_dir"]
+    ordinary = root / "T48/48_Cam077_814566_1117151_20260221"
+    ordinary.mkdir(parents=True)
+    (ordinary / "animal.mp4").touch()
+    dp = LocalDataProvider()
+    project = dp.create_project("Marked references", str(root))
+    dp.sync_videos(active_project_id=project.id)
+    reference = root / f"T48/48-Cam077_814566_1117151_20260221 {marker}/copy"
+    reference.mkdir(parents=True)
+    (reference / "reference.mp4").touch()
+    # This rescan must see new sibling folders, not a stale directory cache.
+    dp.sync_videos(active_project_id=project.id)
+    with dp.Session() as session:
+        videos = session.query(Video).filter_by(project_id=project.id).all()
+        ids = {Path(video.video_path).name: video.video_id for video in videos}
+        assert {video.camera_id for video in videos} == {str(ordinary.relative_to(root))}
+    ref_id = ids["reference.mp4"]
+    assert dp.get_video_tags(ref_id) == ["reference_video"]
+    assert dp.get_video_tags(ids["animal.mp4"]) == []
+    for video_id in ids.values():
+        dp.update_manual_review(video_id, [{"species": "deer"}], is_blank=False)
+    assert [row["video_id"] for row in dp.get_distance_video_queue(project.id)] == [
+        ids["animal.mp4"]
+    ]
+    assert [
+        row["source_video_id"] for row in dp.get_distance_reference_videos(ids["animal.mp4"])
+    ] == [ref_id]
+    custom = dp.create_custom_tag("Keep me")
+    dp.set_video_tags(ref_id, ["reference_video", custom])
+    dp.sync_videos(active_project_id=project.id)
+    assert set(dp.get_video_tags(ref_id)) == {"reference_video", custom}
+    with dp.Session() as session:
+        assert session.query(VideoTag).filter_by(video_id=ref_id).count() == 2
 
 
 def test_deployment_key_prefers_the_most_specific_root_and_survives_relocation():
