@@ -442,13 +442,6 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
     ui.button(label, icon="folder_zip", on_click=dialog.open).mark("open-delivery")
 
 
-def render_assignment_handoff(dp, project_id):
-    """Compatibility entry point for the canonical assignment workspace."""
-    from review_app.app.pages.data_assignments.assignments import render_assignments
-
-    render_assignments(dp, project_id)
-
-
 def render_return_acceptance(dp, project_id, require_project):
     """Focused return flow; preserve impact preview and atomic acceptance."""
     ui.label(t("handoff_policy_help")).classes("text-body2")

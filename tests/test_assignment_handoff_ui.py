@@ -11,7 +11,6 @@ from nicegui.elements.upload_files import SmallFileUpload
 from nicegui.testing import User
 from review_app.app.components.assignment_handoff import (
     assignment_filename,
-    render_assignment_handoff,
     render_open_assignment,
 )
 from review_app.app.pages.data_assignments.assignment_plan import apply_species_request
@@ -68,7 +67,7 @@ def handoff_ui(provider_with_project):
     @ui.page("/handoff-admin")
     def admin():
         app.storage.user["active_project_id"] = project.id
-        render_assignment_handoff(dp, project.id)
+        render_assignments(dp, project.id)
 
     @ui.page("/handoff-distribution")
     def distribution():
@@ -86,7 +85,7 @@ def handoff_ui(provider_with_project):
 
     @ui.page("/handoff-working")
     def working():
-        render_assignment_handoff(dp, get_active_project_id())
+        render_assignments(dp, get_active_project_id())
 
     yield dp, project, root
     set_data_provider(None)
