@@ -17,6 +17,8 @@ from review_app.backend.utils import generate_thumbnail
 _BLANK_COLOR = "#4caf50"
 _NON_BLANK_COLOR = "#2196f3"
 _UNLABELED_COLOR = "#e0e0e0"
+# Acquire before submitting IO work so thumbnail jobs cannot occupy every worker.
+_THUMBNAIL_JOBS = asyncio.Semaphore(2)
 
 
 def _render_annotation_bar(
@@ -120,6 +122,25 @@ async def setup_overview():
                         color="warning",
                         on_click=lambda: go_review(selected_is_review_later=True),
                     ).props("outline")
+
+        deployment_summary = (
+            await run.io_bound(dp.get_deployment_summary, pid)
+            if pid
+            else {"deployments": 0, "references": 0, "unresolved": 0, "unmatched_references": 0}
+        )
+        with ui.card().classes("w-full q-pa-md q-mb-md"):
+            with ui.row().classes("w-full justify-between items-center"):
+                ui.label(t("deployment_count", count=deployment_summary["deployments"])).classes(
+                    "text-subtitle1"
+                )
+                ui.button(
+                    t("deployment_view"),
+                    icon="list_alt",
+                    on_click=lambda: ui.navigate.to("/deployments"),
+                ).props("outline")
+            ui.label(t("deployment_summary", **deployment_summary)).classes(
+                "text-caption text-grey-6"
+            )
 
         # Stat cards
         with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
@@ -307,11 +328,14 @@ async def setup_overview():
                                             el=img_el,
                                             sn=safe_name,
                                         ):
-                                            await run.io_bound(generate_thumbnail, sp, tp)
-                                            if tp.exists():
-                                                el.set_source(
-                                                    f"/thumbnails/{sn}.jpg?v={int(tp.stat().st_mtime)}"
-                                                )
+                                            async with _THUMBNAIL_JOBS:
+                                                if el.is_deleted:
+                                                    return
+                                                await run.io_bound(generate_thumbnail, sp, tp)
+                                                if not el.is_deleted and tp.exists():
+                                                    el.set_source(
+                                                        f"/thumbnails/{sn}.jpg?v={int(tp.stat().st_mtime)}"
+                                                    )
 
                                         asyncio.create_task(_load_thumb())
                                     ui.label(cam_id or t("col_camera")).classes(

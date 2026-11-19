@@ -60,6 +60,8 @@ class SetupWizard:
         assignment_loader: list = [None]
         package_forms = {}
         package_revision = 0
+        deployment_setup = None
+        project_submitting = False
 
         # ── Shared helpers ────────────────────────────────────────────────────
 
@@ -73,6 +75,9 @@ class SetupWizard:
             if btn is not None:
                 btn.set_enabled(
                     self.video_tools_ok
+                    and not project_submitting
+                    and deployment_setup is not None
+                    and deployment_setup.ready
                     and bool(
                         self.inputs.get("video_dir")
                         and self.inputs["video_dir"].value.strip()
@@ -91,12 +96,14 @@ class SetupWizard:
                 )
                 btn.set_enabled(self.video_tools_ok and has_bundle and has_dir)
 
-        def on_video_dir_change(e):
+        async def on_video_dir_change(e):
             update_project_button()
             if not self.inputs["project_name"].value.strip():
                 path = e.value.strip()
                 if path:
                     self.inputs["project_name"].set_value(Path(path).name)
+            if deployment_setup is not None:
+                await deployment_setup.refresh()
 
         def on_bundle_video_dir_change(e):
             update_bundle_button()
@@ -175,6 +182,14 @@ class SetupWizard:
                     )
 
         async def submit_project():
+            nonlocal project_submitting
+            if project_submitting:
+                return
+            if deployment_setup is None or not deployment_setup.ready:
+                ui.notify(t("deployment_error_required"), type="warning")
+                return
+            inventory_kwargs = deployment_setup.creation_kwargs()
+            project_submitting = True
             project_btn_holder[0].set_enabled(False)
 
             video_dir = self.inputs["video_dir"].value.strip()
@@ -184,12 +199,15 @@ class SetupWizard:
 
             if not video_dir:
                 ui.notify(t("enter_video_dir"), type="warning")
+                project_submitting = False
                 update_project_button()
                 return
+            video_dir = Path(video_dir).expanduser().resolve().as_posix()
             dir_error = await run.io_bound(validate_video_dir, video_dir)
             if dir_error:
                 key, kwargs = dir_error
                 ui.notify(t(key, **kwargs), type="negative", timeout=6000)
+                project_submitting = False
                 update_project_button()
                 return
 
@@ -209,7 +227,28 @@ class SetupWizard:
             else:
                 load_session_defaults(dp)
 
-            project = dp.create_project(project_name, video_dir)
+            try:
+                project = await run.io_bound(
+                    dp.create_project_with_deployments, project_name, video_dir, **inventory_kwargs
+                )
+            except Exception as exc:
+                from review_app.backend.deployments import DeploymentInputError
+
+                ui.notify(
+                    t(exc.key, **exc.params)
+                    if isinstance(exc, DeploymentInputError)
+                    else user_error_message(exc),
+                    type="negative",
+                    timeout=6000,
+                )
+                project_submitting = False
+                if (
+                    isinstance(exc, DeploymentInputError)
+                    and exc.key == "deployment_error_setup_stale"
+                ):
+                    await deployment_setup.refresh()
+                update_project_button()
+                return
             collection_id = (
                 collection_select_holder[0].value if collection_select_holder[0] else None
             ) or None
@@ -450,6 +489,7 @@ class SetupWizard:
             result_col.visible = True
 
         def render_project_tabs():
+            nonlocal deployment_setup
             with ui.tabs().classes("w-full q-mb-md") as tabs:
                 ui.tab(name="manual", label=t("wizard_setup_tab_manual"), icon="edit")
                 ui.tab(name="package", label=t("package_open"), icon="inventory_2")
@@ -499,8 +539,15 @@ class SetupWizard:
                         ui.label(t("video_dir_desc")).classes("text-caption text-grey-6 q-mb-md")
                         self.inputs["video_dir"] = ui.input(
                             placeholder=t("video_dir_placeholder"),
-                        ).props("outlined dense class=w-full")
+                        ).props("outlined dense class=w-full debounce=500")
                         self.inputs["video_dir"].on_value_change(on_video_dir_change)
+
+                    from review_app.app.components.deployment_inventory import DeploymentSetup
+
+                    deployment_setup = DeploymentSetup(
+                        lambda: self.inputs["video_dir"].value.strip(), update_project_button
+                    )
+                    deployment_setup.render()
 
                     project_btn_holder[0] = (
                         ui.button(

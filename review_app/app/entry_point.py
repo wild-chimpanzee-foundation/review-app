@@ -456,6 +456,15 @@ class GUI:
 
         await setup_overview()
 
+    async def deployments_page(self):
+        from review_app.app.utils import require_login
+
+        if not require_login():
+            return
+        from review_app.app.pages.deployments import setup_deployments
+
+        await setup_deployments()
+
     async def review_page(self):
         from review_app.app.utils import require_login
 
@@ -591,6 +600,7 @@ class GUI:
         ui.page("/login")(self.login_page)
         ui.page("/db-error")(self.db_error_page)
         ui.page("/overview")(self.overview_page)
+        ui.page("/deployments")(self.deployments_page)
         ui.page("/review")(self.review_page)
         ui.page("/distance-review")(self.distance_review_page)
         ui.page("/setup")(self.setup_page)
