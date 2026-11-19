@@ -47,16 +47,3 @@ def species_requests(groups):
         AssignmentRequest(name, tuple(dict.fromkeys(ids)))
         for name, ids in sorted(recipients.items())
     )
-
-
-def apply_species_request(dp, project_id, request, clear_video_ids=()):
-    """Apply planned recipients and explicit unallocation when preparing Species work."""
-    chunks = [{"chunk_id": "selection", "video_ids": list(request.video_ids)}]
-    if clear_video_ids:
-        chunks.append({"chunk_id": "unassigned", "video_ids": list(clear_video_ids)})
-    dp.apply_chunk_assignment(
-        project_id,
-        {request.recipient: ["selection"]},
-        chunks,
-        clear_chunk_ids=["unassigned"] if clear_video_ids else None,
-    )

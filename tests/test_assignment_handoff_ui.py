@@ -13,7 +13,6 @@ from review_app.app.components.assignment_handoff import (
     assignment_filename,
     render_open_assignment,
 )
-from review_app.app.pages.data_assignments.assignment_plan import apply_species_request
 from review_app.app.pages.data_assignments.assignments import render_assignments
 from review_app.app.pages.data_assignments.legacy_import import render_legacy_annotations_import
 from review_app.app.state import get_active_project_id, set_data_provider
@@ -211,17 +210,21 @@ async def test_unified_allocation_prepares_recipients_and_retries_only_failures(
     ids = dp.get_assignment_video_ids(project.id)
     for name, video_id in zip(("alice", "bob"), ids, strict=True):
         dp.add_annotator(name)
-        apply_species_request(dp, project.id, AssignmentRequest(name, (video_id,)))
-    original = dp.prepare_assignment
+        dp.apply_chunk_assignment(
+            project.id,
+            {name: ["selection"]},
+            [{"chunk_id": "selection", "video_ids": (video_id,)}],
+        )
+    original = dp.prepare_species_assignment
     calls = []
 
-    def prepare(project_id, request):
+    def prepare(project_id, request, clear_video_ids):
         calls.append(request.recipient)
         if request.recipient == "bob" and calls.count("bob") == 1:
             raise ValueError("Temporary preparation failure")
-        return original(project_id, request)
+        return original(project_id, request, clear_video_ids)
 
-    monkeypatch.setattr(dp, "prepare_assignment", prepare)
+    monkeypatch.setattr(dp, "prepare_species_assignment", prepare)
     await user.open("/handoff-admin")
     user.find(t("assign_title"), kind=ui.button).click()
     await user.should_see(t("assign_recipient_count", name="alice", count=1))
@@ -231,12 +234,12 @@ async def test_unified_allocation_prepares_recipients_and_retries_only_failures(
     user.find(t("assign_review"), kind=ui.button).click()
     await user.should_see(t("assign_freeze_help"))
     user.find(t("assign_prepare"), kind=ui.button).click().click()
-    await user.should_see("Temporary preparation failure")
-    await user.should_see(t("assign_view"))
+    await user.should_see("Temporary preparation failure", retries=20)
+    await user.should_see(t("assign_view"), retries=20)
     assert calls == ["alice", "bob"]
     assert len(dp.list_assignments(project.id)) == 1
     user.find(t("assign_prepare"), kind=ui.button).click()
-    await user.should_not_see("Temporary preparation failure")
+    await user.should_not_see("Temporary preparation failure", retries=20)
     assert calls == ["alice", "bob", "bob"]
     assert len(dp.list_assignments(project.id)) == 2
     assert not button(user, "assign_prepare").enabled
@@ -244,7 +247,11 @@ async def test_unified_allocation_prepares_recipients_and_retries_only_failures(
     snapshots = {
         row["id"]: dp.export_assignment(row["id"]) for row in dp.list_assignments(project.id)
     }
-    apply_species_request(dp, project.id, AssignmentRequest("alice", tuple(ids)))
+    dp.apply_chunk_assignment(
+        project.id,
+        {"alice": ["selection"]},
+        [{"chunk_id": "selection", "video_ids": tuple(ids)}],
+    )
     assert all(dp.export_assignment(key) == raw for key, raw in snapshots.items())
 
 

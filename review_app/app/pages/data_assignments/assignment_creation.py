@@ -11,7 +11,6 @@ from review_app.backend.annotation_package.scope import AssignmentRequest
 
 from .assignment_plan import (
     WorkGroup,
-    apply_species_request,
     species_requests,
     species_work_groups,
 )
@@ -496,15 +495,14 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                 try:
                     require_project()
                     if request.stage == "species":
-                        await run.io_bound(
-                            apply_species_request,
-                            dp,
+                        result = await run.io_bound(
+                            dp.prepare_species_assignment,
                             project_id,
                             request,
                             unassigned_ids if index == 0 else (),
                         )
-                        require_project()
-                    result = await run.io_bound(dp.prepare_assignment, project_id, request)
+                    else:
+                        result = await run.io_bound(dp.prepare_assignment, project_id, request)
                     prepared[index] = result
                     outcomes[index] = t("handoff_prepared", count=result.video_count)
                     if result.missing_video_ids:
