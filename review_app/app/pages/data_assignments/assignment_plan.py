@@ -7,7 +7,6 @@ from review_app.backend.annotation_package.scope import AssignmentRequest
 
 @dataclass
 class WorkGroup:
-    key: str
     label: str
     video_ids: tuple[str, ...]
     recipient: str | None = None
@@ -30,10 +29,8 @@ def species_work_groups(dp, project_id):
         recipients = {}
         for video_id in chunk["video_ids"]:
             recipients.setdefault(assigned.get(video_id), []).append(video_id)
-        for index, (name, ids) in enumerate(recipients.items()):
-            groups.append(
-                WorkGroup(f"{chunk['chunk_id']}:{index}", chunk["label"], tuple(ids), name)
-            )
+        for name, ids in recipients.items():
+            groups.append(WorkGroup(chunk["label"], tuple(ids), name))
     return groups
 
 

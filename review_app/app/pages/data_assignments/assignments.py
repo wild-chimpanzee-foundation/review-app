@@ -17,6 +17,7 @@ from review_app.app.translations import get_language, t
 
 from .assignment_bulk import render_bulk_actions
 from .assignment_creation import render_assignment_creation
+from .workload import workload_labels
 
 
 def assignment_date(value):
@@ -31,14 +32,8 @@ def render_assignment_details(dp, project_id, binding, require_project, on_close
         if on_close is not None:
             ui.button(icon="close", on_click=on_close).props("flat round").tooltip(t("close"))
     ui.label(assignment_stage_label(binding)).classes("text-subtitle1")
-    ui.label(t("assign_video_count", count=binding["video_count"]))
-    ui.label(t("assign_camera_count", count=binding.get("camera_count", 0)))
-    if binding.get("camera_ids"):
-        ui.label(" · ".join(binding["camera_ids"])).classes("text-body2")
-    ui.label(t("assign_hours", hours=f"{binding.get('hours', 0):.2f}"))
-    unknown_durations = binding["video_count"] - binding.get("duration_count", 0)
-    if unknown_durations:
-        ui.label(t("assign_unknown_durations", count=unknown_durations))
+    for label in workload_labels(binding, camera_names=" · ".join(binding["camera_ids"])):
+        ui.label(label)
     ui.label(t("assign_prepared_date", date=assignment_date(binding["created_at"]))).classes(
         "text-caption text-grey-7"
     )
