@@ -131,6 +131,9 @@ def test_relocation_updates_only_root_derived_deployment_ids(distance_data, tmp_
         video = session.get(Video, data["videos"][0])
         video.video_path = str(old_root / "videos" / "animal.mp4")
         video.camera_id = old_root.name
+        # Simulate a pre-inventory, root-derived row for this legacy repair case.
+        video.deployment_id = None
+        video.deployment_assignment = "legacy"
     reference = dp.register_reference_video(
         project.id, old_root.name, str(old_root / "references" / "patrol.mp4")
     )

@@ -91,6 +91,7 @@ class MetadataCsvMixin(ImportSharedMixin):
         has_latitude = lat_col and lat_col in df.columns
         has_longitude = lon_col and lon_col in df.columns
         has_assignment = "assigned_to" in df.columns
+        has_deployment = active_project_id is not None and "camera_id" in df.columns
 
         if has_assignment:
             if annotator_map is not None:
@@ -110,16 +111,26 @@ class MetadataCsvMixin(ImportSharedMixin):
         }
 
         updated = 0
+        deployment_assignments = {}
         skipped: list[str] = []
         now_str = self._utcnow_dt().isoformat()
 
         with self.engine.begin() as conn:
+            if has_deployment:
+                conn.exec_driver_sql("BEGIN IMMEDIATE")
             for _, row in df.iterrows():
                 raw_path = self._meta_resolve_path(row, folder_col, file_col)
                 video_id, _ = resolve_video_path(raw_path, lookup, extra_suffix_map=path_to_id)
                 if video_id is None:
                     skipped.append(raw_path)
                     continue
+
+                if has_deployment:
+                    deployment_assignments[video_id] = (
+                        (str(row["camera_id"]).strip() or None)
+                        if pd.notna(row["camera_id"])
+                        else None
+                    )
 
                 fields: dict[str, Any] = {}
                 if has_created_at and not pd.isna(row[datetime_col]):
@@ -170,6 +181,8 @@ class MetadataCsvMixin(ImportSharedMixin):
                         fields,
                     )
                     updated += 1
+                elif has_deployment:
+                    updated += 1
 
                 if has_assignment:
                     raw = str(row["assigned_to"]).strip() if pd.notna(row["assigned_to"]) else None
@@ -183,6 +196,17 @@ class MetadataCsvMixin(ImportSharedMixin):
                                 """),
                                 {"video_id": video_id, "annotator": annotator, "now": now_str},
                             )
+
+            if deployment_assignments:
+                from sqlalchemy.orm import Session
+
+                from review_app.backend.provider.deployments import restore_effective_assignments
+
+                with Session(bind=conn) as session:
+                    restore_effective_assignments(
+                        session, active_project_id, deployment_assignments
+                    )
+                    session.flush()
 
         logger.info("Video metadata import: %d updated, %d skipped", updated, len(skipped))
         return {"updated": updated, "skipped": skipped}

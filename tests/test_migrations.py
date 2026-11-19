@@ -77,14 +77,15 @@ def test_newer_database_is_rejected_without_mutation(tmp_db, entry_point):
 
     path = tmp_db["root"] / "db" / "review_data.db"
     engine = create_engine(f"sqlite:///{path}")
+    future = len(MIGRATIONS) + 1
     with engine.begin() as conn:
         conn.exec_driver_sql("CREATE TABLE _schema_version (version INTEGER)")
-        conn.exec_driver_sql("INSERT INTO _schema_version VALUES (29)")
+        conn.exec_driver_sql(f"INSERT INTO _schema_version VALUES ({future})")
         conn.exec_driver_sql("CREATE TABLE private_evidence (value TEXT)")
         conn.exec_driver_sql("INSERT INTO private_evidence VALUES ('keep me')")
     before = path.read_bytes()
     try:
-        with pytest.raises(ValueError, match=rf"schema v29 is newer.*v{len(MIGRATIONS)}"):
+        with pytest.raises(ValueError, match=rf"schema v{future} is newer.*v{len(MIGRATIONS)}"):
             if entry_point == "runner":
                 run_migrations(engine)
             else:

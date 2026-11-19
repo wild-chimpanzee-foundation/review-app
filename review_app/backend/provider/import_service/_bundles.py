@@ -189,7 +189,7 @@ class BundleMixin(ImportSharedMixin):
             if "metadata" in manifest_contents and "metadata.csv" in names:
                 content = zf.read("metadata.csv").decode("utf-8")
                 try:
-                    df = pd.read_csv(io.StringIO(content))
+                    df = pd.read_csv(io.StringIO(content), converters={"camera_id": str})
                     stats = self.import_video_metadata_csv(
                         df, project_id, annotator_map=annotator_map
                     )

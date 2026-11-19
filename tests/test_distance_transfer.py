@@ -416,6 +416,60 @@ def test_restore_into_fresh_database_maps_media_and_vocabulary(manual_data, tmp_
         assert session.get(ReferenceFrame, frame["id"]).distance_m == 3.75
         assert session.query(Tag).filter_by(key="distinctive").one().individual_eligible
 
+    reference_path = media / "cam_x" / "reference.mp4"
+    reference_path.touch()
+    target.sync_videos(video_dir=media, active_project_id=destination.id)
+    with target.Session() as session:
+        observed = session.query(Video).filter_by(video_path=str(media / "cam_x" / name)).one()
+        reference = session.query(Video).filter_by(video_path=str(reference_path)).one()
+        assert reference.deployment_id == observed.deployment_id
+    assert target.preview_distance_annotations_import(destination.id, archive)[0]["error"] is None
+
+
+@pytest.mark.parametrize("assigned", [True, False])
+def test_restore_checks_destination_reference_assignment(
+    manual_data, tmp_path, monkeypatch, assigned
+):
+    dp, project, _, _, _, deer, _, _, _ = manual_data
+    archive = dp.export_distance_annotations(project.id, [deer])
+    task_path = decode_archive(archive)[1]["tasks"][0]["video_path"]
+    monkeypatch.setattr(
+        "review_app.backend.provider.local_data_provider.get_user_data_dir",
+        lambda: tmp_path / "destination-db",
+    )
+    target = LocalDataProvider()
+    root = tmp_path / "destination"
+    for relative in (task_path, "cam_x/reference.mp4"):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    destination = target.create_project_with_deployments(
+        "Destination", str(root), csv_data=b"deployment_id\ncam_x\nother\n"
+    )
+    target.sync_videos(active_project_id=destination.id)
+    other = next(
+        row["id"]
+        for row in target.get_project_deployments(destination.id)
+        if row["deployment_id"] == "other"
+    )
+    reference = next(
+        row
+        for row in target.get_deployment_management(destination.id)["videos"]
+        if row["filename"] == "reference.mp4"
+    )
+    target.apply_deployment_assignment(
+        target.preview_deployment_assignment(
+            destination.id, [reference["video_id"]], other if assigned else None
+        )
+    )
+
+    preview = target.preview_distance_annotations_import(destination.id, archive)
+    assert "must match the target video's deployment" in preview[0]["error"]
+    with pytest.raises(ValueError, match="must match the target video's deployment"):
+        target.import_distance_annotations(destination.id, archive, {deer: "replace"})
+    with target.Session() as session:
+        assert session.query(ReferenceFrame).count() == 0
+
 
 def test_import_failure_rolls_back_all_accepted_tasks(manual_data, monkeypatch):
     from review_app.backend.provider import distance_transfer_import

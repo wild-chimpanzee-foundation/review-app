@@ -18,8 +18,7 @@ import pandas as pd
 from sqlalchemy import literal, select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from review_app.app.config import VIDEO_EXTENSIONS
-from review_app.backend.camera_layout import video_layout_for_path
+from review_app.backend.camera_layout import iter_footage
 from review_app.backend.db.models import ProjectDir, Tag, Video, VideoTag
 from review_app.backend.errors import VideoError
 from review_app.backend.path_matching import normalize_path_str
@@ -294,19 +293,8 @@ class VideoMixin(ProviderBase):
                             columns=["video_path", "camera_id", "is_reference_video"]
                         )
                     return pd.DataFrame(rows)
-        directory_cache: dict[Path, list[Path]] = {}
         for scan_dir in scan_dirs:
-            if not scan_dir.exists():
-                continue
-            for p in sorted(scan_dir.rglob("*")):
-                if p.suffix.lower() not in VIDEO_EXTENSIONS:
-                    continue
-                # Skip hidden files/dirs (e.g. macOS ._* resource forks, .Trashes)
-                if any(part.startswith(".") for part in p.relative_to(scan_dir).parts):
-                    continue
-                camera_id, is_reference = video_layout_for_path(
-                    p, scan_dir, directory_cache=directory_cache
-                )
+            for p, camera_id, is_reference in iter_footage(scan_dir):
                 rows.append(
                     {
                         "video_path": normalize_path_str(str(p)),
@@ -329,6 +317,10 @@ class VideoMixin(ProviderBase):
         now = self._utcnow_dt()
 
         with self.Session() as session:
+            if active_project_id:
+                from review_app.backend.provider.deployments import initialize_project
+
+                initialize_project(session, active_project_id)
             working_binding = (
                 session.execute(
                     text(
@@ -414,7 +406,11 @@ class VideoMixin(ProviderBase):
                             "video_id": str(uuid.uuid4()),
                             "project_id": active_project_id,
                             "video_path": row["video_path"],
-                            "camera_id": row["camera_id"],
+                            "camera_id": row["camera_id"] if active_project_id is None else None,
+                            "inferred_camera_id": row["camera_id"],
+                            "deployment_assignment": "legacy"
+                            if active_project_id is None
+                            else "unresolved",
                             "created_at": probe.created_at,
                             "last_seen_at": now,
                             "duration_sec": probe.duration_sec,
@@ -431,7 +427,8 @@ class VideoMixin(ProviderBase):
                 session.execute(
                     text("""
                         UPDATE videos
-                        SET camera_id    = :camera_id,
+                        SET inferred_camera_id = :camera_id,
+                            camera_id = CASE WHEN :project_id IS NULL THEN :camera_id ELSE camera_id END,
                             last_seen_at = :last_seen_at,
                             is_missing   = 0
                         WHERE video_path = :video_path
@@ -476,6 +473,14 @@ class VideoMixin(ProviderBase):
                     [{"p": p, "pid": active_project_id} for p in orphaned_paths],
                 )
 
+            if active_project_id:
+                from review_app.backend.provider.deployments import reconcile_scanned
+
+                session.flush()
+                session.expire_all()  # Raw baseline updates must be visible to the resolver.
+                reconcile_scanned(
+                    session, active_project_id, scanned_paths, set(new_rows["video_path"])
+                )
             session.commit()
 
         if progress_callback:

@@ -146,7 +146,7 @@ class StatsMixin(ProviderBase):
                 params=p,
             ).to_dict(orient="records")
 
-            stats["camera_summary"] = pd.read_sql(
+            camera_summary = conn.execute(
                 text(f"""
                 WITH ranked AS (
                     SELECT
@@ -175,9 +175,10 @@ class StatsMixin(ProviderBase):
                 GROUP BY v.camera_id
                 ORDER BY total_videos DESC
             """),
-                conn,
-                params=p,
-            ).to_dict(orient="records")
+                p,
+            ).mappings()
+            # Preserve SQL NULL as None, not pandas string-column NaN (a float).
+            stats["camera_summary"] = [dict(row) for row in camera_summary]
 
         return stats
 

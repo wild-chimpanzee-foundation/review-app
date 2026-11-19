@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -34,6 +35,7 @@ class Project(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String, unique=True)
+    deployment_mode: Mapped[str] = mapped_column(String, default="legacy", server_default="legacy")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     last_opened: Mapped[datetime | None] = mapped_column(DateTime)
     collection_id: Mapped[str | None] = mapped_column(String, ForeignKey("species_collections.id"))
@@ -56,6 +58,47 @@ class ProjectDir(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class Deployment(Base):
+    """Project-scoped deployment identity, independent of folder and camera labels."""
+
+    __tablename__ = "deployments"
+    __table_args__ = (
+        UniqueConstraint("project_id", "deployment_id", name="uq_deployment_project_key"),
+        CheckConstraint("length(trim(deployment_id)) > 0", name="ck_deployment_key"),
+        CheckConstraint("source IN ('csv', 'inferred')", name="ck_deployment_source"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(
+        String, ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    deployment_id: Mapped[str] = mapped_column(String)
+    name: Mapped[str | None] = mapped_column(String)
+    camera_id: Mapped[str | None] = mapped_column(String)
+    installation_date: Mapped[date | None] = mapped_column(Date)
+    retrieval_date: Mapped[date | None] = mapped_column(Date)
+    transect_id: Mapped[str | None] = mapped_column(String)
+    habitat: Mapped[str | None] = mapped_column(String)
+    notes: Mapped[str | None] = mapped_column(String)
+    folder_path: Mapped[str | None] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String)
+
+
+class DeploymentFolderLink(Base):
+    __tablename__ = "deployment_folder_links"
+    __table_args__ = (
+        UniqueConstraint("project_dir_id", "folder_path", name="uq_deployment_folder"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_dir_id: Mapped[str] = mapped_column(
+        String, ForeignKey("project_dirs.id", ondelete="CASCADE"), index=True
+    )
+    folder_path: Mapped[str] = mapped_column(String)
+    deployment_id: Mapped[str | None] = mapped_column(String, ForeignKey("deployments.id"))
+    source: Mapped[str] = mapped_column(String, default="manual", server_default="manual")
+
+
 class Video(Base):
     __tablename__ = "videos"
     __table_args__ = (UniqueConstraint("video_path", "project_id", name="uq_video_path_project"),)
@@ -63,7 +106,15 @@ class Video(Base):
     video_id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str | None] = mapped_column(String, ForeignKey("projects.id"), index=True)
     video_path: Mapped[str] = mapped_column(String)
+    # Compatibility projection for existing queues/exports; writes live in deployments.py.
     camera_id: Mapped[str | None] = mapped_column(String, index=True)
+    inferred_camera_id: Mapped[str | None] = mapped_column(String)
+    deployment_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("deployments.id"), index=True
+    )
+    deployment_assignment: Mapped[str] = mapped_column(
+        String, default="legacy", server_default="legacy"
+    )
     created_at: Mapped[datetime | None] = mapped_column(DateTime)
     duration_sec: Mapped[float | None] = mapped_column(Float)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -339,6 +390,9 @@ class ReferenceVideo(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"))
     camera_id: Mapped[str] = mapped_column(String)
+    deployment_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("deployments.id"), index=True
+    )
     video_path: Mapped[str] = mapped_column(String)
 
 

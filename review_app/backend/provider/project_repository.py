@@ -7,12 +7,15 @@ from pathlib import Path
 from sqlalchemy import func, text
 
 from review_app.backend.db.models import (
+    Deployment,
+    DeploymentFolderLink,
     Project,
     ProjectDir,
     ProjectSpecies,
     ReferenceVideo,
     Video,
 )
+from review_app.backend.deployments import DeploymentSetupPreview
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
 
@@ -33,8 +36,79 @@ class ProjectMixin(ProviderBase):
         return f"{base} ({i})"
 
     def create_project(self, name: str, video_dir: str) -> Project:
+        """Legacy/package creation: preserve existing callers without requiring a CSV."""
+        return self._create_project_with_inventory(name, video_dir, ())
+
+    def create_project_with_deployments(
+        self,
+        name: str,
+        video_dir: str,
+        *,
+        csv_data: bytes | None = None,
+        infer_from_folders: bool = False,
+        expected_preview: DeploymentSetupPreview | None = None,
+    ) -> Project:
+        """Validate before writing; project, root and complete inventory commit together.
+
+        Explicit folder paths are installed before the initial footage scan.
+        """
+        from review_app.backend.deployments import (
+            DeploymentInputError,
+            infer_deployment_inventory,
+            parse_deployment_csv,
+            preview_deployment_setup,
+        )
+
+        root = Path(normalize_path_str(video_dir)).expanduser().resolve()
+        if not video_dir.strip() or not root.is_dir():
+            raise DeploymentInputError("deployment_error_root")
+        video_dir = root.as_posix()
+        if expected_preview is not None:
+            confirmed = preview_deployment_setup(
+                video_dir, csv_data=csv_data, infer_from_folders=infer_from_folders
+            )
+            if confirmed != expected_preview:
+                raise DeploymentInputError("deployment_error_setup_stale")
+            preview = confirmed.inventory
+        elif infer_from_folders:
+            if csv_data is not None:
+                raise DeploymentInputError("deployment_error_mode")
+            preview = infer_deployment_inventory(video_dir)
+        else:
+            if csv_data is None:
+                raise DeploymentInputError("deployment_error_required")
+            preview = parse_deployment_csv(csv_data, video_dir)
+        return self._create_project_with_inventory(
+            name, video_dir, preview.rows, mode="inferred" if infer_from_folders else "csv"
+        )
+
+    def get_project_deployments(self, project_id: str) -> list[dict]:
+        from review_app.backend.provider.deployments import ensure_project_initialized
+
+        with self.Session.begin() as session:
+            if session.get(Project, project_id) is None:
+                return []
+            ensure_project_initialized(session, project_id)
+            return [
+                {
+                    column.name: (
+                        getattr(row, column.name).isoformat()
+                        if column.name in {"installation_date", "retrieval_date"}
+                        and getattr(row, column.name) is not None
+                        else getattr(row, column.name)
+                    )
+                    for column in Deployment.__table__.columns
+                }
+                for row in session.query(Deployment)
+                .filter_by(project_id=project_id)
+                .order_by(Deployment.deployment_id)
+            ]
+
+    def _create_project_with_inventory(
+        self, name: str, video_dir: str, deployment_rows, *, mode="legacy"
+    ) -> Project:
         name = self._unique_project_name(name)
-        project = Project(id=str(uuid.uuid4()), name=name)
+        project = Project(id=str(uuid.uuid4()), name=name, deployment_mode=mode)
         with self.Session() as s:
             s.add(project)
             s.flush()
@@ -47,6 +121,11 @@ class ProjectMixin(ProviderBase):
                         sort_order=0,
                     )
                 )
+            s.add_all(Deployment(project_id=project.id, **row) for row in deployment_rows)
+            s.flush()
+            from review_app.backend.provider.deployments import initialize_project
+
+            initialize_project(s, project.id)
             s.commit()
             s.refresh(project)
         logger.info("Created project %r (id=%s, dir=%s)", name, project.id, video_dir or "none")
@@ -153,7 +232,10 @@ class ProjectMixin(ProviderBase):
                             project_id=d.project_id, camera_id=old_root.name
                         ):
                             parent = Path(normalize_path_str(row.video_path)).parent
-                            if parent in (new_root / "videos", new_root / "references"):
+                            if (
+                                parent in (new_root / "videos", new_root / "references")
+                                and row.deployment_id is None
+                            ):
                                 row.camera_id = new_root.name
             d.path = normalize_path_str(str(new_path))
             s.commit()
@@ -207,7 +289,18 @@ class ProjectMixin(ProviderBase):
             self._cascade_delete_videos(s, Video.project_id == project_id)
             # Project-only tables (not linked via video_id)
             s.query(ProjectSpecies).filter_by(project_id=project_id).delete()
+            s.query(DeploymentFolderLink).filter(
+                DeploymentFolderLink.project_dir_id.in_(
+                    s.query(ProjectDir.id).filter_by(project_id=project_id)
+                )
+            ).delete(synchronize_session=False)
+            # External prepared references retain their own lifetime, but must not
+            # keep a dangling inventory FK when the project is removed.
+            s.query(ReferenceVideo).filter_by(project_id=project_id).update(
+                {"deployment_id": None}
+            )
             s.query(ProjectDir).filter_by(project_id=project_id).delete()
+            s.query(Deployment).filter_by(project_id=project_id).delete()
             s.delete(project)
             s.commit()
 

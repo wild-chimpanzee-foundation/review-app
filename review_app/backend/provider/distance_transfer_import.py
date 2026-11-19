@@ -8,7 +8,6 @@ from pathlib import Path
 
 from sqlalchemy import update
 
-from review_app.backend.camera_layout import deployment_key
 from review_app.backend.db.models import (
     Behavior,
     DistanceIndividual,
@@ -24,6 +23,7 @@ from review_app.backend.db.models import (
     Video,
 )
 from review_app.backend.path_matching import normalize_path_str
+from review_app.backend.provider.deployments import resolved_scope
 from review_app.backend.provider.distance_transfer import _manual_only, _roots, _safe_relative
 
 
@@ -159,12 +159,15 @@ def plan_import(session, project_id, manifest, tables, root_map):
                     )
                 ref_path = _media_path(row, roots, manifest, root_map)
                 scope_roots = [(root.id, root.path) for root in roots]
-                scope = deployment_key(project_id, video.camera_id, video.video_path, scope_roots)
-                if scope is None or scope != deployment_key(
-                    project_id, row["camera_id"], ref_path, scope_roots
-                ):
+                scope = resolved_scope(session, video, scope_roots)
+                reference_plan = _reference_plan(session, project_id, row, ref_path)
+                candidate = reference_plan["reference"] or ReferenceVideo(
+                    project_id=project_id, camera_id=row["camera_id"], video_path=ref_path
+                )
+                if scope is None or scope != resolved_scope(session, candidate, scope_roots):
                     raise ValueError("Reference frame must match the target video's deployment")
-                refs[frame_id] = _reference_plan(session, project_id, row, ref_path)
+                reference_plan["deployment_id"] = scope[2] if scope[1] == "deployment" else None
+                refs[frame_id] = reference_plan
             for tag in {tag["key"] for row in individuals for tag in row["tags"]}:
                 local = session.query(Tag).filter_by(key=tag).one_or_none()
                 if local is not None and not local.individual_eligible:
@@ -238,6 +241,7 @@ def apply_task(session, project_id, plan, tables):
                 project_id=project_id,
                 camera_id=row["camera_id"],
                 video_path=current["path"],
+                deployment_id=ref_plan["deployment_id"],
             )
             session.add(reference)
             session.flush()

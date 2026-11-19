@@ -1,7 +1,7 @@
 """Infer camera deployments without treating clip categories as cameras."""
 
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 from review_app.backend.path_matching import normalize_path_str
@@ -137,6 +137,25 @@ def is_reference_video_path(path: Path, scan_dir: Path) -> bool:
 
 def camera_id_for_path(path: Path, scan_dir: Path) -> str:
     return video_layout_for_path(path, scan_dir)[0]
+
+
+def iter_footage(root: Path) -> Iterator[tuple[Path, str, bool]]:
+    """Enumerate visible footage using one layout decision per containing folder."""
+    from review_app.app.config import VIDEO_EXTENSIONS
+
+    layouts: dict[Path, tuple[str, bool]] = {}
+    siblings: dict[Path, list[Path]] = {}
+    for path in sorted(root.rglob("*")):
+        if (
+            path.suffix.lower() not in VIDEO_EXTENSIONS
+            or any(part.startswith(".") for part in path.relative_to(root).parts)
+            or not path.is_file()
+        ):
+            continue
+        if path.parent not in layouts:
+            layouts[path.parent] = video_layout_for_path(path, root, directory_cache=siblings)
+        label, reference = layouts[path.parent]
+        yield path, label, reference
 
 
 def deployment_key(

@@ -274,6 +274,10 @@ def test_tag_discovery_does_not_change_existing_reference_deployment(distance_da
     with dp.Session.begin() as session:
         video = session.get(Video, data["videos"][1])
         video.camera_id = "another-camera"
+        # Simulate a pre-inventory label, not an inconsistent overwrite of the
+        # compatibility projection while retaining the old durable identity.
+        video.deployment_id = None
+        video.deployment_assignment = "legacy"
     assert dp.get_distance_reference_videos(data["videos"][1]) == []
     assert dp.list_reference_videos(data["project"].id, "cam_x") == [data["reference"]]
 

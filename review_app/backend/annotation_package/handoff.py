@@ -248,6 +248,9 @@ def open_setup(
     else:
         for unit in work:
             restore_work(session, project.id, videos[unit["video_id"]], unit, vocab)
+    from review_app.backend.provider.deployments import reconstruct_package_assignments
+
+    reconstruct_package_assignments(session, project.id)
     session.flush()
     return OpenedAssignment(
         binding.id,

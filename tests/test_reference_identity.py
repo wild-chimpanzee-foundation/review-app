@@ -66,7 +66,7 @@ def test_reference_identity_is_distance_not_timestamp(v25_references, tmp_path, 
                 "INSERT INTO projects (id, name, created_at) VALUES ('p', 'Fresh', '2026-01-01')"
             )
             conn.exec_driver_sql(
-                "INSERT INTO reference_videos VALUES ('r', 'p', 'camera', 'reference.mp4')"
+                "INSERT INTO reference_videos (id, project_id, camera_id, video_path) VALUES ('r', 'p', 'camera', 'reference.mp4')"
             )
             conn.exec_driver_sql(
                 "INSERT INTO reference_frames (id, reference_video_id, offset_ms, distance_m) VALUES ('a', 'r', 2000, 5)"
@@ -92,7 +92,7 @@ def test_upgrade_remaps_duplicate_frames_without_altering_sample_evidence(v25_re
             conn.exec_driver_sql("SELECT * FROM distance_samples ORDER BY id").mappings().all()
         )
         before = {
-            table: conn.exec_driver_sql(f'SELECT * FROM "{table}"').all()
+            table: conn.exec_driver_sql(f'SELECT * FROM "{table}"').mappings().all()
             for table in (
                 "videos",
                 "reference_videos",
@@ -121,7 +121,12 @@ def test_upgrade_remaps_duplicate_frames_without_altering_sample_evidence(v25_re
             "SELECT id FROM reference_frames ORDER BY id"
         ).scalars().all() == ["a", "b"]
         for table, rows in before.items():
-            assert conn.exec_driver_sql(f'SELECT * FROM "{table}"').all() == rows
+            after_rows = conn.exec_driver_sql(f'SELECT * FROM "{table}"').mappings().all()
+            # Later migrations may append assignment columns; all v25 values and
+            # row identities must remain unchanged.
+            assert [{key: value[key] for key in rows[0]} for value in after_rows] == [
+                dict(value) for value in rows
+            ]
         assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
         assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
         assert conn.exec_driver_sql("SELECT version FROM _schema_version").scalar() == len(

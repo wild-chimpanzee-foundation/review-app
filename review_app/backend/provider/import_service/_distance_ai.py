@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from pathlib import PurePosixPath
 
-from review_app.backend.camera_layout import deployment_key
 from review_app.backend.db.models import (
     DistanceImport,
     DistanceIndividual,
@@ -23,6 +22,7 @@ from review_app.backend.distance_ai_package import mask_bounding_box, read_dista
 from review_app.backend.distance_timing import infer_imported_schedule
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
+from review_app.backend.provider.deployments import resolved_scope
 from review_app.backend.provider.distance_references import (
     clear_reference_frame_samples,
     reference_tagged,
@@ -115,7 +115,9 @@ def _plan(session, project_id, package):
             .filter_by(project_id=project_id, video_path=normalize_path_str(video.video_path))
             .first()
         )
-        if source and source.camera_id != video.camera_id:
+        if source and resolved_scope(session, source, roots) != resolved_scope(
+            session, video, roots
+        ):
             errors.append(f"Reference camera mismatch; refresh references: {row['video_path']}")
         frame = (
             session.query(ReferenceFrame)
@@ -185,7 +187,7 @@ def _plan(session, project_id, package):
             schedules.setdefault((video.video_id, row["species"]), set())
             if video.video_id in tagged:
                 errors.append(f"Animal track points to a Reference Video: {row['video_path']}")
-            if deployment_key(project_id, video.camera_id, video.video_path, roots) is None:
+            if resolved_scope(session, video, roots) is None:
                 errors.append(f"Resolve the animal video's deployment: {row['video_path']}")
         if not any(p["individual_id"] == row["individual_id"] for p in package.predictions):
             errors.append(f"Individual {row['individual_id']} has no predictions.")
@@ -198,9 +200,9 @@ def _plan(session, project_id, package):
         schedules[(video.video_id, track["species"])].add(row["time_s"])
         reference = references.get(row["suggested_reference_id"])
         ref_video = videos.get(reference["video_path"]) if reference else None
-        if ref_video and deployment_key(
-            project_id, video.camera_id, video.video_path, roots
-        ) != deployment_key(project_id, ref_video.camera_id, ref_video.video_path, roots):
+        if ref_video and resolved_scope(session, video, roots) != resolved_scope(
+            session, ref_video, roots
+        ):
             errors.append(
                 f"Suggested reference is from another deployment: {row['prediction_id']}"
             )

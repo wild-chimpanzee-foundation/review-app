@@ -19,6 +19,8 @@ def repair_distance_camera_layout(session, project_id: str) -> None:
     )
     for model in (Video, ReferenceVideo):
         for row in session.query(model).filter_by(project_id=project_id):
+            if row.deployment_id is not None:
+                continue  # Explicit/resolved inventory identity is not a folder baseline.
             path = Path(normalize_path_str(row.video_path))
             for root in roots:
                 if not path.is_relative_to(root):

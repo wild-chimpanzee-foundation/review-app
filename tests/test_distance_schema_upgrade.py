@@ -51,7 +51,7 @@ def test_upgrade_preserves_ordinary_records_and_adds_final_schema(
     engine = legacy_database
     with engine.connect() as conn:
         before = {
-            table: conn.exec_driver_sql(f'SELECT * FROM "{table}"').all()
+            table: conn.exec_driver_sql(f'SELECT * FROM "{table}"').mappings().all()
             for table in ("projects", "videos", "individual_observations", "video_tags")
         }
     if precreate_tables:
@@ -60,7 +60,11 @@ def test_upgrade_preserves_ordinary_records_and_adds_final_schema(
     migrations.run_migrations(engine)
     with engine.connect() as conn:
         for table, rows in before.items():
-            assert conn.exec_driver_sql(f'SELECT * FROM "{table}"').all() == rows
+            after = conn.exec_driver_sql(f'SELECT * FROM "{table}"').mappings().all()
+            # New assignment columns are additive; every historical value stays.
+            assert [{key: row[key] for key in rows[0]} for row in after] == [
+                dict(row) for row in rows
+            ]
         assert conn.exec_driver_sql("SELECT individual_eligible FROM tags").scalar() == 1
         assert conn.exec_driver_sql("SELECT version FROM _schema_version").scalar() == len(
             migrations.MIGRATIONS
@@ -122,7 +126,7 @@ def test_task_transition_discards_only_legacy_distance_evidence(legacy_database,
             SELECT id, project_id, manifest, payload, imported_at FROM distance_imports
         """).all()
         before = {
-            table: conn.exec_driver_sql(f'SELECT * FROM "{table}"').all()
+            table: conn.exec_driver_sql(f'SELECT * FROM "{table}"').mappings().all()
             for table in (
                 "reference_videos",
                 "reference_frames",
@@ -135,7 +139,10 @@ def test_task_transition_discards_only_legacy_distance_evidence(legacy_database,
     migrations.run_migrations(engine)
     with engine.begin() as conn:
         for table, rows in before.items():
-            assert conn.exec_driver_sql(f'SELECT * FROM "{table}"').all() == rows
+            after = conn.exec_driver_sql(f'SELECT * FROM "{table}"').mappings().all()
+            assert [{key: row[key] for key in rows[0]} for row in after] == [
+                dict(row) for row in rows
+            ]
         assert conn.exec_driver_sql("SELECT count(*) FROM distance_individuals").scalar() == 0
         assert (
             conn.exec_driver_sql("""

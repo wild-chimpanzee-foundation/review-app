@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from datetime import datetime
 
-from review_app.backend.camera_layout import deployment_key
 from review_app.backend.db.models import (
     DistanceIndividual,
     DistanceReviewProgress,
@@ -19,6 +18,7 @@ from review_app.backend.db.models import (
 )
 from review_app.backend.distance_timing import sample_offsets
 from review_app.backend.path_matching import normalize_path_str
+from review_app.backend.provider.deployments import resolved_scope
 from review_app.backend.provider.distance_tasks import (
     clear_completion,
     complete_task,
@@ -197,7 +197,7 @@ def _suggestion_frames(session, video):
         (row.id, row.path)
         for row in session.query(ProjectDir).filter_by(project_id=video.project_id)
     ]
-    scope = deployment_key(video.project_id, video.camera_id, video.video_path, roots)
+    scope = resolved_scope(session, video, roots)
     paths = {
         normalize_path_str(source.video_path)
         for source in session.query(Video).filter(
@@ -205,8 +205,7 @@ def _suggestion_frames(session, video):
             Video.is_missing.is_(False),
             reference_tagged(session),
         )
-        if scope is not None
-        and deployment_key(source.project_id, source.camera_id, source.video_path, roots) == scope
+        if scope is not None and resolved_scope(session, source, roots) == scope
     }
     return {
         frame.id: frame
@@ -214,7 +213,6 @@ def _suggestion_frames(session, video):
         .join(ReferenceVideo, ReferenceFrame.reference_video_id == ReferenceVideo.id)
         .filter(
             ReferenceVideo.project_id == video.project_id,
-            ReferenceVideo.camera_id == video.camera_id,
         )
         if normalize_path_str(source.video_path) in paths
     }
@@ -323,6 +321,8 @@ def verify_recording_time(
     video = session.get(Video, review.video_id)
     if video is None:
         raise ValueError("Video not found")
+    if not video.camera_id:
+        raise ValueError("Resolve the video deployment before Distance review")
     offsets = sample_offsets(
         recorded_start,
         video.duration_sec,

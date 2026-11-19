@@ -6,7 +6,6 @@ import math
 
 from sqlalchemy import func
 
-from review_app.backend.camera_layout import deployment_key
 from review_app.backend.db.distance_behaviors import ensure_unidentified_behavior
 from review_app.backend.db.models import (
     Behavior,
@@ -19,6 +18,7 @@ from review_app.backend.db.models import (
     ReferenceVideo,
     Video,
 )
+from review_app.backend.provider.deployments import resolved_scope
 from review_app.backend.provider.distance_review import (
     reopen_individual_review,
     review_offsets,
@@ -99,16 +99,10 @@ def save_distance_sample(
             (row.id, row.path)
             for row in session.query(ProjectDir).filter_by(project_id=video.project_id)
         ]
-        scope = deployment_key(video.project_id, video.camera_id, video.video_path, roots)
+        scope = resolved_scope(session, video, roots)
         if not math.isfinite(frame.distance_m) or frame.distance_m <= 0:
             raise ValueError("Reference distance must be finite and positive")
-        if (
-            scope is None
-            or deployment_key(
-                reference.project_id, reference.camera_id, reference.video_path, roots
-            )
-            != scope
-        ):
+        if scope is None or resolved_scope(session, reference, roots) != scope:
             raise ValueError("Reference frame must match the video's project and deployment")
     behaviors = set(behavior_ids or [])
     if behaviors != {

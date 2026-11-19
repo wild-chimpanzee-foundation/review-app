@@ -772,7 +772,78 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
         27,
         lambda conn: _add_column_if_missing(conn, "handoff_assignments", "removed_at", "DATETIME"),
     ),
+    (
+        28,
+        [
+            """
+            CREATE TABLE IF NOT EXISTS deployments (
+                id VARCHAR NOT NULL PRIMARY KEY,
+                project_id VARCHAR NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                deployment_id VARCHAR NOT NULL,
+                name VARCHAR,
+                camera_id VARCHAR,
+                installation_date DATE,
+                retrieval_date DATE,
+                transect_id VARCHAR,
+                habitat VARCHAR,
+                notes VARCHAR,
+                folder_path VARCHAR,
+                source VARCHAR NOT NULL,
+                CONSTRAINT uq_deployment_project_key UNIQUE (project_id, deployment_id),
+                CONSTRAINT ck_deployment_key CHECK (length(trim(deployment_id)) > 0),
+                CONSTRAINT ck_deployment_source CHECK (source IN ('csv', 'inferred'))
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_deployments_project_id ON deployments (project_id)",
+        ],
+    ),
+    (29, lambda conn: _migration_v29(conn)),
 ]
+
+
+def _migration_v29(conn) -> None:
+    """Keep legacy labels/evidence intact; assignment initialization is session-aware."""
+    _add_column_if_missing(
+        conn, "projects", "deployment_mode", "VARCHAR NOT NULL DEFAULT 'legacy'"
+    )
+    _add_column_if_missing(conn, "videos", "inferred_camera_id", "VARCHAR")
+    _add_column_if_missing(conn, "videos", "deployment_id", "VARCHAR REFERENCES deployments(id)")
+    _add_column_if_missing(
+        conn, "videos", "deployment_assignment", "VARCHAR NOT NULL DEFAULT 'legacy'"
+    )
+    _add_column_if_missing(
+        conn, "reference_videos", "deployment_id", "VARCHAR REFERENCES deployments(id)"
+    )
+    conn.execute(
+        text("UPDATE videos SET inferred_camera_id = camera_id WHERE inferred_camera_id IS NULL")
+    )
+    conn.execute(
+        text("""
+        UPDATE projects SET deployment_mode = CASE
+            WHEN EXISTS (SELECT 1 FROM deployments d WHERE d.project_id=projects.id AND d.source='csv') THEN 'csv'
+            WHEN EXISTS (SELECT 1 FROM deployments d WHERE d.project_id=projects.id) THEN 'inferred'
+            ELSE 'legacy' END
+    """)
+    )
+    conn.execute(
+        text("""
+        CREATE TABLE IF NOT EXISTS deployment_folder_links (
+            id VARCHAR NOT NULL PRIMARY KEY,
+            project_dir_id VARCHAR NOT NULL REFERENCES project_dirs(id) ON DELETE CASCADE,
+            folder_path VARCHAR NOT NULL,
+            deployment_id VARCHAR REFERENCES deployments(id),
+            source VARCHAR DEFAULT 'manual' NOT NULL,
+            CONSTRAINT uq_deployment_folder UNIQUE (project_dir_id, folder_path)
+        )
+    """)
+    )
+    for sql in (
+        "CREATE INDEX IF NOT EXISTS ix_deployment_folder_links_project_dir_id ON deployment_folder_links (project_dir_id)",
+        "CREATE INDEX IF NOT EXISTS ix_videos_deployment_id ON videos (deployment_id)",
+        "CREATE INDEX IF NOT EXISTS ix_reference_videos_deployment_id ON reference_videos (deployment_id)",
+    ):
+        conn.execute(text(sql))
+
 
 # Frozen upgrade DDL. Keep independent of evolving ORM metadata.
 DISTANCE_SCHEMA_V23 = [

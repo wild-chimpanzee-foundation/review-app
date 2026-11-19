@@ -8,7 +8,6 @@ import uuid
 from sqlalchemy import func, or_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from review_app.backend.camera_layout import deployment_key
 from review_app.backend.db.models import (
     DistanceIndividual,
     DistanceReviewTask,
@@ -23,6 +22,7 @@ from review_app.backend.db.models import (
     VideoTag,
 )
 from review_app.backend.path_matching import normalize_path_str
+from review_app.backend.provider.deployments import resolved_scope
 from review_app.backend.provider.distance_review import reopen_individual_review
 from review_app.backend.provider.distance_tasks import ensure_tasks
 
@@ -58,7 +58,10 @@ def get_distance_video_queue(
         session.query(Video, DistanceReviewTask)
         .join(DistanceReviewTask, DistanceReviewTask.video_id == Video.video_id)
         .filter(
-            Video.project_id == project_id, Video.is_missing.is_(False), ~reference_tagged(session)
+            Video.project_id == project_id,
+            Video.is_missing.is_(False),
+            Video.camera_id.is_not(None),
+            ~reference_tagged(session),
         )
     )
     if camera_id:
@@ -134,25 +137,29 @@ def get_distance_reference_videos(session, video_id: str) -> list[dict]:
     roots = [
         (row.id, row.path) for row in session.query(ProjectDir).filter_by(project_id=project_id)
     ]
-    scope = deployment_key(project_id, camera_id, video.video_path, roots)
+    scope = resolved_scope(session, video, roots)
     if scope is None:
         raise ValueError("Resolve the video's import root before matching references")
     sources = {
         normalize_path_str(source.video_path): source
         for source in session.query(Video).filter(
             Video.project_id == project_id,
-            Video.camera_id == camera_id.strip(),
             Video.is_missing.is_(False),
             reference_tagged(session),
         )
-        if deployment_key(project_id, source.camera_id, source.video_path, roots) == scope
+        if resolved_scope(session, source, roots) == scope
     }
     if sources:
         session.execute(
             sqlite_insert(ReferenceVideo)
             .values(
                 [
-                    {"project_id": project_id, "camera_id": camera_id.strip(), "video_path": path}
+                    {
+                        "project_id": project_id,
+                        "camera_id": camera_id.strip(),
+                        "video_path": path,
+                        "deployment_id": sources[path].deployment_id,
+                    }
                     for path in sources
                 ]
             )
@@ -168,7 +175,6 @@ def get_distance_reference_videos(session, video_id: str) -> list[dict]:
         session.query(ReferenceVideo)
         .filter(
             ReferenceVideo.project_id == project_id,
-            ReferenceVideo.camera_id == camera_id.strip(),
             or_(
                 ReferenceVideo.video_path.in_(sources),
                 ReferenceVideo.id.in_(saved_reference_ids),
@@ -178,7 +184,7 @@ def get_distance_reference_videos(session, video_id: str) -> list[dict]:
     )
     result = []
     for row in rows:
-        if deployment_key(project_id, row.camera_id, row.video_path, roots) != scope:
+        if resolved_scope(session, row, roots) != scope:
             continue
         source = sources.get(row.video_path)
         is_tagged = source is not None
@@ -187,7 +193,6 @@ def get_distance_reference_videos(session, video_id: str) -> list[dict]:
                 session.query(Video)
                 .filter(
                     Video.project_id == project_id,
-                    Video.camera_id == camera_id.strip(),
                     func.replace(Video.video_path, "\\", "/") == row.video_path,
                 )
                 .first()

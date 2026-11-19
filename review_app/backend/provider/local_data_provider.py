@@ -16,6 +16,7 @@ from review_app.backend.db.models import Base
 from review_app.backend.provider.annotation_repository import AnnotationMixin
 from review_app.backend.provider.assignment_handoff import AssignmentHandoffMixin
 from review_app.backend.provider.assignment_service import AssignmentMixin
+from review_app.backend.provider.deployments import DeploymentMixin
 from review_app.backend.provider.distance_repository import DistanceMixin
 from review_app.backend.provider.distance_transfer import DistanceTransferMixin
 from review_app.backend.provider.import_service import ImportMixin
@@ -34,6 +35,7 @@ sqlite3.register_adapter(date, lambda val: val.isoformat())
 
 
 class LocalDataProvider(
+    DeploymentMixin,
     VideoMixin,
     SpeciesMixin,
     ProjectMixin,

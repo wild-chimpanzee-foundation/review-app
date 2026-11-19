@@ -15,7 +15,6 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, Integer
 
 from review_app.backend.annotation_package import species
 from review_app.backend.annotation_package.scope import id_selection
-from review_app.backend.camera_layout import deployment_key
 from review_app.backend.db.models import (
     DistanceImport,
     DistanceIndividual,
@@ -29,6 +28,7 @@ from review_app.backend.db.models import (
     Species,
     Video,
 )
+from review_app.backend.provider.deployments import resolved_scope
 
 TASK = "id source_count completion_outcome completion_history rejected_ai recorded_start alignment_mode imported_sample_times_s import_id started_at clock_anchor_offset_ms clock_anchor_playback_ms opening_even_second verified_by verified_at completed_by completed_at"
 INDIVIDUAL = "id import_id task_id ai_original individual_number age sex first_seen_offset_ms first_seen_playback_ms initial_carrier_individual_id anchor_x anchor_y anchor_width anchor_height labeled_by labeled_at updated_at review_status completed_by completed_at"
@@ -124,15 +124,12 @@ def collect(session, project, videos, roots, target):
             ]
         work.append(unit)
     root_pairs = [(row.id, row.path) for row in roots]
-    deployments = {
-        deployment_key(project.id, v.camera_id, v.video_path, root_pairs) for v in videos
-    }
+    deployments = {resolved_scope(session, v, root_pairs) for v in videos}
     # Include prepared and merely discoverable reference footage, even on untouched tasks.
     references = [
         row
         for row in session.query(ReferenceVideo).filter_by(project_id=project.id)
-        if deployment_key(project.id, row.camera_id, row.video_path, root_pairs)
-        in deployments - {None}
+        if resolved_scope(session, row, root_pairs) in deployments - {None}
     ]
     needed_frames = {
         row["reference_frame_id"]
@@ -169,8 +166,7 @@ def collect(session, project, videos, roots, target):
         for v in session.query(Video).filter(
             Video.project_id == project.id, reference_tagged(session)
         )
-        if deployment_key(project.id, v.camera_id, v.video_path, root_pairs)
-        in deployments - {None}
+        if resolved_scope(session, v, root_pairs) in deployments - {None}
     ]
     media_videos = {v.video_id: v for v in videos + tagged}
     for ref in references:
@@ -186,6 +182,7 @@ def collect(session, project, videos, roots, target):
                 project_id=project.id,
                 video_path=ref.video_path,
                 camera_id=ref.camera_id,
+                deployment_id=ref.deployment_id,
                 is_missing=not Path(ref.video_path).is_file(),
             )
         media_videos[source.video_id] = source
