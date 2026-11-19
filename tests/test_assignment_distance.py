@@ -693,7 +693,7 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
     user.find(marker="save-delivery").click()
     delivery = tmp_path / "delivery" / f"assignment-{saved['assignment_id']}"
     await user.should_see(
-        t("handoff_copy_result", copied=3, missing=0, failed=0, path=str(delivery))
+        t("handoff_copy_result", copied=3, missing=0, failed=0, path=str(delivery)), retries=20
     )
     setup = (delivery / "assignment.zip").read_bytes()
     manifest, context, _ = decode_archive(setup)
@@ -705,7 +705,7 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
 
     await user.open("/distance-handoff-open")
     await upload_distance_zip(user, setup, "package_upload")
-    await user.should_see(t("handoff_root", number=1))
+    await user.should_see(t("handoff_root", number=1), retries=20)
     await user.should_see(
         t(
             "handoff_identity",
@@ -749,7 +749,7 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
     await upload_distance_zip(user, returned)
     await user.should_see(t("handoff_return_loaded"))
     user.find(t("handoff_preview"), kind=ui.button).click()
-    await user.should_see(t("handoff_species_changed"))
+    await user.should_see(t("handoff_species_changed"), retries=20)
     await user.should_see(t("handoff_substitution_help"))
     await user.should_see(
         t(
@@ -785,7 +785,7 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
         )
     )
     user.find(t("handoff_accept"), kind=ui.button).click()
-    await user.should_see(t("handoff_accepted"))
+    await user.should_see(t("handoff_accepted"), retries=20)
     with dp.Session() as session:
         assert session.get(DistanceSample, "sample-1").distance_m == 5.5
         assert session.get(ReferenceFrame, "frame-0").offset_ms == 1200

@@ -720,3 +720,35 @@ async def test_closing_partial_bulk_removal_refreshes_assignments(
     await user.should_not_see(marker="assignment-bulk-actions", retries=20)
     table = next(iter(user.find(ui.table).elements))
     assert [row["id"] for row in table.rows] == [retained.id]
+
+
+async def test_return_preview_identifies_same_relative_paths_in_different_roots(
+    user: User, handoff_ui, tmp_path
+):
+    dp, project, root = handoff_ui
+    second = tmp_path / "second-root"
+    other_clip = second / "cam_x" / "a.mp4"
+    other_clip.parent.mkdir(parents=True)
+    other_clip.touch()
+    other_root = dp.add_project_dir(project.id, str(second))
+    dp.sync_videos(video_dir=second, active_project_id=project.id)
+    paths = {f"{root.path}/cam_x/a.mp4", str(other_clip)}
+    with dp.Session() as session:
+        ids = tuple(
+            row.video_id
+            for row in session.query(Video).filter(
+                Video.project_id == project.id, Video.video_path.in_(paths)
+            )
+        )
+    assert len(ids) == 2
+    saved = dp.prepare_assignment(project.id, AssignmentRequest("alice", ids))
+    opened = dp.open_assignment(
+        dp.export_assignment(saved.id), "Working", {root.id: root.path, other_root.id: str(second)}
+    )
+    await user.open("/handoff-admin")
+    await upload(user, dp.export_assignment_return(opened.project_id))
+    user.find(t("handoff_preview"), kind=ui.button).click()
+    await user.should_see(marker="assignment-return-videos", retries=20)
+    table = next(iter(user.find(marker="assignment-return-videos").elements))
+    assert {row["id"] for row in table.rows} == set(ids)
+    assert {row["video"] for row in table.rows} == paths

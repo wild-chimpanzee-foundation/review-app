@@ -588,6 +588,7 @@ def render_return_acceptance(dp, project_id, require_project):
                     ).classes("text-warning" if policy.value == "append" else "text-negative")
                 rows = [
                     {
+                        "id": unit["video_id"],
                         "video": unit["video_path"],
                         "action": t(f"handoff_action_{unit['action']}"),
                         "before": sum(unit["existing"].values()),
@@ -610,7 +611,7 @@ def render_return_acceptance(dp, project_id, require_project):
                         filters=[("action", t("handoff_column_action"))],
                         marker="assignment-return-videos",
                     )
-                    table.set_rows([{**row, "id": row["video"]} for row in rows])
+                    table.set_rows(rows)
             accept_button.set_enabled(
                 bool(
                     result.totals["added"]
