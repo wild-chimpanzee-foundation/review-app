@@ -319,19 +319,43 @@ Reference clips are imported videos with the video-level `reference_video` tag.
 They remain in ordinary Review for tagging/conversion and are excluded from the
 Distance animal queue. Import and rescan automatically add the tag to clips
 inside a recognized paired deployment's `references/` folder, including existing
-clips. Existing tags and attribution are preserved; manually removing this tag
-is undone on the next rescan while the clip remains in that folder. A standalone
-folder named `references` is still an ordinary camera folder. Tags on other clips
-are never removed by folder inference. Missing sources or unresolved
-project/camera metadata do not become selectable references.
+clips. The shared folder detector also recognizes separate boundary markers `VR`,
+`V_R`, `ref`, `reference`, and `references` on deployment-folder names. Comparison
+normalizes case, whitespace, dashes, and underscores; deployment matching requires
+a unique exact remaining name, without camera-number or date guessing. Nested
+reference copies retain their enclosing reference assignment. A clear marker can
+identify reference footage without finding its ordinary deployment.
 
-Reference matching uses **project + registered import-root ID + camera label**.
-Separate roots both containing `cam_1` are distinct deployments. Prefer the most
-specific registered root for nested imports; root relocation preserves its ID.
-A single-root project may use explicitly assigned external/relative reference
-files. In multi-root projects, unresolved external paths are ambiguous and must
-not match by camera label alone. Apply this scope to both discovery and writes.
-No separate deployment table is needed.
+Existing tags and attribution are preserved; manually removing an inferred tag is
+undone on the next rescan while the clip remains in that reference layout. A
+standalone folder named `references` is still an ordinary camera folder unless
+paired as described below. Tags on other clips are never removed by folder
+inference. Missing sources or unresolved project/camera metadata do not become
+selectable references.
+
+Current reference matching uses **project + registered import-root ID + camera
+label**. Separate roots both containing `cam_1` are distinct matching scopes.
+Prefer the most specific registered root for nested imports; root relocation
+preserves its ID. A single-root project may use explicitly assigned
+external/relative reference files. In multi-root projects, unresolved external
+paths are ambiguous and must not match by camera label alone. Apply this current
+scope to both discovery and writes until the deployment migration below is implemented.
+
+The existing database's `camera_id` is a deployment label, not the physical camera's
+identifier. [Project deployment management](deployment-management.md) supersedes
+the earlier no-table/override-only plan with a project-scoped deployment inventory:
+standard creation requires an app-format CSV, advanced creation infers records from
+folders, and administrators resolve unmatched footage. Declared deployments may
+span import roots through explicit links; matching labels alone never establish
+such a link. Deployment-dependent Distance operations require resolved assignments.
+
+An initial CSV/folder-derived inventory and read-only Overview inventory page are
+implemented, without location support. Inventory records and stored folder paths do
+not yet change video assignments: sync still owns the stored folder-derived label.
+The remaining assignment migration and compatibility gates must be completed before
+changing discovery/write scope. The planned admin editor remains separate from
+Species Review and does not relax reference inference or permit silently changing
+saved Distance evidence.
 
 Paired `references/` and `videos/` folders support both
 `cam_a/{videos,references}/clip.mp4` and `{videos,references}/cam_a/clip.mp4`.

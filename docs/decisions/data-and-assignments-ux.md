@@ -11,6 +11,14 @@ this rework. Existing transfer behavior remains authoritative.
 See the [implementation plan and tracker](data-and-assignments-ux-implementation-plan.md)
 for the UI slices, existing code to reuse, and focused validation.
 
+[Project deployment management](deployment-management.md) is a separate accepted
+feature. Its initial inventory-only slice provides project-scoped inventory,
+CSV-based standard project creation with advanced folder-only inference, and a
+read-only Overview entry point. Location support and administration to resolve or
+correct footage assignments remain deferred. It is not another
+Species Review editing control or an expansion of this transfer-UI reorganization.
+Its migration, unresolved-footage, and safety requirements are specified there.
+
 ## Purpose
 
 Give users a coherent way to add project data, delegate review, return progress,
