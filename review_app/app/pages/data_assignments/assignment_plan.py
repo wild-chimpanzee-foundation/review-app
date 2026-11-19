@@ -7,7 +7,6 @@ from review_app.backend.annotation_package.scope import AssignmentRequest
 
 @dataclass
 class WorkGroup:
-    key: str
     label: str
     video_ids: tuple[str, ...]
     recipient: str | None = None
@@ -30,10 +29,8 @@ def species_work_groups(dp, project_id):
         recipients = {}
         for video_id in chunk["video_ids"]:
             recipients.setdefault(assigned.get(video_id), []).append(video_id)
-        for index, (name, ids) in enumerate(recipients.items()):
-            groups.append(
-                WorkGroup(f"{chunk['chunk_id']}:{index}", chunk["label"], tuple(ids), name)
-            )
+        for name, ids in recipients.items():
+            groups.append(WorkGroup(chunk["label"], tuple(ids), name))
     return groups
 
 
@@ -46,17 +43,4 @@ def species_requests(groups):
     return tuple(
         AssignmentRequest(name, tuple(dict.fromkeys(ids)))
         for name, ids in sorted(recipients.items())
-    )
-
-
-def apply_species_request(dp, project_id, request, clear_video_ids=()):
-    """Apply planned recipients and explicit unallocation when preparing Species work."""
-    chunks = [{"chunk_id": "selection", "video_ids": list(request.video_ids)}]
-    if clear_video_ids:
-        chunks.append({"chunk_id": "unassigned", "video_ids": list(clear_video_ids)})
-    dp.apply_chunk_assignment(
-        project_id,
-        {request.recipient: ["selection"]},
-        chunks,
-        clear_chunk_ids=["unassigned"] if clear_video_ids else None,
     )

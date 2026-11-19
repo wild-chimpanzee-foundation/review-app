@@ -1,32 +1,23 @@
 """One focused workflow from editable allocation to frozen assignment handoffs."""
 
-import asyncio
-
 from nicegui import run, ui
 
 from review_app.app.components.assignment_handoff import _error_message
-from review_app.app.components.assignment_video_table import AssignmentVideoTable
 from review_app.app.translations import get_language, t
-from review_app.backend.annotation_package.scope import AssignmentRequest
 
-from .assignment_plan import (
-    WorkGroup,
-    apply_species_request,
-    species_requests,
-    species_work_groups,
-)
-from .workload import format_camera_labels
+from .assignment_plan import species_requests, species_work_groups
+from .distance_assignment_editor import render_distance_editor
+from .species_assignment_editor import render_species_editor
+from .workload import workload_labels
 
 
 def render_assignment_creation(dp, project_id, require_project, on_cancel, on_prepared):
     groups = species_work_groups(dp, project_id)
     names = dp.get_all_annotators()
-    distance_rows = []
     requests = ()
     unassigned_ids = ()
     prepared = {}
     busy = False
-    adjustment_open = False
 
     ui.label(t("assign_title")).classes("text-h6")
     ui.label(t("assign_help")).classes("text-body2 text-grey-7")
@@ -69,12 +60,9 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                     await run.io_bound(dp.add_annotator, name)
                     require_project()
                     names[:] = dp.get_all_annotators()
-                    annotators.set_options(names)
-                    annotators.set_value(list(dict.fromkeys([*annotators.value, name])))
-                    for row in distance_rows:
-                        row["recipient_input"].set_options(names)
+                    refresh_species_annotators(name)
+                    refresh_distance_annotators()
                     annotator_name.set_value("")
-                    allocation.refresh()
                 except Exception as exc:
                     status.set_text(_error_message(exc))
                 finally:
@@ -84,283 +72,17 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                 t("distribution_add_annotator"), on_click=add_annotator, icon="person_add"
             ).props("flat")
 
+        def set_review_enabled(enabled):
+            review_button.set_enabled(enabled)
+
         with ui.column().classes("w-full gap-3") as species_editor:
-            annotators = (
-                ui.select(
-                    names,
-                    multiple=True,
-                    value=names.copy(),
-                    label=t("distribution_annotators_label"),
-                )
-                .props("use-chips")
-                .classes("w-full")
+            refresh_species_annotators = render_species_editor(
+                dp, project_id, require_project, names, groups, status, set_review_enabled
             )
-
-            async def distribute():
-                if not annotators.value:
-                    status.set_text(t("assign_choose_recipients"))
-                    return
-                auto_button.disable()
-                review_button.disable()
-                try:
-                    require_project()
-                    mapping, chunks = await run.io_bound(
-                        dp.auto_distribute_flexible, project_id, sorted(annotators.value)
-                    )
-                    if editor.is_deleted:
-                        return
-                    require_project()
-                    assigned = {key: name for name, keys in mapping.items() for key in keys}
-                    groups[:] = [
-                        WorkGroup(
-                            chunk["chunk_id"],
-                            chunk["label"],
-                            tuple(chunk["video_ids"]),
-                            assigned.get(chunk["chunk_id"]),
-                        )
-                        for chunk in chunks
-                    ]
-                    status.set_text("")
-                    allocation.refresh()
-                except Exception as exc:
-                    status.set_text(_error_message(exc))
-                finally:
-                    auto_button.enable()
-                    review_button.enable()
-
-            auto_button = ui.button(
-                t("distribution_auto_btn"), on_click=distribute, icon="auto_fix_high"
-            ).props("outline")
-            ui.label(t("assign_auto_help")).classes("text-caption text-grey-7")
-
-            @ui.refreshable
-            def allocation():
-                totals = species_requests(groups)
-                if totals:
-                    with ui.row().classes("gap-3 flex-wrap"):
-                        for request in totals:
-                            workload = dp.get_assignment_workload(request.video_ids)
-                            description = t(
-                                "assign_recipient_count",
-                                name=request.recipient,
-                                count=workload["video_count"],
-                            )
-                            description += " · " + t(
-                                "assign_camera_count", count=workload["camera_count"]
-                            )
-                            if workload["camera_ids"]:
-                                description += " · " + ", ".join(workload["camera_ids"])
-                            description += " · " + t(
-                                "assign_hours", hours=f"{workload['hours']:.2f}"
-                            )
-                            unknown = workload["video_count"] - workload["duration_count"]
-                            if unknown:
-                                description += " · " + t("assign_unknown_durations", count=unknown)
-                            ui.chip(description, icon="person_outline").props("outline")
-                else:
-                    ui.label(t("assign_no_allocation")).classes("text-grey-7")
-                unassigned = sum(len(group.video_ids) for group in groups if not group.recipient)
-                if unassigned:
-                    ui.label(t("assign_unallocated", count=unassigned)).classes("text-caption")
-
-                def remember_expansion(event):
-                    nonlocal adjustment_open
-                    adjustment_open = event.value
-
-                with ui.expansion(
-                    t("assign_adjust"),
-                    icon="tune",
-                    value=adjustment_open,
-                    on_value_change=remember_expansion,
-                ).classes("w-full"):
-                    for group in groups:
-
-                        def change(event, chosen=group):
-                            chosen.recipient = event.value
-                            allocation.refresh()
-
-                        with ui.row().classes("w-full items-center gap-3"):
-                            workload = dp.get_assignment_workload(group.video_ids)
-                            ui.label(
-                                format_camera_labels(
-                                    workload["camera_ids"], group.label or t("assign_other_videos")
-                                )
-                            ).classes("grow")
-                            ui.label(t("assign_video_count", count=workload["video_count"]))
-                            ui.label(t("assign_camera_count", count=workload["camera_count"]))
-                            if workload["camera_ids"]:
-                                ui.label(", ".join(workload["camera_ids"]))
-                            ui.label(t("assign_hours", hours=f"{workload['hours']:.2f}"))
-                            unknown = workload["video_count"] - workload["duration_count"]
-                            if unknown:
-                                ui.label(t("assign_unknown_durations", count=unknown))
-                            ui.select(
-                                {
-                                    None: t("distribution_unassigned"),
-                                    **{name: name for name in names},
-                                },
-                                value=group.recipient,
-                                label=t("handoff_recipient"),
-                                on_change=change,
-                            ).classes("w-56")
-
-            allocation()
-
         with ui.column().classes("w-full gap-3") as distance_editor:
-            ui.label(t("handoff_distance_help")).classes("text-body2 text-grey-7")
-            row_container = ui.column().classes("w-full gap-3")
-
-            def add_distance_row(target_species):
-                row = {"revision": 0, "loaded": None, "unknown": 0, "species": target_species}
-                distance_rows.append(row)
-                with row_container, ui.column().classes("w-full gap-1 border-b pb-2") as card:
-                    with ui.row().classes("w-full items-center gap-2 flex-wrap"):
-                        ui.label(distance_species_options[target_species]).classes("grow min-w-48")
-                        recipient = (
-                            ui.select(names, label=t("handoff_recipient"))
-                            .props("dense outlined")
-                            .classes("grow min-w-40")
-                        )
-                        row["recipient_input"] = recipient
-                        count = ui.label("").classes("text-body2")
-                        ui.button(
-                            icon="tune",
-                            on_click=lambda: options.set_visibility(not options.visible),
-                        ).props("flat round dense").tooltip(t("assign_row_options")).mark(
-                            "distance-row-options"
-                        )
-
-                        def remove():
-                            distance_species.set_value(
-                                [
-                                    value
-                                    for value in distance_species.value
-                                    if value != target_species
-                                ]
-                            )
-
-                        ui.button(icon="close", on_click=remove).props("flat round dense").tooltip(
-                            t("assign_remove_row")
-                        )
-                    with ui.column().classes("w-full gap-2") as options:
-                        selection_status = ui.label("").classes("text-caption whitespace-pre-wrap")
-                        selection = AssignmentVideoTable(
-                            [
-                                ("path", t("handoff_column_video")),
-                                ("camera", t("distribution_camera_col")),
-                                ("time", t("assign_camera_time")),
-                                ("availability", t("assign_availability")),
-                            ],
-                            filters=[
-                                ("camera", t("distribution_camera_col")),
-                                ("availability", t("assign_availability")),
-                            ],
-                            selectable=True,
-                            on_selection=lambda _: update_count(),
-                            marker="distance-videos",
-                        )
-                        with ui.expansion(t("data_advanced"), icon="schedule").classes("w-full"):
-                            with ui.row().classes("w-full gap-3"):
-                                start = ui.input(t("handoff_start"), placeholder="18:00").props(
-                                    "dense"
-                                )
-                                end = ui.input(t("handoff_end"), placeholder="06:00").props(
-                                    "dense"
-                                )
-                            ui.label(t("handoff_time_help")).classes("text-caption")
-                    options.set_visibility(False)
-                row["card"] = card
-
-                def filters():
-                    return (
-                        target_species,
-                        (start.value or "").strip() or None,
-                        (end.value or "").strip() or None,
-                    )
-
-                def invalidate():
-                    row["revision"] += 1
-                    row["loaded"] = None
-                    selection.set_rows([])
-                    count.set_text(t("assign_loading"))
-                    selection_status.set_text("")
-
-                def update_count():
-                    if row["loaded"] is not None:
-                        count.set_text(t("assign_video_count", count=len(selection.selection)))
-                        message = t(
-                            "handoff_selection_result",
-                            count=len(selection.selection),
-                            unknown=row["unknown"],
-                        )
-                        if not selection.rows:
-                            message += "\n" + t("data_empty_scope")
-                        selection_status.set_text(message)
-
-                async def load():
-                    row["revision"] += 1
-                    current, chosen = row["revision"], filters()
-                    if not chosen[0]:
-                        return
-                    try:
-                        require_project()
-                        result = await run.io_bound(
-                            dp.preview_assignment_distance_selection,
-                            project_id,
-                            chosen[0],
-                            start_time=chosen[1],
-                            end_time=chosen[2],
-                        )
-                        if current != row["revision"] or card.is_deleted:
-                            return
-                        require_project()
-                        row["loaded"] = chosen
-                        row["unknown"] = result["unknown_time_count"]
-                        selection.set_rows(
-                            [
-                                {
-                                    "id": video["video_id"],
-                                    "path": video["video_path"],
-                                    "camera": video["camera_id"] or "",
-                                    "time": video["recorded_start"] or t("handoff_unknown_time"),
-                                    "availability": t(
-                                        "assign_missing"
-                                        if video["is_missing"]
-                                        else "assign_available"
-                                    ),
-                                }
-                                for video in result["videos"]
-                            ],
-                            select_all=True,
-                        )
-                    except Exception as exc:
-                        if current == row["revision"] and not card.is_deleted:
-                            count.set_text(t("assign_selection_error"))
-                            selection_status.set_text(_error_message(exc))
-                            options.set_visibility(True)
-
-                for field in (start, end):
-                    field.on_value_change(invalidate)
-                    field.on_value_change(load)
-                row["request"] = lambda: AssignmentRequest(
-                    recipient.value or "", selection.selection, "distance", *filters()
-                )
-                row["ready"] = lambda: row["loaded"] == filters() and bool(selection.selection)
-                invalidate()
-                return load
-
-            async def select_distance_species():
-                selected = distance_species.value
-                for row in distance_rows.copy():
-                    if row["species"] not in selected:
-                        row["revision"] += 1
-                        distance_rows.remove(row)
-                        row["card"].delete()
-                existing = {row["species"] for row in distance_rows}
-                loaders = [add_distance_row(value) for value in selected if value not in existing]
-                await asyncio.gather(*(load() for load in loaders))
-
-            distance_species.on_value_change(select_distance_species)
+            distance_requests, refresh_distance_annotators = render_distance_editor(
+                dp, project_id, require_project, names, distance_species, distance_species_options
+            )
         distance_editor.set_visibility(False)
 
         def stage_changed():
@@ -378,12 +100,7 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                 if stage.value == "species":
                     requests = species_requests(groups)
                 else:
-                    if not distance_rows or not all(row["ready"]() for row in distance_rows):
-                        raise ValueError(t("handoff_select_distance"))
-                    requests = tuple(row["request"]() for row in distance_rows)
-                    targets = [request.target_species for request in requests]
-                    if len(set(targets)) != len(targets):
-                        raise ValueError(t("assign_duplicate_species"))
+                    requests = distance_requests()
                 if not requests or any(not request.video_ids for request in requests):
                     raise ValueError(t("assign_no_work"))
                 if any(request.recipient not in names for request in requests):
@@ -447,18 +164,16 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                             if request.stage == "species"
                             else []
                         )
-                        workload_labels = [*chunk_labels, *workload["camera_ids"]]
+                        group_labels = list(
+                            dict.fromkeys([*chunk_labels, *workload["camera_ids"]])
+                        )
                         ui.label(
                             t(f"handoff_stage_{request.stage}")
                             + (f" · {request.target_species}" if request.target_species else "")
-                            + (" · " + ", ".join(workload_labels) if workload_labels else "")
+                            + (" · " + ", ".join(group_labels) if group_labels else "")
                         ).classes("grow")
-                        ui.label(t("assign_video_count", count=workload["video_count"]))
-                        ui.label(t("assign_camera_count", count=workload["camera_count"]))
-                        ui.label(t("assign_hours", hours=f"{workload['hours']:.2f}"))
-                        unknown = workload["video_count"] - workload["duration_count"]
-                        if unknown:
-                            ui.label(t("assign_unknown_durations", count=unknown))
+                        for label in workload_labels(workload):
+                            ui.label(label)
                         if index in prepared and not busy:
                             ui.button(
                                 t("assign_view"),
@@ -496,15 +211,14 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                 try:
                     require_project()
                     if request.stage == "species":
-                        await run.io_bound(
-                            apply_species_request,
-                            dp,
+                        result = await run.io_bound(
+                            dp.prepare_species_assignment,
                             project_id,
                             request,
                             unassigned_ids if index == 0 else (),
                         )
-                        require_project()
-                    result = await run.io_bound(dp.prepare_assignment, project_id, request)
+                    else:
+                        result = await run.io_bound(dp.prepare_assignment, project_id, request)
                     prepared[index] = result
                     outcomes[index] = t("handoff_prepared", count=result.video_count)
                     if result.missing_video_ids:

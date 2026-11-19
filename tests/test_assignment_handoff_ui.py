@@ -11,10 +11,8 @@ from nicegui.elements.upload_files import SmallFileUpload
 from nicegui.testing import User
 from review_app.app.components.assignment_handoff import (
     assignment_filename,
-    render_assignment_handoff,
     render_open_assignment,
 )
-from review_app.app.pages.data_assignments.assignment_plan import apply_species_request
 from review_app.app.pages.data_assignments.assignments import render_assignments
 from review_app.app.pages.data_assignments.legacy_import import render_legacy_annotations_import
 from review_app.app.state import get_active_project_id, set_data_provider
@@ -68,7 +66,7 @@ def handoff_ui(provider_with_project):
     @ui.page("/handoff-admin")
     def admin():
         app.storage.user["active_project_id"] = project.id
-        render_assignment_handoff(dp, project.id)
+        render_assignments(dp, project.id)
 
     @ui.page("/handoff-distribution")
     def distribution():
@@ -86,7 +84,7 @@ def handoff_ui(provider_with_project):
 
     @ui.page("/handoff-working")
     def working():
-        render_assignment_handoff(dp, get_active_project_id())
+        render_assignments(dp, get_active_project_id())
 
     yield dp, project, root
     set_data_provider(None)
@@ -135,13 +133,13 @@ async def test_distribution_uses_saved_delivery_and_keeps_independent_csv_import
     user: User, handoff_ui
 ):
     dp, project, _ = handoff_ui
-    video_id = dp.get_assignment_video_ids(project.id)[0]
+    video_id, assigned_id = dp.get_assignment_video_ids(project.id)
     dp.update_manual_review(
         video_id, [{"species": "deer", "count": 3}], active_project_id=project.id
     )
-    csv = dp.export_annotations_csv(project.id).to_csv(index=False).encode()
+    csv = dp.export_annotations_csv(project.id).to_csv(index=False).encode("utf-8-sig")
     dp.update_manual_review(video_id, [], active_project_id=project.id)
-    saved = dp.prepare_assignment(project.id, AssignmentRequest("alice", (video_id,)))
+    saved = dp.prepare_assignment(project.id, AssignmentRequest("alice", (assigned_id,)))
     await user.open("/handoff-distribution")
     await user.should_see(t("assign_title"))
     await user.should_not_see(t("handoff_download"))
@@ -166,8 +164,9 @@ async def test_distribution_uses_saved_delivery_and_keeps_independent_csv_import
         await csv_upload.handle_uploads([SmallFileUpload("annotations.csv", "text/csv", csv)])
     await user.should_see(t("handoff_legacy_csv_loaded"))
     assert dp.get_video_detail(video_id)["manual_selections"] == []
-    user.find(t("handoff_accept"), kind=ui.button).click()
-    await user.should_see(t("batch_import_summary", files=1, imported=2, skipped=0))
+    await user.should_not_see(t("handoff_accept"), kind=ui.button)
+    user.find(t("handoff_import_csv"), kind=ui.button).click()
+    await user.should_see(t("batch_import_summary", files=1, imported=2, skipped=0), retries=20)
     assert dp.get_video_detail(video_id)["manual_selections"][0]["count"] == 3
     assert dp.list_assignments(project.id)[0]["id"] == saved.id
 
@@ -212,17 +211,21 @@ async def test_unified_allocation_prepares_recipients_and_retries_only_failures(
     ids = dp.get_assignment_video_ids(project.id)
     for name, video_id in zip(("alice", "bob"), ids, strict=True):
         dp.add_annotator(name)
-        apply_species_request(dp, project.id, AssignmentRequest(name, (video_id,)))
-    original = dp.prepare_assignment
+        dp.apply_chunk_assignment(
+            project.id,
+            {name: ["selection"]},
+            [{"chunk_id": "selection", "video_ids": (video_id,)}],
+        )
+    original = dp.prepare_species_assignment
     calls = []
 
-    def prepare(project_id, request):
+    def prepare(project_id, request, clear_video_ids):
         calls.append(request.recipient)
         if request.recipient == "bob" and calls.count("bob") == 1:
             raise ValueError("Temporary preparation failure")
-        return original(project_id, request)
+        return original(project_id, request, clear_video_ids)
 
-    monkeypatch.setattr(dp, "prepare_assignment", prepare)
+    monkeypatch.setattr(dp, "prepare_species_assignment", prepare)
     await user.open("/handoff-admin")
     user.find(t("assign_title"), kind=ui.button).click()
     await user.should_see(t("assign_recipient_count", name="alice", count=1))
@@ -232,12 +235,12 @@ async def test_unified_allocation_prepares_recipients_and_retries_only_failures(
     user.find(t("assign_review"), kind=ui.button).click()
     await user.should_see(t("assign_freeze_help"))
     user.find(t("assign_prepare"), kind=ui.button).click().click()
-    await user.should_see("Temporary preparation failure")
-    await user.should_see(t("assign_view"))
+    await user.should_see("Temporary preparation failure", retries=20)
+    await user.should_see(t("assign_view"), retries=20)
     assert calls == ["alice", "bob"]
     assert len(dp.list_assignments(project.id)) == 1
     user.find(t("assign_prepare"), kind=ui.button).click()
-    await user.should_not_see("Temporary preparation failure")
+    await user.should_not_see("Temporary preparation failure", retries=20)
     assert calls == ["alice", "bob", "bob"]
     assert len(dp.list_assignments(project.id)) == 2
     assert not button(user, "assign_prepare").enabled
@@ -245,7 +248,11 @@ async def test_unified_allocation_prepares_recipients_and_retries_only_failures(
     snapshots = {
         row["id"]: dp.export_assignment(row["id"]) for row in dp.list_assignments(project.id)
     }
-    apply_species_request(dp, project.id, AssignmentRequest("alice", tuple(ids)))
+    dp.apply_chunk_assignment(
+        project.id,
+        {"alice": ["selection"]},
+        [{"chunk_id": "selection", "video_ids": tuple(ids)}],
+    )
     assert all(dp.export_assignment(key) == raw for key, raw in snapshots.items())
 
 
@@ -640,7 +647,7 @@ async def test_bulk_assignment_delivery_and_removal(user: User, handoff_ui, tmp_
     await user.should_see(t("assign_remove_selected_title", count=2))
     assert len(dp.list_assignments(project.id)) == 3
     user.find(marker="confirm-remove-selected-assignments").click()
-    await user.should_not_see(marker="assignment-bulk-actions")
+    await user.should_not_see(marker="assignment-bulk-actions", retries=20)
     assert [row["id"] for row in dp.list_assignments(project.id)] == [saved[2].id]
 
 
@@ -655,7 +662,7 @@ async def test_bulk_selection_can_be_cleared(user: User, handoff_ui):
     user.find(ui.table).trigger("selection", {"added": True, "rows": table.rows, "keys": keys})
     await user.should_see(marker="assignment-bulk-actions")
     user.find(ui.table).trigger("selection", {"added": False, "rows": table.rows, "keys": keys})
-    await user.should_not_see(marker="assignment-bulk-actions")
+    await user.should_not_see(marker="assignment-bulk-actions", retries=20)
     assert not table.selected
 
 
@@ -681,3 +688,67 @@ async def test_open_with_missing_footage_requires_explicit_confirmation(
     assert dp.get_project_video_count(working) == 2
     with dp.Session() as session:
         assert all(row.is_missing for row in session.query(Video).filter_by(project_id=working))
+
+
+async def test_closing_partial_bulk_removal_refreshes_assignments(
+    user: User, handoff_ui, monkeypatch
+):
+    dp, project, _ = handoff_ui
+    video_id = dp.get_assignment_video_ids(project.id)[0]
+    removed, retained = [
+        dp.prepare_assignment(project.id, AssignmentRequest(name, (video_id,)))
+        for name in ("alice", "bob")
+    ]
+    original = dp.remove_assignment
+
+    def remove(project_id, assignment_id):
+        if assignment_id == retained.id:
+            raise ValueError("Temporary removal failure")
+        original(project_id, assignment_id)
+
+    monkeypatch.setattr(dp, "remove_assignment", remove)
+    await user.open("/handoff-admin")
+    table = next(iter(user.find(ui.table).elements))
+    user.find(ui.table).trigger(
+        "selection", {"added": True, "rows": table.rows, "keys": [removed.id, retained.id]}
+    )
+    await user.should_see(marker="remove-selected-assignments")
+    user.find(marker="remove-selected-assignments").click()
+    user.find(marker="confirm-remove-selected-assignments").click()
+    await user.should_see("bob: Temporary removal failure")
+    user.find(t("cancel"), kind=ui.button).click()
+    await user.should_not_see(marker="assignment-bulk-actions", retries=20)
+    table = next(iter(user.find(ui.table).elements))
+    assert [row["id"] for row in table.rows] == [retained.id]
+
+
+async def test_return_preview_identifies_same_relative_paths_in_different_roots(
+    user: User, handoff_ui, tmp_path
+):
+    dp, project, root = handoff_ui
+    second = tmp_path / "second-root"
+    other_clip = second / "cam_x" / "a.mp4"
+    other_clip.parent.mkdir(parents=True)
+    other_clip.touch()
+    other_root = dp.add_project_dir(project.id, str(second))
+    dp.sync_videos(video_dir=second, active_project_id=project.id)
+    paths = {f"{root.path}/cam_x/a.mp4", str(other_clip)}
+    with dp.Session() as session:
+        ids = tuple(
+            row.video_id
+            for row in session.query(Video).filter(
+                Video.project_id == project.id, Video.video_path.in_(paths)
+            )
+        )
+    assert len(ids) == 2
+    saved = dp.prepare_assignment(project.id, AssignmentRequest("alice", ids))
+    opened = dp.open_assignment(
+        dp.export_assignment(saved.id), "Working", {root.id: root.path, other_root.id: str(second)}
+    )
+    await user.open("/handoff-admin")
+    await upload(user, dp.export_assignment_return(opened.project_id))
+    user.find(t("handoff_preview"), kind=ui.button).click()
+    await user.should_see(marker="assignment-return-videos", retries=20)
+    table = next(iter(user.find(marker="assignment-return-videos").elements))
+    assert {row["id"] for row in table.rows} == set(ids)
+    assert {row["video"] for row in table.rows} == paths

@@ -12,6 +12,7 @@ from review_app.backend.annotation_package.scope import (
 )
 from review_app.backend.db.models import HandoffAssignment, ProjectDir, Species, Video
 from review_app.backend.path_matching import normalize_path_str
+from review_app.backend.provider.assignment_service import write_video_allocations
 from review_app.backend.provider.base import ProviderBase
 
 
@@ -36,6 +37,23 @@ class AssignmentHandoffMixin(ProviderBase):
             # Freeze collection and persistence together despite concurrent editor saves.
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             return handoff.prepare(session, project_id, request)
+
+    def prepare_species_assignment(
+        self, project_id: str, request: AssignmentRequest, clear_video_ids: tuple[str, ...] = ()
+    ) -> PreparedAssignment:
+        """Freeze Species work and update the live allocation in one transaction."""
+        if request.stage != "species":
+            raise ValueError("Choose a Species assignment")
+        with self.Session.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            prepared = handoff.prepare(session, project_id, request)
+            write_video_allocations(
+                session.connection(),
+                project_id,
+                {prepared.recipient: request.video_ids},
+                clear_video_ids,
+            )
+            return prepared
 
     def get_assignment_workload(self, video_ids: list[str] | tuple[str, ...]) -> dict:
         """Summarize selected footage metadata without estimating unknown durations."""

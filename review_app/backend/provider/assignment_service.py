@@ -27,6 +27,41 @@ _ANNOTATOR_WORK_SQL = " UNION ALL ".join(
 )
 
 
+def write_video_allocations(conn, project_id, allocations, cleared):
+    """Replace selected allocations using the caller's transaction."""
+    affected = [*cleared, *(video_id for ids in allocations.values() for video_id in ids)]
+    if not affected:
+        return 0
+    params = {"project_id": project_id}
+    id_list = bind_id_list(params, "video_ids", affected)
+    project_ids = set(
+        conn.execute(
+            text(
+                f"SELECT video_id FROM videos WHERE project_id = :project_id AND video_id IN {id_list}"
+            ),
+            params,
+        ).scalars()
+    )
+    if project_ids != set(affected):
+        raise ValueError("Every selected video must belong to the source project")
+    conn.execute(text(f"DELETE FROM video_assignments WHERE video_id IN {id_list}"), params)
+    now = datetime.now(timezone.utc).isoformat()
+    rows = [
+        {"vid": video_id, "annotator": annotator, "now": now}
+        for annotator, ids in allocations.items()
+        for video_id in ids
+    ]
+    if rows:
+        conn.execute(
+            text("""
+                INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at)
+                VALUES (:vid, :annotator, :now)
+            """),
+            rows,
+        )
+    return len(rows)
+
+
 class AssignmentMixin(ProviderBase):
     """Work distribution: annotator registry and camera-based video assignment."""
 
@@ -403,40 +438,15 @@ class AssignmentMixin(ProviderBase):
         Returns total rows inserted.
         """
         chunk_map = {c["chunk_id"]: c for c in chunks}
-        now = datetime.now(timezone.utc).isoformat()
-
-        # Collect all video_ids affected (assigned + cleared)
-        all_video_ids: list[str] = []
-        for chunk_ids in chunk_assignment.values():
-            for cid in chunk_ids:
-                all_video_ids.extend(chunk_map[cid]["video_ids"])
-        for cid in clear_chunk_ids or []:
-            all_video_ids.extend(chunk_map[cid]["video_ids"])
-
-        total = 0
+        allocations = {
+            annotator: [video_id for cid in chunk_ids for video_id in chunk_map[cid]["video_ids"]]
+            for annotator, chunk_ids in chunk_assignment.items()
+        }
+        cleared = [
+            video_id for cid in clear_chunk_ids or [] for video_id in chunk_map[cid]["video_ids"]
+        ]
         with self.engine.begin() as conn:
-            if all_video_ids:
-                params: dict = {}
-                id_list = bind_id_list(params, "vids", all_video_ids)
-                conn.execute(
-                    text(f"DELETE FROM video_assignments WHERE video_id IN {id_list}"),
-                    params,
-                )
-            for annotator, chunk_ids in chunk_assignment.items():
-                video_ids: list[str] = []
-                for cid in chunk_ids:
-                    video_ids.extend(chunk_map[cid]["video_ids"])
-                if not video_ids:
-                    continue
-                conn.execute(
-                    text("""
-                        INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at)
-                        VALUES (:vid, :annotator, :now)
-                    """),
-                    [{"vid": v, "annotator": annotator, "now": now} for v in video_ids],
-                )
-                total += len(video_ids)
-        return total
+            return write_video_allocations(conn, project_id, allocations, cleared)
 
     def apply_distribution(
         self,

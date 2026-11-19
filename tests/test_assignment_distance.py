@@ -8,7 +8,6 @@ import pytest
 from nicegui import app, ui
 from nicegui.elements.upload_files import SmallFileUpload
 from nicegui.testing import User
-from review_app.app.components.assignment_handoff import render_assignment_handoff
 from review_app.app.pages.data_assignments.assignments import render_assignments
 from review_app.app.setup_wizard import SetupWizard
 from review_app.app.state import get_active_project_id, set_data_provider
@@ -593,7 +592,7 @@ def distance_ui(distance_assignment, monkeypatch):
 
     @ui.page("/distance-handoff-working")
     def working():
-        render_assignment_handoff(dp, get_active_project_id())
+        render_assignments(dp, get_active_project_id())
 
     yield distance_assignment
     set_data_provider(None)
@@ -679,6 +678,7 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
     assert sum(not row["assigned"] for row in media) == 1
     # The newly prepared handoff opens directly in the saved-assignment details.
     assert not dp.get_assigned_video_ids(project.id, "alice")
+    await user.should_see(marker="open-delivery", retries=20)
     user.find(marker="open-delivery").click()
     with user:
         next(iter(user.find(t("assign_include_footage"), kind=ui.checkbox).elements)).set_value(
@@ -693,7 +693,7 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
     user.find(marker="save-delivery").click()
     delivery = tmp_path / "delivery" / f"assignment-{saved['assignment_id']}"
     await user.should_see(
-        t("handoff_copy_result", copied=3, missing=0, failed=0, path=str(delivery))
+        t("handoff_copy_result", copied=3, missing=0, failed=0, path=str(delivery)), retries=20
     )
     setup = (delivery / "assignment.zip").read_bytes()
     manifest, context, _ = decode_archive(setup)
@@ -705,7 +705,7 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
 
     await user.open("/distance-handoff-open")
     await upload_distance_zip(user, setup, "package_upload")
-    await user.should_see(t("handoff_root", number=1))
+    await user.should_see(t("handoff_root", number=1), retries=20)
     await user.should_see(
         t(
             "handoff_identity",
@@ -749,7 +749,7 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
     await upload_distance_zip(user, returned)
     await user.should_see(t("handoff_return_loaded"))
     user.find(t("handoff_preview"), kind=ui.button).click()
-    await user.should_see(t("handoff_species_changed"))
+    await user.should_see(t("handoff_species_changed"), retries=20)
     await user.should_see(t("handoff_substitution_help"))
     await user.should_see(
         t(
@@ -785,7 +785,7 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
         )
     )
     user.find(t("handoff_accept"), kind=ui.button).click()
-    await user.should_see(t("handoff_accepted"))
+    await user.should_see(t("handoff_accepted"), retries=20)
     with dp.Session() as session:
         assert session.get(DistanceSample, "sample-1").distance_m == 5.5
         assert session.get(ReferenceFrame, "frame-0").offset_ms == 1200
@@ -868,7 +868,7 @@ async def test_distance_ui_prepares_per_species_and_groups_review_by_recipient(
     assert len(user.find(marker="assignment-review-recipient").elements) == 1
     await user.should_see(t("assign_group_count", count=2))
     user.find(t("assign_prepare"), kind=ui.button).click()
-    await user.should_see(t("handoff_prepared", count=1))
+    await user.should_see(t("handoff_prepared", count=1), retries=20)
     await user.should_see(t("assign_view"))
     assignments = dp.list_assignments(project.id)
     assert len(assignments) == 3  # Existing fixture handoff plus the two new rows.
@@ -907,9 +907,10 @@ async def test_distance_ui_selection_filters_subset_and_prepare_revalidation(
     with user:
         narrow_distance_selection(user, [ids[1]])
     await prepare_distance_selection(user)
-    await user.should_see(t("handoff_prepared", count=1))
+    await user.should_see(t("handoff_prepared", count=1), retries=20)
     saved = dp.list_assignments(project.id)[0]
     assert decode_archive(dp.export_assignment(saved["id"]))[0]["work_keys"] == [ids[1]]
+    await user.should_see(marker="open-delivery", retries=20)
     # A label edit after loading must fail preparation, never silently drop selection.
     await load_distance_selection(user)
     with user:

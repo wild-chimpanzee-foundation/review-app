@@ -16,11 +16,19 @@ def render_bulk_actions(dp, project_id, selected, require_project, on_removed):
         ui.label(t("assign_selected_count", count=len(selected)))
 
         render_assignment_delivery(dp, project_id, selected, require_project)
-        with ui.dialog() as confirm, ui.card().classes("w-full max-w-xl gap-3"):
+        with (
+            ui.dialog().props("persistent") as confirm,
+            ui.card().classes("w-full max-w-xl gap-3"),
+        ):
             ui.label(t("assign_remove_selected_title", count=len(selected))).classes("text-h6")
             ui.label(t("assign_remove_help")).classes("text-body2")
             status = ui.label("").classes("text-negative whitespace-pre-wrap")
             removed = set()
+
+            def close():
+                confirm.close()
+                if removed:
+                    on_removed()
 
             async def remove():
                 remove_button.disable()
@@ -40,17 +48,17 @@ def render_bulk_actions(dp, project_id, selected, require_project, on_removed):
                     if errors:
                         status.set_text("\n".join(errors))
                     else:
-                        confirm.close()
                         ui.notify(t("assign_removed"), type="positive")
-                        on_removed()
+                        close()
                 except Exception as exc:
                     status.set_text(_error_message(exc))
                 finally:
-                    remove_button.enable()
-                    cancel_button.enable()
+                    if not confirm.is_deleted:
+                        remove_button.enable()
+                        cancel_button.enable()
 
             with ui.row().classes("w-full justify-end gap-2"):
-                cancel_button = ui.button(t("cancel"), on_click=confirm.close).props("flat")
+                cancel_button = ui.button(t("cancel"), on_click=close).props("flat")
                 remove_button = (
                     ui.button(t("assign_remove_selected"), on_click=remove)
                     .props("color=negative")

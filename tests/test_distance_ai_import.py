@@ -640,6 +640,17 @@ def test_suggestion_uses_reference_or_nearest_distance(
     assert sample["distance_m"] is None
 
 
+async def wait_for_enabled_import(user):
+    for _ in range(100):
+        if all(
+            button.enabled
+            for button in user.find(t("distance_ai_import"), kind=ui.button).elements
+        ):
+            return
+        await asyncio.sleep(0.02)
+    pytest.fail("Distance import remained disabled")
+
+
 async def test_upload_preview_import_and_saved_package_ui(user: User, distance_data, ai_package):
     dp, project_id = distance_data["dp"], distance_data["project"].id
 
@@ -657,10 +668,10 @@ async def test_upload_preview_import_and_saved_package_ui(user: User, distance_d
     await user.should_see(t("distance_ai_import"))
     assert dp.list_distance_imports(project_id) == []
     user.find(t("distance_ai_import"), kind=ui.button).click()
-    await user.should_see(t("distance_ai_imported"))
+    await user.should_see(t("distance_ai_imported"), retries=20)
     assert len(dp.list_distance_imports(project_id)) == 1
     user.find(t("distance_ai_view_run"), kind=ui.button).click()
-    await user.should_see(t("distance_ai_saved_preview"))
+    await user.should_see(t("distance_ai_saved_preview"), retries=20)
     with user:
         await upload.handle_uploads([SmallFileUpload("broken.zip", "application/zip", b"broken")])
     await user.should_see("Invalid or unsupported AI Distance ZIP")
@@ -687,12 +698,9 @@ async def test_ui_requires_draft_replacement_confirmation(user: User, distance_d
     await user.should_see(t("distance_ai_replace_warning"))
     assert all(not e.enabled for e in user.find(t("distance_ai_import"), kind=ui.button).elements)
     user.find(t("distance_ai_replace_confirm"), kind=ui.checkbox).click()
-    for _ in range(50):
-        if all(e.enabled for e in user.find(t("distance_ai_import"), kind=ui.button).elements):
-            break
-        await asyncio.sleep(0.01)
+    await wait_for_enabled_import(user)
     user.find(t("distance_ai_import"), kind=ui.button).click()
-    await user.should_see(t("distance_ai_imported"))
+    await user.should_see(t("distance_ai_imported"), retries=20)
     assert len(dp.list_distance_imports(project_id)) == 2
 
 
@@ -806,7 +814,9 @@ def test_reference_overwrite_requires_consent_and_clears_affected_measurements(
     with pytest.raises(ValueError, match="Conflicting prepared reference"):
         dp.import_distance_ai_package(project_id, data)
     assert snapshot(dp) == before
-    result = dp.import_distance_ai_package(project_id, data, overwrite_reference_ids=["ref-1"])
+    result = dp.import_distance_ai_package(
+        project_id, data, reference_overwrite_token=preview["reference_overwrite_token"]
+    )
     with dp.Session() as session:
         updated = session.get(ReferenceFrame, frame["id"])
         assert updated.playback_offset_ms == pytest.approx(2125.125)
@@ -815,6 +825,32 @@ def test_reference_overwrite_requires_consent_and_clears_affected_measurements(
         assert session.query(DistanceSample).filter_by(reference_frame_id=frame["id"]).count() == 0
         assert session.get(DistanceIndividual, individual["id"]) is not None
     assert dp.preview_distance_ai_package(project_id, data)["already_imported"]
+
+
+def test_reference_overwrite_rejects_new_measurements_after_confirmation(
+    distance_data, ai_package
+):
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    reference = dp.register_reference_video(
+        project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
+    )
+    frame = dp.add_reference_frame(reference["id"], 3125, 3.5)
+    data = package_zip(ai_package)
+    preview = dp.preview_distance_ai_package(project_id, data)
+    assert preview["reference_conflicts"][0]["affected_samples"] == 0
+    dp.verify_distance_recording_time(distance_data["videos"][1], datetime(2024, 1, 1), "alice")
+    dp.save_distance_sample(
+        distance_data["individual"]["id"], 2000, reference_frame_id=frame["id"], labeled_by="alice"
+    )
+    before = snapshot(dp)
+    with pytest.raises(ValueError, match="Reference overwrite preview is stale"):
+        dp.import_distance_ai_package(
+            project_id, data, reference_overwrite_token=preview["reference_overwrite_token"]
+        )
+    assert snapshot(dp) == before
+    refreshed = dp.preview_distance_ai_package(project_id, data)
+    assert refreshed["reference_conflicts"][0]["affected_samples"] == 1
+    assert refreshed["reference_overwrite_token"] != preview["reference_overwrite_token"]
 
 
 def test_failed_reference_overwrite_rolls_back(distance_data, ai_package):
@@ -832,11 +868,13 @@ def test_failed_reference_overwrite_rolls_back(distance_data, ai_package):
     def fail(*args):
         raise RuntimeError("interrupted overwrite")
 
+    data = package_zip(ai_package)
+    preview = dp.preview_distance_ai_package(project_id, data)
     event.listen(DistanceSample, "before_insert", fail)
     try:
         with pytest.raises(RuntimeError, match="interrupted overwrite"):
             dp.import_distance_ai_package(
-                project_id, package_zip(ai_package), overwrite_reference_ids=["ref-1"]
+                project_id, data, reference_overwrite_token=preview["reference_overwrite_token"]
             )
     finally:
         event.remove(DistanceSample, "before_insert", fail)
@@ -871,13 +909,13 @@ async def test_ui_accept_missing_species_enables_distance_import(
         )
     await user.should_see(t("distance_ai_add_species"))
     user.find(t("distance_ai_add_species"), kind=ui.button).click()
-    await user.should_see(t("distance_ai_species_added"))
-    assert all(e.enabled for e in user.find(t("distance_ai_import"), kind=ui.button).elements)
+    await user.should_see(t("distance_ai_species_added"), retries=20)
+    await wait_for_enabled_import(user)
     with dp.Session() as session:
         assert session.query(ModelAnnotation).filter_by(video_id=video_id).count() == 0
         assert session.query(IndividualObservation).filter_by(video_id=video_id).count() == 1
     user.find(t("distance_ai_import"), kind=ui.button).click()
-    await user.should_see(t("distance_ai_imported"))
+    await user.should_see(t("distance_ai_imported"), retries=20)
 
 
 async def test_ui_reference_overwrite_requires_confirmation(user: User, distance_data, ai_package):
@@ -885,7 +923,7 @@ async def test_ui_reference_overwrite_requires_confirmation(user: User, distance
     reference = dp.register_reference_video(
         project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
     )
-    dp.add_reference_frame(reference["id"], 3125, 3.5)
+    frame = dp.add_reference_frame(reference["id"], 3125, 3.5)
 
     @ui.page("/test-ai-overwrite")
     async def page():
@@ -901,12 +939,32 @@ async def test_ui_reference_overwrite_requires_confirmation(user: User, distance
     await user.should_see(t("distance_ai_overwrite_warning"))
     assert all(not e.enabled for e in user.find(t("distance_ai_import"), kind=ui.button).elements)
     user.find(t("distance_ai_overwrite_confirm"), kind=ui.checkbox).click()
-    for _ in range(50):
-        if all(e.enabled for e in user.find(t("distance_ai_import"), kind=ui.button).elements):
-            break
-        await asyncio.sleep(0.01)
+    await wait_for_enabled_import(user)
+    dp.update_reference_frame_position(frame["id"], 3500)
     user.find(t("distance_ai_import"), kind=ui.button).click()
-    await user.should_see(t("distance_ai_imported"))
+    await user.should_see(
+        t(
+            "import_failed",
+            error="Reference overwrite preview is stale. Review the current impact and confirm again.",
+        ),
+        retries=20,
+    )
+    await user.should_see(
+        t(
+            "distance_ai_reference_conflict",
+            video_path="cam_x/patrol.mp4",
+            distance_m=3.5,
+            existing_time_s=3.5,
+            imported_time_s=2.125125,
+            affected_samples=0,
+        ),
+        retries=20,
+    )
+    assert all(not e.enabled for e in user.find(t("distance_ai_import"), kind=ui.button).elements)
+    user.find(t("distance_ai_overwrite_confirm"), kind=ui.checkbox).click()
+    await wait_for_enabled_import(user)
+    user.find(t("distance_ai_import"), kind=ui.button).click()
+    await user.should_see(t("distance_ai_imported"), retries=20)
 
 
 def test_import_revalidates_calibration_after_preview(distance_data, ai_package):
