@@ -3,7 +3,10 @@
 Species and Distance handoff and saved-assignment footage copying are available.
 The Assignments workspace delivers work only through saved handoffs; the old
 live-distribution bundle/copy controls were removed.
-Legacy CSV batch import remains independent and is not an assignment return.
+Legacy CSV annotations can be uploaded in **Accept returned work** or batched
+under **Existing annotations**. **Append CSV to project** adds annotations for
+matching videos across the active project, including videos outside saved
+assignments. CSV intake has no assignment impact preview.
 Legacy setup import is still available when creating a project.
 
 ## Start the app

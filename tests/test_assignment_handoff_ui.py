@@ -133,13 +133,13 @@ async def test_distribution_uses_saved_delivery_and_keeps_independent_csv_import
     user: User, handoff_ui
 ):
     dp, project, _ = handoff_ui
-    video_id = dp.get_assignment_video_ids(project.id)[0]
+    video_id, assigned_id = dp.get_assignment_video_ids(project.id)
     dp.update_manual_review(
         video_id, [{"species": "deer", "count": 3}], active_project_id=project.id
     )
-    csv = dp.export_annotations_csv(project.id).to_csv(index=False).encode()
+    csv = dp.export_annotations_csv(project.id).to_csv(index=False).encode("utf-8-sig")
     dp.update_manual_review(video_id, [], active_project_id=project.id)
-    saved = dp.prepare_assignment(project.id, AssignmentRequest("alice", (video_id,)))
+    saved = dp.prepare_assignment(project.id, AssignmentRequest("alice", (assigned_id,)))
     await user.open("/handoff-distribution")
     await user.should_see(t("assign_title"))
     await user.should_not_see(t("handoff_download"))
@@ -164,8 +164,9 @@ async def test_distribution_uses_saved_delivery_and_keeps_independent_csv_import
         await csv_upload.handle_uploads([SmallFileUpload("annotations.csv", "text/csv", csv)])
     await user.should_see(t("handoff_legacy_csv_loaded"))
     assert dp.get_video_detail(video_id)["manual_selections"] == []
-    user.find(t("handoff_accept"), kind=ui.button).click()
-    await user.should_see(t("batch_import_summary", files=1, imported=2, skipped=0))
+    await user.should_not_see(t("handoff_accept"), kind=ui.button)
+    user.find(t("handoff_import_csv"), kind=ui.button).click()
+    await user.should_see(t("batch_import_summary", files=1, imported=2, skipped=0), retries=20)
     assert dp.get_video_detail(video_id)["manual_selections"][0]["count"] == 3
     assert dp.list_assignments(project.id)[0]["id"] == saved.id
 

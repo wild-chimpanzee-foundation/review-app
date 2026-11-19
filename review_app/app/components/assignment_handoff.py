@@ -1,15 +1,17 @@
 """Assignment controls; serialization, scope and acceptance stay in the backend."""
 
 import asyncio
-import io
 import re
 import threading
 
-import pandas as pd
 from nicegui import app, run, ui
 
 from review_app.app.components.assignment_video_table import AssignmentVideoTable
 from review_app.app.components.folder_picker import pick_folder
+from review_app.app.components.legacy_annotations_csv import (
+    append_annotations_csv,
+    parse_annotations_csv,
+)
 from review_app.app.translations import t
 from review_app.app.utils import (
     get_or_create_data_provider,
@@ -463,8 +465,11 @@ def render_return_acceptance(dp, project_id, require_project):
 
     async def uploaded(event):
         nonlocal raw, legacy_csv
+        if busy:
+            return
         raw = None
         legacy_csv = None
+        accept_button.set_text(t("handoff_accept"))
         preview_button.disable()
         policy.disable()
         policy.set_options(base_policies, value="use_imported")
@@ -476,13 +481,14 @@ def render_return_acceptance(dp, project_id, require_project):
             require_project()
             content = await event.file.read()
             if event.file.name.lower().endswith(".csv"):
-                frame = await run.io_bound(pd.read_csv, io.StringIO(content.decode("utf-8-sig")))
+                frame = await run.io_bound(parse_annotations_csv, content)
                 require_project()
                 if current == revision:
                     legacy_csv = frame
                     policy.set_visibility(False)
                     preview_button.set_visibility(False)
                     status.set_text(t("handoff_legacy_csv_loaded"))
+                    accept_button.set_text(t("handoff_import_csv"))
                     accept_button.enable()
                 return
             policy.set_visibility(True)
@@ -625,9 +631,7 @@ def render_return_acceptance(dp, project_id, require_project):
             accept_button.disable()
             try:
                 require_project()
-                result = await run.io_bound(
-                    dp.import_annotations_csv, legacy_csv, project_id, "append"
-                )
+                result = await append_annotations_csv(dp, project_id, legacy_csv)
                 legacy_csv = None
                 require_project()
                 status.set_text(
@@ -642,6 +646,7 @@ def render_return_acceptance(dp, project_id, require_project):
                 status.set_text(_error_message(exc))
             finally:
                 busy = False
+                accept_button.set_enabled(legacy_csv is not None)
             return
         if preview is None or raw is None:
             return

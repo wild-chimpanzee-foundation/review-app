@@ -1,10 +1,11 @@
-"""Legacy CSV intake, intentionally separate from assignment returns."""
+"""Batch intake for legacy project annotations."""
 
-import io
-
-import pandas as pd
 from nicegui import run, ui
 
+from review_app.app.components.legacy_annotations_csv import (
+    append_annotations_csv,
+    parse_annotations_csv,
+)
 from review_app.app.state import get_active_project_id
 from review_app.app.translations import t
 from review_app.app.utils import user_error_message
@@ -21,11 +22,10 @@ def render_legacy_annotations_import(dp, project_id):
             try:
                 if get_active_project_id() != project_id:
                     raise ValueError(t("handoff_project_changed"))
-                content = (await e.file.read()).decode("utf-8")
-                df = pd.read_csv(io.StringIO(content))
+                frame = await run.io_bound(parse_annotations_csv, await e.file.read())
                 if get_active_project_id() != project_id:
                     raise ValueError(t("handoff_project_changed"))
-                result = await run.io_bound(dp.import_annotations_csv, df, project_id, "append")
+                result = await append_annotations_csv(dp, project_id, frame)
                 _batch_state["total_imported"] += result.get("imported", 0)
                 _batch_state["total_skipped"] += len(result.get("skipped", []))
                 _batch_state["file_count"] += 1
