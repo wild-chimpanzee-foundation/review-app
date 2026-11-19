@@ -853,6 +853,49 @@ def test_reference_overwrite_rejects_new_measurements_after_confirmation(
     assert refreshed["reference_overwrite_token"] != preview["reference_overwrite_token"]
 
 
+def test_reference_overwrite_requires_new_confirmation_after_review_completion(
+    distance_data, ai_package
+):
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    video_id = distance_data["videos"][1]
+    individual_id = distance_data["individual"]["id"]
+    reference = dp.register_reference_video(
+        project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
+    )
+    frame = dp.add_reference_frame(reference["id"], 3125, 3.5)
+    dp.verify_distance_recording_time(video_id, datetime(2024, 1, 1), "alice")
+    dp.set_distance_individual_attributes(individual_id, age="Adult", sex="Female", tag_ids=[])
+    offsets = dp.get_distance_review_state(video_id, "alice")["offsets"]
+    dp.save_distance_sample(
+        individual_id, offsets[0], labeled_by="alice", reference_frame_id=frame["id"]
+    )
+    for offset in offsets[1:]:
+        dp.save_distance_sample(
+            individual_id, offset, labeled_by="alice", skip_reason="individual absent"
+        )
+    data = package_zip(ai_package)
+    preview = dp.preview_distance_ai_package(project_id, data)
+    assert preview["reference_conflicts"][0]["completed_reviews"] == []
+
+    dp.finish_distance_video(video_id, "alice")
+    completed = dp.get_distance_review_state(video_id, "alice")["review"]["completed_at"]
+    with pytest.raises(ValueError, match="Reference overwrite preview is stale"):
+        dp.import_distance_ai_package(
+            project_id, data, reference_overwrite_token=preview["reference_overwrite_token"]
+        )
+    assert dp.get_distance_review_state(video_id, "alice")["review"]["completed_at"] == completed
+
+    refreshed = dp.preview_distance_ai_package(project_id, data)
+    review = refreshed["reference_conflicts"][0]["completed_reviews"]
+    assert review == [
+        {"video_path": dp.get_video_detail(video_id)["video_path"], "species": "deer"}
+    ]
+    dp.import_distance_ai_package(
+        project_id, data, reference_overwrite_token=refreshed["reference_overwrite_token"]
+    )
+    assert dp.get_distance_review_state(video_id, "alice")["review"]["completed_at"] is None
+
+
 def test_failed_reference_overwrite_rolls_back(distance_data, ai_package):
     dp, project_id = distance_data["dp"], distance_data["project"].id
     reference = dp.register_reference_video(

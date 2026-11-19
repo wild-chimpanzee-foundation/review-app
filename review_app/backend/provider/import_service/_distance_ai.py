@@ -149,7 +149,17 @@ def _plan(session, project_id, package):
                         DistanceSample.id,
                         DistanceSample.updated_at,
                         DistanceSampleBehavior.behavior_id,
+                        DistanceReviewTask.id.label("task_id"),
+                        DistanceReviewTask.completed_at,
+                        Video.video_path,
+                        Species.scientific_name,
                     )
+                    .join(
+                        DistanceIndividual, DistanceIndividual.id == DistanceSample.individual_id
+                    )
+                    .join(DistanceReviewTask, DistanceReviewTask.id == DistanceIndividual.task_id)
+                    .join(Video, Video.video_id == DistanceReviewTask.video_id)
+                    .join(Species, Species.id == DistanceReviewTask.species_id)
                     .outerjoin(
                         DistanceSampleBehavior,
                         DistanceSampleBehavior.sample_id == DistanceSample.id,
@@ -158,6 +168,9 @@ def _plan(session, project_id, package):
                     .order_by(DistanceSample.id, DistanceSampleBehavior.behavior_id)
                     .all()
                 )
+                completed_reviews = {
+                    sample.task_id: sample for sample in samples if sample.completed_at
+                }
                 overwrite_state.append(
                     {
                         "reference": row["reference_id"],
@@ -170,8 +183,12 @@ def _plan(session, project_id, package):
                             frame.import_id,
                         ],
                         "samples": [
-                            (sample_id, updated_at.isoformat(), behavior_id)
-                            for sample_id, updated_at, behavior_id in samples
+                            (sample.id, sample.updated_at.isoformat(), sample.behavior_id)
+                            for sample in samples
+                        ],
+                        "completed_reviews": [
+                            (task_id, sample.completed_at.isoformat())
+                            for task_id, sample in sorted(completed_reviews.items())
                         ],
                     }
                 )
@@ -183,10 +200,11 @@ def _plan(session, project_id, package):
                         "existing_time_s": position / 1000,
                         "imported_time_s": row["time_s"],
                         "affected_samples": len({sample.id for sample in samples}),
+                        "completed_reviews": [
+                            {"video_path": sample.video_path, "species": sample.scientific_name}
+                            for sample in completed_reviews.values()
+                        ],
                     }
-                )
-                errors.append(
-                    f"Conflicting prepared reference frame: {row['reference_id']}; existing calibration is unchanged"
                 )
             summary["reused_reference_frames"] += 1
         else:
@@ -325,7 +343,6 @@ class DistanceAIImportMixin(ProviderBase):
     def preview_distance_ai_package(self, project_id: str, zip_bytes: bytes) -> dict:
         package = read_distance_ai_package(zip_bytes)
         with self.Session() as session:
-            session.connection().exec_driver_sql("BEGIN")
             summary, _, _, _ = _plan(session, project_id, package)
         return {
             **summary,
@@ -392,15 +409,14 @@ class DistanceAIImportMixin(ProviderBase):
                 raise StaleReferenceOverwriteError(
                     "Reference overwrite preview is stale. Review the current impact and confirm again."
                 )
-            conflict_errors = {
-                f"Conflicting prepared reference frame: {reference_id}; existing calibration is unchanged"
-                for reference_id in conflicts
-                if reference_overwrite_token is not None
-            }
-            errors = [error for error in summary["errors"] if error not in conflict_errors]
+            errors = list(summary["errors"])
+            if reference_overwrite_token is None:
+                errors.extend(
+                    f"Conflicting prepared reference frame: {reference_id}; existing calibration is unchanged"
+                    for reference_id in sorted(conflicts)
+                )
             if errors:
                 raise ValueError("\n".join(errors[:20]))
-            summary["errors"] = errors
             if not set(summary["replace_video_ids"]).issubset(set(replace_video_ids or [])):
                 raise ValueError(
                     "Preview again and explicitly confirm replacement of untouched AI drafts."

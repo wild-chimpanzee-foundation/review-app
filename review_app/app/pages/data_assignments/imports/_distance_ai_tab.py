@@ -19,16 +19,15 @@ async def setup_distance_ai_tab(dp, loading_dialog):
         "overwrite_confirmed": False,
     }
 
-    def blocking_errors(preview):
-        allowed = (
-            {
-                f"Conflicting prepared reference frame: {row['reference_id']}; existing calibration is unchanged"
-                for row in preview["reference_conflicts"]
-            }
-            if state["overwrite_confirmed"]
-            else set()
+    def can_import(preview):
+        return (
+            not state["busy"]
+            and preview is not None
+            and not preview["already_imported"]
+            and not preview["errors"]
+            and (not preview["reference_conflicts"] or state["overwrite_confirmed"])
+            and (not preview["replace_video_ids"] or state["replace_confirmed"])
         )
-        return [error for error in preview["errors"] if error not in allowed]
 
     def check_project():
         if not project_id or get_active_project_id() != project_id:
@@ -79,21 +78,22 @@ async def setup_distance_ai_tab(dp, loading_dialog):
             ui.label(t("distance_ai_overwrite_warning")).classes("text-warning")
             for conflict in preview["reference_conflicts"]:
                 ui.label(t("distance_ai_reference_conflict", **conflict)).classes("break-all")
+                for review in conflict["completed_reviews"]:
+                    ui.label(t("distance_ai_reopens_review", **review)).classes(
+                        "text-warning break-all"
+                    )
             ui.checkbox(
                 t("distance_ai_overwrite_confirm"),
                 value=state["overwrite_confirmed"],
                 on_change=lambda event: confirm_overwrite(event.value),
             ).set_enabled(not state["busy"])
-        for error in blocking_errors(preview)[:20]:
+        for error in preview["errors"][:20]:
             ui.label(error).classes("text-negative break-all")
         if preview["already_imported"]:
             ui.label(t("distance_ai_already_imported")).classes("text-positive")
         prediction_table(preview["preview"])
         ui.button(t("distance_ai_import"), icon="file_upload", on_click=do_import).set_enabled(
-            not state["busy"]
-            and not blocking_errors(preview)
-            and not preview["already_imported"]
-            and (not preview["replace_video_ids"] or state["replace_confirmed"])
+            can_import(preview)
         )
 
     def confirm_replace(value):
@@ -159,12 +159,8 @@ async def setup_distance_ai_tab(dp, loading_dialog):
                 loading_dialog.close()
 
     async def do_import():
-        if state["busy"] or not state["bytes"]:
-            return
         preview = state["preview"]
-        if blocking_errors(preview) or (
-            preview["replace_video_ids"] and not state["replace_confirmed"]
-        ):
+        if not can_import(preview) or not state["bytes"]:
             return
         state["busy"] = True
         preview_ui.refresh()
