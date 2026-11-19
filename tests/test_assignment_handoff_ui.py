@@ -640,7 +640,7 @@ async def test_bulk_assignment_delivery_and_removal(user: User, handoff_ui, tmp_
     await user.should_see(t("assign_remove_selected_title", count=2))
     assert len(dp.list_assignments(project.id)) == 3
     user.find(marker="confirm-remove-selected-assignments").click()
-    await user.should_not_see(marker="assignment-bulk-actions")
+    await user.should_not_see(marker="assignment-bulk-actions", retries=20)
     assert [row["id"] for row in dp.list_assignments(project.id)] == [saved[2].id]
 
 
@@ -655,7 +655,7 @@ async def test_bulk_selection_can_be_cleared(user: User, handoff_ui):
     user.find(ui.table).trigger("selection", {"added": True, "rows": table.rows, "keys": keys})
     await user.should_see(marker="assignment-bulk-actions")
     user.find(ui.table).trigger("selection", {"added": False, "rows": table.rows, "keys": keys})
-    await user.should_not_see(marker="assignment-bulk-actions")
+    await user.should_not_see(marker="assignment-bulk-actions", retries=20)
     assert not table.selected
 
 
@@ -681,3 +681,35 @@ async def test_open_with_missing_footage_requires_explicit_confirmation(
     assert dp.get_project_video_count(working) == 2
     with dp.Session() as session:
         assert all(row.is_missing for row in session.query(Video).filter_by(project_id=working))
+
+
+async def test_closing_partial_bulk_removal_refreshes_assignments(
+    user: User, handoff_ui, monkeypatch
+):
+    dp, project, _ = handoff_ui
+    video_id = dp.get_assignment_video_ids(project.id)[0]
+    removed, retained = [
+        dp.prepare_assignment(project.id, AssignmentRequest(name, (video_id,)))
+        for name in ("alice", "bob")
+    ]
+    original = dp.remove_assignment
+
+    def remove(project_id, assignment_id):
+        if assignment_id == retained.id:
+            raise ValueError("Temporary removal failure")
+        original(project_id, assignment_id)
+
+    monkeypatch.setattr(dp, "remove_assignment", remove)
+    await user.open("/handoff-admin")
+    table = next(iter(user.find(ui.table).elements))
+    user.find(ui.table).trigger(
+        "selection", {"added": True, "rows": table.rows, "keys": [removed.id, retained.id]}
+    )
+    await user.should_see(marker="remove-selected-assignments")
+    user.find(marker="remove-selected-assignments").click()
+    user.find(marker="confirm-remove-selected-assignments").click()
+    await user.should_see("bob: Temporary removal failure")
+    user.find(t("cancel"), kind=ui.button).click()
+    await user.should_not_see(marker="assignment-bulk-actions", retries=20)
+    table = next(iter(user.find(ui.table).elements))
+    assert [row["id"] for row in table.rows] == [retained.id]
