@@ -6,6 +6,7 @@ from review_app.app.state import get_active_project_id
 from review_app.app.translations import t
 from review_app.app.utils import ignore_deleted_client
 from review_app.backend.distance_ai_package import MAX_ZIP_BYTES
+from review_app.backend.provider.import_service._distance_ai import StaleReferenceOverwriteError
 
 
 async def setup_distance_ai_tab(dp, loading_dialog):
@@ -112,6 +113,7 @@ async def setup_distance_ai_tab(dp, loading_dialog):
         try:
             check_project()
             await run.io_bound(dp.add_distance_ai_species_annotations, project_id, state["bytes"])
+            state.update(replace_confirmed=False, overwrite_confirmed=False)
             check_project()
             state["preview"] = await run.io_bound(
                 dp.preview_distance_ai_package, project_id, state["bytes"]
@@ -169,17 +171,25 @@ async def setup_distance_ai_tab(dp, loading_dialog):
         loading_dialog.open()
         try:
             check_project()
-            result = await run.io_bound(
-                dp.import_distance_ai_package,
-                project_id,
-                state["bytes"],
-                replace_video_ids=preview["replace_video_ids"],
-                overwrite_reference_ids=[
-                    row["reference_id"] for row in preview["reference_conflicts"]
-                ]
-                if state["overwrite_confirmed"]
-                else [],
-            )
+            try:
+                result = await run.io_bound(
+                    dp.import_distance_ai_package,
+                    project_id,
+                    state["bytes"],
+                    replace_video_ids=preview["replace_video_ids"],
+                    reference_overwrite_token=(
+                        preview["reference_overwrite_token"]
+                        if state["overwrite_confirmed"]
+                        else None
+                    ),
+                )
+            except StaleReferenceOverwriteError:
+                state.update(preview=None, replace_confirmed=False, overwrite_confirmed=False)
+                check_project()
+                state["preview"] = await run.io_bound(
+                    dp.preview_distance_ai_package, project_id, state["bytes"]
+                )
+                raise
             state["replace_confirmed"] = False
             state["overwrite_confirmed"] = False
             state["preview"] = await run.io_bound(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from pathlib import PurePosixPath
 
@@ -11,6 +13,7 @@ from review_app.backend.db.models import (
     DistanceIndividual,
     DistanceReviewTask,
     DistanceSample,
+    DistanceSampleBehavior,
     IndividualObservation,
     Project,
     ProjectDir,
@@ -29,6 +32,10 @@ from review_app.backend.provider.distance_references import (
 )
 from review_app.backend.provider.distance_review import reset_video_evidence
 from review_app.backend.provider.distance_tasks import ensure_tasks
+
+
+class StaleReferenceOverwriteError(ValueError):
+    """The confirmed calibration or affected samples changed after preview."""
 
 
 def _plan(session, project_id, package):
@@ -50,6 +57,7 @@ def _plan(session, project_id, package):
         new_reference_frames=0,
         reused_reference_frames=0,
         reference_conflicts=[],
+        reference_overwrite_token=None,
         missing_species_labels=[],
         already_imported=existing is not None,
         import_id=existing.id if existing else None,
@@ -91,6 +99,7 @@ def _plan(session, project_id, package):
         )
     }
     frames, keys = {}, set()
+    overwrite_state = []
     for row in package.references:
         video = videos.get(row["video_path"])
         if video is None:
@@ -133,6 +142,37 @@ def _plan(session, project_id, package):
             if frame.distance_m != row["known_distance_m"] or not math.isclose(
                 position, precise, rel_tol=0, abs_tol=0.000001
             ):
+                samples = (
+                    session.query(
+                        DistanceSample.id,
+                        DistanceSample.updated_at,
+                        DistanceSampleBehavior.behavior_id,
+                    )
+                    .outerjoin(
+                        DistanceSampleBehavior,
+                        DistanceSampleBehavior.sample_id == DistanceSample.id,
+                    )
+                    .filter(DistanceSample.reference_frame_id == frame.id)
+                    .order_by(DistanceSample.id, DistanceSampleBehavior.behavior_id)
+                    .all()
+                )
+                overwrite_state.append(
+                    {
+                        "reference": row["reference_id"],
+                        "frame": [
+                            frame.id,
+                            frame.offset_ms,
+                            frame.playback_offset_ms,
+                            frame.distance_m,
+                            frame.mask,
+                            frame.import_id,
+                        ],
+                        "samples": [
+                            (sample_id, updated_at.isoformat(), behavior_id)
+                            for sample_id, updated_at, behavior_id in samples
+                        ],
+                    }
+                )
                 summary["reference_conflicts"].append(
                     {
                         "reference_id": row["reference_id"],
@@ -140,9 +180,7 @@ def _plan(session, project_id, package):
                         "distance_m": row["known_distance_m"],
                         "existing_time_s": position / 1000,
                         "imported_time_s": row["time_s"],
-                        "affected_samples": session.query(DistanceSample)
-                        .filter_by(reference_frame_id=frame.id)
-                        .count(),
+                        "affected_samples": len({sample.id for sample in samples}),
                     }
                 )
                 errors.append(
@@ -152,6 +190,11 @@ def _plan(session, project_id, package):
         else:
             summary["new_reference_frames"] += 1
         frames[row["reference_id"]] = frame
+    if overwrite_state:
+        payload = [project_id, package.package_hash, overwrite_state]
+        summary["reference_overwrite_token"] = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
     ensure_tasks(session, project_id)
     species = {row.scientific_name: row.id for row in session.query(Species)}
     tasks = {
@@ -280,6 +323,7 @@ class DistanceAIImportMixin(ProviderBase):
     def preview_distance_ai_package(self, project_id: str, zip_bytes: bytes) -> dict:
         package = read_distance_ai_package(zip_bytes)
         with self.Session() as session:
+            session.connection().exec_driver_sql("BEGIN")
             summary, _, _, _ = _plan(session, project_id, package)
         return {
             **summary,
@@ -330,24 +374,31 @@ class DistanceAIImportMixin(ProviderBase):
         zip_bytes: bytes,
         *,
         replace_video_ids: list[str] | None = None,
-        overwrite_reference_ids: list[str] | None = None,
+        reference_overwrite_token: str | None = None,
     ) -> dict:
         package = read_distance_ai_package(zip_bytes)
         with self.Session.begin() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             summary, videos, frames, schedules = _plan(session, project_id, package)
+            if summary["already_imported"]:
+                return summary
             conflicts = {row["reference_id"] for row in summary["reference_conflicts"]}
-            confirmed = set(overwrite_reference_ids or [])
+            if (
+                reference_overwrite_token is not None
+                and reference_overwrite_token != summary["reference_overwrite_token"]
+            ):
+                raise StaleReferenceOverwriteError(
+                    "Reference overwrite preview is stale. Review the current impact and confirm again."
+                )
             conflict_errors = {
                 f"Conflicting prepared reference frame: {reference_id}; existing calibration is unchanged"
-                for reference_id in conflicts & confirmed
+                for reference_id in conflicts
+                if reference_overwrite_token is not None
             }
             errors = [error for error in summary["errors"] if error not in conflict_errors]
             if errors:
                 raise ValueError("\n".join(errors[:20]))
             summary["errors"] = errors
-            if summary["already_imported"]:
-                return summary
             if not set(summary["replace_video_ids"]).issubset(set(replace_video_ids or [])):
                 raise ValueError(
                     "Preview again and explicitly confirm replacement of untouched AI drafts."
