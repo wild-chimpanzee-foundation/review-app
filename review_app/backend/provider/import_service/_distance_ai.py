@@ -20,6 +20,7 @@ from review_app.backend.db.models import (
     ReferenceVideo,
     Species,
     Video,
+    VideoLabel,
 )
 from review_app.backend.distance_ai_package import mask_bounding_box, read_distance_ai_package
 from review_app.backend.distance_timing import infer_imported_schedule
@@ -361,25 +362,36 @@ class DistanceAIImportMixin(ProviderBase):
             summary, _, _, _ = _plan(session, project_id, package)
             added = 0
             species = {row.scientific_name: row.id for row in session.query(Species)}
+            labeled_by = f"Distance AI: {package.manifest['model']['name']}"
             for row in summary["missing_species_labels"]:
+                video_id = row["video_id"]
                 observations = (
-                    session.query(IndividualObservation).filter_by(video_id=row["video_id"]).all()
+                    session.query(IndividualObservation).filter_by(video_id=video_id).all()
                 )
                 if any(
                     observation.species_id == species[row["species"]]
                     for observation in observations
                 ):
                     continue
+                labeled_at = self._utcnow_dt()
+                label = session.get(VideoLabel, video_id)
+                if label is None:
+                    label = VideoLabel(video_id=video_id)
+                    session.add(label)
+                if label.is_blank is not False or label.labeled_at is None:
+                    label.is_blank = False
+                    label.labeled_by = labeled_by
+                    label.labeled_at = labeled_at
                 session.add(
                     IndividualObservation(
                         project_id=project_id,
-                        video_id=row["video_id"],
+                        video_id=video_id,
                         id=max((observation.id for observation in observations), default=0) + 1,
                         species_id=species[row["species"]],
                         # Presence is accepted; track counts are not reliable animal counts.
                         count=None,
-                        labeled_by=f"Distance AI: {package.manifest['model']['name']}",
-                        labeled_at=self._utcnow_dt(),
+                        labeled_by=labeled_by,
+                        labeled_at=labeled_at,
                     )
                 )
                 session.flush()

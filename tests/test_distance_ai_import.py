@@ -749,11 +749,15 @@ def test_ai_import_rejects_duplicate_video_distance_before_writing(distance_data
     assert snapshot(dp) == before
 
 
-def test_missing_species_are_accepted_and_idempotent(distance_data, ai_package):
+@pytest.mark.parametrize(
+    "original_blank", [None, True, False], ids=["unreviewed", "blank", "nonblank"]
+)
+def test_missing_species_are_accepted_and_idempotent(distance_data, ai_package, original_blank):
     from review_app.backend.db.models import (
         DistanceReviewTask,
         IndividualObservation,
         ModelAnnotation,
+        VideoLabel,
     )
 
     dp, project_id = distance_data["dp"], distance_data["project"].id
@@ -761,6 +765,11 @@ def test_missing_species_are_accepted_and_idempotent(distance_data, ai_package):
     with dp.Session.begin() as session:
         session.query(IndividualObservation).filter_by(video_id=video_id).delete()
         session.query(DistanceReviewTask).filter_by(video_id=video_id).delete()
+    if original_blank is not None:
+        dp.update_manual_review(
+            video_id, [], is_blank=original_blank, labeled_by="alice", active_project_id=project_id
+        )
+        dp.set_review_later(video_id)
     data = package_zip(ai_package)
     before = snapshot(dp)
     preview = dp.preview_distance_ai_package(project_id, data)
@@ -776,6 +785,14 @@ def test_missing_species_are_accepted_and_idempotent(distance_data, ai_package):
         assert observation.count is None
         assert observation.labeled_by == "Distance AI: test-model"
         assert observation.labeled_at is not None
+        label = session.get(VideoLabel, video_id)
+        assert label.is_blank is False
+        assert label.review_later is (original_blank is not None)
+        if original_blank is False:
+            assert label.labeled_by == "alice"
+        else:
+            assert label.labeled_by == observation.labeled_by
+            assert label.labeled_at == observation.labeled_at
         assert session.query(ModelAnnotation).filter_by(video_id=video_id).count() == 0
     assert dp.preview_distance_ai_package(project_id, data)["errors"] == []
     dp.import_distance_ai_package(project_id, data)
