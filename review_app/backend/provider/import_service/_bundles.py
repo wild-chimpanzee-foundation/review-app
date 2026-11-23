@@ -12,6 +12,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 
+from review_app.backend.annotation_package.detection import legacy_contents
 from review_app.backend.provider.import_service._shared import ImportSharedMixin
 
 logger = logging.getLogger(__name__)
@@ -122,22 +123,9 @@ class BundleMixin(ImportSharedMixin):
         results: dict[str, Any] = {}
 
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            names = set(zf.namelist())
+            manifest_contents = legacy_contents(zf)
 
-            manifest_contents: list[str] = []
-            if "bundle.json" in names:
-                manifest = json.loads(zf.read("bundle.json"))
-                manifest_contents = manifest.get("contents", [])
-            else:
-                manifest_contents = [
-                    n.replace(".csv", "")
-                    for n in names
-                    if n.endswith(".csv")
-                    and n.replace(".csv", "")
-                    in ("species", "tags", "model_annotations", "metadata")
-                ]
-
-            if "species" in manifest_contents and "species.csv" in names:
+            if "species" in manifest_contents:
                 content = zf.read("species.csv").decode("utf-8")
                 try:
                     count = self.import_project_species_from_csv(project_id, content)
@@ -145,7 +133,7 @@ class BundleMixin(ImportSharedMixin):
                 except Exception as exc:
                     results["species"] = {"error": str(exc)}
 
-            if "tags" in manifest_contents and "tags.csv" in names:
+            if "tags" in manifest_contents:
                 content = zf.read("tags.csv").decode("utf-8")
                 try:
                     count = self.import_tags_from_csv(content)
@@ -153,7 +141,7 @@ class BundleMixin(ImportSharedMixin):
                 except Exception as exc:
                     results["tags"] = {"error": str(exc)}
 
-            if "model_annotations" in manifest_contents and "model_annotations.csv" in names:
+            if "model_annotations" in manifest_contents:
                 content = zf.read("model_annotations.csv").decode("utf-8")
                 try:
                     df = pd.read_csv(io.StringIO(content))
@@ -186,7 +174,7 @@ class BundleMixin(ImportSharedMixin):
                 except Exception as exc:
                     results["model_annotations"] = {"error": str(exc)}
 
-            if "metadata" in manifest_contents and "metadata.csv" in names:
+            if "metadata" in manifest_contents:
                 content = zf.read("metadata.csv").decode("utf-8")
                 try:
                     df = pd.read_csv(io.StringIO(content), converters={"camera_id": str})

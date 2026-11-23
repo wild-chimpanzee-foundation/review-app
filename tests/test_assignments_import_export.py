@@ -1,4 +1,15 @@
-def test_export_import_bundle_preserves_assignments(provider_with_project):
+import io
+import zipfile
+
+import pytest
+from review_app.backend.annotation_package.detection import (
+    detect_setup_package,
+    inspect_legacy_package,
+)
+
+
+@pytest.mark.parametrize("include_manifest", [True, False])
+def test_export_import_bundle_preserves_assignments(provider_with_project, include_manifest):
     dp, project, _ = provider_with_project
 
     # Setup assignments
@@ -10,6 +21,14 @@ def test_export_import_bundle_preserves_assignments(provider_with_project):
 
     # Export bundle including metadata
     bundle_bytes = dp.export_project_bundle(project.id, include=["metadata"])
+    if not include_manifest:
+        csv_only = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(bundle_bytes)) as source:
+            with zipfile.ZipFile(csv_only, "w") as target:
+                target.writestr("metadata.csv", source.read("metadata.csv"))
+        bundle_bytes = csv_only.getvalue()
+    assert detect_setup_package(bundle_bytes) == "legacy"
+    assert inspect_legacy_package(bundle_bytes)["metadata_count"] == 2
 
     # Clear assignments to test restoration
     with dp.engine.begin() as conn:

@@ -279,17 +279,24 @@ def test_inventory_edit_create_validation_and_display_names_not_used_for_matchin
         dp.save_deployment(project.id, {"deployment_id": "D", "installation_date": "bad"})
 
 
-def test_assignment_package_preserves_effective_assignment_on_open_and_rescan(managed):
+@pytest.mark.parametrize("package_version", [1, 2])
+def test_assignment_package_preserves_effective_assignment_on_open_and_rescan(
+    managed, package_version
+):
     dp, project, root, videos, inventory = managed
     animal = videos["misc/other.mp4"]
     assign(dp, project.id, [animal], inventory["A"])
     prepared = dp.prepare_assignment(project.id, AssignmentRequest("alice", (animal,)))
     data = dp.export_assignment(prepared.id)
-    # Existing v1 fields carry the effective label; reconstruct local pinned scope.
-    from review_app.backend.annotation_package.archive import decode_archive
+    from review_app.backend.annotation_package.archive import decode_archive, encode_archive
 
     manifest, context, work = decode_archive(data)
-    assert manifest["version"] == 1
+    assert manifest["version"] == 2
+    if package_version == 1:
+        # Simulate a v1 setup that carries only the effective camera label.
+        manifest["version"] = 1
+        del context["deployments"]
+        data = encode_archive(manifest, context, work)
     assert context["media"][0]["camera_id"] == "A"
     opened = dp.open_assignment(data, "Opened", {dp.get_project_dirs(project.id)[0].id: root})
     local = dp.get_assignment_video_ids(opened.project_id)[0]
@@ -297,6 +304,9 @@ def test_assignment_package_preserves_effective_assignment_on_open_and_rescan(ma
     dp.sync_videos(active_project_id=opened.project_id)
     assert row(dp, local)[0] == "A"
     assert dp.get_project_deployments(opened.project_id)
+    returned = dp.export_assignment_return(opened.project_id)
+    assert decode_archive(returned)[0]["version"] == package_version
+    assert dp.preview_assignment_return(project.id, returned).totals["unchanged"] == 1
 
 
 def test_missing_media_can_be_assigned_and_root_relocation_preserves_links(managed, tmp_path):

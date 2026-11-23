@@ -11,17 +11,37 @@ from review_app.backend.annotation_package.archive import (
     decode_archive,
 )
 
+LEGACY_COMPONENTS = ("species", "tags", "model_annotations", "metadata")
+
+
+def legacy_contents(archive: zipfile.ZipFile) -> set[str]:
+    names = archive.namelist()
+    if len(names) != len(set(names)):
+        raise ValueError("Duplicate package members")
+    if sum(info.file_size for info in archive.infolist()) > MAX_UNCOMPRESSED_BYTES:
+        raise ValueError("Package exceeds the uncompressed size limit")
+    available = {name for name in LEGACY_COMPONENTS if f"{name}.csv" in names}
+    if "bundle.json" not in names:
+        if not available:
+            raise ValueError("Choose an assignment setup package or a legacy project bundle")
+        return available
+    info = archive.getinfo("bundle.json")
+    if info.file_size > MAX_ARCHIVE_BYTES:
+        raise ValueError("Bundle manifest exceeds the upload limit")
+    manifest = json.loads(archive.read(info))
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("contents"), list):
+        raise ValueError("Invalid legacy bundle manifest")
+    return {name for name in available if name in manifest["contents"]}
+
 
 def inspect_legacy_package(raw: bytes) -> dict[str, int]:
     """Summarize legacy bundle contents without exposing format-specific file names."""
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-        if sum(info.file_size for info in archive.infolist()) > MAX_UNCOMPRESSED_BYTES:
-            raise ValueError("Package exceeds the uncompressed size limit")
-        included = json.loads(archive.read("bundle.json"))["contents"]
+        included = legacy_contents(archive)
         counts = {}
-        for name in ("species", "tags", "model_annotations", "metadata"):
+        for name in LEGACY_COMPONENTS:
             filename = f"{name}.csv"
-            if name not in included or filename not in archive.namelist():
+            if name not in included:
                 counts[name] = 0
                 continue
             text = archive.read(filename).decode("utf-8-sig")
@@ -45,14 +65,7 @@ def detect_setup_package(data: bytes) -> str:
                 if manifest["direction"] != "setup":
                     raise ValueError("Open a setup package, not an assignment return")
                 return "assignment"
-            if len(names) != len(set(names)):
-                raise ValueError("Duplicate package members")
-            info = archive.getinfo("bundle.json")
-            if info.file_size > MAX_ARCHIVE_BYTES:
-                raise ValueError("Bundle manifest exceeds the upload limit")
-            manifest = json.loads(archive.read(info))
-            if not isinstance(manifest, dict) or not isinstance(manifest.get("contents"), list):
-                raise ValueError("Invalid legacy bundle manifest")
+            legacy_contents(archive)
             return "legacy"
     except (zipfile.BadZipFile, KeyError, json.JSONDecodeError) as exc:
         raise ValueError("Choose an assignment setup package or a legacy project bundle") from exc

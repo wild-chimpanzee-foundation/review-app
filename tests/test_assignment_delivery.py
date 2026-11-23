@@ -59,17 +59,35 @@ def test_copy_reports_missing_and_failures(provider_with_project, tmp_path, monk
     saved = dp.prepare_assignment(project.id, AssignmentRequest("alice", tuple(ids)))
     with dp.Session() as session:
         missing = Path(session.get(Video, ids[0]).video_path)
+        interrupted = Path(session.get(Video, ids[1]).video_path)
+    original = missing.read_bytes()
     missing.unlink()
 
-    def fail(*args):
+    def fail(source, target):
+        Path(target).write_bytes(b"partial copy")
         raise PermissionError("copy denied")
 
-    monkeypatch.setattr(delivery.shutil, "copy2", fail)
-    result = dp.copy_assignment_footage(saved.id, tmp_path / "delivery")
+    with monkeypatch.context() as patch:
+        patch.setattr(delivery.shutil, "copy2", fail)
+        result = dp.copy_assignment_footage(saved.id, tmp_path / "delivery")
     assert result.copied_count == 0
     assert result.missing_video_ids == (ids[0],)
     assert result.failures == {ids[1]: "copy denied"}
     assert all(Path(path).is_dir() for path in result.media_roots.values())
+    assert not [path for path in Path(result.path).rglob("*") if path.is_file()]
+
+    package = dp.export_assignment(saved.id)
+    opened = dp.open_assignment(package, "Interrupted delivery", result.media_roots)
+    assert set(opened.missing_video_ids) == set(ids)
+
+    missing.write_bytes(original)
+    retry = dp.copy_assignment_footage(saved.id, tmp_path / "retry")
+    assert retry.copied_count == len(ids)
+    assert retry.failures == {}
+    target = Path(retry.media_roots[root.id]) / interrupted.relative_to(root.path)
+    assert target.read_bytes() == interrupted.read_bytes()
+    reopened = dp.open_assignment(package, "Retried delivery", retry.media_roots)
+    assert reopened.missing_video_ids == ()
 
 
 def test_copy_rejects_scanned_output_and_escaped_source(provider_with_project, tmp_path):

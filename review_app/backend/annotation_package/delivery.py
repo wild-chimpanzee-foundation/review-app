@@ -4,6 +4,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from review_app.backend.annotation_package.archive import decode_archive
 from review_app.backend.annotation_package.scope import bound_videos, safe_relative
@@ -84,7 +85,11 @@ def copy_media(
             return "missing"
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        # Stage on the same filesystem so package opening only sees complete files.
+        with TemporaryDirectory(prefix=".copy-", dir=target.parent) as staging_dir:
+            staged = Path(staging_dir) / "footage.tmp"
+            shutil.copy2(source, staged)
+            staged.replace(target)
         return "copied"
 
     copied, missing, failures = 0, [], {}

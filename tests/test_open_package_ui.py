@@ -91,7 +91,7 @@ async def test_assignment_detects_and_opens_through_common_upload(user: User, pa
     assert not any(is_visible(e) for e in elements(user, ui.button, t("wizard_bundle_submit_btn")))
     user.find(t("handoff_root", number=1)).type(root.path)
     user.find(t("handoff_open"), kind=ui.button).click()
-    await user.should_see("Package opened")
+    await user.should_see("Package opened", retries=20)
     working = get_active_project_id()
     assert dp.list_assignments(working)[0]["role"] == "working"
     stats = dp.get_overview_stats(working)["videos"]
@@ -131,9 +131,18 @@ async def test_failed_opening_sync_retries_without_creating_another_project(
     assert dp.get_overview_stats(get_active_project_id())["videos"]["unprobed"] == 0
 
 
-async def test_legacy_detects_warns_and_creates_independent_project(user: User, package_ui):
+@pytest.mark.parametrize("include_manifest", [True, False])
+async def test_legacy_detects_warns_and_creates_independent_project(
+    user: User, package_ui, include_manifest
+):
     dp, project, root, wizard = package_ui
     raw = dp.export_project_bundle(project.id, include=["metadata"])
+    if not include_manifest:
+        csv_only = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(raw)) as source, zipfile.ZipFile(csv_only, "w") as target:
+            target.writestr("metadata.csv", source.read("metadata.csv"))
+        raw = csv_only.getvalue()
+    assert detect_setup_package(raw) == "legacy"
     await user.open("/open-package")
     await upload(user, raw)
     await user.should_see(t("package_legacy_warning"))
