@@ -146,39 +146,39 @@ class StatsMixin(ProviderBase):
                 params=p,
             ).to_dict(orient="records")
 
-            camera_summary = conn.execute(
+            deployment_footage = conn.execute(
                 text(f"""
-                WITH ranked AS (
+                WITH footage AS (
                     SELECT
-                        camera_id, video_path,
-                        ROW_NUMBER() OVER (PARTITION BY camera_id ORDER BY video_path) AS rn,
-                        COUNT(*) OVER (PARTITION BY camera_id) AS cnt
+                        video_id, deployment_id, video_path, duration_sec, is_missing,
+                        EXISTS (
+                            SELECT 1 FROM video_tags vt JOIN tags t ON t.id = vt.tag_id
+                            WHERE vt.video_id = videos.video_id AND t.key = 'reference_video'
+                        ) AS is_reference
                     FROM videos
                     {pf}
-                ),
-                mid_sample AS (
-                    SELECT camera_id, video_path
-                    FROM ranked
-                    WHERE rn = (cnt + 1) / 2
                 )
                 SELECT
-                    v.camera_id,
+                    v.deployment_id,
                     COUNT(*)                                               AS total_videos,
-                    SUM(CASE WHEN vl.video_id IS NOT NULL THEN 1 ELSE 0 END) AS labeled,
+                    SUM(v.is_reference)                                    AS reference_videos,
+                    SUM(CASE WHEN vl.is_blank IS NOT NULL THEN 1 ELSE 0 END) AS labeled,
                     SUM(CASE WHEN vl.is_blank = 1 THEN 1 ELSE 0 END)         AS blank,
                     ROUND(SUM(COALESCE(v.duration_sec,0))/3600.0, 2)         AS hours,
-                    ms.video_path                                              AS sample_video_path
-                FROM videos v
+                    COALESCE(
+                        MIN(CASE WHEN NOT COALESCE(v.is_missing, 0) AND NOT v.is_reference
+                            THEN v.video_path END),
+                        MIN(CASE WHEN NOT COALESCE(v.is_missing, 0) THEN v.video_path END)
+                    )                                                      AS sample_video_path
+                FROM footage v
                 LEFT JOIN video_labels vl ON vl.video_id = v.video_id
-                LEFT JOIN mid_sample ms ON ms.camera_id = v.camera_id
-                {vf}
-                GROUP BY v.camera_id
-                ORDER BY total_videos DESC
+                GROUP BY v.deployment_id
+                ORDER BY total_videos DESC, v.deployment_id
             """),
                 p,
             ).mappings()
             # Preserve SQL NULL as None, not pandas string-column NaN (a float).
-            stats["camera_summary"] = [dict(row) for row in camera_summary]
+            stats["deployment_footage"] = [dict(row) for row in deployment_footage]
 
         return stats
 

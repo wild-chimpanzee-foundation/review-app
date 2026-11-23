@@ -83,6 +83,36 @@ def test_folder_links_and_inference_drive_grouping_and_unresolved_distance(manag
         "references": 2,
         "unresolved": 2,
         "unmatched_references": 0,
+        "has_pending_reference_reviews": True,
+        "has_pending_deployment_issues": True,
+    }
+
+
+def test_overview_footage_and_review_use_saved_deployment_ids(managed):
+    dp, project, _, videos, inventory = managed
+    with dp.Session.begin() as session:
+        # A camera can be reused in another deployment.
+        session.get(Video, videos["animals/a.mp4"]).camera_id = "B"
+
+    groups = {
+        entry["deployment_id"]: entry
+        for entry in dp.get_overview_stats(project.id)["deployment_footage"]
+    }
+    assert {identifier: group["total_videos"] for identifier, group in groups.items()} == {
+        inventory["A"]: 1,
+        inventory["B"]: 2,
+        None: 2,
+    }
+    assert Path(groups[inventory["A"]]["sample_video_path"]).name == "a.mp4"
+    assert groups[inventory["B"]]["reference_videos"] == 1
+    assert Path(groups[inventory["B"]]["sample_video_path"]).name == "b.mp4"
+    assert Path(groups[None]["sample_video_path"]).name == "other.mp4"
+    assert dp.get_video_queue({"selected_deployment": inventory["A"]}, project.id) == [
+        videos["animals/a.mp4"]
+    ]
+    assert set(dp.get_video_queue({"selected_deployment": "unresolved"}, project.id)) == {
+        videos["shared/ref.mp4"],
+        videos["misc/other.mp4"],
     }
 
 

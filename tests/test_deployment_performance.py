@@ -113,36 +113,6 @@ def test_folder_preview_and_apply_batch_queries_and_path_resolution(legacy_inven
     assert len(resolutions) <= 6, f"{len(resolutions)} repeated path resolutions"
 
 
-def test_overview_unresolved_camera_identifiers_are_none_not_nan(tmp_db):
-    dp = LocalDataProvider()
-    project = dp.create_project("Unresolved", str(tmp_db["video_dir"]))
-    with dp.Session.begin() as session:
-        session.add_all(
-            [
-                Video(
-                    video_id="unresolved",
-                    project_id=project.id,
-                    video_path=str(tmp_db["video_dir"] / "unknown.mp4"),
-                    camera_id=None,
-                    deployment_assignment="unresolved",
-                ),
-                Video(
-                    video_id="resolved",
-                    project_id=project.id,
-                    video_path=str(tmp_db["video_dir"] / "known.mp4"),
-                    camera_id="48_cam086",
-                    deployment_assignment="folder",
-                ),
-            ]
-        )
-    summary = dp.get_overview_stats(project.id)["camera_summary"]
-    assert {row["camera_id"] for row in summary} == {None, "48_cam086"}
-    assert all(
-        row["sample_video_path"] is None or isinstance(row["sample_video_path"], str)
-        for row in summary
-    )
-
-
 def test_unchanged_rescan_loads_assignment_inputs_once(tmp_db, mock_probe):
     root = tmp_db["video_dir"]
     for index in range(300):

@@ -1,9 +1,14 @@
-import asyncio
-import re
 from pathlib import Path
 
 from nicegui import run, ui
 
+from review_app.app.components.deployment_catalog import (
+    deployment_details_url,
+    render_deployment_clip_counts,
+    render_deployment_name,
+)
+from review_app.app.components.deployment_inventory import open_deployment_editor
+from review_app.app.components.deployment_thumbnail import render_deployment_thumbnail
 from review_app.app.components.location_map import MapMarker, render_location_map
 from review_app.app.state import get_active_project_id, get_language, reset_filters, update_filters
 from review_app.app.translations import t
@@ -12,13 +17,10 @@ from review_app.app.utils import (
     render_uninitialized_state,
 )
 from review_app.backend.path_matching import normalize_path_str
-from review_app.backend.utils import generate_thumbnail
 
 _BLANK_COLOR = "#4caf50"
 _NON_BLANK_COLOR = "#2196f3"
 _UNLABELED_COLOR = "#e0e0e0"
-# Acquire before submitting IO work so thumbnail jobs cannot occupy every worker.
-_THUMBNAIL_JOBS = asyncio.Semaphore(2)
 
 
 def _render_annotation_bar(
@@ -38,6 +40,76 @@ def _render_annotation_bar(
                 ui.element("div").style(f"flex:{flex:.3f}; background:{color}; height:100%")
 
 
+async def _render_deployment_overview(dp, pid, footage, go_review) -> None:
+    from review_app.app.config import get_user_data_dir
+
+    thumbnails_dir = get_user_data_dir() / "thumbnails"
+    with ui.card().classes("w-full q-pa-md q-mb-lg"):
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label(t("deployment_overview_title")).classes("text-subtitle1 font-weight-medium")
+            ui.link(t("deployment_view_all"), "/deployments")
+        host = ui.column().classes("w-full")
+
+    async def refresh(_identifier=None):
+        inventory = await run.io_bound(dp.get_project_deployments, pid) if pid and footage else []
+        if host.is_deleted:
+            return
+        by_id = {row["id"]: row for row in inventory}
+        host.clear()
+        with host:
+            if not footage:
+                ui.label(t("deployment_no_assigned_videos")).classes("text-grey-5")
+                return
+            with ui.element("div").classes("w-full overflow-x-auto"):
+                with ui.row().classes("no-wrap gap-md q-pb-sm items-stretch"):
+                    for group in footage:
+                        deployment_id = group["deployment_id"]
+                        deployment = by_id.get(deployment_id)
+                        total = group["total_videos"]
+                        labeled_pct = round(100 * group.get("labeled", 0) / max(total, 1))
+                        with ui.card().classes("q-pa-md shrink-0").style("width: 300px"):
+                            sample_path = group.get("sample_video_path")
+                            if deployment:
+                                with ui.link(target=deployment_details_url(deployment_id)).classes(
+                                    "w-full no-underline"
+                                ):
+                                    render_deployment_thumbnail(thumbnails_dir, sample_path)
+                                    render_deployment_name(deployment)
+                            else:
+                                render_deployment_thumbnail(thumbnails_dir, sample_path)
+                                ui.label(t("deployment_unresolved")).classes(
+                                    "text-body2 font-medium"
+                                )
+                            render_deployment_clip_counts(total, group.get("reference_videos", 0))
+                            ui.linear_progress(value=labeled_pct / 100, show_value=False).props(
+                                "color=primary style=height:4px"
+                            )
+                            with ui.row().classes(
+                                "w-full justify-between text-caption text-grey-7"
+                            ):
+                                ui.label(f"{labeled_pct}% {t('col_labeled').lower()}")
+                                ui.label(f"{group.get('hours', 0):.1f}h")
+                            with ui.row().classes("gap-xs"):
+                                if total:
+                                    ui.button(
+                                        t("deployment_open_review"),
+                                        icon="rate_review",
+                                        on_click=lambda did=deployment_id: go_review(
+                                            selected_deployment=did or "unresolved"
+                                        ),
+                                    ).props("flat dense no-caps")
+                                if deployment:
+                                    ui.button(
+                                        t("deployment_edit"),
+                                        icon="edit",
+                                        on_click=lambda row=deployment: open_deployment_editor(
+                                            dp, pid, row, on_saved=refresh
+                                        ),
+                                    ).props("flat dense no-caps")
+
+    await refresh()
+
+
 async def setup_overview():
     from review_app.app.entry_point import shared_header
 
@@ -50,6 +122,12 @@ async def setup_overview():
     shared_header()
 
     pid = get_active_project_id()
+
+    def go_review(**filters):
+        reset_filters()
+        update_filters(**filters)
+        ui.navigate.to("/review")
+
     if not await run.io_bound(dp.has_videos_in_db, pid):
         with ui.column().classes("w-full q-pa-lg items-center"):
             ui.label(t("no_videos_synced")).classes("text-h6 text-grey-6")
@@ -57,19 +135,18 @@ async def setup_overview():
             ui.button(
                 t("go_to_settings"), on_click=lambda: ui.navigate.to("/settings"), icon="settings"
             )
+        if pid:
+            with ui.column().classes("w-full q-pa-lg").style("max-width: 1600px; margin: 0 auto"):
+                await _render_deployment_overview(dp, pid, [], go_review)
         return
 
+    deployment_summary = await run.io_bound(dp.get_deployment_summary, pid) if pid else None
     stats, locations = (
         await run.io_bound(dp.get_overview_stats, pid),
         await run.io_bound(dp.get_video_locations, pid),
     )
     if stats is None:
         return
-
-    def go_review(**filters):
-        reset_filters()
-        update_filters(**filters)
-        ui.navigate.to("/review")
 
     with ui.column().classes("w-full q-pa-lg").style("max-width: 1600px; margin: 0 auto"):
         bindings = await run.io_bound(dp.list_assignments, pid)
@@ -123,34 +200,30 @@ async def setup_overview():
                         on_click=lambda: go_review(selected_is_review_later=True),
                     ).props("outline")
 
-        deployment_summary = (
-            await run.io_bound(dp.get_deployment_summary, pid)
-            if pid
-            else {"deployments": 0, "references": 0, "unresolved": 0, "unmatched_references": 0}
-        )
-        with ui.card().classes("w-full q-pa-md q-mb-md"):
-            with ui.row().classes("w-full justify-between items-center"):
-                ui.label(t("deployment_count", count=deployment_summary["deployments"])).classes(
-                    "text-subtitle1"
-                )
-                with ui.row().classes("items-center gap-2"):
-                    if deployment_summary["unmatched_references"]:
+        if deployment_summary and deployment_summary["has_pending_deployment_issues"]:
+            with ui.card().classes("w-full q-pa-md q-mb-md"):
+                with ui.row().classes("w-full justify-between items-center"):
+                    ui.label(
+                        t("deployment_count", count=deployment_summary["deployments"])
+                    ).classes("text-subtitle1")
+                    with ui.row().classes("items-center gap-2"):
+                        if deployment_summary["has_pending_reference_reviews"]:
+                            ui.button(
+                                t("deployment_review_references"),
+                                icon="playlist_add_check",
+                                on_click=lambda: ui.navigate.to("/deployments?review=references"),
+                            )
                         ui.button(
-                            t("deployment_review_references"),
-                            icon="playlist_add_check",
-                            on_click=lambda: ui.navigate.to("/deployments?review=references"),
-                        )
-                    ui.button(
-                        t("deployment_view"),
-                        icon="list_alt",
-                        on_click=lambda: ui.navigate.to("/deployments"),
-                    ).props("outline")
-            ui.label(t("deployment_summary", **deployment_summary)).classes(
-                "text-caption text-grey-6"
-            )
+                            t("deployment_view"),
+                            icon="list_alt",
+                            on_click=lambda: ui.navigate.to("/deployments"),
+                        ).props("outline")
+                ui.label(t("deployment_summary", **deployment_summary)).classes(
+                    "text-caption text-grey-6"
+                )
 
         # Stat cards
-        with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
+        with ui.row().classes("w-full gap-md q-mb-lg"):
             stat_cards = [
                 (t("stat_total_videos"), int(v.get("total", 0))),
                 (t("stat_cameras"), int(v.get("cameras", 0))),
@@ -172,7 +245,7 @@ async def setup_overview():
         missing_videos_df = stats.get("missing_videos")
         missing_count = 0 if missing_videos_df is None else len(missing_videos_df)
         if missing_count:
-            with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
+            with ui.row().classes("w-full gap-md q-mb-lg"):
                 with ui.card().classes("col q-pa-md"):
                     with (
                         ui.expansion(
@@ -204,7 +277,7 @@ async def setup_overview():
         non_blank = int(lb.get("non_blank", 0))
         unlabeled = max(total - blank - non_blank, 0)
 
-        with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
+        with ui.row().classes("w-full gap-md q-mb-lg"):
             with ui.card().classes("col q-pa-md"):
                 ui.label(t("annotation_progress")).classes(
                     "text-subtitle1 font-weight-medium q-mb-md"
@@ -225,7 +298,7 @@ async def setup_overview():
         # Species and behaviors (side by side)
         species_map = await run.io_bound(dp.get_species_display_map, get_language())
 
-        with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
+        with ui.row().classes("w-full gap-md q-mb-lg"):
             with ui.card().classes("col q-pa-md"):
                 ui.label(t("species_obs_title")).classes(
                     "text-subtitle1 font-weight-medium q-mb-md"
@@ -288,85 +361,10 @@ async def setup_overview():
                 else:
                     ui.label(t("no_behavior_yet")).classes("text-grey-5")
 
-        # Camera cards
-        with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
-            with ui.card().classes("w-full q-pa-md q-mb-lg"):
-                ui.label(t("camera_summary_title")).classes(
-                    "text-subtitle1 font-weight-medium q-mb-md"
-                )
-                camera_summary = stats.get("camera_summary", [])
-                if camera_summary:
-                    from review_app.app.config import get_user_data_dir
-
-                    thumbnails_dir = get_user_data_dir() / "thumbnails"
-
-                    with ui.scroll_area().style("width: 100%; height: 400px"):
-                        with ui.row().classes("no-wrap gap-md q-pb-sm"):
-                            for cam in camera_summary:
-                                labeled_pct = round(
-                                    100 * cam["labeled"] / max(cam["total_videos"], 1)
-                                )
-                                cam_id = cam["camera_id"]
-                                safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", cam_id or "unknown")
-                                thumb_path = thumbnails_dir / f"{safe_name}.jpg"
-                                sample_path = cam.get("sample_video_path")
-                                with (
-                                    ui.card()
-                                    .classes("q-pa-md cursor-pointer")
-                                    .style("min-width: 280px; max-width: 340px")
-                                    .on("click", lambda c=cam_id: go_review(selected_camera=c))
-                                ):
-                                    if thumb_path.exists():
-                                        ui.image(
-                                            f"/thumbnails/{safe_name}.jpg?v={int(thumb_path.stat().st_mtime)}"
-                                        ).style("width: 100%; border-radius: 4px").classes(
-                                            "q-mb-xs"
-                                        )
-                                    elif sample_path:
-                                        img_el = (
-                                            ui.image("")
-                                            .style("width: 100%; border-radius: 4px")
-                                            .classes("q-mb-xs")
-                                        )
-
-                                        async def _load_thumb(
-                                            sp=Path(normalize_path_str(sample_path)),
-                                            tp=thumb_path,
-                                            el=img_el,
-                                            sn=safe_name,
-                                        ):
-                                            async with _THUMBNAIL_JOBS:
-                                                if el.is_deleted:
-                                                    return
-                                                await run.io_bound(generate_thumbnail, sp, tp)
-                                                if not el.is_deleted and tp.exists():
-                                                    el.set_source(
-                                                        f"/thumbnails/{sn}.jpg?v={int(tp.stat().st_mtime)}"
-                                                    )
-
-                                        asyncio.create_task(_load_thumb())
-                                    ui.label(cam_id or t("col_camera")).classes(
-                                        "text-body2 font-weight-medium ellipsis"
-                                    ).style("max-width: 220px")
-                                    ui.linear_progress(
-                                        value=labeled_pct / 100, show_value=False
-                                    ).props("color=primary style=height:4px").classes("q-my-xs")
-                                    with ui.row().classes("w-full justify-between items-center"):
-                                        ui.label(
-                                            f"{labeled_pct}% {t('col_labeled').lower()}"
-                                        ).classes("text-caption text-grey-6")
-                                    with ui.row().classes("w-full justify-between"):
-                                        ui.label(
-                                            f"{cam['total_videos']} {t('col_total').lower()}"
-                                        ).classes("text-caption text-grey-5")
-                                        ui.label(f"{cam['hours']:.1f}h").classes(
-                                            "text-caption text-grey-5"
-                                        )
-                else:
-                    ui.label(t("no_camera_data")).classes("text-grey-5")
+        await _render_deployment_overview(dp, pid, stats["deployment_footage"], go_review)
 
         # Assignment summary
-        with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
+        with ui.row().classes("w-full gap-md q-mb-lg"):
             with ui.card().classes("col q-pa-md"):
                 with ui.row().classes("w-full justify-between items-center q-mb-md"):
                     ui.label(t("assignment_summary_title")).classes(
@@ -426,7 +424,7 @@ async def setup_overview():
                     ui.label(t("no_camera_data")).classes("text-grey-5")
         # Location map
         if locations:
-            with ui.row().classes("w-full q-col-gutter-md q-mb-lg"):
+            with ui.row().classes("w-full gap-md q-mb-lg"):
                 with ui.card().classes("col q-pa-md"):
                     ui.label(t("location_map_title")).classes(
                         "text-subtitle1 font-weight-medium q-mb-md"

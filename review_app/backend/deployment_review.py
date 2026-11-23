@@ -36,16 +36,22 @@ def group_deployment_folders(videos, links, *, ordinary=None):
                 "ordinary": 0,
                 "references": 0,
                 "unresolved": 0,
+                "unresolved_references": 0,
                 "unmatched_references": 0,
                 "exceptions": 0,
                 "missing": 0,
                 "assignments": Counter(),
+                "reference_deployments": set(),
                 "link": linked.get(key),
+                "ordinary_unavailable": False,
+                "new_comparison_candidates": [],
+                "review_note": None,
             }
         group = groups[key]
         group["total"] += 1
         group["references" if video["reference"] else "ordinary"] += 1
         group["unresolved"] += video["deployment_id"] is None
+        group["unresolved_references"] += video["reference"] and video["deployment_id"] is None
         group["unmatched_references"] += bool(
             video["reference"]
             and video["deployment_id"]
@@ -54,14 +60,20 @@ def group_deployment_folders(videos, links, *, ordinary=None):
         group["exceptions"] += video["assignment"] == "manual"
         group["missing"] += video["missing"]
         group["assignments"][video["deployment"]] += 1
+        if video["reference"] and video["deployment_id"]:
+            group["reference_deployments"].add(video["deployment_id"])
     for group in groups.values():
+        group["reference_deployments"] = sorted(group["reference_deployments"])
         group["assignments"] = [
             {"deployment": label, "count": count}
             for label, count in sorted(
                 group["assignments"].items(), key=lambda item: item[0] or ""
             )
         ]
-        group["needs_attention"] = bool(group["unresolved"] or group["unmatched_references"])
+        group["needs_reference_review"] = bool(
+            group["unmatched_references"] or group["unresolved_references"]
+        )
+        group["needs_attention"] = bool(group["unresolved"] or group["needs_reference_review"])
     return sorted(
         groups.values(), key=lambda row: (row["folder"].casefold(), row["root_id"] or "")
     )
@@ -206,6 +218,22 @@ def rank_folder_deployments(folder, inventory, limit=5, *, ordinary_deployments=
             )
         )
     return [row for _, row in sorted(ranked, key=lambda pair: pair[0])[:limit]]
+
+
+def available_folder_candidates(folder, inventory, ordinary):
+    """Identify plausible available matches strong enough to reopen folder review."""
+    candidates = rank_folder_deployments(
+        folder | {"unmatched_references": True},
+        inventory,
+        limit=len(inventory),
+        ordinary_deployments=ordinary,
+    )
+    mismatches = {"deployment_reason_other_camera", "deployment_reason_other_transect"}
+    return ordinary.intersection(folder["reference_deployments"]) | {
+        row["id"]
+        for row in candidates
+        if row["distance"] == 0 and not mismatches.intersection(row["reasons"])
+    }
 
 
 def summarize_folder_preview(preview):

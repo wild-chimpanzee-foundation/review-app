@@ -106,13 +106,13 @@ async def test_setup_routes_flagged_reference_folders_after_sync(
             created = state.get_active_project_id()
             assert dp.get_project_video_count(created) == 4
             assert attempts == [created] * (2 if review_now else 1)
-            await user.should_see(t("deployment_review_preview_help"), retries=20)
+            await user.should_see(marker="deployment-review-source", retries=20)
             user.find(kind=ui.button, content=t("deployment_review_skip")).click()
             await user.should_see(t("deployment_review_position", current=2, total=2), retries=20)
-            await user.should_see(t("deployment_review_preview_help"), retries=20)
+            await user.should_see(marker="deployment-review-source", retries=20)
             await user.should_see(marker="deployment-review-workspace")
             user.find(kind=ui.button, content=t("deployment_manage")).click()
-            await user.should_see(t("deployment_management_help"), retries=20)
+            await user.should_see(t("deployment_catalog_title"), retries=20)
             assert user.back_history[-1] == "/deployments"
     finally:
         state.reset_app_state(keep_prefs=False)

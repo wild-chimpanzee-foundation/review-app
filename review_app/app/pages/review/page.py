@@ -130,11 +130,12 @@ class ReviewPage:
         await render_filter_drawer_body(self)
 
 
-def _render_no_videos_match():
+async def _render_no_videos_match(dp):
     filters = get_filters()
     label_map = {
         "search_query": t("search"),
         "selected_camera": t("camera_filter"),
+        "selected_deployment": t("deployment_filter"),
         "selected_possible_species_group": f"{t('filter_section_model')} · {t('group_label')}",
         "selected_possible_species": t("species_model_filter"),
         "selected_model_blank": t("model_blank_filter"),
@@ -157,7 +158,18 @@ def _render_no_videos_match():
             continue
         if isinstance(val, list) and not val:
             continue
-        if isinstance(val, str):
+        if key == "selected_deployment":
+            display = t("deployment_unresolved")
+            if val != "unresolved":
+                pid = get_active_project_id()
+                deployments = await run.io_bound(dp.get_project_deployments, pid) if pid else []
+                deployment = next((row for row in deployments if row["id"] == val), None)
+                display = (
+                    deployment["name"] or deployment["deployment_id"]
+                    if deployment
+                    else t("deployment_error_target")
+                )
+        elif isinstance(val, str):
             display = val
         elif isinstance(val, list):
             display = ", ".join(str(v) for v in val)
@@ -340,7 +352,7 @@ async def _render_video_section_body(page: ReviewPage):
     dp = page.dp
     queue = get_queue()
     if not queue:
-        _render_no_videos_match()
+        await _render_no_videos_match(dp)
         return
 
     current_idx = get_current_idx()
@@ -1012,19 +1024,17 @@ async def setup_review():
                 let best = 3, bestDiff = Infinity;
                 __SPEED_STEPS.forEach((s, i) => { const d = Math.abs(s - videoEl.playbackRate); if (d < bestDiff) { bestDiff = d; best = i; } });
                 const newRateD = __SPEED_STEPS[Math.min(best + 1, __SPEED_STEPS.length - 1)];
-                videoEl.playbackRate = newRateD;
-                const speedSelD = document.querySelector('[id^="vp-speed-"]');
+                const speedSelD = videoEl.closest('[id^="vp-wrap-"]')?.querySelector('[id^="vp-speed-"]');
                 if (speedSelD) { speedSelD.value = Number.isInteger(newRateD) ? newRateD.toFixed(1) : String(newRateD); speedSelD.dispatchEvent(new Event('change')); }
-                videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRateD }));
+                videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: videoEl.playbackRate }));
             } else if (e.key === 's' || e.key === 'S') {
                 e.preventDefault();
                 let best = 3, bestDiff = Infinity;
                 __SPEED_STEPS.forEach((s, i) => { const d = Math.abs(s - videoEl.playbackRate); if (d < bestDiff) { bestDiff = d; best = i; } });
                 const newRateS = __SPEED_STEPS[Math.max(best - 1, 0)];
-                videoEl.playbackRate = newRateS;
-                const speedSelS = document.querySelector('[id^="vp-speed-"]');
+                const speedSelS = videoEl.closest('[id^="vp-wrap-"]')?.querySelector('[id^="vp-speed-"]');
                 if (speedSelS) { speedSelS.value = Number.isInteger(newRateS) ? newRateS.toFixed(1) : String(newRateS); speedSelS.dispatchEvent(new Event('change')); }
-                videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: newRateS }));
+                videoEl.dispatchEvent(new CustomEvent('speedchange', { detail: videoEl.playbackRate }));
             } else if (e.key === ']') {
                 e.preventDefault();
                 const brightSlider = document.querySelector('[id^="vp-brightness-"]');

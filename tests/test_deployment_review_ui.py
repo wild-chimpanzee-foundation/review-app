@@ -55,6 +55,7 @@ async def test_reference_review_compares_first_clips_and_disables_self_link(
     left_second = root / ref448 / "b448.mp4"
     second_folder = root / ref559 / "a559.mp4"
     target_first = root / cam489 / "a489.mp4"
+    target_second = root / cam489 / "videos/z489.mp4"
     target_alternate = root / cam559 / "a559-ordinary.mp4"
     for clip in (
         left_first,
@@ -63,7 +64,7 @@ async def test_reference_review_compares_first_clips_and_disables_self_link(
         target_first,
         target_alternate,
         root / cam489 / "ref/00-reference.mp4",
-        root / cam489 / "z489.mp4",
+        target_second,
     ):
         clip.parent.mkdir(parents=True, exist_ok=True)
         clip.touch()
@@ -77,14 +78,18 @@ async def test_reference_review_compares_first_clips_and_disables_self_link(
     try:
         async with user_simulation() as user:
 
-            @ui.page("/deployments")
+            @ui.page("/deployments", reconnect_timeout=3)
             async def deployments(review: str = ""):
                 await gui.deployments_page(review=review)
 
             await user.open("/deployments")
+            await user.should_see(marker="deployment-group-matched", retries=20)
+            for group, deployment in (("matched", cam489), ("no_reference", cam559)):
+                user.find(kind=ui.tab, marker=f"deployment-group-{group}").click()
+                await user.should_see(marker=f"deployment-card-{inventory[deployment]}")
             await user.should_see(kind=ui.button, content=t("deployment_review_open"), retries=20)
             user.find(kind=ui.button, content=t("deployment_review_open")).click()
-            await user.should_see(t("deployment_review_reference_mismatch"), retries=20)
+            await user.should_see(marker="deployment-review-source", retries=20)
             assert not any(
                 isinstance(element, ui.dialog) and element.value
                 for element in user.client.elements.values()
@@ -96,9 +101,36 @@ async def test_reference_review_compares_first_clips_and_disables_self_link(
             assert picker.value == inventory[cam489]
             left = await player_for(user, "source", streamed_clips, left_first)
             await player_for(user, "target", streamed_clips, target_first)
+            path_comparison = user.find(marker="deployment-review-path-comparison")
+            rendered = next(iter(path_comparison.elements))
+            parts = [item.content for item in rendered.descendants() if isinstance(item, ui.html)]
+            assert parts[:4] == [
+                '<span class="text-positive">DS_M1Phase5_E3</span>',
+                '<span class="text-positive">DS_M1Phase5_E3</span>',
+                '<span class="text-positive">T44</span>',
+                '<span class="text-positive">T44</span>',
+            ]
+            assert "underline" in parts[4] and "448" in parts[4]
+            assert "underline" in parts[5] and "489" in parts[5]
+            comparison = next(
+                iter(user.find(kind=ui.select, marker="deployment-review-target-clip").elements)
+            )
+            assert list(comparison.options.values()) == [target_first.name, target_second.name]
+            comparison.set_value(next(reversed(comparison.options)))
+            await player_for(user, "target", streamed_clips, target_second)
+            assert rendered.is_deleted
+            rendered = next(iter(user.find(marker="deployment-review-path-comparison").elements))
+            parts = [item.content for item in rendered.descendants() if isinstance(item, ui.html)]
+            assert parts[-2:] == [
+                "—",
+                '<span class="text-warning font-semibold underline">videos</span>',
+            ]
+            assert not left.is_deleted
+            assert picker.value == inventory[cam489]
             assert dp.get_deployment_summary(project.id)["unmatched_references"] == 3
             picker.set_value(inventory[cam559])
             right = await player_for(user, "target", streamed_clips, target_alternate)
+            assert comparison.is_deleted
             assert not left.is_deleted
             source = next(
                 iter(user.find(kind=ui.select, marker="deployment-review-source").elements)
@@ -115,6 +147,7 @@ async def test_reference_review_compares_first_clips_and_disables_self_link(
             picker.set_value(inventory[ref448])
             await user.should_see(t("deployment_review_no_change"), retries=20)
             await user.should_see(t("deployment_review_no_comparison_clip"), retries=20)
+            await user.should_not_see(marker="deployment-review-path-comparison")
             apply = user.find(kind=ui.button, content=t("deployment_review_apply_next"))
             assert not next(iter(apply.elements)).enabled
 
@@ -122,7 +155,6 @@ async def test_reference_review_compares_first_clips_and_disables_self_link(
             await user.should_see(t("deployment_review_position", current=2, total=2), retries=20)
             await player_for(user, "source", streamed_clips, second_folder)
             await player_for(user, "target", streamed_clips, target_alternate)
-            await user.should_not_see(t("deployment_review_reference_mismatch"))
             await user.should_see(
                 t("deployment_preview_counts", changed=1, unchanged=0, blocked=0), retries=20
             )
@@ -131,6 +163,105 @@ async def test_reference_review_compares_first_clips_and_disables_self_link(
                 t("deployment_review_complete", applied=1, skipped=1), retries=20
             )
             assert dp.get_deployment_summary(project.id)["unmatched_references"] == 2
+    finally:
+        state.reset_app_state(keep_prefs=False)
+
+
+async def test_reference_review_warns_when_matching_footage_is_likely_missing(
+    provider_with_project, streamed_clips
+):
+    dp, project, directory = provider_with_project
+    folder = "DS_M1Phase5_E2/T136/136_cam296_0185142_1107244_20260208_VR"
+    clip = Path(directory.path) / folder / "DSCF0002.mp4"
+    clip.parent.mkdir(parents=True)
+    clip.touch()
+    dp.sync_videos(active_project_id=project.id)
+    reference_deployment = next(
+        row["id"]
+        for row in dp.get_project_deployments(project.id)
+        if row["deployment_id"] == folder
+    )
+    state.set_data_provider(dp)
+    state.set_annotator_name("Alice")
+    state.set_active_project(project.id)
+    gui = GUI()
+    try:
+        async with user_simulation() as user:
+
+            @ui.page("/deployments", reconnect_timeout=3)
+            async def deployments(review: str = "", deployment: str = ""):
+                await gui.deployments_page(review=review, deployment=deployment)
+
+            @ui.page("/review", reconnect_timeout=3)
+            async def review_queue():
+                assert state.get_filters()["selected_deployment"] == reference_deployment
+                ui.label("Deployment review queue opened")
+
+            await user.open("/deployments?review=references")
+            await user.should_see(t("deployment_review_likely_missing_ordinary"), retries=20)
+            details = user.find(kind=ui.expansion, content=t("deployment_review_folder_details"))
+            next(iter(details.elements)).open()
+            user.find(kind=ui.button, content=t("deployment_add")).click()
+            id_label = t("deployment_field_required", field=t("deployment_field_deployment_id"))
+            await user.should_see(kind=ui.input, content=id_label)
+            deployment_id = next(iter(user.find(kind=ui.input, content=id_label).elements))
+            assert deployment_id.value == folder
+            await user.should_see(
+                kind=ui.input, content=t("deployment_field_optional", field=t("deployment_name"))
+            )
+
+            new_id = folder.removesuffix("_VR")
+            deployment_id.set_value(new_id)
+            user.find(kind=ui.button, content=t("deployment_save")).click()
+            await user.should_not_see(kind=ui.button, content=t("deployment_save"), retries=20)
+            assert any(
+                row["deployment_id"] == new_id and row["name"] is None
+                for row in dp.get_project_deployments(project.id)
+            )
+            await user.should_see(t("deployment_review_no_comparison_clip"), retries=20)
+            user.find(kind=ui.button, content=t("deployment_review_mark_unavailable")).click()
+            note_label = t("deployment_field_optional", field=t("deployment_field_notes"))
+            await user.should_see(kind=ui.textarea, content=note_label)
+            note = next(iter(user.find(kind=ui.textarea, content=note_label).elements))
+            note.set_value("Camera may have been stolen")
+            user.find(kind=ui.button, content=t("save")).click()
+            await user.should_see(
+                t("deployment_review_complete", applied=1, skipped=0), retries=20
+            )
+            summary = dp.get_deployment_summary(project.id)
+            assert not summary["has_pending_reference_reviews"]
+            assert not summary["has_pending_deployment_issues"]
+
+            await user.open("/deployments")
+            card_marker = f"deployment-card-{reference_deployment}"
+            await user.should_see(marker="deployment-group-no_ordinary", retries=20)
+            target_tab = user.find(kind=ui.tab, marker="deployment-group-no_ordinary")
+            tab = next(iter(target_tab.elements))
+            assert tab.props["label"] == f"{t('deployment_group_no_ordinary')} (1)"
+            target_tab.click()
+            await user.should_see(marker=card_marker, retries=20)
+            await user.should_see(t("deployment_reference_count", count=1))
+            await user.should_not_see(t("deployment_advanced_video_tools"))
+            user.find(kind=ui.link, marker=card_marker).click()
+            await user.should_see(t("deployment_catalog_folder_clips", count=1), retries=20)
+            await user.should_see(folder)
+            user.find(kind=ui.button, content=t("deployment_catalog_review_folder")).click()
+            await user.should_see(t("deployment_review_ordinary_unavailable"), retries=20)
+            await user.should_see("Camera may have been stolen")
+            user.find(kind=ui.button, content=t("deployment_review_reopen")).click()
+            await user.should_see(t("deployment_review_likely_missing_ordinary"), retries=20)
+            assert dp.get_deployment_summary(project.id)["has_pending_reference_reviews"]
+            user.find(kind=ui.button, content=t("deployment_manage")).click()
+            await user.should_see(t("deployment_catalog_folder_clips", count=1), retries=20)
+            user.find(kind=ui.button, content=t("deployment_edit")).click()
+            name_label = t("deployment_field_optional", field=t("deployment_name"))
+            await user.should_see(kind=ui.input, content=name_label)
+            name = next(iter(user.find(kind=ui.input, content=name_label).elements))
+            name.set_value("Cam 296")
+            user.find(kind=ui.button, content=t("deployment_save")).click()
+            await user.should_see(kind=ui.label, content="Cam 296", retries=20)
+            user.find(kind=ui.button, content=t("deployment_open_review")).click()
+            await user.should_see("Deployment review queue opened", retries=20)
     finally:
         state.reset_app_state(keep_prefs=False)
 
@@ -196,7 +327,7 @@ async def test_deployment_review_converts_clip_and_previews_before_apply(
                 await gui.deployments_page(review=review)
 
             await user.open("/deployments?review=references")
-            await user.should_see(t("deployment_review_preview_help"), retries=20)
+            await user.should_see(marker="deployment-review-source", retries=20)
             await user.should_not_see(kind=ui.button, content=t("deployment_preview"))
             next(
                 iter(
@@ -251,5 +382,130 @@ async def test_deployment_review_converts_clip_and_previews_before_apply(
             apply_button.click()
             await user.should_see(t("deployment_review_position", current=2, total=2), retries=20)
             assert dp.get_deployment_summary(project.id)["unmatched_references"] == 1
+    finally:
+        state.reset_app_state(keep_prefs=False)
+
+
+async def test_overview_shows_reference_thumbnails_and_omits_empty_deployments(
+    provider_with_project, tmp_path, monkeypatch
+):
+    dp, project, directory = provider_with_project
+    reference = Path(directory.path) / "test_camera_VR" / "reference.mp4"
+    reference.parent.mkdir()
+    reference.touch()
+    dp.sync_videos(active_project_id=project.id)
+    empty_id = dp.save_deployment(project.id, {"deployment_id": "Former deployment"})
+    samples = []
+
+    def thumbnail(source, _destination):
+        samples.append(source)
+        return False
+
+    monkeypatch.setattr("review_app.app.config.get_user_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "review_app.app.components.deployment_catalog.get_user_data_dir", lambda: tmp_path
+    )
+    monkeypatch.setattr(
+        "review_app.app.components.deployment_thumbnail.generate_thumbnail", thumbnail
+    )
+    state.set_data_provider(dp)
+    state.set_annotator_name("Alice")
+    state.set_active_project(project.id)
+    gui = GUI()
+    try:
+        async with user_simulation() as user:
+
+            @ui.page("/overview", reconnect_timeout=3)
+            async def overview():
+                await gui.overview_page()
+
+            @ui.page("/deployments", reconnect_timeout=3)
+            async def deployments():
+                await gui.deployments_page()
+
+            await user.open("/overview")
+            await user.should_see(t("deployment_reference_count", count=1), retries=20)
+            await user.should_see(kind=ui.button, content=t("deployment_view"))
+            await user.should_not_see("Former deployment")
+            for _ in range(20):
+                if reference in samples:
+                    break
+                await asyncio.sleep(0.05)
+            assert reference in samples
+
+            samples.clear()
+            user.find(kind=ui.link, content=t("deployment_view_all")).click()
+            await user.should_see(marker=f"deployment-card-{empty_id}", retries=20)
+            await user.should_see(t("deployment_no_assigned_videos"))
+            user.find(kind=ui.tab, marker="deployment-group-no_ordinary").click()
+            await user.should_see(t("deployment_reference_count", count=1))
+            for _ in range(20):
+                if reference in samples:
+                    break
+                await asyncio.sleep(0.05)
+            assert reference in samples
+    finally:
+        state.reset_app_state(keep_prefs=False)
+
+
+async def test_overview_edits_deployment_and_opens_filtered_species_review(
+    provider_with_project, monkeypatch
+):
+    dp, project, _ = provider_with_project
+    (deployment,) = dp.get_project_deployments(project.id)
+    monkeypatch.setattr(
+        "review_app.app.components.deployment_thumbnail.generate_thumbnail", lambda *_: False
+    )
+    state.set_data_provider(dp)
+    state.set_annotator_name("Alice")
+    state.set_active_project(project.id)
+    state.update_filters(selected_camera="another-camera")
+    gui = GUI()
+    try:
+        async with user_simulation() as user:
+
+            @ui.page("/overview", reconnect_timeout=3)
+            async def overview():
+                await gui.overview_page()
+
+            @ui.page("/deployments", reconnect_timeout=3)
+            async def deployments(deployment: str = ""):
+                await gui.deployments_page(deployment=deployment)
+
+            @ui.page("/review", reconnect_timeout=3)
+            async def review():
+                filters = state.get_filters()
+                assert filters["selected_deployment"] == deployment["id"]
+                assert filters["selected_camera"] == "All"
+                ui.label("Filtered review opened")
+
+            await user.open("/overview")
+            await user.should_see(t("deployment_overview_title"), retries=30)
+            await user.should_not_see(kind=ui.button, content=t("deployment_view"))
+            await user.should_see(kind=ui.button, content=t("deployment_edit"), retries=30)
+            user.find(kind=ui.button, content=t("deployment_edit")).click()
+            name_label = t("deployment_field_optional", field=t("deployment_name"))
+            await user.should_see(kind=ui.input, content=name_label)
+            name = next(iter(user.find(kind=ui.input, content=name_label).elements))
+            name.set_value("New deployment name")
+            user.find(kind=ui.button, content=t("deployment_save")).click()
+            await user.should_see(kind=ui.label, content="New deployment name", retries=20)
+            assert dp.get_project_deployments(project.id)[0]["name"] == "New deployment name"
+            user.find(kind=ui.button, content=t("deployment_open_review")).click()
+            await user.should_see("Filtered review opened", retries=20)
+            await user.open("/overview")
+            await user.should_see(t("deployment_ordinary_count", count=2), retries=20)
+            user.find(kind=ui.link, content=t("deployment_view_all")).click()
+            await user.should_see(marker="deployment-group-no_reference", retries=20)
+            await user.open("/overview")
+            await user.should_see(kind=ui.label, content="New deployment name", retries=20)
+            detail = next(
+                link
+                for link in user.client.elements.values()
+                if isinstance(link, ui.link)
+                and str(link.props["href"]).endswith(f"?deployment={deployment['id']}")
+            )
+            await user.open(detail.props["href"])
+            await user.should_see(t("deployment_catalog_folder_clips", count=2), retries=20)
     finally:
         state.reset_app_state(keep_prefs=False)

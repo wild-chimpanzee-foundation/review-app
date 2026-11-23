@@ -24,11 +24,12 @@ async def render_filter_drawer_body(page):
     species_groups = page.catalog.groups
     project_id = get_active_project_id()
     language = get_language()
-    filter_options, behavior_display_map, all_tags = await run.io_bound(
+    filter_options, behavior_display_map, all_tags, deployments = await run.io_bound(
         lambda: (
             dp.get_queue_filter_options(project_id),
             dp.get_behavior_display_map(lang=language),
             dp.get_all_tags(),
+            dp.get_project_deployments(project_id) if project_id else [],
         )
     )
     filters = get_filters()
@@ -52,6 +53,20 @@ async def render_filter_drawer_body(page):
                 label=t("camera_filter"),
                 options={v: v if v != "All" else t("all_option") for v in ["All"] + camera_values},
                 value=selected_camera,
+                with_input=True,
+                on_change=lambda _: apply_filters(),
+            ).props("outlined dense class=full-width")
+
+            deployment_options = {
+                "All": t("all_option"),
+                "unresolved": t("deployment_unresolved"),
+                **{row["id"]: row["name"] or row["deployment_id"] for row in deployments},
+            }
+            selected_deployment = filters.get("selected_deployment", "All")
+            deployment_select = ui.select(
+                label=t("deployment_filter"),
+                options=deployment_options,
+                value=selected_deployment if selected_deployment in deployment_options else "All",
                 with_input=True,
                 on_change=lambda _: apply_filters(),
             ).props("outlined dense class=full-width")
@@ -293,6 +308,7 @@ async def render_filter_drawer_body(page):
             async def reset_filters():
                 search.value = ""
                 camera_select.value = "All"
+                deployment_select.value = "All"
                 possible_species_group_filter.value = ""
                 possible_species_filter.value = []
                 model_blank_filter.value = "All"
@@ -319,6 +335,7 @@ async def render_filter_drawer_body(page):
                 new_filters = {
                     "search_query": search.value,
                     "selected_camera": camera_select.value,
+                    "selected_deployment": deployment_select.value,
                     "selected_sort": sort_select.value,
                     "selected_sort_direction": sort_dir[0],
                     "selected_species": species_filter.value,

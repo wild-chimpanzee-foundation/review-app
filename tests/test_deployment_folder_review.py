@@ -1,5 +1,7 @@
 """Folder summaries, advisory matching, and confirmed correction flows; no UI tests."""
 
+from pathlib import Path
+
 import pytest
 from review_app.backend.db.models import Video
 from review_app.backend.deployment_review import rank_folder_deployments, summarize_folder_preview
@@ -232,6 +234,58 @@ def test_folder_summary_shows_manual_exceptions_and_confirmation_preserves_them(
     dp.apply_deployment_assignment(preview)
     with dp.Session() as session:
         assert session.get(Video, video_id).deployment_id == inventory_rows["7_cam536"]
+
+
+@pytest.mark.parametrize("suffix", ["_VR", "_voler_VR"])
+def test_unavailable_folder_reenters_review_when_matching_footage_arrives(
+    provider_with_project, suffix
+):
+    dp, project, directory = provider_with_project
+    root = Path(directory.path)
+    deployment = "DS_M1Phase5_E4/T98/98_Cam150_823536_1101825_20260212"
+    folder = deployment + suffix
+    reference = root / folder / "ref.mp4"
+    reference.parent.mkdir(parents=True)
+    reference.touch()
+    dp.sync_videos(active_project_id=project.id)
+
+    def current_folder():
+        return dp.get_deployment_folder(project.id, directory.id, folder)
+
+    _, [original], _ = current_folder()
+    dp.set_folder_ordinary_unavailable(project.id, directory.id, folder, "Camera may be stolen")
+    saved, [closed], _ = current_folder()
+    assert saved["ordinary_unavailable"]
+    assert not saved["needs_attention"]
+    assert closed["deployment_id"] == original["deployment_id"]
+    assert closed["assignment"] == original["assignment"]
+
+    unrelated = root / "T99/99_Cam150/ordinary.mp4"
+    unrelated.parent.mkdir(parents=True)
+    unrelated.touch()
+    dp.sync_videos(active_project_id=project.id)
+    assert current_folder()[0]["ordinary_unavailable"]
+
+    ordinary = root / deployment / "ordinary.mp4"
+    ordinary.parent.mkdir(parents=True)
+    ordinary.touch()
+    dp.sync_videos(active_project_id=project.id)
+    reopened, [reference_after_scan], _ = current_folder()
+    assert reopened["needs_attention"]
+    assert reference_after_scan["deployment_id"] == original["deployment_id"]
+    assert reopened["review_note"] == "Camera may be stolen"
+    assert dp.get_deployment_summary(project.id)["has_pending_reference_reviews"]
+    (target,) = reopened["new_comparison_candidates"]
+    preview = dp.preview_deployment_assignment(
+        project.id,
+        target_id=target,
+        action="folder",
+        folder={"root_id": directory.id, "path": folder},
+    )
+    dp.apply_deployment_assignment(preview)
+    matched, [clip], _ = current_folder()
+    assert not matched["needs_attention"]
+    assert clip["deployment_id"] == target
 
 
 def test_folder_review_uses_existing_stale_preview_guard(folders):

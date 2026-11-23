@@ -95,6 +95,17 @@ class DeploymentFolderLink(Base):
     source: Mapped[str] = mapped_column(String, default="manual", server_default="manual")
 
 
+class DeploymentFolderReview(Base):
+    __tablename__ = "deployment_folder_reviews"
+
+    project_dir_id: Mapped[str] = mapped_column(
+        String, ForeignKey("project_dirs.id", ondelete="CASCADE"), primary_key=True
+    )
+    folder_path: Mapped[str] = mapped_column(String, primary_key=True)
+    note: Mapped[str | None] = mapped_column(String)
+    available_candidates: Mapped[list[str]] = mapped_column(JSON)
+
+
 class Video(Base):
     __tablename__ = "videos"
     __table_args__ = (UniqueConstraint("video_path", "project_id", name="uq_video_path_project"),)

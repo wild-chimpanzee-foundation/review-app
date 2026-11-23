@@ -1,32 +1,32 @@
-"""Project administration for inventory, direct folder links and video exceptions."""
+"""Project deployments and footage assignment tools."""
 
 from nicegui import run, ui
 
+from review_app.app.components.deployment_catalog import (
+    render_deployment_catalog,
+    render_deployment_details,
+)
 from review_app.app.components.deployment_clip_preview import show_deployment_clip
 from review_app.app.components.deployment_folder_review import (
     render_assignment_preview,
     review_deployment_folders,
 )
-from review_app.app.components.deployment_inventory import render_inventory
+from review_app.app.components.deployment_inventory import (
+    deployment_error_message,
+    open_deployment_editor,
+    render_inventory,
+)
 from review_app.app.state import get_active_project_id
 from review_app.app.translations import t
 from review_app.app.utils import (
     get_or_create_data_provider,
     render_uninitialized_state,
-    user_error_message,
 )
-from review_app.backend.deployments import DEPLOYMENT_FIELDS, DeploymentInputError
 
 
-def _error(exc):
-    return (
-        t(exc.key, **exc.params)
-        if isinstance(exc, DeploymentInputError)
-        else user_error_message(exc)
-    )
-
-
-async def setup_deployments(*, review_references: bool = False):
+async def setup_deployments(
+    *, deployment: str = "", tools: bool = False, review_references: bool = False
+):
     from review_app.app.entry_point import shared_header
 
     shared_header()
@@ -39,10 +39,17 @@ async def setup_deployments(*, review_references: bool = False):
     with ui.column().classes("w-full q-pa-lg").style("max-width:1600px; margin:0 auto"):
         with ui.column().classes("w-full") as management_panel:
             ui.button(
-                t("nav_overview"), icon="arrow_back", on_click=lambda: ui.navigate.to("/overview")
+                t("deployment_catalog_title") if deployment or tools else t("nav_overview"),
+                icon="arrow_back",
+                on_click=lambda: ui.navigate.to(
+                    "/deployments" if deployment or tools else "/overview"
+                ),
             ).props("flat")
-            ui.label(t("deployment_manage")).classes("text-h5 text-primary")
-            ui.label(t("deployment_management_help")).classes("text-caption text-grey-6")
+            if tools:
+                ui.label(t("deployment_tools")).classes("text-h5 text-primary")
+                ui.label(t("deployment_management_help")).classes("text-caption text-grey-6")
+            elif not deployment:
+                ui.label(t("deployment_catalog_title")).classes("text-h5 text-primary")
             host = ui.column().classes("w-full")
         review_host = ui.column().classes("w-full")
         review_host.set_visibility(False)
@@ -52,7 +59,7 @@ async def setup_deployments(*, review_references: bool = False):
             management = await run.io_bound(dp.get_deployment_management, pid)
             inventory = await run.io_bound(dp.get_project_deployments, pid)
         except Exception as exc:
-            ui.notify(_error(exc), type="negative")
+            ui.notify(deployment_error_message(exc), type="negative")
             return
         host.clear()
         options = {"": t("deployment_unresolved")} | {
@@ -64,6 +71,13 @@ async def setup_deployments(*, review_references: bool = False):
         folders = [
             row
             | {
+                "review_status": (
+                    t("deployment_review_ordinary_unavailable")
+                    if row["ordinary_unavailable"]
+                    else t("deployment_review_match_found")
+                    if row["new_comparison_candidates"]
+                    else ""
+                ),
                 "root_path": roots.get(row["root_id"], ""),
                 "current": ", ".join(
                     f"{assignment['deployment'] or t('deployment_unresolved')}: {assignment['count']}"
@@ -73,46 +87,17 @@ async def setup_deployments(*, review_references: bool = False):
             for row in management["folders"]
         ]
 
-        async def edit_inventory(existing=None, *, on_saved=None):
-            dialog = ui.dialog()
-            with dialog, ui.card().classes("q-pa-lg").style("width:650px; max-width:95vw"):
-                ui.label(t("deployment_edit") if existing else t("deployment_add")).classes(
-                    "text-h6"
-                )
-                inputs = {}
-                for field in DEPLOYMENT_FIELDS:
-                    widget = ui.textarea if field == "notes" else ui.input
-                    inputs[field] = widget(field, value=(existing or {}).get(field) or "").classes(
-                        "w-full"
-                    )
-                    if field == "deployment_id" and existing:
-                        inputs[field].props("readonly")
-                status = ui.label("").classes("text-negative")
+        async def refresh_inventory(_identifier):
+            await reload()
 
-                async def save():
-                    save_button.disable()
-                    values = {key: widget.value for key, widget in inputs.items()}
-                    try:
-                        identifier = await run.io_bound(
-                            dp.save_deployment,
-                            pid,
-                            values,
-                            deployment_id=(existing or {}).get("id"),
-                        )
-                    except Exception as exc:
-                        status.set_text(_error(exc))
-                        save_button.enable()
-                        return
-                    dialog.close()
-                    if on_saved:
-                        await on_saved(identifier)
-                    else:
-                        await reload()
-
-                with ui.row():
-                    save_button = ui.button(t("deployment_save"), on_click=save)
-                    ui.button(t("cancel"), on_click=dialog.close).props("flat")
-            dialog.open()
+        async def edit_inventory(existing=None, *, initial_deployment_id="", on_saved=None):
+            open_deployment_editor(
+                dp,
+                pid,
+                existing,
+                initial_deployment_id=initial_deployment_id,
+                on_saved=on_saved or refresh_inventory,
+            )
 
         async def assignment_dialog(action="assign", folder=None):
             selected = [row["video_id"] for row in footage.selected]
@@ -165,7 +150,7 @@ async def setup_deployments(*, review_references: bool = False):
                             folder=folder,
                         )
                     except Exception as exc:
-                        error.set_text(_error(exc))
+                        error.set_text(deployment_error_message(exc))
                     else:
                         if requested != revision:
                             return
@@ -183,7 +168,7 @@ async def setup_deployments(*, review_references: bool = False):
                     try:
                         counts = await run.io_bound(dp.apply_deployment_assignment, preview)
                     except Exception as exc:
-                        error.set_text(_error(exc))
+                        error.set_text(deployment_error_message(exc))
                         # A new preview is required after an error, never retry a stale one.
                         invalidate()
                         return
@@ -237,11 +222,33 @@ async def setup_deployments(*, review_references: bool = False):
                 )
 
         if open_reference_review:
-            flagged = [row for row in folders if row["unmatched_references"]]
+            flagged = [row for row in folders if row["needs_reference_review"]]
             if flagged:
                 await show_review(flagged)
                 return
             ui.notify(t("deployment_review_empty"), type="info")
+
+        if not tools:
+            with host:
+                if existing := by_id.get(deployment):
+                    render_deployment_details(
+                        existing,
+                        videos,
+                        folders,
+                        management["links"],
+                        roots,
+                        edit=lambda: edit_inventory(existing),
+                        review_folder=show_review,
+                    )
+                else:
+                    render_deployment_catalog(
+                        inventory,
+                        videos,
+                        folders,
+                        add=edit_inventory,
+                        review_pending=show_review,
+                    )
+            return
 
         with host:
             with ui.row().classes("w-full items-center"):
@@ -276,7 +283,9 @@ async def setup_deployments(*, review_references: bool = False):
             ui.label(t("deployment_review_help")).classes("text-caption text-grey-6")
             with ui.row().classes("w-full items-center"):
                 folder_search = ui.input(t("deployment_search_folders")).classes("grow")
-                folder_attention = ui.checkbox(t("deployment_needs_attention"), value=True)
+                folder_attention = ui.checkbox(t("deployment_needs_attention"), value=True).mark(
+                    "deployment-folder-attention"
+                )
             folder_columns = [
                 {"name": key, "field": key, "label": label, "align": "left", "sortable": True}
                 for key, label in (
@@ -287,6 +296,7 @@ async def setup_deployments(*, review_references: bool = False):
                     ("unmatched_references", t("deployment_folder_unmatched")),
                     ("exceptions", t("deployment_folder_exceptions")),
                     ("current", t("deployment_folder_assignments")),
+                    ("review_status", t("deployment_status")),
                 )
             ]
             if len(management["roots"]) > 1:

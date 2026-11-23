@@ -3,6 +3,7 @@ Tests for delete_project, import_annotations_csv, and get_overview_stats.
 """
 
 import uuid
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -632,11 +633,13 @@ def test_overview_stats_project_filter(provider_with_project):
     assert stats["videos"]["total"] == 2
 
 
-def test_overview_stats_camera_summary(populated_provider):
+def test_overview_stats_includes_unresolved_footage(populated_provider):
     dp, _ = populated_provider
-    stats = dp.get_overview_stats()
-    cameras = {row["camera_id"] for row in stats["camera_summary"]}
-    assert cameras == {"cam_a", "cam_b"}
+    (group,) = dp.get_overview_stats()["deployment_footage"]
+    assert group["deployment_id"] is None
+    assert group["total_videos"] == 4
+    assert group["labeled"] == 3
+    assert Path(group["sample_video_path"]).name == "v2.mp4"
 
 
 def test_import_annotations_creates_safety_backup(clean_provider, tmp_db):

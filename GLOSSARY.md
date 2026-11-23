@@ -41,6 +41,10 @@ A reference video whose assigned deployment has no registered ordinary footage.
 This may indicate incomplete footage or an assignment needing attention, rather
 than an error; it is distinct from footage with no deployment assignment.
 
+**Ordinary footage unavailable**:
+A folder review outcome recording that matching ordinary footage is unavailable
+for the folder's reference footage.
+
 ### Review work and delegation
 
 **Allocation**:

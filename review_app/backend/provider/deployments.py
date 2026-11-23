@@ -19,6 +19,7 @@ from review_app.backend.camera_layout import deployment_key
 from review_app.backend.db.models import (
     Deployment,
     DeploymentFolderLink,
+    DeploymentFolderReview,
     DistanceIndividual,
     DistanceReviewTask,
     HandoffAssignment,
@@ -31,7 +32,10 @@ from review_app.backend.db.models import (
     Video,
     VideoTag,
 )
-from review_app.backend.deployment_review import group_deployment_folders
+from review_app.backend.deployment_review import (
+    available_folder_candidates,
+    group_deployment_folders,
+)
 from review_app.backend.deployments import (
     DeploymentInputError,
     relative_deployment_folder,
@@ -437,6 +441,27 @@ def reconcile_scanned(session, project_id, paths, new_paths):
     ]
     if not selected:
         return
+    reviewed = {
+        (row.project_dir_id, row.folder_path) for row in _folder_reviews(session, project_id)
+    }
+    if reviewed:
+        locations = _StoredLocations(roots)
+        reference_ids = {
+            identifier
+            for (identifier,) in session.query(Video.video_id).filter(
+                Video.project_id == project_id, _reference_tagged(session)
+            )
+        }
+        retained = []
+        for video, target in selected:
+            if video.video_id in reference_ids and video.video_path not in new_paths:
+                root, folder = locations.locate(video.video_path)
+                if root and (root.id, folder) in reviewed:
+                    continue
+            retained.append((video, target))
+        selected = retained
+    if not selected:
+        return
     dependencies = _AssignmentDependencies(session, project_id, [video for video, _ in selected])
     root_pairs = [(root.id, root.path) for root in roots]
     for video, target in selected:
@@ -577,6 +602,37 @@ def _fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def _folder_reviews(session, project_id):
+    return (
+        session.query(DeploymentFolderReview)
+        .join(ProjectDir)
+        .filter(ProjectDir.project_id == project_id)
+    )
+
+
+def _show_folder_review(folder, review, inventory, ordinary):
+    if review is None or not folder["references"]:
+        return
+    new_candidates = available_folder_candidates(folder, inventory, ordinary).difference(
+        review.available_candidates
+    )
+    folder["review_note"] = review.note
+    folder["ordinary_unavailable"] = not new_candidates
+    folder["new_comparison_candidates"] = sorted(new_candidates)
+    folder["needs_reference_review"] = bool(new_candidates)
+    folder["needs_attention"] = bool(
+        new_candidates or folder["unresolved"] > folder["unresolved_references"]
+    )
+
+
+def _apply_folder_reviews(folders, reviews, inventory, available):
+    by_folder = {(row.project_dir_id, row.folder_path): row for row in reviews}
+    for folder in folders:
+        _show_folder_review(
+            folder, by_folder.get((folder["root_id"], folder["folder"])), inventory, available
+        )
+
+
 class DeploymentMixin(ProviderBase):
     def get_deployment_summary(self, project_id):
         with self.Session.begin() as session:
@@ -590,45 +646,105 @@ class DeploymentMixin(ProviderBase):
             )
             ordinary = {did for did, tagged, count in groups if did and not tagged}
             unresolved = sum(count for did, tagged, count in groups if did is None)
+            unresolved_ordinary = any(did is None and not tagged for did, tagged, _ in groups)
             unmatched = sum(
                 count for did, tagged, count in groups if did and tagged and did not in ordinary
             )
+            pending = bool(unmatched or any(did is None and tagged for did, tagged, _ in groups))
+            reviews = _folder_reviews(session, project_id).all()
+            if reviews:
+                locations = _StoredLocations(_roots(session, project_id))
+                deployments = {
+                    row.id: row
+                    for row in session.query(Deployment).filter_by(project_id=project_id)
+                }
+                references = [
+                    _management_video(video, True, locations, deployments)
+                    for video in session.query(Video).filter(
+                        Video.project_id == project_id, reference
+                    )
+                ]
+                _, available = self._ordinary_deployments(session, project_id)
+                folders = group_deployment_folders(references, (), ordinary=ordinary)
+                _apply_folder_reviews(
+                    folders, reviews, self._comparison_inventory(deployments), available
+                )
+                pending = any(folder["needs_reference_review"] for folder in folders)
             return {
                 "deployments": session.query(Deployment).filter_by(project_id=project_id).count(),
                 "references": sum(count for did, tagged, count in groups if tagged),
                 "unresolved": unresolved,
                 "unmatched_references": unmatched,
+                "has_pending_reference_reviews": pending,
+                "has_pending_deployment_issues": pending or unresolved_ordinary,
             }
 
     def get_deployment_management(self, project_id):
         with self.Session.begin() as session:
             ensure_project_initialized(session, project_id)
-            roots = _roots(session, project_id)
-            locations = _StoredLocations(roots)
-            deployments = {
-                r.id: r for r in session.query(Deployment).filter_by(project_id=project_id)
+            return self._deployment_management(
+                session, project_id, _folder_reviews(session, project_id).all()
+            )
+
+    def _deployment_management(self, session, project_id, reviews):
+        roots = _roots(session, project_id)
+        locations = _StoredLocations(roots)
+        deployments = {r.id: r for r in session.query(Deployment).filter_by(project_id=project_id)}
+        videos = [
+            _management_video(video, reference, locations, deployments)
+            for video, reference in (
+                session.query(Video, _reference_tagged(session))
+                .filter(Video.project_id == project_id)
+                .order_by(Video.video_path)
+            )
+        ]
+        links = [
+            _management_link(link, deployments)
+            for link in session.query(DeploymentFolderLink).filter(
+                DeploymentFolderLink.project_dir_id.in_([root.id for root in roots])
+            )
+            if link.source == "manual"
+        ]
+        folders = group_deployment_folders(videos, links)
+        available = {
+            row["deployment_id"]
+            for row in videos
+            if not row["reference"] and not row["missing"] and row["deployment_id"]
+        }
+        _apply_folder_reviews(folders, reviews, self._comparison_inventory(deployments), available)
+        return {
+            "videos": videos,
+            "links": links,
+            "roots": [{"id": r.id, "path": r.path} for r in roots],
+            "folders": folders,
+        }
+
+    @staticmethod
+    def _comparison_inventory(deployments):
+        return [
+            {
+                "id": row.id,
+                "deployment_id": row.deployment_id,
+                "camera_id": row.camera_id,
+                "transect_id": row.transect_id,
             }
-            videos = [
-                _management_video(video, reference, locations, deployments)
-                for video, reference in (
-                    session.query(Video, _reference_tagged(session))
-                    .filter(Video.project_id == project_id)
-                    .order_by(Video.video_path)
-                )
-            ]
-            links = [
-                _management_link(link, deployments)
-                for link in session.query(DeploymentFolderLink).filter(
-                    DeploymentFolderLink.project_dir_id.in_([root.id for root in roots])
-                )
-                if link.source == "manual"
-            ]
-            return {
-                "videos": videos,
-                "links": links,
-                "roots": [{"id": r.id, "path": r.path} for r in roots],
-                "folders": group_deployment_folders(videos, links),
-            }
+            for row in deployments.values()
+        ]
+
+    def _ordinary_deployments(self, session, project_id):
+        rows = (
+            session.query(Video.deployment_id, Video.is_missing)
+            .filter(
+                Video.project_id == project_id,
+                Video.deployment_id.is_not(None),
+                ~_reference_tagged(session),
+            )
+            .distinct()
+            .all()
+        )
+        return {identifier for identifier, _ in rows}, {
+            identifier for identifier, missing in rows if not missing
+        }
 
     def get_deployment_folder(self, project_id, root_id, folder):
         """Refresh a folder and find the project's deployments with ordinary footage."""
@@ -648,16 +764,7 @@ class DeploymentMixin(ProviderBase):
                     session, project_id, root, folder, locations
                 )
             ]
-            ordinary = {
-                identifier
-                for (identifier,) in session.query(Video.deployment_id)
-                .filter(
-                    Video.project_id == project_id,
-                    Video.deployment_id.is_not(None),
-                    ~_reference_tagged(session),
-                )
-                .distinct()
-            }
+            ordinary, available = self._ordinary_deployments(session, project_id)
             links = [
                 _management_link(row, deployments)
                 for row in session.query(DeploymentFolderLink).filter_by(
@@ -666,26 +773,93 @@ class DeploymentMixin(ProviderBase):
                 if row.source == "manual"
             ]
             summaries = group_deployment_folders(videos, links, ordinary=ordinary)
+            if summaries and root_id is not None:
+                review = session.get(DeploymentFolderReview, (root_id, folder))
+                _show_folder_review(
+                    summaries[0], review, self._comparison_inventory(deployments), available
+                )
             return (summaries[0] if summaries else None), videos, ordinary
 
-    def get_deployment_comparison_clip(self, project_id, deployment_id):
-        """Pick the first ordinary clip by path, preferring footage still on disk."""
-        with self.Session() as session:
-            video = (
-                session.query(Video)
-                .filter(
-                    Video.project_id == project_id,
-                    Video.deployment_id == deployment_id,
-                    ~_reference_tagged(session),
+    def set_folder_ordinary_unavailable(self, project_id, root_id, folder, note):
+        """A string records the outcome. None reopens the folder manually."""
+        with self.Session.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            root = session.get(ProjectDir, root_id) if root_id else None
+            if root is None or root.project_id != project_id:
+                raise DeploymentInputError("deployment_error_root")
+            folder = relative_deployment_folder(folder, _path(root.path))
+            review = session.get(DeploymentFolderReview, (root_id, folder))
+            if note is None:
+                if review is not None:
+                    session.delete(review)
+                return
+            inventory = {
+                row.id: row for row in session.query(Deployment).filter_by(project_id=project_id)
+            }
+            locations = _StoredLocations(_roots(session, project_id))
+            videos = [
+                _management_video(video, reference, locations, inventory)
+                for video, reference in _folder_videos(
+                    session, project_id, root, folder, locations
                 )
-                .order_by(Video.is_missing, Video.video_path)
-                .first()
+            ]
+            ordinary, available = self._ordinary_deployments(session, project_id)
+            summaries = group_deployment_folders(videos, (), ordinary=ordinary)
+            if not summaries or not summaries[0]["references"]:
+                raise DeploymentInputError("deployment_error_selection")
+            candidates = available_folder_candidates(
+                summaries[0],
+                self._comparison_inventory(inventory),
+                available,
             )
+            if review is None:
+                review = DeploymentFolderReview(project_dir_id=root_id, folder_path=folder)
+                session.add(review)
+            review.note = note.strip() or None
+            review.available_candidates = sorted(candidates)
+
+    def _comparison_clips(self, session, project_id, deployment_id):
+        return session.query(Video).filter(
+            Video.project_id == project_id,
+            Video.deployment_id == deployment_id,
+            ~_reference_tagged(session),
+        )
+
+    def get_deployment_comparison_clips(self, project_id, deployment_id):
+        """List ordinary clips by path, with available footage first."""
+        with self.Session() as session:
+            rows = (
+                self._comparison_clips(session, project_id, deployment_id)
+                .with_entities(Video.video_id, Video.video_path, Video.is_missing)
+                .order_by(Video.is_missing, Video.video_path)
+            )
+            return [
+                {
+                    "video_id": identifier,
+                    "video_path": path,
+                    "filename": Path(normalize_path_str(path)).name,
+                    "missing": bool(missing),
+                }
+                for identifier, path, missing in rows
+            ]
+
+    def get_deployment_comparison_clip(self, project_id, deployment_id, video_id=None):
+        """Load playback details for the selected clip, or the first available clip."""
+        with self.Session() as session:
+            clips = self._comparison_clips(session, project_id, deployment_id)
+            if video_id is not None:
+                clips = clips.filter(Video.video_id == video_id)
+            video = clips.order_by(Video.is_missing, Video.video_path).first()
             if video is None:
                 return None
             locations = _StoredLocations(_roots(session, project_id))
-            root, _ = locations.locate(video.video_path)
-            return _playback_fields(video) | {"root_path": root.path if root else None}
+            root, folder = locations.locate(video.video_path)
+            return _playback_fields(video) | {
+                "root_path": root.path if root else None,
+                "folder": folder
+                if root
+                else Path(normalize_path_str(video.video_path)).parent.as_posix(),
+            }
 
     def save_deployment(self, project_id, values, *, deployment_id=None):
         """Create or edit inventory. The stable public key is immutable after creation."""
@@ -851,6 +1025,15 @@ class DeploymentMixin(ProviderBase):
                     )
                     session.add(link)
                 link.deployment_id, link.source = fresh["target_id"], "manual"
+            reviewed_folders = (
+                {(fresh["folder"]["root_id"], fresh["folder"]["path"])}
+                if fresh["action"] == "folder"
+                else {(row["root_id"], row["folder"]) for row in fresh["rows"] if row["changed"]}
+            )
+            if reviewed_folders:
+                for review in _folder_reviews(session, fresh["project_id"]):
+                    if (review.project_dir_id, review.folder_path) in reviewed_folders:
+                        session.delete(review)
             for item in fresh["rows"]:
                 if item["preserved"]:
                     continue

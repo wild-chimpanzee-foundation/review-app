@@ -123,6 +123,7 @@ class QueueMixin(ProviderBase):
         # through bind params (the `params` dict). Do not interpolate filter values directly.
         search_raw = (filters.get("search_query") or "").strip().lower()
         selected_camera = filters.get("selected_camera", "All")
+        selected_deployment = filters.get("selected_deployment", "All")
         selected_species = filters.get("selected_species") or []
         selected_possible_species = filters.get("selected_possible_species") or []
         selected_manual_blank = filters.get("selected_manual_blank", "All")
@@ -249,6 +250,12 @@ class QueueMixin(ProviderBase):
         if selected_camera != "All":
             params["camera"] = selected_camera
             where.append("v.camera_id = :camera")
+
+        if selected_deployment == "unresolved":
+            where.append("v.deployment_id IS NULL")
+        elif selected_deployment and selected_deployment != "All":
+            params["deployment"] = selected_deployment
+            where.append("v.deployment_id = :deployment")
 
         if selected_species:
             phs = ", ".join(f":sp{i}" for i in range(len(selected_species)))

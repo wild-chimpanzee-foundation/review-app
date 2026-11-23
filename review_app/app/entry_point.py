@@ -464,14 +464,16 @@ class GUI:
 
         await setup_overview()
 
-    async def deployments_page(self, review: str = ""):
+    async def deployments_page(self, review: str = "", deployment: str = "", view: str = ""):
         from review_app.app.utils import require_login
 
         if not require_login(require_project=True):
             return
         from review_app.app.pages.deployments import setup_deployments
 
-        await setup_deployments(review_references=review == "references")
+        await setup_deployments(
+            deployment=deployment, tools=view == "tools", review_references=review == "references"
+        )
 
     async def review_page(self):
         from review_app.app.utils import require_login

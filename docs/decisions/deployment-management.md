@@ -40,12 +40,20 @@ deployment.
 
 ## Management
 
-Open **Overview → Manage deployments**. The folder view lists unresolved
-videos, references without ordinary footage, and individual clip exceptions.
-Folder review plays the first clip from the source folder beside the first
-ordinary clip from the selected deployment. The dropdown lists suggested
-deployments first and highlights camera and transect mismatches below the
-preview. Choosing a deployment previews the assignment automatically.
+Open **Overview → Manage deployments** to browse footage by deployment.
+The catalog has three tabs, **No reference video**, **No ordinary video**,
+and **Matched**. Empty deployments appear under **No reference video**.
+Overview shows deployments with assigned clips. Both views use a reference
+video thumbnail when ordinary footage is unavailable.
+Open a deployment to edit its metadata, see its folders, or start its Species
+Review queue. **Review folders…** opens folders that need attention.
+**Assignment tools** opens the folder links and individual clip tools.
+Folder review lets you choose a clip from the source folder and an ordinary
+clip from the selected deployment. The deployment dropdown lists suggestions
+first and highlights camera and transect mismatches below the preview.
+The folder path comparison highlights shared and differing parts of the paths
+for the source folder and the selected comparison clip.
+Choosing a deployment previews the assignment automatically.
 Confirm a folder link to assign directly contained current and future clips,
 or select clips and confirm an assignment for that subset.
 Descendants get their own inference or folder links. Explicit clip assignments
@@ -55,6 +63,13 @@ it for browser playback from the same dialog.
 Create deployment records or edit metadata in the same view. The deployment ID
 is stable after creation. Display names and physical camera identifiers are
 metadata. Location and CRS support is deferred.
+
+Use **Mark ordinary footage unavailable** to resolve a reference folder without
+changing any clip assignments. An optional note records what the reviewer
+knows. To reopen it, open the deployment, select **Review folder**, then choose
+**Reopen review**. Folders without a deployment are available in **Assignment tools**.
+If a rescan makes a new plausible comparison available, the folder returns to
+the reference review queue for confirmation. **Skip** leaves the folder pending.
 
 Reassignment previews are revalidated inside the write transaction. Saved
 Distance evidence, calibrated references, and frozen handoff bindings block

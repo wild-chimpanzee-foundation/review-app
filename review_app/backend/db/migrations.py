@@ -799,6 +799,18 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     ),
     (29, lambda conn: _migration_v29(conn)),
     (30, lambda conn: _migration_v30(conn)),
+    (
+        31,
+        """
+        CREATE TABLE IF NOT EXISTS deployment_folder_reviews (
+            project_dir_id VARCHAR NOT NULL REFERENCES project_dirs(id) ON DELETE CASCADE,
+            folder_path VARCHAR NOT NULL,
+            note VARCHAR,
+            available_candidates JSON NOT NULL,
+            PRIMARY KEY (project_dir_id, folder_path)
+        )
+        """,
+    ),
 ]
 
 

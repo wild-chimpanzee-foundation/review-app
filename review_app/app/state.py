@@ -42,6 +42,7 @@ _auto_transcode: bool = GLOBAL_DEFAULTS["auto_transcode"]
 _DEFAULT_FILTERS: dict[str, Any] = {
     "search_query": "",
     "selected_camera": "All",
+    "selected_deployment": "All",
     "selected_species": [],
     "selected_possible_species": [],
     "selected_manual_blank": "All",
@@ -161,7 +162,13 @@ def save_user_prefs_to_db(dp) -> None:
 def set_active_project(project_id: str | None) -> None:
     from nicegui import app
 
-    app.storage.user["active_project_id"] = project_id
+    storage = app.storage.user
+    if storage.get("active_project_id") != project_id:
+        filters = dict(storage.get("filters", {}))
+        if "selected_deployment" in filters:
+            filters.pop("selected_deployment")
+            storage["filters"] = filters
+    storage["active_project_id"] = project_id
 
 
 def get_active_project_id() -> str | None:

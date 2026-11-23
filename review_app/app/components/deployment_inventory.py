@@ -1,4 +1,4 @@
-"""New-project preview of deployment groups inferred from footage folders."""
+"""Deployment inventory, metadata editor and new-project preview."""
 
 from __future__ import annotations
 
@@ -6,7 +6,61 @@ from nicegui import run, ui
 
 from review_app.app.translations import t
 from review_app.app.utils import user_error_message
-from review_app.backend.deployments import DeploymentInputError, preview_deployment_setup
+from review_app.backend.deployments import (
+    DEPLOYMENT_FIELDS,
+    DeploymentInputError,
+    preview_deployment_setup,
+)
+
+
+def deployment_error_message(exc):
+    return (
+        t(exc.key, **exc.params)
+        if isinstance(exc, DeploymentInputError)
+        else user_error_message(exc)
+    )
+
+
+def open_deployment_editor(dp, pid, existing=None, *, initial_deployment_id="", on_saved):
+    initial_values = existing if existing is not None else {"deployment_id": initial_deployment_id}
+    dialog = ui.dialog()
+    with dialog, ui.card().classes("q-pa-lg").style("width:650px; max-width:95vw"):
+        ui.label(t("deployment_edit") if existing else t("deployment_add")).classes("text-h6")
+        inputs = {}
+        for field in DEPLOYMENT_FIELDS:
+            required = field == "deployment_id"
+            field_label = t("deployment_name" if field == "name" else f"deployment_field_{field}")
+            label = t(
+                "deployment_field_required" if required else "deployment_field_optional",
+                field=field_label,
+            )
+            widget = ui.textarea if field == "notes" else ui.input
+            inputs[field] = widget(label, value=initial_values.get(field) or "").classes("w-full")
+            if required and existing:
+                inputs[field].props("readonly")
+        status = ui.label("").classes("text-negative")
+
+        async def save():
+            save_button.disable()
+            values = {key: widget.value for key, widget in inputs.items()}
+            try:
+                identifier = await run.io_bound(
+                    dp.save_deployment,
+                    pid,
+                    values,
+                    deployment_id=(existing or {}).get("id"),
+                )
+            except Exception as exc:
+                status.set_text(deployment_error_message(exc))
+                save_button.enable()
+                return
+            dialog.close()
+            await on_saved(identifier)
+
+        with ui.row():
+            save_button = ui.button(t("deployment_save"), on_click=save)
+            ui.button(t("cancel"), on_click=dialog.close).props("flat")
+    dialog.open()
 
 
 def render_inventory(rows: list[dict]) -> None:
