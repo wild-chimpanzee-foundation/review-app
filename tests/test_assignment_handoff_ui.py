@@ -218,24 +218,35 @@ async def test_unified_allocation_prepares_recipients_and_retries_only_failures(
         )
     original = dp.prepare_species_assignment
     calls = []
+    finish_first_attempt = threading.Event()
 
     def prepare(project_id, request, clear_video_ids):
         calls.append(request.recipient)
         if request.recipient == "bob" and calls.count("bob") == 1:
+            assert finish_first_attempt.wait(timeout=5)
             raise ValueError("Temporary preparation failure")
         return original(project_id, request, clear_video_ids)
 
     monkeypatch.setattr(dp, "prepare_species_assignment", prepare)
     await user.open("/handoff-admin")
     user.find(t("assign_title"), kind=ui.button).click()
-    await user.should_see(t("assign_recipient_count", name="alice", count=1))
+    await user.should_see("alice", kind=ui.label)
+    await user.should_see(t("assign_video_count", count=1), kind=ui.label)
     await user.should_not_see(t("distribution_apply_btn"))
     await user.should_not_see(t("handoff_prepare"), kind=ui.button)
     assert not dp.list_assignments(project.id)
     user.find(t("assign_review"), kind=ui.button).click()
-    await user.should_see(t("assign_freeze_help"))
+    await user.should_see(t("assign_prepare"), kind=ui.button)
+    dialog = next(iter(user.find(marker="assignment-preparation", kind=ui.dialog).elements))
     user.find(t("assign_prepare"), kind=ui.button).click().click()
+    try:
+        await user.should_see(t("assign_preparing", done=1, total=2), retries=20)
+        await user.should_see(kind=ui.spinner)
+        assert dialog.value
+    finally:
+        finish_first_attempt.set()
     await user.should_see("Temporary preparation failure", retries=20)
+    assert not dialog.value
     await user.should_see(t("assign_view"), retries=20)
     assert calls == ["alice", "bob"]
     assert len(dp.list_assignments(project.id)) == 1
@@ -271,15 +282,18 @@ async def test_new_recipient_can_be_added_without_leaving_creation(user: User, h
     await user.should_see(kind=ui.select, content="Élodie")
     assert "Élodie" in dp.get_all_annotators()
     user.find(t("distribution_auto_btn"), kind=ui.button).click()
-    await user.should_see(t("assign_recipient_count", name="Élodie", count=2))
+    await user.should_see("Élodie", kind=ui.label)
+    await user.should_see(t("assign_video_count", count=2), kind=ui.label)
     await user.should_see(t("assign_camera_count", count=2))
-    await user.should_see("camera-a")
-    await user.should_see("camera-b")
+    await user.should_not_see("camera-a", kind=ui.label)
+    await user.should_not_see("camera-b", kind=ui.label)
+    table = next(iter(user.find(marker="species-allocation", kind=ui.table).elements))
+    assert {row["camera"] for row in table.rows} == {"camera-a", "camera-b"}
     await user.should_see(t("assign_hours", hours="1.00"))
     await user.should_see(t("assign_unknown_durations", count=1))
     assert not dp.get_assigned_video_ids(project.id, "Élodie")  # Still only a draft.
     user.find(t("assign_review"), kind=ui.button).click()
-    await user.should_see(t("assign_freeze_help"))
+    await user.should_see(t("assign_prepare"), kind=ui.button)
     await user.should_see(t("assign_camera_count", count=2))
     await user.should_see(t("assign_hours", hours="1.00"))
     await user.should_see(t("assign_unknown_durations", count=1))
@@ -290,8 +304,7 @@ async def test_new_recipient_can_be_added_without_leaving_creation(user: User, h
     await user.should_see(t("assign_unknown_durations", count=1))
     assert len(dp.get_assigned_video_ids(project.id, "Élodie")) == 2
     saved = dp.list_assignments(project.id)[0]
-    technical = next(iter(user.find(t("assign_technical"), kind=ui.expansion).elements))
-    assert not technical.value
+    await user.should_not_see(saved["assignment_id"], kind=ui.label)
     table = next(iter(user.find(ui.table).elements))
     assert saved["assignment_id"] not in str(table.rows)
     assert saved["created_at"] not in str(table.rows)
@@ -301,38 +314,6 @@ async def test_new_recipient_can_be_added_without_leaving_creation(user: User, h
     media_table = next(iter(user.find(marker="assignment-media").elements))
     assert len(media_table.rows) == 2
     assert {row["role"] for row in media_table.rows} == {t("assign_work_media")}
-
-
-@pytest.mark.parametrize("selection", ["chosen", "cancel", "unavailable"])
-async def test_delivery_folder_picker(user: User, handoff_ui, monkeypatch, tmp_path, selection):
-    dp, project, _ = handoff_ui
-    dp.prepare_assignment(
-        project.id, AssignmentRequest("alice", tuple(dp.get_assignment_video_ids(project.id)))
-    )
-    calls = []
-
-    def pick(initial):
-        calls.append(initial)
-        if selection == "unavailable":
-            raise RuntimeError("No desktop picker")
-        return str(tmp_path) if selection == "chosen" else None
-
-    monkeypatch.setattr("review_app.app.components.assignment_handoff.pick_folder", pick)
-    await user.open("/handoff-admin")
-    table = next(iter(user.find(ui.table).elements))
-    user.find(ui.table).trigger("rowClick", [None, table.rows[0], 0])
-    await user.should_see(marker="open-delivery")
-    user.find(marker="open-delivery").click()
-    user.find(t("handoff_copy_output")).type("existing-path")
-    user.find(marker="browse-delivery-folder").click()
-    await asyncio.sleep(0.1)  # Allow the off-thread picker to return, including on cancel.
-    if selection == "unavailable":
-        await user.should_see(t("assign_folder_picker_unavailable"))
-    else:
-        await user.should_see(str(tmp_path) if selection == "chosen" else "existing-path")
-    assert calls == ["existing-path"]
-    output = next(iter(user.find(t("handoff_copy_output"), kind=ui.input).elements))
-    assert output.value == (str(tmp_path) if selection == "chosen" else "existing-path")
 
 
 async def test_save_delivery_defaults_to_zip_only(user: User, handoff_ui, tmp_path):
@@ -345,6 +326,7 @@ async def test_save_delivery_defaults_to_zip_only(user: User, handoff_ui, tmp_pa
     user.find(ui.table).trigger("rowClick", [None, table.rows[0], 0])
     await user.should_see(marker="open-delivery")
     user.find(marker="open-delivery").click()
+    await user.should_not_see(marker="browse-delivery-folder")
     include = next(iter(user.find(t("assign_include_footage"), kind=ui.checkbox).elements))
     assert not include.value
     user.find(t("handoff_copy_output")).type(str(tmp_path / "delivery"))
@@ -464,12 +446,17 @@ async def test_species_roundtrip_through_prepare_open_return_preview_accept(
     await user.should_not_see(t("handoff_scope_all"))
     with user:
         next(iter(user.find(t("assign_adjust"), kind=ui.expansion).elements)).set_value(True)
-        recipient = next(iter(user.find(t("handoff_recipient"), kind=ui.select).elements))
-        assert "alice" in recipient.options
-        recipient.set_value("alice")
-    await user.should_see(t("assign_recipient_count", name="alice", count=2))
+        table = next(iter(user.find(marker="species-allocation", kind=ui.table).elements))
+        (row,) = table.rows
+        listener = next(
+            event for event in table._event_listeners.values() if event.type == "assignRecipient"
+        )
+        table._handle_event({"listener_id": listener.id, "args": [row["id"], "alice"]})
+        assert table.rows[0]["recipient"] == "alice"
+    await user.should_see("alice", kind=ui.label)
+    await user.should_see(t("assign_video_count", count=2), kind=ui.label)
     user.find(t("assign_review"), kind=ui.button).click()
-    await user.should_see(t("assign_freeze_help"))
+    await user.should_see(t("assign_prepare"), kind=ui.button)
     user.find(t("assign_prepare"), kind=ui.button).click()
     await user.should_see(t("handoff_prepared", count=2))
     assert len(dp.list_assignments(project.id)) == 1

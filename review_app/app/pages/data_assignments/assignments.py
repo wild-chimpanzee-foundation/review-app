@@ -137,10 +137,6 @@ def render_assignment_details(dp, project_id, binding, require_project, on_close
                         ui.label(_error_message(exc)).classes("text-negative")
 
         scope.on_value_change(load_media)
-    with ui.expansion(t("assign_technical"), icon="info_outline").classes("w-full"):
-        ui.label(binding["assignment_id"]).classes("text-caption break-all")
-        ui.label(binding["created_at"]).classes("text-caption")
-
     if not working:
         with ui.dialog() as confirm, ui.card().classes("w-full max-w-xl gap-3"):
             ui.label(t("assign_remove_title")).classes("text-h6")

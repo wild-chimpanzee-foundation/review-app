@@ -7,7 +7,6 @@ import threading
 from nicegui import app, run, ui
 
 from review_app.app.components.assignment_video_table import AssignmentVideoTable
-from review_app.app.components.folder_picker import pick_folder
 from review_app.app.components.legacy_annotations_csv import (
     append_annotations_csv,
     parse_annotations_csv,
@@ -243,28 +242,7 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
         ui.label(label).classes("text-h6")
         ui.label(t("assign_delivery_help")).classes("text-body2 text-grey-7")
 
-        async def browse():
-            browse_button.disable()
-            save_button.disable()
-            try:
-                require_project()
-                selected = await run.io_bound(pick_folder, output.value or "")
-                require_project()
-                if selected:
-                    output.set_value(selected)
-            except Exception:
-                ui.notify(t("assign_folder_picker_unavailable"), type="warning")
-            finally:
-                browse_button.enable()
-                save_button.enable()
-
-        with ui.row().classes("w-full items-end gap-2 flex-nowrap"):
-            output = ui.input(t("handoff_copy_output")).classes("grow min-w-0")
-            browse_button = (
-                ui.button(t("assign_browse_folder"), icon="folder_open", on_click=browse)
-                .props("outline")
-                .mark("browse-delivery-folder")
-            )
+        output = ui.input(t("handoff_copy_output")).classes("w-full")
         include = ui.checkbox(t("assign_include_footage"), value=False)
         ui.label(t("assign_reuse_footage")).classes("text-caption text-grey-7")
         if not bulk and bindings[0]["stage"] == "distance":
@@ -337,7 +315,6 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
             save_button.disable()
             close_button.disable()
             output.disable()
-            browse_button.disable()
             include.disable()
             with_footage = include.value
             try:
@@ -435,7 +412,6 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
                 save_button.enable()
                 close_button.enable()
                 output.enable()
-                browse_button.enable()
                 include.enable()
 
         with ui.row().classes("w-full justify-end gap-2"):

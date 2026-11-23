@@ -25,6 +25,12 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
     review = ui.column().classes("w-full gap-4")
     review.set_visibility(False)
     status = ui.label("").classes("text-negative whitespace-pre-wrap")
+    with (
+        ui.dialog().props("persistent").mark("assignment-preparation") as preparation_dialog,
+        ui.card().classes("q-pa-lg items-center"),
+    ):
+        ui.spinner(size="lg")
+        preparation_progress = ui.label().props('role="status"')
 
     with editor:
         stage = ui.select(
@@ -133,7 +139,6 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
         if not requests:
             return
         ui.label(t("assign_review")).classes("text-h6")
-        ui.label(t("assign_freeze_help")).classes("text-body2 text-grey-7")
         recipients = {}
         for index, request in enumerate(requests):
             recipients.setdefault(request.recipient, []).append((index, request))
@@ -152,25 +157,9 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                 for index, request in entries:
                     with ui.row().classes("w-full items-center gap-3"):
                         workload = dp.get_assignment_workload(request.video_ids)
-                        chunk_labels = (
-                            list(
-                                dict.fromkeys(
-                                    group.label
-                                    for group in groups
-                                    if group.label
-                                    and set(group.video_ids).intersection(request.video_ids)
-                                )
-                            )
-                            if request.stage == "species"
-                            else []
-                        )
-                        group_labels = list(
-                            dict.fromkeys([*chunk_labels, *workload["camera_ids"]])
-                        )
                         ui.label(
                             t(f"handoff_stage_{request.stage}")
                             + (f" · {request.target_species}" if request.target_species else "")
-                            + (" · " + ", ".join(group_labels) if group_labels else "")
                         ).classes("grow")
                         for label in workload_labels(workload):
                             ui.label(label)
@@ -203,11 +192,15 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
         if busy:
             return
         busy = True
-        render_review.refresh()
+        pending = [
+            (index, request) for index, request in enumerate(requests) if index not in prepared
+        ]
+        total = len(pending)
         try:
-            for index, request in enumerate(requests):
-                if index in prepared:
-                    continue
+            preparation_progress.set_text(t("assign_preparing", done=0, total=total))
+            preparation_dialog.open()
+            render_review.refresh()
+            for done, (index, request) in enumerate(pending, 1):
                 try:
                     require_project()
                     if request.stage == "species":
@@ -227,8 +220,9 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                         )
                 except Exception as exc:
                     outcomes[index] = _error_message(exc)
-                render_review.refresh()
+                preparation_progress.set_text(t("assign_preparing", done=done, total=total))
         finally:
+            preparation_dialog.close()
             busy = False
             render_review.refresh()
         if len(requests) == 1 and prepared:
