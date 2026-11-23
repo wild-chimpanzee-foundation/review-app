@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from review_app.backend.db.models import (
@@ -81,6 +81,29 @@ class ProviderBase:
 
     def get_valid_species(self, project_id: str | None) -> list[str]: ...
 
+    @staticmethod
+    def _get_valid_species(conn: Connection, project_id: str | None) -> list[str]: ...
+
+    @staticmethod
+    def _add_custom_species(
+        conn: Connection,
+        scientific_name: str,
+        name_en: str,
+        name_fr: str,
+        group_en: str,
+        group_fr: str,
+        iucn: str | None = None,
+    ) -> bool: ...
+
+    @staticmethod
+    def _insert_custom_tag(
+        conn: Connection,
+        key: str,
+        name_en: str,
+        color: str | None = None,
+        name_fr: str | None = None,
+    ) -> None: ...
+
     def get_species_catalog(self, lang: str = "en", project_id: str | None = None): ...
 
     def _validate_species_fuzzy(
@@ -107,6 +130,17 @@ class ProviderBase:
         review_later: dict[str, bool] | None = None,
         assignments: dict[str, str] | None = None,
         video_tags: dict[str, list[str]] | None = None,
+    ) -> None: ...
+
+    def _apply_manual_reviews(
+        self,
+        conn: Connection,
+        reviews: list[dict],
+        active_project_id: str | None,
+        append: bool,
+        review_later: dict[str, bool],
+        assignments: dict[str, str],
+        video_tags: dict[str, list[str]],
     ) -> None: ...
 
     def add_annotators_bulk(self, conn, names) -> None: ...

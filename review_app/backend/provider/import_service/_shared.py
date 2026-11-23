@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 
 from review_app.backend.errors import DataImportError
 from review_app.backend.path_matching import (
@@ -47,20 +47,34 @@ class ImportSharedMixin(ProviderBase):
         Returns the names that were newly created in the global catalog."""
         if not names:
             return []
+        with self.engine.begin() as conn:
+            return self._attach_import_species(conn, names, active_project_id)
+
+    def _attach_import_species(
+        self, conn: Connection, names: list[str], active_project_id: str | None
+    ) -> list[str]:
+        """Create mapped vocabulary and extend an explicit project species list."""
+        if not names:
+            return []
         created = [
             name
             for name in names
-            if not self.species_exists(name)
-            and self.add_custom_species(name, name_en=name, name_fr="", group_en="", group_fr="")
+            if self._add_custom_species(
+                conn, name, name_en=name, name_fr="", group_en="", group_fr=""
+            )
         ]
         if active_project_id:
-            existing = self.get_project_species(active_project_id)
-            # An empty list means the project implicitly allows every species, so don't
-            # narrow it down to just these.
-            if existing:
-                missing = [n for n in names if n not in existing]
-                if missing:
-                    self.set_project_species(active_project_id, existing + missing)
+            # An empty list means the project implicitly allows every species.
+            conn.execute(
+                text("""
+                    INSERT INTO project_species (project_id, species_id)
+                    SELECT :pid, id FROM species
+                    WHERE scientific_name = :name
+                      AND EXISTS (SELECT 1 FROM project_species WHERE project_id = :pid)
+                    ON CONFLICT(project_id, species_id) DO NOTHING
+                """),
+                [{"pid": active_project_id, "name": name} for name in names],
+            )
         logger.info(
             "Registered %d imported species (%d new to the catalog) for project %s: %s",
             len(names),

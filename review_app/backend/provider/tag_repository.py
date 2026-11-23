@@ -5,12 +5,20 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 
 from review_app.backend.provider.base import ProviderBase
 from review_app.backend.utils import bind_id_list
 
 logger = logging.getLogger(__name__)
+
+
+def custom_tag_key(name_en: str, name_fr: str | None = None) -> str:
+    key_source = name_en.strip() or (name_fr.strip() if name_fr else "")
+    key = re.sub(r"[^a-z0-9_]", "", key_source.lower().replace(" ", "_").replace("-", "_"))
+    if not key:
+        raise ValueError(f"Cannot derive a valid key from tag names: {name_en!r}, {name_fr!r}")
+    return key
 
 
 class TagMixin(ProviderBase):
@@ -124,32 +132,35 @@ class TagMixin(ProviderBase):
         self, name_en: str = "", color: str | None = None, name_fr: str | None = None
     ) -> str:
         """Create a custom tag if it doesn't exist yet. Returns the tag key."""
-        key_source = name_en.strip() or (name_fr.strip() if name_fr else "")
-        key = re.sub(r"[^a-z0-9_]", "", key_source.lower().replace(" ", "_").replace("-", "_"))
-        if not key:
-            raise ValueError(f"Cannot derive a valid key from tag names: {name_en!r}, {name_fr!r}")
-        name_fr_val = name_fr.strip() if name_fr and name_fr.strip() else None
+        key = custom_tag_key(name_en, name_fr)
         with self.engine.begin() as conn:
-            existing = conn.execute(
-                text("SELECT key FROM tags WHERE key = :k"), {"k": key}
-            ).fetchone()
-            if existing:
-                return key
-            conn.execute(
-                text(
-                    "INSERT INTO tags (id, key, name_en, name_fr, color, is_custom, individual_eligible) "
-                    "VALUES (:id, :key, :name_en, :name_fr, :color, 1, 0)"
-                ),
-                {
-                    "id": str(uuid.uuid4()),
-                    "key": key,
-                    "name_en": name_en.strip() or None,
-                    "name_fr": name_fr_val,
-                    "color": color,
-                },
-            )
-        logger.info("Created custom tag: key=%s name=%s color=%s", key, name_en.strip(), color)
+            self._insert_custom_tag(conn, key, name_en, color, name_fr)
         return key
+
+    @staticmethod
+    def _insert_custom_tag(
+        conn: Connection,
+        key: str,
+        name_en: str,
+        color: str | None = None,
+        name_fr: str | None = None,
+    ) -> None:
+        result = conn.execute(
+            text(
+                "INSERT INTO tags (id, key, name_en, name_fr, color, is_custom, individual_eligible) "
+                "VALUES (:id, :key, :name_en, :name_fr, :color, 1, 0) "
+                "ON CONFLICT(key) DO NOTHING"
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "key": key,
+                "name_en": name_en.strip() or None,
+                "name_fr": (name_fr or "").strip() or None,
+                "color": color,
+            },
+        )
+        if result.rowcount:
+            logger.info("Created custom tag: key=%s name=%s color=%s", key, name_en.strip(), color)
 
     def update_tag_names(self, key: str, name_en: str, name_fr: str | None = None) -> None:
         name_fr_val = name_fr.strip() if name_fr and name_fr.strip() else None

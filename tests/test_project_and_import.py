@@ -10,6 +10,7 @@ import pytest
 from conftest import seed_builtin_tags
 from review_app.backend.errors import DataImportError
 from review_app.backend.provider.local_data_provider import LocalDataProvider
+from sqlalchemy.exc import IntegrityError
 
 
 @pytest.mark.parametrize("csv_format", ["app", "historic", "model_long", "model_wide"])
@@ -942,17 +943,84 @@ def test_import_creates_brand_new_species(provider_with_project):
     assert not dp.species_exists("lynx")
 
     df = pd.DataFrame([{"video_path": a_path, "is_blank": 0, "species": "lynx"}])
+    df.loc[1] = {"video_path": "/missing/otter.mp4", "is_blank": 0, "species": "otter"}
     # User picked "add 'lynx' to project (new species)" → mapping points at itself.
     result = dp.import_annotations_csv(
-        df, active_project_id=project.id, species_mappings={"lynx": "lynx"}
+        df, active_project_id=project.id, species_mappings={"lynx": "lynx", "otter": "otter"}
     )
 
     assert result["imported"] == 1
     assert result["skipped_observations"] == 0
+    assert result["skipped"] == ["/missing/otter.mp4"]
     assert dp.species_exists("lynx")
+    assert not dp.species_exists("otter")
     assert "lynx" in dp.get_project_species(project.id)
     detail = dp.get_video_detail(paths[a_path])
     assert detail["manual_selections"][0]["species"] == "lynx"
+
+
+@pytest.mark.parametrize("failure", ["invalid_count", "late_write"])
+def test_annotation_csv_failure_leaves_vocabulary_and_reviews_intact(
+    provider_with_project, failure
+):
+    dp, project, _ = provider_with_project
+    dp.set_project_species(project.id, ["deer"])
+    paths = _project_clip_paths(dp, project)
+    first, second = sorted(paths)
+    dp.update_manual_review(
+        paths[first], [{"species": "deer", "tags": ["grazing"]}], labeled_by="original"
+    )
+    dp.set_video_tags(paths[first], [dp.create_custom_tag("Original tag")])
+    before = dp.export_annotations_csv(project.id)
+    df = pd.DataFrame(
+        {
+            "video_path": [first, second],
+            "is_blank": [0, 0],
+            "species": ["lynx", "deer"],
+            "count": ["2", "1"],
+            "assigned_to": ["reviewer", "reviewer"],
+            "review_later": [1, 0],
+            "custom_tags": ["New trail tag", None],
+        }
+    )
+
+    if failure == "invalid_count":
+        df.loc[1, "count"] = "invalid"
+        expected_error = pytest.raises(ValueError, match="invalid")
+    else:
+        with dp.engine.begin() as conn:
+            conn.exec_driver_sql("""
+                CREATE TRIGGER reject_imported_tag_link BEFORE INSERT ON video_tags
+                BEGIN SELECT RAISE(ABORT, 'tag link rejected'); END
+            """)
+        expected_error = pytest.raises(IntegrityError, match="tag link rejected")
+
+    with expected_error:
+        dp.import_annotations_csv(df, project.id, species_mappings={"lynx": "lynx"})
+
+    pd.testing.assert_frame_equal(dp.export_annotations_csv(project.id), before)
+    assert dp.get_project_species(project.id) == ["deer"]
+    assert not dp.species_exists("lynx")
+    assert "new_trail_tag" not in {tag["key"] for tag in dp.get_all_tags()}
+
+    if failure == "invalid_count":
+        df.loc[1, "count"] = "1"
+    else:
+        with dp.engine.begin() as conn:
+            conn.exec_driver_sql("DROP TRIGGER reject_imported_tag_link")
+
+    result = dp.import_annotations_csv(df, project.id, species_mappings={"lynx": "lynx"})
+    assert result["imported"] == 2
+    assert result["custom_tags"] == 1
+    assert set(dp.get_project_species(project.id)) == {"deer", "lynx"}
+    assert dp.get_video_tags(paths[first]) == ["new_trail_tag"]
+    after = dp.export_annotations_csv(project.id).set_index("video_path")
+    assert after.loc[first, ["species", "count", "assigned_to", "review_later"]].tolist() == [
+        "lynx",
+        2,
+        "reviewer",
+        1,
+    ]
 
 
 def test_validate_create_as_new_counts_species_to_add(provider_with_project):

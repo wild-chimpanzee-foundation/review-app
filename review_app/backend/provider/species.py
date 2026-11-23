@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import IO, Any
 
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 
 from review_app.backend.db.distance_behaviors import ensure_unidentified_behavior
 from review_app.backend.errors import DataImportError, SpeciesError
@@ -465,29 +465,33 @@ class SpeciesMixin(ProviderBase):
 
     def get_valid_species(self, project_id: str | None = None) -> list[str]:
         with self.engine.connect() as conn:
-            if project_id:
-                # Check if project has specific species configured
-                has_proj_sp = conn.execute(
-                    text("SELECT 1 FROM project_species WHERE project_id = :pid LIMIT 1"),
-                    {"pid": project_id},
-                ).fetchone()
-                if has_proj_sp:
-                    rows = conn.execute(
-                        text(
-                            """
-                            SELECT s.scientific_name FROM species s
-                            JOIN project_species ps ON ps.species_id = s.id
-                            WHERE ps.project_id = :pid
-                            ORDER BY s.scientific_name
-                            """
-                        ),
-                        {"pid": project_id},
-                    ).fetchall()
-                    return [r[0] for r in rows]
+            return self._get_valid_species(conn, project_id)
 
-            rows = conn.execute(
-                text("SELECT scientific_name FROM species ORDER BY scientific_name")
-            ).fetchall()
+    @staticmethod
+    def _get_valid_species(conn: Connection, project_id: str | None) -> list[str]:
+        if project_id:
+            # Check if project has specific species configured
+            has_proj_sp = conn.execute(
+                text("SELECT 1 FROM project_species WHERE project_id = :pid LIMIT 1"),
+                {"pid": project_id},
+            ).fetchone()
+            if has_proj_sp:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT s.scientific_name FROM species s
+                        JOIN project_species ps ON ps.species_id = s.id
+                        WHERE ps.project_id = :pid
+                        ORDER BY s.scientific_name
+                        """
+                    ),
+                    {"pid": project_id},
+                ).fetchall()
+                return [r[0] for r in rows]
+
+        rows = conn.execute(
+            text("SELECT scientific_name FROM species ORDER BY scientific_name")
+        ).fetchall()
         return [r[0] for r in rows]
 
     def get_species_display_map(
@@ -661,29 +665,42 @@ class SpeciesMixin(ProviderBase):
         group_fr: str,
         iucn: str | None = None,
     ) -> bool:
-        if self.species_exists(scientific_name):
-            return False
-
         with self.engine.begin() as conn:
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO species (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn, is_custom)
-                    VALUES (:id, :scientific_name, :name_en, :name_fr, :group_en, :group_fr, :iucn, 1)
-                    """
-                ),
-                {
-                    "id": str(uuid.uuid4()),
-                    "scientific_name": scientific_name,
-                    "name_en": name_en,
-                    "name_fr": name_fr,
-                    "group_en": group_en,
-                    "group_fr": group_fr,
-                    "iucn": iucn,
-                },
+            return self._add_custom_species(
+                conn, scientific_name, name_en, name_fr, group_en, group_fr, iucn
             )
-        logger.info("Added custom species %r", scientific_name)
-        return True
+
+    @staticmethod
+    def _add_custom_species(
+        conn: Connection,
+        scientific_name: str,
+        name_en: str,
+        name_fr: str,
+        group_en: str,
+        group_fr: str,
+        iucn: str | None = None,
+    ) -> bool:
+        result = conn.execute(
+            text(
+                """
+                INSERT INTO species (id, scientific_name, name_en, name_fr, group_en, group_fr, iucn, is_custom)
+                VALUES (:id, :scientific_name, :name_en, :name_fr, :group_en, :group_fr, :iucn, 1)
+                ON CONFLICT(scientific_name) DO NOTHING
+                """
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "scientific_name": scientific_name,
+                "name_en": name_en,
+                "name_fr": name_fr,
+                "group_en": group_en,
+                "group_fr": group_fr,
+                "iucn": iucn,
+            },
+        )
+        if result.rowcount:
+            logger.info("Added custom species %r", scientific_name)
+        return result.rowcount > 0
 
     def _upsert_species(self, row: dict[str, Any]) -> None:
         """Insert or update a species from a user-supplied CSV. Marks as custom so the

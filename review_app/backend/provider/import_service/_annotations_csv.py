@@ -26,6 +26,7 @@ from review_app.backend.provider.observation_identity import (
     normalize_observation_uuid,
     prepare_observation_csv,
 )
+from review_app.backend.provider.tag_repository import custom_tag_key
 
 logger = logging.getLogger(__name__)
 
@@ -253,24 +254,29 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             df, active_project_id
         )
         df = prepare_observation_csv(df, known_ids)
-        map_species = self._build_annotation_species_mapper(
-            df, active_project_id, species_mappings
-        )
+        valid_species = set(self.get_valid_species(active_project_id))
+        mappings = species_mappings or {}
+
+        def map_species(name: str) -> str | None:
+            if active_project_id:
+                target = name if name in valid_species else mappings.get(name)
+            else:
+                target = mappings.get(name) or name
+            return target if target and target != IGNORE_SENTINEL else None
 
         imported = 0
         skipped: list[str] = []
         skipped_observations = 0
         append = mode == "append"
         observations_by_annotator: Counter[str] = Counter()
-        all_custom_keys: set[str] = set()
+        species_to_add: set[str] = set()
 
-        # Pure collection pass: no DB writes until every video's rows are planned, then
-        # apply_manual_reviews commits the whole import in one transaction.
+        # Parse all matched clips before changing the database.
         reviews: list[dict[str, Any]] = []
         assignments: dict[str, str] = {}
         review_later_map: dict[str, bool] = {}
         tags_map: dict[str, list[str]] = {}
-        custom_key_cache: dict[str, str] = {}
+        custom_tag_names: dict[str, str] = {}
 
         for video_id, group in df.groupby("video_id", sort=False, dropna=False):
             if pd.isna(video_id) or video_id not in known_ids:
@@ -298,39 +304,48 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                 else:
                     for selection in review["selections"]:
                         observations_by_annotator[selection["labeled_by"] or ""] += 1
+                        species = selection["species"]
+                        if active_project_id and species not in valid_species:
+                            species_to_add.add(species)
 
             # Restore review_later — reset to False too so override is complete
             rl_raw = first.get("review_later") if "review_later" in group.columns else None
             if pd.notna(rl_raw):
                 review_later_map[str(video_id)] = bool(int(rl_raw))
 
-            # Auto-create missing custom tags and collect their normalized keys so
-            # the tag write receives keys that actually exist in the DB.
-            normalized_custom_keys: list[str] = []
-            if "custom_tags" in df.columns:
-                raw = first.get("custom_tags")
-                if pd.notna(raw) and str(raw).strip():
-                    for k in str(raw).split(","):
-                        k = k.strip()
-                        if k:
-                            if k not in custom_key_cache:
-                                custom_key_cache[k] = self.create_custom_tag(name_en=k)
-                            normalized_custom_keys.append(custom_key_cache[k])
+            custom_keys: list[str] = []
+            raw_tags = first.get("custom_tags")
+            if pd.notna(raw_tags):
+                for raw_name in str(raw_tags).split(","):
+                    name = raw_name.strip()
+                    if name:
+                        key = custom_tag_key(name)
+                        custom_tag_names.setdefault(key, name)
+                        custom_keys.append(key)
             builtin_tag_keys = _extract_builtin_tag_keys(first, df.columns)
-            if builtin_tag_keys is not None or normalized_custom_keys:
-                tags_map[str(video_id)] = (builtin_tag_keys or []) + normalized_custom_keys
-            all_custom_keys.update(normalized_custom_keys)
+            if builtin_tag_keys is not None or custom_keys:
+                tags_map[str(video_id)] = list(
+                    dict.fromkeys((builtin_tag_keys or []) + custom_keys)
+                )
 
             imported += 1
 
-        self.apply_manual_reviews(
-            reviews,
-            active_project_id=active_project_id,
-            append=append,
-            review_later=review_later_map,
-            assignments=assignments,
-            video_tags=tags_map,
-        )
+        with self.engine.begin() as conn:
+            # SQLite does not begin a transaction on reads. Lock before loading
+            # current reviews so concurrent imports cannot plan writes from stale rows.
+            conn.exec_driver_sql("BEGIN IMMEDIATE")
+            self._attach_import_species(conn, sorted(species_to_add), active_project_id)
+            for key, name in custom_tag_names.items():
+                self._insert_custom_tag(conn, key, name)
+            self._apply_manual_reviews(
+                conn,
+                reviews,
+                active_project_id=active_project_id,
+                append=append,
+                review_later=review_later_map,
+                assignments=assignments,
+                video_tags=tags_map,
+            )
 
         if skipped:
             logger.warning(
@@ -352,71 +367,8 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             "ambiguous_paths": ambiguous_paths,
             "skipped_observations": skipped_observations,
             "by_annotator": dict(observations_by_annotator),
-            "custom_tags": len(all_custom_keys),
+            "custom_tags": len(custom_tag_names),
         }
-
-    def _build_annotation_species_mapper(
-        self,
-        df: pd.DataFrame,
-        active_project_id: str | None,
-        species_mappings: dict[str, str] | None,
-    ):
-        """Resolve incoming species against the project, attaching explicitly-mapped
-        "create as new" targets to the project so they import as-is.
-
-        Returns a callable ``map_species(name) -> resolved_name | None`` where ``None``
-        means the observation should be skipped (mapped to ignore, or awaiting a mapping
-        decision) and ``BLANK_SENTINEL`` means it is a vote for the video being blank
-        rather than an observation. A species that is neither already configured nor given
-        an explicit mapping is skipped — matching the dry-run in
-        ``validate_annotations_csv``.
-        """
-        mappings = species_mappings or {}
-
-        # Without a project scope every global species is valid — import as-is,
-        # honouring explicit mappings/ignore/blank but never skipping as "unconfigured".
-        if not active_project_id:
-
-            def _target_global(sp: str) -> str | None:
-                mapped = mappings.get(sp, sp) or sp
-                return None if mapped == IGNORE_SENTINEL else mapped
-
-            return _target_global
-
-        valid = set(self.get_valid_species(active_project_id))
-
-        def _target(sp: str) -> str | None:
-            """Mapped target if importable, else None (ignored or awaiting a decision).
-
-            Mirrors validate_annotations_csv.resolve_species so the dry-run preview and
-            the real import agree on which species get written. An unmapped species that
-            isn't already configured is skipped — it is NOT silently auto-created.
-            """
-            if sp in valid:
-                return sp
-            raw = mappings.get(sp)
-            if raw == BLANK_SENTINEL:
-                return BLANK_SENTINEL
-            if not raw or raw == IGNORE_SENTINEL:
-                return None
-            return raw
-
-        targets = {
-            t
-            for sp in (str(s).strip() for s in df.get("species", pd.Series(dtype=str)).dropna())
-            if sp and (t := _target(sp)) is not None and t != BLANK_SENTINEL
-        }
-        to_add = sorted(t for t in targets if t not in valid)
-        self._attach_species_to_project(to_add, active_project_id)
-        valid |= set(to_add)
-
-        def map_species(sp: str) -> str | None:
-            target = _target(sp)
-            if target == BLANK_SENTINEL:
-                return BLANK_SENTINEL
-            return target if target in valid else None
-
-        return map_species
 
     def validate_annotations_csv(
         self,
