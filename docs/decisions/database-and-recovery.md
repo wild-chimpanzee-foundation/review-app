@@ -99,13 +99,16 @@ frames, still need migration logic and upgrade tests.
 
 ## Work checklist
 
-- [ ] Unify staged restore and rollback. Test invalid files and foreign keys,
-  insufficient disk space, a failed reopen, and process interruption during
-  cutover. Confirm the original records survive on the normal Settings path.
-- [ ] Separate fresh initialization from existing upgrades and reuse the
-  upgrader for restore. Test a failed migration and a direct upgrade from the
-  oldest supported release. Verify key annotation, reference, and assignment
-  records as well as schema parity.
+- [x] Unify staged restore and rollback (`0c3edf7`). Settings uses the staged
+  restore through the local provider. Automated tests cover invalid files,
+  foreign-key violations, a staging disk failure, and recovery of original
+  records after a failed or interrupted reopen.
+- [x] Separate fresh initialization from existing upgrades and reuse the
+  upgrader for restore (`0c3edf7`). Tests cover rollback after an injected
+  migration failure and upgrading stamped and unstamped v3 backups while
+  preserving annotations and vocabulary.
+- [ ] Verify fresh/upgraded schema parity and preservation of reference and
+  assignment records across supported upgrades.
 - [ ] Time a verified restore of a representative 1 GB backup on an annotator
   machine. Record peak disk use and simulate a cutover failure. Time a
   table-rebuild upgrade on a copy of the same database.

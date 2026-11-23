@@ -4,18 +4,16 @@
 
 The audit was performed at `c8fb566`. Commit `4e9652d` closes the AI Distance
 acceptance bug for new Species observations. Acceptance now saves the nonblank
-label and observation in one transaction. The remaining findings below are open.
+label and observation in one transaction. Unchecked findings below are open.
 
 ### High priority
 
-- [ ] **Make database restore and rollback safe.** Settings can copy a gzip
-  safety backup directly over the live SQLite file when reopening a restore
-  fails. Restore also accepts files that pass `integrity_check` but fail
-  `foreign_key_check`. Use one staged, gzip-aware restore and rollback path.
-  Verify that an invalid candidate leaves the live database readable and that a
-  failed reopen recovers the original records from the compressed safety backup.
-  [Settings rollback](../../review_app/app/pages/settings/database.py#L118) ·
-  [Restore validation](../../review_app/backend/db/backup.py#L384) ·
+- [x] **Make database restore and rollback safe.** Commit `0c3edf7` stages
+  compressed and raw backups and checks SQLite integrity and foreign keys before
+  replacing the live database. A separate SQLite rollback snapshot preserves the
+  original records if reopening fails or the swap is interrupted.
+  [Settings restore](../../review_app/app/pages/settings/database.py#L94) ·
+  [Restore validation](../../review_app/backend/db/backup.py#L398) ·
   [Database and recovery work checklist](database-and-recovery.md#work-checklist)
 - [x] **Preserve Distance measurements when calibration changes.** Review uses
   the current position of the saved frame. Deletion preserves the distance and
@@ -40,12 +38,11 @@ label and observation in one transaction. The remaining findings below are open.
   resolve a shared suffix. Covered by imports with duplicate paths under two roots.
   [Path lookup](../../review_app/backend/path_matching.py#L39) ·
   [Annotation CSV resolution](../../review_app/backend/provider/import_service/_shared.py#L95)
-- [ ] **Preserve multiple AI detections with the same label.** Model CSV
-  validation accepts repeated video/model/type/species rows, while the database
-  conflict key excludes time. Import therefore reports all rows as imported but
-  the last interval overwrites earlier detections. Decide whether intervals
-  belong in the identity or duplicates should be rejected, then verify import
-  counts against exported predictions.
+- **Deferred: Preserve multiple AI detections with the same label.** Current
+  Species AI imports work for the models in use, which supply no start or end
+  times. Revisit if a model starts emitting timed detections or multiple rows
+  for the same video, model, type, and species. The current import upserts those
+  rows under one identity and reports each input row as imported.
   [Model CSV import](../../review_app/backend/provider/import_service/_model_csv.py#L503) ·
   [Model annotation identity](../../review_app/backend/db/models.py#L238)
 - [x] **Keep Species blank state consistent during Append returns.** The
@@ -95,13 +92,12 @@ label and observation in one transaction. The remaining findings below are open.
   [CSV preview](../../review_app/backend/provider/import_service/_annotations_csv.py#L414) ·
   [Bulk writer](../../review_app/backend/provider/annotation_repository.py#L495) ·
   [Single-video writer](../../review_app/backend/provider/annotation_repository.py#L791)
-- [ ] **Make annotation CSV writes atomic across vocabulary and observations.**
-  An invalid count aborted import after the new mapped species had already been
-  committed to the catalog. Validate the full input before writing and include
-  vocabulary and tag creation in the same transaction as the accepted rows. Add
-  a regression covering a late failure after a new species or tag is planned.
-  [Species mapping](../../review_app/backend/provider/import_service/_annotations_csv.py#L397) ·
-  [Custom tag creation](../../review_app/backend/provider/import_service/_annotations_csv.py#L301)
+- [x] **Make app-format annotation CSV writes atomic across vocabulary and observations.**
+  Import plans the matched rows before writing and saves mapped species, custom
+  tags, clip reviews, and assignment metadata in one transaction. Regression
+  tests cover a malformed count and a failed tag link after earlier writes.
+  [CSV import](../../review_app/backend/provider/import_service/_annotations_csv.py#L237) ·
+  [Rollback tests](../../tests/test_project_and_import.py#L963)
 - [ ] **Cut redundant writes from Distance queues and previews.** In a test
   project with 1,000 already-materialized tasks, initialization issued 1,000
   insert attempts. Create only missing tasks and verify with a query-count test
@@ -131,11 +127,12 @@ label and observation in one transaction. The remaining findings below are open.
   teardown.** Three tests redirected their database but reached the real backup
   directory. All three passed after backup storage was redirected to the fixture.
   Use isolated database and backup storage for every test. The full suite also
-  stalled in teardown after the simulated Distance round trip passed its
-  assertions. Make the suite exit cleanly so it can serve as a release gate.
+  stalls at the simulated Distance round trip. A focused rerun reported the
+  round trip as passed and then timed out. Make the suite exit cleanly so it can
+  serve as a release gate.
   [Provider test fixture](../../tests/test_local_data_provider.py#L10) ·
   [Isolated backup fixture](../../tests/conftest.py#L66) ·
-  [Distance round trip](../../tests/test_assignment_distance.py#L663)
+  [Distance round trip](../../tests/test_assignment_distance.py#L770)
 - [ ] **Make CI and release builds verify the artifacts they produce.** The
   manual release workflow uses its tag input for versioning without passing it
   to checkout. Build from the selected ref and smoke-test startup of the packaged
@@ -144,6 +141,12 @@ label and observation in one transaction. The remaining findings below are open.
   [Release workflow](../../.github/workflows/build.yml#L31) ·
   [CI workflow](../../.github/workflows/ci.yml#L25) ·
   [Type-check configuration](../../pyproject.toml#L36)
+- [ ] **Reconcile the unresolved-footage sample test with overview selection.**
+  The test expects `v2.mp4`, while the overview query chooses the first
+  available non-reference path, `v1.mp4` in this fixture. Confirm the intended
+  sample-selection rule and align the query and test.
+  [Overview query](../../review_app/backend/provider/stats_service.py#L167) ·
+  [Failing test](../../tests/test_project_and_import.py#L704)
 
 ### Operator verification
 
@@ -197,25 +200,30 @@ The player has a speed dropdown with 15 options up to 10x (defined in `video_pla
 The species selector re-renders on selection change, causing the dropdown to resize based on content. Needs a fixed `min-width` CSS rule applied to the NiceGUI select component. Likely a one-liner in `annotations.py`.
 **Effort: XS–S**
 
-### Fix "Mark as empty and next" button overflow in French
+### Fix "Mark as empty and next" button overflow in French — superseded
 
-The button text is longer in French (`t()` translation). The button needs either a `max-width` + text truncation, a shorter French translation, or to be restyled to wrap gracefully. Quick CSS or translation fix.
-**Effort: XS**
+The review form now uses a shared, full-width Submit and next button for
+empty and annotated clips.
+[Review submit control](../../review_app/app/pages/review/annotations.py#L481)
 
-### Add multiple individuals per observation (e.g. "5 chimps seen")
+### Add multiple individuals per observation (e.g. "5 chimps seen") — done
 
-Currently `IndividualObservation` stores one species + behavior + time range with no count. This needs: a DB migration to add a `count` integer column, a numeric input in the annotation UI per observation row, updated export to include the count column, and a design decision about what "count" means (individuals seen simultaneously vs. over the clip). The backend design question is the main complexity — how does this interact with model predictions that are per-species but not per-count?
-**Effort: L**
+Species Review has a count control per observation. The database stores the
+count, and the annotation CSV round-trip test verifies that export and import
+preserve it.
+[Review count control](../../review_app/app/pages/review/annotations.py#L271) ·
+[CSV round-trip test](../../tests/test_project_and_import.py#L539)
 
 ### Comment box per video
 
 No free-text notes field exists on `Video` or `VideoLabel`. Needs a DB migration (add `notes TEXT` column to `VideoLabel`), a textarea in the review UI, and a new export column. Straightforward but touches multiple layers.
 **Effort: M**
 
-### Video tags (fire, nice shot, broken metadata, custom)
+### Video tags (fire, nice shot, broken metadata, custom) — done
 
-Consolidated into a single `VideoTag` system — see [decision doc](video-tags.md).
-**Effort: M–L**
+Review supports per-video tags, and Settings supports creating custom tags.
+[Tag design](video-tags.md) ·
+[Review tag selector](../../review_app/app/pages/review/tags.py#L230)
 
 ### "Are you sure?" popup when creating a new tag
 
@@ -266,20 +274,23 @@ browser/media visual confirmation remains a manual check.
 
 Define a shared import interface and workflow across the supported import types.
 
-### Export: change model blank/non-blank column to raw probability
+### Export: change model blank/non-blank column to raw probability — superseded
 
-The export pivots `ModelAnnotation` rows to wide format with `model_name__annotation_type` column headers. Currently the `blank_non_blank` column likely shows the predicted class label (`"blank"`/`"non_blank"`) rather than the raw probability float. The `probability` field exists on `ModelAnnotation` — just change which field gets pivoted into the value vs. a separate `__prob` column.
-**Effort: S**
+AI results export one row per model annotation, with separate class
+(`value_text`) and raw `probability` columns.
+[Model CSV export](../../review_app/backend/provider/import_service/_model_csv.py#L575)
 
 ### Remove timestamps from behavior export
 
 The export includes `labeled_at` per observation. Either drop the column entirely or make it a filter option. One-line change to the `SELECT` / column list in the export SQL.
 **Effort: XS**
 
-### Import historical manual annotations
+### Import historical manual annotations — done
 
-The `ImportMixin` already handles annotation CSV import (matching by path/stem, mapping species/behavior to IDs). "Historical" likely means a different source format — e.g., annotations from a previous tool or spreadsheet. Effort depends on how different the format is; may need a mapping/transform step added to the import flow.
-**Effort: M** (highly dependent on source format)
+The annotation import accepts custom-format historical CSVs with column and
+species mapping, validation, and Append or Override.
+[Historical import UI](../../review_app/app/pages/data_assignments/imports/_annotations_tab.py#L99) ·
+[Historical import tests](../../tests/test_historic_import.py)
 
 ### Import/export multiple annotator files, merge, re-export
 
