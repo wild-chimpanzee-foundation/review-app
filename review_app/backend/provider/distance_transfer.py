@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, time
+from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import SimpleNamespace
 
@@ -15,7 +15,6 @@ from review_app.backend.db.models import (
     DistanceReviewTask,
     DistanceSample,
     DistanceSampleBehavior,
-    IndividualObservation,
     Project,
     ProjectDir,
     ReferenceFrame,
@@ -24,6 +23,7 @@ from review_app.backend.db.models import (
     Tag,
     Video,
 )
+from review_app.backend.distance_selection import in_time_window, manual_presence, time_window
 from review_app.backend.distance_timing import sample_camera_time
 from review_app.backend.distance_transfer import decode_archive, encode_archive, write_tsv
 from review_app.backend.path_matching import normalize_path_str
@@ -77,33 +77,6 @@ def _safe_relative(value):
     return value
 
 
-def _time_window(start, end):
-    if start is None and end is None:
-        return None
-    if start is None or end is None:
-        raise ValueError("Provide both start and end times, or neither")
-    try:
-        start, end = time.fromisoformat(start), time.fromisoformat(end)
-    except (ValueError, TypeError) as exc:
-        raise ValueError("Use 24-hour start/end times, such as 18:00 and 20:00") from exc
-    if start.tzinfo or end.tzinfo or start == end:
-        raise ValueError("Time-of-day boundaries must be different local times")
-    return start, end
-
-
-def _manual_presence(session, video_id, species_id):
-    return (
-        session.query(IndividualObservation.video_id)
-        .filter(
-            IndividualObservation.video_id == video_id,
-            IndividualObservation.species_id == species_id,
-            (IndividualObservation.count.is_(None)) | (IndividualObservation.count > 0),
-        )
-        .correlate(Video)
-        .exists()
-    )
-
-
 def _manual_only(session, task):
     if task.import_id or task.rejected_ai or task.alignment_mode == "imported":
         raise ValueError("AI-linked tasks are not supported by the manual Distance format")
@@ -152,7 +125,7 @@ def _tables(session, project_id, task_ids):
             not session.query(Video)
             .filter(
                 Video.video_id == task.video_id,
-                _manual_presence(session, Video.video_id, task.species_id),
+                manual_presence(session, Video.video_id, task.species_id),
             )
             .first()
         ):
@@ -220,7 +193,7 @@ def _tables(session, project_id, task_ids):
             )
         tables["references"].append(
             {
-                **_record(frame, ("import_id",)),
+                **_record(frame, ("import_id", "retired")),
                 **_portable_path(reference.video_path, roots),
                 "camera_id": reference.camera_id,
             }
@@ -285,7 +258,7 @@ def _validate_tables(tables):
             ("video_id", "species_id", "import_id", "ai_original"),
         ),
         ("samples", DistanceSample, ("ai_original",)),
-        ("references", ReferenceFrame, ("import_id",)),
+        ("references", ReferenceFrame, ("import_id", "retired")),
         ("progress", DistanceReviewProgress, ()),
         ("species", Species, ()),
         ("behaviors", Behavior, ()),
@@ -495,7 +468,7 @@ class DistanceTransferMixin(ProviderBase):
         Windows are start-inclusive/end-exclusive; an end before the start crosses
         midnight. Unfiltered exports also allow tasks with unknown camera time.
         """
-        window = _time_window(start_time, end_time)
+        window = time_window(start_time, end_time)
         with self.Session.begin() as session:
             _roots(session, project_id)
             if session.get(Species, species_id) is None:
@@ -507,7 +480,7 @@ class DistanceTransferMixin(ProviderBase):
                 .filter(
                     Video.project_id == project_id,
                     DistanceReviewTask.species_id == species_id,
-                    _manual_presence(session, Video.video_id, species_id),
+                    manual_presence(session, Video.video_id, species_id),
                     ~reference_tagged(session),
                 )
                 .order_by(Video.video_path)
@@ -534,11 +507,7 @@ class DistanceTransferMixin(ProviderBase):
                     if task.recorded_start is None:
                         unknown.append(row)
                         continue
-                    value = task.recorded_start.time()
-                    start, end = window
-                    if not (
-                        start <= value < end if start < end else value >= start or value < end
-                    ):
+                    if not in_time_window(task.recorded_start, window):
                         continue
                 selected.append(row)
             return {"tasks": selected, "unknown_time": unknown}

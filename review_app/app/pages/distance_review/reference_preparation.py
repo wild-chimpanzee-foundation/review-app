@@ -32,7 +32,7 @@ class ReferencePreparationContext:
     prepared_frames: list[dict]
     guard: Callable
     is_current: Callable[[str], bool]
-    on_frames_saved: Callable[[list[dict]], None]
+    on_frames_saved: Callable[[list[dict]], Awaitable[None]]
     on_frames_deleted: Callable[[list[dict]], Awaitable[None]]
 
 
@@ -163,7 +163,7 @@ async def open_reference_preparation(context: ReferencePreparationContext) -> No
                     cancel_edit.set_visibility(False)
                     distance.set_value(next_distance(value))
                     render_prepared_frames.refresh()
-                    context.on_frames_saved(prepared_frames)
+                    await context.on_frames_saved(prepared_frames)
                     ui.notify(t("distance_frame_saved"), type="positive")
                 except (ValueError, TimeoutError) as exc:
                     ui.notify(
@@ -262,7 +262,6 @@ async def open_reference_preparation(context: ReferencePreparationContext) -> No
                         await run.io_bound(
                             context.provider.delete_reference_frame,
                             frame["id"],
-                            clear_samples=True,
                         )
                         prepared_frames = await run.io_bound(
                             context.provider.list_reference_frames, reference_id

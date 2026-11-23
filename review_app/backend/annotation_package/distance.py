@@ -14,6 +14,7 @@ from pathlib import Path
 from sqlalchemy import JSON, Boolean, DateTime, Float, Integer
 
 from review_app.backend.annotation_package import species
+from review_app.backend.annotation_package.archive import RETIRED_REFERENCE_VERSION
 from review_app.backend.annotation_package.scope import id_selection
 from review_app.backend.db.models import (
     DistanceImport,
@@ -35,6 +36,13 @@ INDIVIDUAL = "id import_id task_id ai_original individual_number age sex first_s
 SAMPLE = "id individual_id offset_ms ai_original status skip_reason reference_frame_id distance_m carried_by_individual_id labeled_by labeled_at updated_at"
 FRAME = "id reference_video_id offset_ms playback_offset_ms distance_m mask import_id"
 PROGRESS = "task_id annotator_name active_individual_id updated_at"
+
+
+def frame_record(frame):
+    record = species.fields(frame, FRAME)
+    if frame.retired:
+        record["retired"] = True
+    return record
 
 
 def digest(value):
@@ -148,7 +156,10 @@ def collect(session, project, videos, roots, target):
     frames = list(
         session.query(ReferenceFrame)
         .filter(
-            ReferenceFrame.reference_video_id.in_(id_selection(r.id for r in references))
+            (
+                ReferenceFrame.reference_video_id.in_(id_selection(r.id for r in references))
+                & ReferenceFrame.retired.is_(False)
+            )
             | ReferenceFrame.id.in_(id_selection(needed_frames))
         )
         .order_by(ReferenceFrame.id)
@@ -275,7 +286,7 @@ def collect(session, project, videos, roots, target):
         )
     context["distance"] = {
         "references": [{"id": r.id, "video_id": media_by_path[r.video_path]} for r in references],
-        "frames": [species.fields(f, FRAME) for f in frames],
+        "frames": [frame_record(f) for f in frames],
         "imports": imports,
         "species_work": species_work,
     }
@@ -426,7 +437,15 @@ def validate(manifest, context, work):
         {r["video_id"] for r in refs.values()}
     ) != len(refs):
         raise ValueError("Invalid reference media mapping")
-    validate_rows(deps["frames"], ReferenceFrame, FRAME)
+    if not isinstance(deps["frames"], list):
+        raise ValueError("Expected Distance record list")
+    for frame in deps["frames"]:
+        fields = FRAME
+        if isinstance(frame, dict) and "retired" in frame:
+            if manifest["version"] != RETIRED_REFERENCE_VERSION or frame["retired"] is not True:
+                raise ValueError("Invalid retired reference frame")
+            fields += " retired"
+        validate_rows([frame], ReferenceFrame, fields)
     frames = {r["id"]: r for r in deps["frames"]}
     imports = _records(
         deps["imports"],
@@ -819,7 +838,15 @@ def match_reference_frames(incoming, current, mapped_ids):
 
 
 def restore_dependencies(
-    session, project_id, context, identities, videos, roots, work, *, approved_substitutions=()
+    session,
+    project_id,
+    context,
+    identities,
+    videos,
+    media_paths,
+    work,
+    *,
+    approved_substitutions=(),
 ):
     deps = context["distance"]
     mapping = dict(videos)
@@ -829,9 +856,10 @@ def restore_dependencies(
         ("sample", [r for u in work for r in u["samples"]]),
     ):
         mapping.update({r["id"]: identities.local("distance_" + kind, r["id"]) for r in rows})
+    media_by_id = {row["video_id"]: row for row in context["media"]}
     for ref in deps["references"]:
-        media = next(m for m in context["media"] if m["video_id"] == ref["video_id"])
-        path = (roots[media["root_id"]] / media["video_path"]).as_posix()
+        video_id = ref["video_id"]
+        path = media_paths[video_id]
         local = (
             session.query(ReferenceVideo).filter_by(project_id=project_id, video_path=path).first()
         )
@@ -840,7 +868,7 @@ def restore_dependencies(
                 id=identities.local("distance_reference", ref["id"]),
                 project_id=project_id,
                 video_path=path,
-                camera_id=media["camera_id"],
+                camera_id=media_by_id[video_id]["camera_id"],
             )
             session.add(local)
             session.flush()
@@ -850,7 +878,7 @@ def restore_dependencies(
         for frame in deps["frames"]
     ]
     current = [
-        species.fields(frame, FRAME)
+        frame_record(frame)
         for frame in session.query(ReferenceFrame).filter(
             ReferenceFrame.reference_video_id.in_(
                 id_selection(frame["reference_video_id"] for frame in incoming)

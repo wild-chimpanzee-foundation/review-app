@@ -205,9 +205,9 @@ class DistanceMixin(ProviderBase):
         with self.Session() as session:
             return count_reference_frame_samples(session, frame_id)
 
-    def delete_reference_frame(self, frame_id: str, *, clear_samples: bool = False) -> int:
+    def delete_reference_frame(self, frame_id: str) -> int:
         with self.Session.begin() as session:
-            return delete_reference_frame(session, frame_id, clear_samples=clear_samples)
+            return delete_reference_frame(session, frame_id)
 
     def list_reference_frames(self, reference_video_id: str) -> list[dict]:
         with self.Session() as session:

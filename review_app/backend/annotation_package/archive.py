@@ -12,6 +12,7 @@ from review_app.backend.annotation_package.scope import safe_relative
 
 FORMAT = "review-app.assignment"
 VERSION = 2
+RETIRED_REFERENCE_VERSION = 3
 MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 MEMBERS = ("manifest.json", "context.json", "work.json")
@@ -61,7 +62,10 @@ def validate_snapshot(manifest, context, work):
     if isinstance(context, dict) and "deployments" in context:
         base = {key: value for key, value in context.items() if key != "deployments"}
         _validate_snapshot(manifest, base, work)
-        if manifest["version"] != VERSION or manifest["direction"] != "setup":
+        if (
+            manifest["version"] not in {VERSION, RETIRED_REFERENCE_VERSION}
+            or manifest["direction"] != "setup"
+        ):
             raise ValueError("Unexpected assignment deployment context")
         from review_app.backend.annotation_package import deployments
 
@@ -89,7 +93,11 @@ def _validate_snapshot(manifest, context, work):
             "roots": (list,),
         },
     )
-    if manifest["format"] != FORMAT or manifest["version"] not in {1, VERSION}:
+    if manifest["format"] != FORMAT or manifest["version"] not in {
+        1,
+        VERSION,
+        RETIRED_REFERENCE_VERSION,
+    }:
         raise ValueError("Unsupported assignment format/version")
     if manifest["stage"] not in {"species", "distance"} or manifest["direction"] not in {
         "setup",
@@ -293,6 +301,12 @@ def _json(value):
 
 
 def encode_archive(manifest: dict, context: dict, work: list[dict]) -> bytes:
+    if (
+        manifest["stage"] == "distance"
+        and manifest["version"] in {1, VERSION}
+        and any(frame.get("retired") for frame in context["distance"]["frames"])
+    ):
+        manifest = {**manifest, "version": RETIRED_REFERENCE_VERSION}
     validate_snapshot(manifest, context, work)
     output = io.BytesIO()
     total = 0

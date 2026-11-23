@@ -14,6 +14,7 @@ from review_app.backend.db.models import (
     ProjectDir,
     Video,
 )
+from review_app.backend.distance_selection import in_time_window, manual_presence, time_window
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.utils import sqlite_values as id_selection
 
@@ -117,14 +118,13 @@ def distance_selection(session, project_id, target_species, start_time=None, end
     from review_app.backend.db.models import DistanceReviewTask, Species
     from review_app.backend.provider.distance_references import reference_tagged
     from review_app.backend.provider.distance_tasks import ensure_tasks
-    from review_app.backend.provider.distance_transfer import _manual_presence, _time_window
 
     if session.get(Project, project_id) is None:
         raise ValueError("Project not found")
     target = session.query(Species).filter_by(scientific_name=target_species).one_or_none()
     if target is None:
         raise ValueError("Choose a Distance target species by scientific name")
-    window = _time_window(start_time, end_time)
+    window = time_window(start_time, end_time)
     ensure_tasks(session, project_id)
     rows = (
         session.query(DistanceReviewTask, Video)
@@ -132,24 +132,25 @@ def distance_selection(session, project_id, target_species, start_time=None, end
         .filter(
             Video.project_id == project_id,
             DistanceReviewTask.species_id == target.id,
-            _manual_presence(session, Video.video_id, target.id),
+            manual_presence(session, Video.video_id, target.id),
             ~reference_tagged(session),
         )
         .order_by(Video.video_path, Video.video_id)
         .all()
     )
-    selected, unknown = [], []
+    selected, unknown, without_camera = [], [], []
     for task, video in rows:
+        if video.camera_id is None:
+            without_camera.append(video)
+            continue
         if window:
             if task.recorded_start is None:
                 unknown.append(video)
                 continue
-            start, end = window
-            value = task.recorded_start.time()
-            if not (start <= value < end if start < end else value >= start or value < end):
+            if not in_time_window(task.recorded_start, window):
                 continue
         selected.append((task, video))
-    return selected, unknown
+    return selected, unknown, without_camera
 
 
 def select_videos(session: Session, project_id: str, request: AssignmentRequest):
@@ -184,7 +185,9 @@ def select_videos(session: Session, project_id: str, request: AssignmentRequest)
     if len(videos) != len(request.video_ids):
         raise ValueError("Every selected video must belong to the source project")
     if request.stage == "distance":
-        rows, _ = distance_selection(
+        if any(video.camera_id is None for video in videos):
+            raise ValueError("Distance preparation requires a camera or deployment for each clip")
+        rows, _, _ = distance_selection(
             session, project_id, request.target_species, request.start_time, request.end_time
         )
         eligible = {video.video_id for _, video in rows}

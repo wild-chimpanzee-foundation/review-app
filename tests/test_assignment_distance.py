@@ -247,6 +247,33 @@ def test_complete_setup_same_frame_people_and_projected_ai_round_trip(distance_a
     assert copied.copied_count == 3
 
 
+def test_retired_reference_with_same_distance_alternative_survives_handoff(distance_assignment):
+    dp, project, root, ids, _, _ = distance_assignment
+    alternative = dp.add_reference_frame("ref", 1500, 5)
+    assert dp.delete_reference_frame("frame-0") > 0
+    saved = dp.prepare_assignment(
+        project.id, AssignmentRequest("alice", tuple(ids), "distance", "deer")
+    )
+    package = dp.export_assignment(saved.id)
+    manifest, _, _ = decode_archive(package)
+    assert manifest["version"] == 3
+    opened = dp.open_assignment(package, "Retired reference", {root.id: root.path})
+    with dp.Session() as session:
+        local = {
+            (row.kind, row.portable_id): row.local_id
+            for row in session.query(HandoffIdentityMap).filter_by(handoff_id=opened.id)
+        }
+    retired = local["distance_frame", "frame-0"]
+    fallback = local["distance_frame", alternative["id"]]
+    before = dp.get_distance_review_state(ids[0], "alice")
+    after = dp.get_distance_review_state(local["video", ids[0]], "alice")
+    assert after["review"]["completed_at"] == before["review"]["completed_at"]
+    samples = [row for row in after["samples"] if row["reference_frame_id"] == retired]
+    assert samples and all(row["display_reference_frame_id"] == fallback for row in samples)
+    returned = dp.export_assignment_return(opened.project_id)
+    assert dp.preview_assignment_return(project.id, returned).totals["unchanged"] == len(ids)
+
+
 def test_removed_distance_assignment_still_accepts_returns(distance_assignment):
     dp, project, _, _, prepared, _ = distance_assignment
     working = open_work(distance_assignment)
@@ -443,7 +470,10 @@ def test_late_acceptance_failure_rolls_back_graph_dependencies_and_identity_maps
     assert dp.preview_assignment_return(project.id, returned).token == preview.token
 
 
-def test_distance_assignment_restores_reference_deployment(distance_assignment):
+@pytest.mark.parametrize("symlink_reference", [False, True])
+def test_distance_assignment_restores_reference_deployment(
+    distance_assignment, tmp_path, symlink_reference
+):
     dp, project, root, video_ids, _, _ = distance_assignment
     with dp.Session.begin() as session:
         deployment = Deployment(project_id=project.id, deployment_id="spring")
@@ -457,11 +487,28 @@ def test_distance_assignment_restores_reference_deployment(distance_assignment):
         project.id, AssignmentRequest("alice", tuple(video_ids), "distance", "deer")
     )
     setup = dp.export_assignment(prepared.id)
-    opened = dp.open_assignment(setup, "Distance deployment", {root.id: root.path})
+    media_root = Path(root.path)
+    reference_path = media_root / "cam_x/reference.mp4"
+    if symlink_reference:
+        media_root = tmp_path / "recipient"
+        _, context, _ = decode_archive(setup)
+        for row in context["media"]:
+            relative = row["video_path"]
+            target = media_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((Path(root.path) / relative).read_bytes())
+        link = media_root / "cam_x/reference.mp4"
+        reference_path = link.with_name("calibration.mp4")
+        link.rename(reference_path)
+        link.symlink_to(reference_path.name)
+
+    opened = dp.open_assignment(setup, "Distance deployment", {root.id: media_root})
+    assert opened.missing_video_ids == ()
     with dp.Session() as session:
         deployment = session.query(Deployment).filter_by(project_id=opened.project_id).one()
         assert deployment.deployment_id == "spring"
         reference = session.query(ReferenceVideo).filter_by(project_id=opened.project_id).one()
+        assert reference.video_path == reference_path.resolve().as_posix()
         assert reference.deployment_id == deployment.id
         assert {
             video.deployment_id
@@ -469,6 +516,8 @@ def test_distance_assignment_restores_reference_deployment(distance_assignment):
         } == {deployment.id}
     returned = dp.export_assignment_return(opened.project_id)
     assert "deployments" not in decode_archive(returned)[1]
+    preview = dp.preview_assignment_return(project.id, returned)
+    assert preview.totals["unchanged"] == len(video_ids)
 
 
 def test_reference_dependencies_discovered_on_untouched_task_and_listed_only_sync(
@@ -599,6 +648,31 @@ def test_distance_assignment_selection_includes_ai_and_reports_unknown_times(
         species_id = session.query(Species).filter_by(scientific_name="deer").one().id
     legacy = dp.preview_distance_export(project.id, species_id)
     assert any(row["error"] and "AI" in row["error"] for row in legacy["tasks"])
+
+
+def test_distance_assignment_excludes_clips_without_camera(distance_assignment):
+    dp, project, root, ids, _, _ = distance_assignment
+    with dp.Session.begin() as session:
+        video = session.get(Video, ids[0])
+        video.camera_id = None
+        video.deployment_id = None
+
+    preview = dp.preview_assignment_distance_selection(project.id, "deer")
+    assert preview["unresolved_camera_count"] == 1
+    assert [row["video_id"] for row in preview["videos"]] == [ids[1]]
+    with pytest.raises(ValueError, match="requires a camera or deployment"):
+        dp.prepare_assignment(
+            project.id, AssignmentRequest("alice", tuple(ids), "distance", "deer")
+        )
+
+    prepared = dp.prepare_assignment(
+        project.id, AssignmentRequest("alice", (ids[1],), "distance", "deer")
+    )
+    opened = dp.open_assignment(
+        dp.export_assignment(prepared.id), "Reviewable", {root.id: root.path}
+    )
+    queue = dp.get_distance_video_queue(opened.project_id)
+    assert len(queue) == 1
 
 
 @pytest.fixture

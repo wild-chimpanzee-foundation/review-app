@@ -20,6 +20,8 @@ Exporte les prédictions brutes du modèle au format CSV.
 
 Utilisez **Importation / Exportation → Affectations** pour préparer les affectations, puis **Enregistrer le dossier de livraison**. Cette action écrit `assignment.zip` et copie éventuellement les vidéos nécessaires dans un nouveau dossier sur l’ordinateur exécutant l’application ; ce n’est pas un téléchargement par le navigateur. La barre de progression compte les fichiers traités, et le résultat indique les copies, fichiers manquants et échecs. Transmettez le dossier au destinataire. L’ouverture des affectations reçues et des anciens bundles reste dans le sélecteur de projet — voir [Premiers pas](getting-started.md).
 
+Pour les affectations contenant des données de déploiement, comme des métadonnées du catalogue ou des liens de dossiers, utilisez chez le destinataire une version de l’application prenant en charge le format d’affectation v2. Une version limitée au format v1 ne peut pas ouvrir ces affectations. Les versions compatibles avec le format v2 ouvrent également les affectations v1. Une affectation Distance contenant des mesures liées à des images de référence supprimées nécessite la prise en charge du format v3.
+
 Les annotateurs téléchargent un ZIP de **progression** depuis **Affectations** dans leur projet de travail. Le coordinateur l’examine et l’accepte dans le projet d’origine. Pour Espèces, les règles sont **Ajouter** (ajout/mise à jour par UUID d’observation, sans suppression des observations absentes), **Conserver l’existant** ou **Utiliser l’import**. Distance utilise uniquement les deux dernières règles, par tâche entière. Voir [Affectations](settings.md#affectations) pour les détails.
 
 ## Annotations Distance manuelles

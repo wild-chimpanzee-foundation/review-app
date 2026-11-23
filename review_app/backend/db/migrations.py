@@ -811,6 +811,12 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
         )
         """,
     ),
+    (
+        32,
+        lambda conn: _add_column_if_missing(
+            conn, "reference_frames", "retired", "BOOLEAN NOT NULL DEFAULT 0"
+        ),
+    ),
 ]
 
 

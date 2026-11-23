@@ -483,6 +483,7 @@ class DistanceAIImportMixin(ProviderBase):
                     frame.playback_offset_ms = row["time_s"] * 1000
                     frame.mask = row["mask"]
                     frame.import_id = imported.id
+                frame.retired = False
                 refs.append({**row, "reference_frame_id": frame.id})
             species = {row.scientific_name: row.id for row in session.query(Species)}
             tasks = {}

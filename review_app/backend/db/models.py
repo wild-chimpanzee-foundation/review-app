@@ -426,6 +426,7 @@ class ReferenceFrame(Base):
     import_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("distance_imports.id", ondelete="SET NULL")
     )
+    retired: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
 
 class DistanceIndividual(Base):
@@ -563,7 +564,7 @@ class DistanceSample(Base):
     ai_original: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String)
     skip_reason: Mapped[str | None] = mapped_column(String)
-    # Restrict deletion of selected frames so existing annotation evidence survives.
+    # Retired frames keep their identity for existing measurements.
     reference_frame_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("reference_frames.id")
     )

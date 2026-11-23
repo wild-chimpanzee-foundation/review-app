@@ -215,14 +215,14 @@ async def test_cancel_reference_deletion_preserves_mapping(user: User, preparati
     await user.open("/reference-preparation-test")
     delete_button(user, data["frame"]["id"]).click()
     await user.should_see("Delete the 5 m reference mapping?")
-    await user.should_see("All saved animal samples using this mapping")
-    await user.should_see("Saved animal samples to clear: 0")
+    await user.should_see("Saved distances and completed reviews are kept")
+    await user.should_see("Saved animal samples using this frame: 0")
     user.find("Cancel").click()
     await user.should_not_see("Delete the 5 m reference mapping?")
     assert data["dp"].list_reference_frames(data["reference"]["id"]) == [data["frame"]]
 
 
-async def test_delete_reference_clears_saved_sample_and_current_selection(
+async def test_delete_reference_preserves_saved_sample_and_clears_current_selection(
     user: User, preparation_page
 ):
     holder, data, _, seek, _ = preparation_page
@@ -237,6 +237,7 @@ async def test_delete_reference_clears_saved_sample_and_current_selection(
     page.individual_id, page.sample_offset = data["individual"]["id"], 1000
     await page.reload_individuals()
     assert page.samples
+    before = [dict(row) for row in page.samples]
     page.frames = [data["frame"]]
     page.selected_frame_id = data["frame"]["id"]
     edit = next(
@@ -250,15 +251,16 @@ async def test_delete_reference_clears_saved_sample_and_current_selection(
     seek.reset_mock()
     delete_button(user, data["frame"]["id"]).click()
     await user.should_see("Delete the 5 m reference mapping?")
-    await user.should_see("Saved animal samples to clear: 1")
-    user.find("Delete mapping and clear affected annotations").click()
+    await user.should_see("Saved animal samples using this frame: 1")
+    user.find("Delete reference frame").click()
     await user.should_not_see("Delete the 5 m reference mapping?", retries=30)
     await user.should_not_see("Prepared reference frames")
     await user.should_see("Save current frame")
     assert next(iter(user.find(ui.number).elements)).enabled
     assert page.selected_frame_id is None
-    assert page.frames == [] and page.samples == []
-    assert dp.get_distance_review_state(video_id, "alice")["samples"] == []
+    assert page.frames == []
+    assert page.samples == [{**before[0], "display_reference_frame_id": None}]
+    assert dp.get_distance_review_state(video_id, "alice")["samples"] == page.samples
     assert page.individual["review_status"] == "in_progress"
     seek.assert_not_called()
 
@@ -271,7 +273,7 @@ async def test_failed_reference_deletion_preserves_mapping_for_retry(
     await user.open("/reference-preparation-test")
     delete_button(user, data["frame"]["id"]).click()
     await user.should_see("Delete the 5 m reference mapping?")
-    user.find("Delete mapping and clear affected annotations").click()
+    user.find("Delete reference frame").click()
     await user.should_see("Could not delete the reference mapping. Please try again.")
     assert data["dp"].list_reference_frames(data["reference"]["id"]) == [data["frame"]]
     await user.should_see("Delete the 5 m reference mapping?")

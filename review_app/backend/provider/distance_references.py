@@ -28,7 +28,11 @@ from review_app.backend.provider.distance_tasks import ensure_tasks
 
 
 def _record(row) -> dict:
-    return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+    return {
+        column.name: getattr(row, column.name)
+        for column in row.__table__.columns
+        if column.name != "retired"
+    }
 
 
 def _offset(value: int) -> None:
@@ -226,6 +230,21 @@ def add_reference_frame(
         raise ValueError("Reference distance must be a finite positive number")
     if session.get(ReferenceVideo, reference_video_id) is None:
         raise ValueError("Reference video not found")
+    retired = (
+        session.query(ReferenceFrame)
+        .filter_by(
+            reference_video_id=reference_video_id,
+            distance_m=distance_m,
+            offset_ms=offset_ms,
+            retired=True,
+        )
+        .one_or_none()
+    )
+    if retired is not None:
+        retired.retired = False
+        retired.playback_offset_ms = playback_offset_ms
+        session.flush()
+        return _record(retired)
     row = ReferenceFrame(
         reference_video_id=reference_video_id,
         offset_ms=offset_ms,
@@ -280,7 +299,11 @@ def configure_reference_distance(
             distance_m=distance_m,
             playback_offset_ms=playback_offset_ms,
         )
-        .on_conflict_do_nothing(index_elements=["reference_video_id", "distance_m", "offset_ms"])
+        .on_conflict_do_update(
+            index_elements=["reference_video_id", "distance_m", "offset_ms"],
+            set_={"retired": False, "playback_offset_ms": playback_offset_ms},
+            where=ReferenceFrame.retired.is_(True),
+        )
     )
     return _record(existing.one())
 
@@ -295,7 +318,7 @@ def update_reference_frame_position(
     """Explicitly correct a reference position, retaining its identity and meters."""
     _validate_reference_position(offset_ms, playback_offset_ms)
     row = session.get(ReferenceFrame, frame_id)
-    if row is None:
+    if row is None or row.retired:
         raise ValueError("Reference frame not found")
     row.offset_ms = offset_ms
     row.playback_offset_ms = playback_offset_ms
@@ -310,20 +333,14 @@ def count_reference_frame_samples(session, frame_id: str) -> int:
     return session.query(DistanceSample).filter_by(reference_frame_id=frame_id).count()
 
 
-def delete_reference_frame(session, frame_id: str, *, clear_samples: bool = False) -> int:
-    """Remove a mapping, clearing its saved evidence only after explicit confirmation."""
-    if not isinstance(clear_samples, bool):
-        raise ValueError("Confirm whether to clear saved annotations")
+def delete_reference_frame(session, frame_id: str) -> int:
+    """Retire a mapping while preserving saved measurements and their completion."""
     frame = session.get(ReferenceFrame, frame_id)
-    if frame is None:
+    if frame is None or frame.retired:
         raise ValueError("Reference frame not found")
-    samples = session.query(DistanceSample).filter_by(reference_frame_id=frame_id).all()
-    if samples and not clear_samples:
-        raise ValueError("Confirm deletion to clear saved annotations using this reference frame")
-    count = clear_reference_frame_samples(session, frame_id)
-    session.delete(frame)
+    frame.retired = True
     session.flush()
-    return count
+    return count_reference_frame_samples(session, frame_id)
 
 
 def clear_reference_frame_samples(session, frame_id: str) -> int:
@@ -342,6 +359,6 @@ def list_reference_frames(session, reference_video_id: str) -> list[dict]:
     return [
         _record(row)
         for row in session.query(ReferenceFrame)
-        .filter_by(reference_video_id=reference_video_id)
+        .filter_by(reference_video_id=reference_video_id, retired=False)
         .order_by(ReferenceFrame.offset_ms, ReferenceFrame.distance_m, ReferenceFrame.id)
     ]

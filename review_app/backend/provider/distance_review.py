@@ -137,6 +137,17 @@ def get_review_state(session, video_id: str, annotator_name: str) -> dict:
             )
         )
     }
+    retired = {frame.reference_video_id for frame in frames.values() if frame.retired}
+    alternatives = {}
+    if retired:
+        for frame in (
+            session.query(ReferenceFrame)
+            .filter(
+                ReferenceFrame.reference_video_id.in_(retired), ReferenceFrame.retired.is_(False)
+            )
+            .order_by(ReferenceFrame.offset_ms, ReferenceFrame.id)
+        ):
+            alternatives.setdefault((frame.reference_video_id, frame.distance_m), frame.id)
     behaviors: dict[str, list[str]] = {}
     for sample_id, behavior_id in (
         session.query(DistanceSampleBehavior.sample_id, DistanceSampleBehavior.behavior_id)
@@ -177,6 +188,15 @@ def get_review_state(session, video_id: str, annotator_name: str) -> dict:
                 else None,
                 "behavior_ids": behaviors.get(row.id, []),
                 "reference_video_id": frame.reference_video_id if frame else None,
+                **(
+                    {
+                        "display_reference_frame_id": alternatives.get(
+                            (frame.reference_video_id, frame.distance_m)
+                        )
+                    }
+                    if frame and frame.retired
+                    else {}
+                ),
             }
         )
     progress = session.get(DistanceReviewProgress, (review.id, annotator_name))
@@ -213,6 +233,7 @@ def _suggestion_frames(session, video):
         .join(ReferenceVideo, ReferenceFrame.reference_video_id == ReferenceVideo.id)
         .filter(
             ReferenceVideo.project_id == video.project_id,
+            ReferenceFrame.retired.is_(False),
         )
         if normalize_path_str(source.video_path) in paths
     }

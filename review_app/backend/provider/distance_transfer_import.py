@@ -256,7 +256,7 @@ def apply_task(session, project_id, plan, tables):
                 **{
                     column.name: row[column.name]
                     for column in ReferenceFrame.__table__.columns
-                    if column.name not in {"reference_video_id", "import_id"}
+                    if column.name not in {"reference_video_id", "import_id", "retired"}
                 },
                 reference_video_id=reference.id,
             )

@@ -232,8 +232,9 @@ def open_setup(
             )
         )
     if manifest["stage"] == "distance":
+        media_paths = {video_id: path for video_id, (path, _) in paths.items()}
         mapping = distance.restore_dependencies(
-            session, project.id, context, identities, videos, roots, work
+            session, project.id, context, identities, videos, media_paths, work
         )
         for unit in context["distance"]["species_work"]:
             restore_work(session, project.id, videos[unit["video_id"]], unit, vocab)

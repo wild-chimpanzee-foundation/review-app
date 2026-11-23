@@ -9,6 +9,7 @@ from nicegui import ui
 from nicegui.testing import User
 from review_app.app.pages.distance_review import page as page_module
 from review_app.app.pages.distance_review.page import DistanceReviewPage
+from review_app.app.translations import t
 from review_app.backend.db.models import DistanceSample
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 from sqlalchemy.exc import SQLAlchemyError
@@ -185,6 +186,42 @@ async def test_review_can_start_with_zero_reference_frames(user: User, on_demand
     await wait_for(lambda: not page.busy and len(page.frames) == 1)
     assert page.frames[0]["distance_m"] == 1
     assert page.samples == []
+
+
+@pytest.mark.parametrize("has_alternative", [True, False])
+async def test_review_displays_saved_distance_after_reference_deletion(
+    user: User, on_demand_page, has_alternative
+):
+    holder = on_demand_page
+    data, dp = holder["data"], holder["data"]["dp"]
+    video_id = data["videos"][0]
+    frame_id = data["frame"]["id"]
+    dp.verify_distance_recording_time(video_id, datetime(2026, 10, 12, 16, 2, 49), "alice")
+    dp.save_distance_sample(
+        data["individual"]["id"], 1000, reference_frame_id=frame_id, labeled_by="alice"
+    )
+    dp.add_reference_frame(data["reference"]["id"], 1000, 6)
+    alternative = (
+        dp.add_reference_frame(data["reference"]["id"], 2000, 5) if has_alternative else None
+    )
+    dp.delete_reference_frame(frame_id)
+
+    await user.open("/reference-on-demand-test")
+    page = holder["page"]
+    page.samples = dp.get_distance_review_state(video_id, "alice")["samples"]
+    holder["seek"].reset_mock()
+    with user:
+        await page.restore_sample(seek=False)
+    assert page.selected_frame_id == (alternative["id"] if alternative else None)
+    assert page.sample["reference_frame_id"] == frame_id
+    assert page.sample["distance_m"] == 5
+    if alternative:
+        holder["seek"].assert_called_once_with(page.reference_player, 2000)
+        await user.should_see(t("distance_reference_alternative", distance="5"))
+    else:
+        holder["seek"].assert_not_called()
+        await user.should_see(t("distance_reference_unavailable", distance="5"))
+        assert "distance-reference-dimmed" in page.reference_player.classes
 
 
 @pytest.mark.parametrize("failure", ["not-ready", "database"])

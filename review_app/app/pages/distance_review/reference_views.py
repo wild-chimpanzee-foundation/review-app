@@ -41,6 +41,7 @@ class ReferenceViewsContext:
     render_frames: Callable
     render_samples: Callable
     render_actions: Callable
+    saved_reference_unavailable: bool = False
 
 
 def frames_by_distance(frames: list[dict], selected_id: str | None) -> dict[float, dict]:
@@ -132,17 +133,12 @@ def render_reference_controls(context: ReferenceViewsContext) -> None:
 
 def render_frames(context: ReferenceViewsContext) -> None:
     if context.reference_player:
+        dimmed = context.saved_reference_unavailable or context.selection_id in {
+            choice["id"] for choice in context.skip_choices
+        }
         context.reference_player.classes(
-            add=(
-                "distance-reference-dimmed"
-                if context.selection_id in {choice["id"] for choice in context.skip_choices}
-                else ""
-            ),
-            remove=(
-                ""
-                if context.selection_id in {choice["id"] for choice in context.skip_choices}
-                else "distance-reference-dimmed"
-            ),
+            add="distance-reference-dimmed" if dimmed else "",
+            remove="" if dimmed else "distance-reference-dimmed",
         )
     if context.reference and context.reference_player:
         ui.label(t("distance_on_demand_help")).classes("text-caption text-grey-6")

@@ -96,7 +96,7 @@ class AssignmentHandoffMixin(ProviderBase):
     ) -> dict:
         """List eligible work without the legacy format's AI/manual restriction."""
         with self.Session.begin() as session:
-            rows, unknown = distance_selection(
+            rows, unknown, without_camera = distance_selection(
                 session, project_id, target_species, start_time, end_time
             )
             return {
@@ -113,6 +113,7 @@ class AssignmentHandoffMixin(ProviderBase):
                     for task, video in rows
                 ],
                 "unknown_time_count": len(unknown),
+                "unresolved_camera_count": len(without_camera),
             }
 
     def list_assignments(self, project_id: str) -> list[dict]:

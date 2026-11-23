@@ -396,8 +396,17 @@ class DistanceReviewPage:
         if self.selected_skip_reason:
             return
         if not any(frame["id"] == self.selected_frame_id for frame in self.frames):
+            if self.reference_sample and "display_reference_frame_id" in self.reference_sample:
+                self.selected_frame_id = None
+                return
             first = min(self.frames, key=lambda frame: frame["distance_m"], default=None)
             self.selected_frame_id = first["id"] if first else None
+
+    @staticmethod
+    def reference_choice_id(sample: dict) -> str | None:
+        return sample.get("skip_reason") or sample.get(
+            "display_reference_frame_id", sample.get("reference_frame_id")
+        )
 
     @stable_client
     async def reload_review(self, *, resume: bool = False) -> None:
@@ -580,10 +589,7 @@ class DistanceReviewPage:
                             self.frames = await run.io_bound(
                                 self.dp.list_reference_frames, reference["id"]
                             )
-                            self.selected_frame_id = (
-                                reference_sample.get("skip_reason")
-                                or reference_sample["reference_frame_id"]
-                            )
+                            self.selected_frame_id = self.reference_choice_id(reference_sample)
             if not self.reference and self.references:
                 reference = self.references[0]
                 path = reference_path(reference)
@@ -1873,6 +1879,13 @@ class DistanceReviewPage:
             ):
                 return
             reference_frame_id = self.selected_frame_id
+            if (
+                self.sample
+                and "display_reference_frame_id" in self.sample
+                and self._graph_preview_key != self.graph_preview_key()
+                and reference_frame_id == self.sample["display_reference_frame_id"]
+            ):
+                reference_frame_id = self.sample["reference_frame_id"]
         individual_id, offset_ms = self.individual_id, self.sample_offset
         values = self.sample_values
         self.busy = True
@@ -1994,13 +2007,10 @@ class DistanceReviewPage:
                     await self.open_reference(
                         reference,
                         restoring=True,
-                        selected_frame_id=reference_sample.get("skip_reason")
-                        or reference_sample["reference_frame_id"],
+                        selected_frame_id=self.reference_choice_id(reference_sample),
                     )
         if reference_sample:
-            self.selected_frame_id = (
-                reference_sample.get("skip_reason") or reference_sample["reference_frame_id"]
-            )
+            self.selected_frame_id = self.reference_choice_id(reference_sample)
         self.ensure_reference_selection()
         self.seek_reference()
         self.render_frames.refresh()
@@ -2175,6 +2185,7 @@ class DistanceReviewPage:
         dialog.open()
 
     def _reference_views_context(self) -> ReferenceViewsContext:
+        sample = self.sample
         return ReferenceViewsContext(
             has_camera=bool(self.video and self.video.get("camera_id")),
             references=self.references,
@@ -2203,6 +2214,11 @@ class DistanceReviewPage:
             render_frames=self.render_frames,
             render_samples=self.render_samples,
             render_actions=self.render_sample_actions,
+            saved_reference_unavailable=bool(
+                sample
+                and "display_reference_frame_id" in sample
+                and self.selected_frame_id is None
+            ),
         )
 
     def _render_reference_player(self, reference: dict, duration: float, panel):
@@ -2317,6 +2333,18 @@ class DistanceReviewPage:
     @ui.refreshable
     def render_frames(self) -> None:
         render_reference_frames(self._reference_views_context())
+        sample = self.sample
+        if (
+            sample
+            and "display_reference_frame_id" in sample
+            and self.selected_frame_id == sample["display_reference_frame_id"]
+        ):
+            key = (
+                "distance_reference_alternative"
+                if sample["display_reference_frame_id"]
+                else "distance_reference_unavailable"
+            )
+            ui.label(t(key, distance=f"{sample['distance_m']:g}")).classes("text-caption")
 
     def clear_reference_visibility_selection(self) -> None:
         """Browsing discards a visibility choice without changing saved evidence."""
@@ -2492,9 +2520,14 @@ class DistanceReviewPage:
             )
         )
 
-    def _reference_frames_saved(self, reference_id: str, frames: list[dict]) -> None:
+    async def _reference_frames_saved(self, reference_id: str, frames: list[dict]) -> None:
         if self.reference and self.reference["id"] == reference_id:
             self.frames = frames
+            if self.sample and "display_reference_frame_id" in self.sample:
+                await self.reload_review()
+                await self.restore_sample(seek=False)
+            else:
+                self.seek_reference()
             self.render_frames.refresh()
 
     async def _reference_frames_deleted(self, reference_id: str, frames: list[dict]) -> None:
@@ -2508,7 +2541,7 @@ class DistanceReviewPage:
         self._graph_preview_key = None
         if self.video:
             await self.reload_individuals()
-            self.reset_sample_values()
+            await self.restore_sample(seek=False)
         self.render_frames.refresh()
         self.refresh_sample_ui()
 
@@ -2589,7 +2622,18 @@ class DistanceReviewPage:
                 )
                 selected_frame_id = selected["id"]
         selected = next((frame for frame in frames if frame["id"] == selected_frame_id), None)
-        if selected is None and selected_frame_id not in {choice["id"] for choice in SKIP_CHOICES}:
+        sample = self.reference_sample
+        restoring_retired = (
+            not seek_animal
+            and sample
+            and "display_reference_frame_id" in sample
+            and sample["reference_video_id"] == reference["id"]
+        )
+        if (
+            selected is None
+            and not restoring_retired
+            and selected_frame_id not in {choice["id"] for choice in SKIP_CHOICES}
+        ):
             selected = min(frames, key=lambda frame: frame["distance_m"], default=None)
             selected_frame_id = selected["id"] if selected else None
         if self.reference_player:

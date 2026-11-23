@@ -20,6 +20,8 @@ Exports the raw model predictions as a CSV.
 
 Use **Import / Export → Assignments** to prepare assignments, then **Save delivery folder**. This writes `assignment.zip` and optionally copies the required footage into a new folder on the computer running the app; it is not a browser download. The progress bar reports attempted files, and the result lists copied, missing, and failed files. Send the delivery folder to the recipient. Opening received assignments and legacy setup bundles remains in the project picker — see [Getting started](getting-started.md).
 
+Use a recipient build that supports assignment format v2 for packages with deployment records, such as those containing catalog metadata or folder links. A build limited to v1 cannot open these packages. Builds with v2 support also open v1 assignments. A Distance package with saved measurements linked to deleted reference frames requires assignment format v3 support.
+
 Annotators download a **return progress** ZIP from their working project's **Assignments** area. The coordinator previews and accepts it in the origin project. Species returns support **Append** (add/update by observation UUID, without deleting absent observations), **Keep existing**, or **Use imported**. Distance returns use only the last two whole-task policies. See [Assignments](settings.md#assignments) for conflict and replacement details.
 
 ## Manual Distance annotations

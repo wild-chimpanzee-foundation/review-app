@@ -54,6 +54,8 @@ def render_distance_editor(
                 ui.button(icon="close", on_click=remove).props("flat round dense").tooltip(
                     t("assign_remove_row")
                 )
+            camera_warning = ui.label("").classes("text-caption text-warning")
+            camera_warning.set_visibility(False)
             with ui.column().classes("w-full gap-2") as options:
                 selection_status = ui.label("").classes("text-caption whitespace-pre-wrap")
                 selection = AssignmentVideoTable(
@@ -92,6 +94,7 @@ def render_distance_editor(
             selection.set_rows([])
             count.set_text(t("assign_loading"))
             selection_status.set_text("")
+            camera_warning.set_visibility(False)
 
         def update_count():
             if loaded is not None:
@@ -125,6 +128,9 @@ def render_distance_editor(
                 require_project()
                 loaded = chosen
                 unknown = result["unknown_time_count"]
+                unresolved_camera = result["unresolved_camera_count"]
+                camera_warning.set_text(t("handoff_unresolved_camera", count=unresolved_camera))
+                camera_warning.set_visibility(unresolved_camera > 0)
                 selection.set_rows(
                     [
                         {

@@ -8,11 +8,9 @@ input is supported via Model Import → AI Distance (see the
 AI predictions remain separate from human evidence. Their supplied playback times
 are retained exactly, with no manual clock verification required. Imports create
 full-video AI drafts with inferred Absent recommendations at missing samples, and
-original animal masks can be overlaid at prediction frames. Initial manual-only
-analysis TSV and editable task snapshots are available under Model Import → Manual
-Distance; see the [export/import contract](./distance-manual-export-import.md).
-[Assignment handoff](./assignment-handoff.md), including AI-aware transfer, remains
-unimplemented.
+original animal masks can be overlaid at prediction frames. The manual analysis TSV is available in Import / Export → Export results.
+[Assignment handoff](./assignment-handoff.md) transfers Distance tasks with AI
+provenance and reference calibration.
 See the [cleanup plan](./distance-branch-cleanup-plan.md) for
 migration consolidation, development-database recovery, and validation status.
 
@@ -416,14 +414,13 @@ Failed saves keep the input open for retry.
   the mapping's ID and distance, including links from existing animal samples.
   Canceling an edit leaves the mapping unchanged. Refresh reloads saved mappings
   without rebuilding the reference player.
-- Each prepared frame has a red delete action. Its confirmation shows the current
-  count of saved animal samples that will be cleared, across all videos. It warns
-  that deleting the distance-to-frame mapping clears those samples, including
-  behaviors and carrying links, and reopens affected individual/video reviews.
-  Individuals, clock alignment, unrelated evidence, and the reference video remain
-  intact. Deletion and evidence clearing are transactional; used mappings cannot
-  be deleted through the provider without explicit `clear_samples=True`.
-  Canceling or a failed deletion preserves the mapping and annotations.
+- Deleting a frame removes it from the calibration choices. The confirmation
+  shows how many saved samples use the frame. Saved distances, behaviors, carrying
+  links and completion are preserved. Review displays the saved frame while it is
+  active, including any edits to its position. For a deleted frame it shows the
+  earliest available timestamp on the same clip at the same calibration distance.
+  When no matching frame exists, review shows the saved distance with a notice.
+  Re-adding the same calibration position restores the original frame ID.
 
 Reference preparation uses an independent dialog player with ±1/5/20-frame
 controls and reported FPS. New clips start at playback zero and 1 m. Open existing
@@ -561,34 +558,21 @@ Sample invariants:
   primary keys. Box geometry is all-null or complete/valid; first-seen offsets
   must be inside the video. Parent/infant writes and reopening remain atomic.
 
-## Manual Distance export and restore
+## Distance analysis and handoff
 
-Model Import → Manual Distance provides a flat analysis TSV and a versioned
-editable ZIP snapshot. Selection uses manually confirmed Species Review labels,
-independently of ordinary assignments. An optional recurring time-of-day window
-checks only the video's verified camera-local start time across days; unknown
-times are reported rather than inferred from file metadata.
+Import / Export → Export results provides a flat analysis TSV for manual
+Distance tasks. Selection uses manually confirmed Species Review labels and an
+optional camera-local start-time window. The TSV contains rows for annotated and
+visibility-skipped samples, with individual identity, distances, behaviors, carrier
+links, reference IDs, camera time where available, and attribution.
 
-The analysis TSV includes annotated and visibility-skipped samples, species,
-individual identity/number, age/sex, distance, behaviors/tags, carrier links,
-reference ID, camera time where known, and attribution. Empty/explicitly absent
-tasks have no sample rows and require the editable ZIP to preserve their outcome.
-
-The editable ZIP retains whole manual tasks, precise alignment, individuals and
-boxes, samples/skips, relationships, used reference calibration/media-path context,
-vocabulary, completion/history and bookmarks. Restore uses explicit per-task
-replace-or-skip decisions and transactional writes. Shared calibration conflicts
-block the dependent task; ordinary Review labels and other species tasks are not
-modified. AI-linked state is explicitly unsupported in this initial manual format.
-
-See the [manual export/import contract](./distance-manual-export-import.md) for
-format, media-root mapping, limits and restoration semantics. Neither a flat
-analysis table nor ordinary annotation CSV is an editable Distance or database backup.
+Use [assignment handoff](./assignment-handoff.md) to transfer editable work,
+including AI-linked tasks, explicit absence, task completion, and reference
+dependencies. The older [manual ZIP format](./distance-manual-export-import.md)
+has backend and test coverage. The current UI uses the TSV and assignment workflows.
 
 ## Remaining Work
 
-- [Assignment handoff](./assignment-handoff.md), including AI-aware/provenance-preserving
-  transfer. Manual-only snapshots are implemented separately.
 - AI assistance: reference-mask overlays remain deferred. Imported animal masks are
   shown on their exact prediction frames with a visibility toggle; they hide during
   playback, seeking and box drawing. Selected masks are yellow and other animals gray.

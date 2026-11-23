@@ -1,4 +1,4 @@
-"""Deleting reference mappings explicitly clears only their saved sample evidence."""
+"""Retired references preserve measurements, carrying links, and review completion."""
 
 from datetime import datetime
 
@@ -12,31 +12,39 @@ def test_delete_unused_mapping_and_reconfigure(distance_data):
     assert dp.delete_reference_frame(frame["id"]) == 0
     assert dp.list_reference_frames(frame["reference_video_id"]) == []
     replacement = dp.configure_reference_distance(frame["reference_video_id"], 3500, 5)
-    assert replacement["id"] != frame["id"]
+    assert replacement["id"] == frame["id"]
     assert replacement["distance_m"] == 5
     with pytest.raises(ValueError, match="Reference frame not found"):
-        dp.delete_reference_frame("missing", clear_samples=True)
+        dp.delete_reference_frame("missing")
 
 
-def test_used_mapping_requires_confirmation(distance_data):
+def test_delete_used_reference_without_alternative_keeps_saved_distance(distance_data):
     data, dp = distance_data, distance_data["dp"]
     video_id = data["videos"][0]
+    frame_id = data["frame"]["id"]
     dp.verify_distance_recording_time(video_id, datetime(2026, 10, 12, 16, 2, 49), "alice")
     dp.save_distance_sample(
-        data["individual"]["id"], 1000, reference_frame_id=data["frame"]["id"], labeled_by="alice"
+        data["individual"]["id"], 1000, reference_frame_id=frame_id, labeled_by="alice"
     )
+    other = dp.add_reference_frame(data["reference"]["id"], 1000, 6)
     before = dp.get_distance_review_state(video_id, "alice")
-    assert dp.count_reference_frame_samples(data["frame"]["id"]) == 1
-    with pytest.raises(ValueError, match="Confirm deletion"):
-        dp.delete_reference_frame(data["frame"]["id"])
+    dp.update_reference_frame_position(frame_id, 3600)
     assert dp.get_distance_review_state(video_id, "alice") == before
-    assert dp.list_reference_frames(data["reference"]["id"]) == [data["frame"]]
+    assert dp.delete_reference_frame(frame_id) == 1
+    after = dp.get_distance_review_state(video_id, "alice")
+    assert after["samples"] == [{**before["samples"][0], "display_reference_frame_id": None}]
+    assert dp.list_reference_frames(data["reference"]["id"]) == [other]
+    with pytest.raises(ValueError, match="Select a prepared reference frame"):
+        dp.save_distance_sample(
+            data["individual"]["id"], 3000, reference_frame_id=frame_id, labeled_by="alice"
+        )
 
 
-def test_delete_mapping_clears_shared_evidence_and_reopens_affected_reviews(distance_data):
+def test_delete_mapping_preserves_completed_reviews_and_shows_alternative(distance_data):
     data, dp = distance_data, distance_data["dp"]
     frame_id = data["frame"]["id"]
     other = dp.add_reference_frame(data["reference"]["id"], 1000, 6)
+    alternative = dp.add_reference_frame(data["reference"]["id"], 2000, 5)
     affected_individual_ids = set()
     for index, video_id in enumerate(data["videos"]):
         dp.verify_distance_recording_time(video_id, datetime(2026, 10, 12, 16, 2, 49), "alice")
@@ -69,41 +77,41 @@ def test_delete_mapping_clears_shared_evidence_and_reopens_affected_reviews(dist
             )
         dp.finish_distance_video(video_id, "alice")
     before = {vid: dp.get_distance_review_state(vid, "alice") for vid in data["videos"]}
-    deleted_ids = {
+    affected_sample_ids = {
         sample["id"]
         for state in before.values()
         for sample in state["samples"]
         if sample["reference_frame_id"] == frame_id
     }
-    assert len(deleted_ids) == 3  # Adult and carried infant, plus an adult in another video.
+    assert (
+        len(affected_sample_ids) == 3
+    )  # Adult and carried infant, plus an adult in another video.
     assert dp.count_reference_frame_samples(frame_id) == 3
     assert dp.count_reference_frame_samples(other["id"]) == sum(
         sample["reference_frame_id"] == other["id"]
         for state in before.values()
         for sample in state["samples"]
     )
-    assert dp.delete_reference_frame(frame_id, clear_samples=True) == 3
+    assert dp.delete_reference_frame(frame_id) == 3
     for video_id in data["videos"]:
         after = dp.get_distance_review_state(video_id, "alice")
         assert after["samples"] == [
-            sample for sample in before[video_id]["samples"] if sample["id"] not in deleted_ids
+            {**sample, "display_reference_frame_id": alternative["id"]}
+            if sample["id"] in affected_sample_ids
+            else sample
+            for sample in before[video_id]["samples"]
         ]
-        assert after["review"]["completed_at"] is None
-        assert after["review"]["completed_by"] is None
-        assert after["review"]["completion_outcome"] is None
-        for key, value in before[video_id]["review"].items():
-            if key not in {"completed_at", "completed_by", "completion_outcome"}:
-                assert after["review"][key] == value
+        assert after["review"] == before[video_id]["review"]
+        assert after["review"]["completed_at"] is not None
         individuals = dp.list_distance_individuals(video_id)
         assert {row["id"] for row in individuals}.issubset(affected_individual_ids)
-        assert all(row["review_status"] == "in_progress" for row in individuals)
-        assert all(row["completed_at"] is None for row in individuals)
+        assert all(row["review_status"] == "completed" for row in individuals)
     with dp.Session() as session:
         assert (
             session.query(DistanceSampleBehavior)
-            .filter(DistanceSampleBehavior.sample_id.in_(deleted_ids))
+            .filter(DistanceSampleBehavior.sample_id.in_(affected_sample_ids))
             .count()
-            == 0
+            == 3
         )
-    assert dp.list_reference_frames(data["reference"]["id"]) == [other]
+    assert dp.list_reference_frames(data["reference"]["id"]) == [other, alternative]
     assert dp.list_reference_videos(data["project"].id, "cam_x") == [data["reference"]]

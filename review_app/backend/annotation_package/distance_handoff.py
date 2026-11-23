@@ -312,6 +312,12 @@ def accept(session, binding, context, selected, approved_substitutions):
         for key, local in maps.items()
         if session.get(ProjectDir, local) is not None
     }
+    reference_media = {ref["video_id"] for ref in context["distance"]["references"]}
+    media_paths = {
+        row["video_id"]: (roots[row["root_id"]] / row["video_path"]).as_posix()
+        for row in context["media"]
+        if row["video_id"] in reference_media
+    }
     work = [u for _, u in selected]
     used = distance.used_vocabulary(work, binding.target_species)
     definitions = {
@@ -325,7 +331,7 @@ def accept(session, binding, context, selected, approved_substitutions):
         context,
         identities,
         maps,
-        roots,
+        media_paths,
         work,
         approved_substitutions=approved_substitutions,
     )

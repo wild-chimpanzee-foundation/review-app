@@ -127,6 +127,8 @@ def save_distance_sample(
         .filter_by(individual_id=individual_id, offset_ms=offset_ms)
         .first()
     )
+    if frame and frame.retired and (current is None or current.reference_frame_id != frame.id):
+        raise ValueError("Select a prepared reference frame")
     if infant_id or create_infant:
         if individual.age == "Infant" or (current and current.carried_by_individual_id):
             raise ValueError("A carried infant cannot also carry an infant")
@@ -225,7 +227,9 @@ def save_distance_sample(
         row.status = "skipped" if skipping else "annotated"
         row.skip_reason = skip_reason
         row.reference_frame_id = frame.id if frame else None
-        row.distance_m = frame.distance_m if frame else None
+        row.distance_m = (
+            (current.distance_m if frame.retired else frame.distance_m) if frame else None
+        )
         row.carried_by_individual_id = carrier_id
         row.labeled_by, row.labeled_at, row.updated_at = labeled_by, now, now
         session.flush()
