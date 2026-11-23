@@ -15,7 +15,8 @@ label and observation in one transaction. The remaining findings below are open.
   Verify that an invalid candidate leaves the live database readable and that a
   failed reopen recovers the original records from the compressed safety backup.
   [Settings rollback](../../review_app/app/pages/settings/database.py#L118) ·
-  [Restore validation](../../review_app/backend/db/backup.py#L384)
+  [Restore validation](../../review_app/backend/db/backup.py#L384) ·
+  [Database and recovery work checklist](database-and-recovery.md#work-checklist)
 - [ ] **Preserve the reference frame behind saved Distance measurements.** A
   manual position edit changed the frame behind five saved measurements while
   the task stayed complete. The multiple-timestamp changes in progress add a way
@@ -38,6 +39,66 @@ label and observation in one transaction. The remaining findings below are open.
   [Overview counts](../../review_app/backend/provider/stats_service.py#L80)
 
 ### Import and performance
+
+- [ ] **Reject ambiguous media paths in CSV imports.** The shared suffix
+  lookup can overwrite one video's path with another when separate project roots
+  contain the same relative path. An import from another machine can then attach
+  annotations or predictions to the wrong clip. Preserve all matches and report
+  ambiguous paths for manual resolution across manual, historic, and model CSV
+  imports.
+  [Path lookup](../../review_app/backend/path_matching.py#L39) ·
+  [Annotation CSV resolution](../../review_app/backend/provider/import_service/_shared.py#L95)
+- [ ] **Preserve multiple AI detections with the same label.** Model CSV
+  validation accepts repeated video/model/type/species rows, while the database
+  conflict key excludes time. Import therefore reports all rows as imported but
+  the last interval overwrites earlier detections. Decide whether intervals
+  belong in the identity or duplicates should be rejected, then verify import
+  counts against exported predictions.
+  [Model CSV import](../../review_app/backend/provider/import_service/_model_csv.py#L503) ·
+  [Model annotation identity](../../review_app/backend/db/models.py#L238)
+- [ ] **Keep Species blank state consistent during Append returns.** Append
+  retains an existing blank video label while adding returned observations. The
+  clip then exports as blank and re-importing that CSV in Override mode deletes
+  those observations. Define and preview the result when blank state conflicts
+  with returned observations, and verify the accepted project survives a CSV
+  export/import round trip.
+  [Species Append merge](../../review_app/backend/annotation_package/species.py#L159) ·
+  [Annotation CSV import](../../review_app/backend/provider/import_service/_annotations_csv.py#L207)
+- [ ] **Make CSV dry-run counts match the writes.** The app-format annotation
+  CSV preview misses behavior-only updates and can count a deletion for an empty
+  row that the importer leaves untouched. Share the preview and apply decisions
+  for observation identity, behavior links, and empty states, then compare the
+  reported counts with the resulting database state.
+  [CSV preview](../../review_app/backend/provider/import_service/_annotations_csv.py#L414) ·
+  [CSV apply](../../review_app/backend/provider/import_service/_annotations_csv.py#L146)
+- [ ] **Ensure prepared Distance assignments are reviewable after opening.**
+  Selection currently allows confirmed clips with unresolved camera/deployment
+  identity, while the recipient's Distance queue filters clips without a camera
+  ID. Resolve or exclude these clips during preparation and show the reason
+  before delivery.
+  [Distance selection](../../review_app/backend/annotation_package/scope.py#L111) ·
+  [Distance queue](../../review_app/backend/provider/distance_references.py#L48)
+- [ ] **Use one canonical path for packaged reference footage.** Assignment
+  opening resolves located media paths, but Distance reference restoration and
+  deployment restoration use inconsistent path forms. A symlinked reference
+  clip can pass the media check and then fail package opening. Normalize paths
+  consistently and test opening and returning a package with symlinked footage.
+  [Media location](../../review_app/backend/annotation_package/handoff.py#L124) ·
+  [Distance references](../../review_app/backend/annotation_package/distance.py#L834) ·
+  [Deployment restore](../../review_app/backend/annotation_package/deployments.py#L188)
+- [ ] **Avoid exposing partial copies as delivered footage.** A failed file
+  copy can leave a partial destination file, while the package-opening check
+  sees only that the path exists. Stage each file and publish it only after a
+  successful copy, then test retries after a partial write failure.
+  [Footage copy](../../review_app/backend/annotation_package/delivery.py#L80) ·
+  [Media check](../../review_app/backend/annotation_package/handoff.py#L137)
+- [ ] **Align legacy package detection and assignment version support.** The
+  project picker requires `bundle.json`, although the legacy importer supports
+  CSV-only bundles. Also document the recipient app version needed for v2
+  deployment packages. Test both picker compatibility and cross-version handoff.
+  [Package detection](../../review_app/backend/annotation_package/detection.py#L37) ·
+  [Assignment version selection](../../review_app/backend/annotation_package/handoff.py#L55) ·
+  [Delivery guide](../../userdocs/exporting.md#assignment-delivery)
 
 - [ ] **Make CSV preview and apply share the same Species decisions.** In append
   mode a preview can promise to mark a clip blank even though apply preserves
