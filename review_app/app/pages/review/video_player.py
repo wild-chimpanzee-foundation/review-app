@@ -225,21 +225,29 @@ def render_custom_video_player(
                     startY: 0
                 }};
 
-                videoEl.playbackRate = parseFloat(speedSel.value);
-                // Sync select to what browser actually accepted (browsers may cap max rate)
-                setTimeout(() => {{
-                    const actual = videoEl.playbackRate;
-                    const desired = parseFloat(speedSel.value);
-                    if (Math.abs(actual - desired) > 0.05) {{
-                        // Find closest available option
-                        let best = null;
-                        for (const opt of speedSel.options) {{
-                            if (best === null || Math.abs(parseFloat(opt.value) - actual) < Math.abs(parseFloat(best.value) - actual)) best = opt;
-                        }}
-                        if (best) speedSel.value = best.value;
-                        comp.$emit('vp_speed_change_{vid_key}', actual);
+                function applySpeed(rate) {{
+                    try {{
+                        videoEl.playbackRate = rate;
+                        // Loading another source restores the element's default rate.
+                        videoEl.defaultPlaybackRate = videoEl.playbackRate;
+                    }} catch (error) {{
+                        if (error.name !== 'NotSupportedError') throw error;
                     }}
-                }}, 100);
+                    const actual = videoEl.playbackRate;
+                    const closest = Array.from(speedSel.options).reduce((best, option) =>
+                        Math.abs(Number(option.value) - actual) < Math.abs(Number(best.value) - actual)
+                            ? option : best);
+                    speedSel.value = closest.value;
+                    return actual;
+                }}
+
+                // A replacement player can arrive before the saved preference is updated.
+                applySpeed(window.__vpPlaybackRate ?? Number(speedSel.value));
+                speedSel.addEventListener('change', () => {{
+                    const actual = applySpeed(Number(speedSel.value));
+                    window.__vpPlaybackRate = actual;
+                    comp.$emit('vp_speed_change_{vid_key}', actual);
+                }});
 
                 function updateTransform() {{
                     const brightness = brightnessSlider ? brightnessSlider.value : 1;
@@ -421,24 +429,6 @@ def render_custom_video_player(
                 }});
                 videoEl.addEventListener('play', () => {{ playIcon.style.display = 'none'; pauseIcon.style.display = ''; }});
                 videoEl.addEventListener('pause', () => {{ playIcon.style.display = ''; pauseIcon.style.display = 'none'; }});
-
-                speedSel.addEventListener('change', () => {{
-                    const rate = parseFloat(speedSel.value);
-                    videoEl.playbackRate = rate;
-                    setTimeout(() => {{
-                        const actual = videoEl.playbackRate;
-                        if (Math.abs(actual - rate) > 0.05) {{
-                            let best = null;
-                            for (const opt of speedSel.options) {{
-                                if (best === null || Math.abs(parseFloat(opt.value) - actual) < Math.abs(parseFloat(best.value) - actual)) best = opt;
-                            }}
-                            if (best) speedSel.value = best.value;
-                            comp.$emit('vp_speed_change_{vid_key}', actual);
-                        }} else {{
-                            comp.$emit('vp_speed_change_{vid_key}', rate);
-                        }}
-                    }}, 50);
-                }});
 
                 videoEl.addEventListener('timeupdate', () => {{
                     if (!videoEl.isConnected || range._seeking) return;
