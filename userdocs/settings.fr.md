@@ -117,7 +117,8 @@ sont dans **Détails techniques**.
    préserve le travail local différent. Pour Espèces, **Ajouter** ajoute les
    nouvelles observations, met à jour les UUID correspondants (attributs compris),
    conserve les observations absentes du retour, fusionne les étiquettes et garde
-   les états vidéo locaux en cas de conflit. Une observation plus récente ayant
+   les états vidéo locaux en cas de conflit. L’aperçu indique les vidéos qui
+   deviendront non vides car le résultat contient des observations. Une observation plus récente ayant
    le même UUID peut être écrasée, mais les observations absentes ne sont jamais
    supprimées. Distance ne propose pas ce mode : alignement, individus et
    échantillons doivent rester cohérents dans une tâche entière. Changer de

@@ -531,6 +531,10 @@ def render_return_acceptance(dp, project_id, require_project):
                         t("handoff_append_totals", count=result.totals.get("appended", 0))
                     ).classes("text-body1")
                     ui.label(t("handoff_append_warning")).classes("text-warning")
+                    if corrected := result.totals.get("blank_states_corrected"):
+                        ui.label(t("handoff_append_blank_warning", count=corrected)).classes(
+                            "text-warning"
+                        )
                 if result.species_context_changed:
                     ui.label(t("handoff_species_changed")).classes("text-warning")
                 if result.reference_substitutions:

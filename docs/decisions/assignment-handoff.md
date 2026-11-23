@@ -192,7 +192,8 @@ Species also supports an explicit **Append** policy, chosen once for the return:
 - Keep existing observations absent from the return; an empty return does not
   delete local observations.
 - Merge video tags without deleting local-only tags. Preserve existing video-level
-  labels on conflict rather than overwrite local blank/review state.
+  labels on conflict. If the merged video has observations, clear any conflicting
+  blank label and report that change in the preview.
 - Preview the composed result, explain that matching UUIDs can overwrite newer
   observation edits, and retain stale-preview protection and atomic acceptance.
 - Repeated acceptance of the same composed state is a no-op.

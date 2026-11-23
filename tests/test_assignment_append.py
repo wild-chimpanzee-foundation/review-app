@@ -36,14 +36,14 @@ def by_filename(dp, project_id):
     }
 
 
-def test_append_merges_observations_tags_and_preserves_local_label_and_work(handout):
+def test_append_merges_observations_tags_and_clears_conflicting_blank_state(handout):
     dp, project, root, ids, data = handout
     opened = dp.open_assignment(data, "Alice", {root.id: root.path})
     manifest, context, work = decode_archive(dp.export_assignment_return(opened.project_id))
     returned = next(unit for unit in work if unit["video_id"] == ids[0])
     original = returned["observations"][0]
     original["count"] = 9  # Same UUID updates its row.
-    added = dict(original, observation_uuid="return-only-uuid", count=4)
+    added = dict(original, observation_uuid=str(uuid.uuid4()), count=4)
     returned["observations"].append(added)
     returned["tags"].append(
         {"key": "returned_evidence", "tagged_by": "alice", "tagged_at": "2025-01-01T00:00:00"}
@@ -75,6 +75,7 @@ def test_append_merges_observations_tags_and_preserves_local_label_and_work(hand
     preview = dp.preview_assignment_return(project.id, returned_data, "append")
     assert preview.totals["appended"] == 1
     assert preview.totals["added"] == 0
+    assert preview.totals["blank_states_corrected"] == 1
     assert preview.units[0]["removed"] == {
         "labels": 0,
         "observations": 0,
@@ -84,19 +85,28 @@ def test_append_merges_observations_tags_and_preserves_local_label_and_work(hand
     assert "matching UUIDs" in " ".join(preview.warnings)
     dp.accept_assignment_return(project.id, returned_data, "append", preview.token)
     detail = dp.get_video_detail(local_unit_id)
-    assert [(row["species"], row["count"]) for row in detail["manual_selections"]] == [
-        ("deer", 9),
+    assert sorted((row["species"], row["count"]) for row in detail["manual_selections"]) == [
         ("deer", 4),
+        ("deer", 9),
         ("fox", 77),
     ]
-    assert detail["is_blank"] is True
+    assert detail["is_blank"] is False
+    repeated = dp.preview_assignment_return(project.id, returned_data, "append")
+    assert repeated.totals["unchanged"] == 2
+    assert repeated.totals["appended"] == 0
     with dp.Session() as session:
         from review_app.backend.db.models import VideoTag
 
         assert session.query(VideoTag).filter_by(video_id=ids[0]).count() == 2
-    repeated = dp.preview_assignment_return(project.id, returned_data, "append")
-    assert repeated.totals["unchanged"] == 2
-    assert repeated.totals["appended"] == 0
+    csv = dp.export_annotations_csv(project.id)
+    dp.import_annotations_csv(csv, project.id, mode="override")
+    reimported = dp.get_video_detail(local_unit_id)
+    assert reimported["is_blank"] is False
+    assert sorted((row["species"], row["count"]) for row in reimported["manual_selections"]) == [
+        ("deer", 4),
+        ("deer", 9),
+        ("fox", 77),
+    ]
 
 
 def test_append_updates_local_uuid_and_behavior_without_duplicate_and_keeps_local_only(handout):
@@ -177,7 +187,7 @@ def test_empty_return_keeps_observation_and_placeholder_label_accepts_returned_l
     dp.accept_assignment_return(project.id, returned_data, "append", preview.token)
     detail = dp.get_video_detail(ids[0])
     assert len(detail["manual_selections"]) == 1
-    assert detail["is_blank"] is True
+    assert detail["is_blank"] is False
     assert bool(detail["review_later"]) is True
 
 

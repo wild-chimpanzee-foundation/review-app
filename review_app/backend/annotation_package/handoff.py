@@ -357,10 +357,15 @@ def plan_return(session, project_id, data, policy):
     totals = dict.fromkeys(
         ("added", "appended", "unchanged", "replaced", "unapplied", "annotations_removed"), 0
     )
+    if policy == "append":
+        totals["blank_states_corrected"] = 0
     for returned in sorted(work, key=lambda unit: unit["video_id"]):
         video = videos[returned["video_id"]]
         local = {**current[video.video_id], "video_id": returned["video_id"]}
-        if species.canonical(local) == species.canonical(returned):
+        merged = returned
+        if policy == "append":
+            merged, blank_corrected = species.merge_append(local, returned)
+        if species.canonical(local) == species.canonical(merged):
             classification, action = "identical", "unchanged"
         elif not any(species.counts(local).values()):
             classification, action = "new", "added"
@@ -373,9 +378,6 @@ def plan_return(session, project_id, data, policy):
                 if policy == "use_imported"
                 else "unapplied"
             )
-        merged = species.merge_append(local, returned) if policy == "append" else returned
-        if policy == "append" and species.canonical(local) == species.canonical(merged):
-            classification, action = "identical", "unchanged"
         removed = (
             species.removals(local, merged)
             if action in {"replaced", "appended"}
@@ -396,6 +398,8 @@ def plan_return(session, project_id, data, policy):
         )
         if action in {"added", "replaced", "appended"}:
             selected.append((video.video_id, merged))
+            if policy == "append" and blank_corrected:
+                totals["blank_states_corrected"] += 1
     vocabulary_work = [unit for _, unit in selected]
     used = species.used_vocabulary(vocabulary_work)
     relevant_vocab = {}
@@ -432,8 +436,10 @@ def plan_return(session, project_id, data, policy):
     if totals["appended"]:
         warnings.append(
             "Append adds returned observations, updates matching UUIDs, merges video tags, "
-            "keeps local-only observations, and preserves existing video labels."
+            "keeps local-only observations, and preserves existing video labels where consistent."
         )
+    if count := totals.get("blank_states_corrected"):
+        warnings.append(f"Append will clear the blank label on {count} videos with observations.")
     if totals["annotations_removed"]:
         warnings.append(
             "Append updates matching observations' attribute links without deleting observations."

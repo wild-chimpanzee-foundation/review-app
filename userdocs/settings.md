@@ -105,7 +105,8 @@ identifiers and precise timestamps are under **Technical details**.
    deletions and admin corrections. **Keep existing** leaves differing local work
    untouched. Species also offers **Append**: add new observations, update matching
    UUIDs (including their attributes), keep observations absent from the return,
-   merge tags, and preserve existing video-level labels on conflict. Append can
+   merge tags, and preserve existing video-level labels on conflict. The preview flags any
+   blank labels that will be cleared because the result contains observations. Append can
    overwrite newer edits to a matching observation, but never removes absent
    observations. Distance has no append option: its alignment, individuals and
    samples must stay consistent as one task. Changing the file invalidates

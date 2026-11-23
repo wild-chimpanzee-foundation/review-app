@@ -162,12 +162,16 @@ def merge_append(local, returned):
     observations.update({row["observation_uuid"]: row for row in returned["observations"]})
     tags = {row["key"]: row for row in local["tags"]}
     tags.update({row["key"]: row for row in returned["tags"] if row["key"] not in tags})
+    label = meaningful_label(local["label"]) or meaningful_label(returned["label"])
+    blank_corrected = bool(observations and label and label["is_blank"] is True)
+    if blank_corrected:
+        label = {**label, "is_blank": False}
     return {
         "video_id": returned["video_id"],
-        "label": meaningful_label(local["label"]) or meaningful_label(returned["label"]),
+        "label": label,
         "observations": list(observations.values()),
         "tags": list(tags.values()),
-    }
+    }, blank_corrected
 
 
 def canonical(unit):
