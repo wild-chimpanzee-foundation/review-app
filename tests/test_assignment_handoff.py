@@ -5,7 +5,7 @@ import json
 import uuid
 import zipfile
 from contextlib import nullcontext
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -14,6 +14,8 @@ from review_app.backend.annotation_package.identity import IdentityMap
 from review_app.backend.db.migrations import MIGRATIONS, run_migrations
 from review_app.backend.db.models import (
     Base,
+    Deployment,
+    DeploymentFolderLink,
     HandoffAssignment,
     HandoffIdentityMap,
     IndividualObservation,
@@ -71,6 +73,70 @@ def prepared(provider_with_project):
         )
     result = dp.prepare_assignment(project.id, AssignmentRequest(" alice ", tuple(ids)))
     return dp, project, root, ids, result
+
+
+def test_assignment_preserves_deployment_metadata_and_manual_links(
+    provider_with_project, tmp_path
+):
+    dp, project, root = provider_with_project
+    first, second = dp.get_assignment_video_ids(project.id)
+    with dp.Session.begin() as session:
+        spring = Deployment(
+            project_id=project.id,
+            deployment_id="spring",
+            camera_id="cam_x",
+            installation_date=date(2025, 3, 12),
+            habitat="forest",
+        )
+        fall = Deployment(project_id=project.id, deployment_id="fall", camera_id="cam_x")
+        session.add_all([spring, fall])
+        session.flush()
+        session.get(Video, first).deployment_id = spring.id
+        session.get(Video, second).deployment_id = fall.id
+        session.add(
+            DeploymentFolderLink(
+                project_dir_id=root.id,
+                folder_path="cam_x",
+                deployment_id=spring.id,
+            )
+        )
+        origin_ids = {spring.id, fall.id}
+
+    prepared = dp.prepare_assignment(project.id, AssignmentRequest("alice", (first, second)))
+    package = dp.export_assignment(prepared.id)
+    manifest, context, work = archive.decode_archive(package)
+    assert manifest["version"] == 2
+    assert manifest["recipient"] == "alice"
+    context["deployments"]["media"][0]["deployment_id"] = "unknown"
+    with pytest.raises(ValueError, match="Deployment records must match footage links"):
+        archive.decode_archive(repack(manifest, context, work))
+
+    opened = dp.open_assignment(package, "Remote project", {root.id: tmp_path})
+    with dp.Session() as session:
+        records = {
+            row.id: row
+            for row in session.query(Deployment).filter_by(project_id=opened.project_id)
+        }
+        assert not origin_ids.intersection(records)
+        assert {row.deployment_id for row in records.values()} == {"spring", "fall"}
+        spring = next(row for row in records.values() if row.deployment_id == "spring")
+        assert spring.installation_date == date(2025, 3, 12)
+        assert spring.habitat == "forest"
+        scoped = session.query(Video).filter_by(project_id=opened.project_id).all()
+        assert {video.deployment_id for video in scoped} == records.keys()
+        assert {video.deployment_assignment for video in scoped} == {"manual"}
+        assert (
+            session.query(DeploymentFolderLink)
+            .filter_by(deployment_id=spring.id)
+            .one()
+            .folder_path
+            == "cam_x"
+        )
+
+    returned = dp.export_assignment_return(opened.project_id)
+    return_manifest, return_context, _ = archive.decode_archive(returned)
+    assert return_manifest["direction"] == "return"
+    assert "deployments" not in return_context
 
 
 def unpack(prepared):
@@ -265,7 +331,7 @@ def test_unknown_assignment_download(provider_with_project):
     "change,match",
     [
         (lambda m, c, w: m.update(version=True), "version"),
-        (lambda m, c, w: m.update(version=2), "version"),
+        (lambda m, c, w: m.update(version=99), "version"),
         (lambda m, c, w: m.update(work_keys=[]), "scope"),
         (lambda m, c, w: c["media"][0].update(video_path="../escape.mp4"), "relative"),
         (lambda m, c, w: c["media"][0].update(video_path="C:/absolute.mp4"), "relative"),

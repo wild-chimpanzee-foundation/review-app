@@ -89,7 +89,7 @@ def scoped_context(context, work):
     """Only dependencies actually required by applied tasks can be imported."""
     import copy
 
-    result = copy.deepcopy(context)
+    result = copy.deepcopy({key: value for key, value in context.items() if key != "deployments"})
     deps = result["distance"]
     frames = {
         s["reference_frame_id"] for u in work for s in u["samples"] if s["reference_frame_id"]

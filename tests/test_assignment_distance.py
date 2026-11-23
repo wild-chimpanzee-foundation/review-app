@@ -16,6 +16,7 @@ from review_app.backend.annotation_package.archive import decode_archive, encode
 from review_app.backend.annotation_package.scope import AssignmentRequest
 from review_app.backend.db.models import (
     Behavior,
+    Deployment,
     DistanceImport,
     DistanceIndividual,
     DistanceIndividualTag,
@@ -442,6 +443,34 @@ def test_late_acceptance_failure_rolls_back_graph_dependencies_and_identity_maps
     assert dp.preview_assignment_return(project.id, returned).token == preview.token
 
 
+def test_distance_assignment_restores_reference_deployment(distance_assignment):
+    dp, project, root, video_ids, _, _ = distance_assignment
+    with dp.Session.begin() as session:
+        deployment = Deployment(project_id=project.id, deployment_id="spring")
+        session.add(deployment)
+        session.flush()
+        for video_id in video_ids:
+            session.get(Video, video_id).deployment_id = deployment.id
+        session.get(ReferenceVideo, "ref").deployment_id = deployment.id
+
+    prepared = dp.prepare_assignment(
+        project.id, AssignmentRequest("alice", tuple(video_ids), "distance", "deer")
+    )
+    setup = dp.export_assignment(prepared.id)
+    opened = dp.open_assignment(setup, "Distance deployment", {root.id: root.path})
+    with dp.Session() as session:
+        deployment = session.query(Deployment).filter_by(project_id=opened.project_id).one()
+        assert deployment.deployment_id == "spring"
+        reference = session.query(ReferenceVideo).filter_by(project_id=opened.project_id).one()
+        assert reference.deployment_id == deployment.id
+        assert {
+            video.deployment_id
+            for video in session.query(Video).filter_by(project_id=opened.project_id)
+        } == {deployment.id}
+    returned = dp.export_assignment_return(opened.project_id)
+    assert "deployments" not in decode_archive(returned)[1]
+
+
 def test_reference_dependencies_discovered_on_untouched_task_and_listed_only_sync(
     distance_assignment,
 ):
@@ -660,7 +689,7 @@ def narrow_distance_selection(user, ids):
 
 async def prepare_distance_selection(user):
     user.find(t("assign_review"), kind=ui.button).click()
-    await user.should_see(t("assign_freeze_help"))
+    await user.should_see(t("assign_prepare"), kind=ui.button)
     user.find(t("assign_prepare"), kind=ui.button).click()
 
 
@@ -868,7 +897,7 @@ async def test_distance_ui_prepares_per_species_and_groups_review_by_recipient(
         recipient.set_value("alice")
     await user.should_see(t("assign_video_count", count=1))
     user.find(t("assign_review"), kind=ui.button).click()
-    await user.should_see(t("assign_freeze_help"))
+    await user.should_see(t("assign_prepare"), kind=ui.button)
     assert len(user.find(marker="assignment-review-recipient").elements) == 1
     await user.should_see(t("assign_group_count", count=2))
     user.find(t("assign_prepare"), kind=ui.button).click()

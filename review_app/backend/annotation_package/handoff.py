@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from review_app.backend.annotation_package import distance, species
+from review_app.backend.annotation_package import deployments, distance, species
 from review_app.backend.annotation_package.archive import (
     FORMAT,
     VERSION,
@@ -54,11 +54,14 @@ def prepare(session: Session, project_id: str, request: AssignmentRequest) -> Pr
         if request.stage == "distance"
         else collect(session, project, videos, roots)
     )
+    deployment_context = deployments.collect(session, project_id, context, roots)
+    if deployment_context is not None:
+        context["deployments"] = deployment_context
     assignment_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     manifest = {
         "format": FORMAT,
-        "version": VERSION,
+        "version": VERSION if deployment_context is not None else 1,
         "direction": "setup",
         "assignment_id": assignment_id,
         "source_project_id": project_id,
@@ -248,9 +251,12 @@ def open_setup(
     else:
         for unit in work:
             restore_work(session, project.id, videos[unit["video_id"]], unit, vocab)
-    from review_app.backend.provider.deployments import reconstruct_package_assignments
+    if "deployments" in context:
+        deployments.restore(session, project.id, context["deployments"], identities, videos, paths)
+    else:
+        from review_app.backend.provider.deployments import reconstruct_package_assignments
 
-    reconstruct_package_assignments(session, project.id)
+        reconstruct_package_assignments(session, project.id)
     session.flush()
     return OpenedAssignment(
         binding.id,

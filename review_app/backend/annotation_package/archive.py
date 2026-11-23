@@ -11,7 +11,7 @@ from datetime import datetime
 from review_app.backend.annotation_package.scope import safe_relative
 
 FORMAT = "review-app.assignment"
-VERSION = 1
+VERSION = 2
 MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 MEMBERS = ("manifest.json", "context.json", "work.json")
@@ -58,6 +58,21 @@ def _records(value, schema, key):
 
 
 def validate_snapshot(manifest, context, work):
+    if isinstance(context, dict) and "deployments" in context:
+        base = {key: value for key, value in context.items() if key != "deployments"}
+        _validate_snapshot(manifest, base, work)
+        if manifest["version"] != VERSION or manifest["direction"] != "setup":
+            raise ValueError("Unexpected assignment deployment context")
+        from review_app.backend.annotation_package import deployments
+
+        deployments.validate(context["deployments"], base)
+        return
+    _validate_snapshot(manifest, context, work)
+    if manifest["version"] == VERSION and manifest["direction"] == "setup":
+        raise ValueError("Assignment deployment context is missing")
+
+
+def _validate_snapshot(manifest, context, work):
     _record(
         manifest,
         {
@@ -74,7 +89,7 @@ def validate_snapshot(manifest, context, work):
             "roots": (list,),
         },
     )
-    if manifest["format"] != FORMAT or manifest["version"] != VERSION:
+    if manifest["format"] != FORMAT or manifest["version"] not in {1, VERSION}:
         raise ValueError("Unsupported assignment format/version")
     if manifest["stage"] not in {"species", "distance"} or manifest["direction"] not in {
         "setup",
@@ -109,7 +124,7 @@ def validate_snapshot(manifest, context, work):
             "target_species": None,
             "work_keys": [row["video_id"] for row in context["media"]],
         }
-        validate_snapshot(synthetic, base, context["distance"]["species_work"])
+        _validate_snapshot(synthetic, base, context["distance"]["species_work"])
         return
     _record(
         context,
@@ -313,7 +328,7 @@ def decode_archive(data: bytes) -> tuple[dict, dict, list[dict]]:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             if len(archive.namelist()) != len(MEMBERS) or set(archive.namelist()) != set(MEMBERS):
-                raise ValueError("Assignment archive must contain exactly the version 1 members")
+                raise ValueError("Assignment archive must contain exactly the expected members")
             if sum(info.file_size for info in archive.infolist()) > MAX_UNCOMPRESSED_BYTES:
                 raise ValueError("Assignment exceeds the uncompressed size limit")
             values = []
