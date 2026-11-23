@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from review_app.backend.annotation_package import deployments, distance, species
 from review_app.backend.annotation_package.archive import (
+    FOLDER_REVIEW_VERSION,
     FORMAT,
     VERSION,
     decode_archive,
@@ -54,14 +55,16 @@ def prepare(session: Session, project_id: str, request: AssignmentRequest) -> Pr
         if request.stage == "distance"
         else collect(session, project, videos, roots)
     )
-    deployment_context = deployments.collect(session, project_id, context, roots)
+    version = 1
+    deployment_context = deployments.collect(session, project_id, context, work, roots)
     if deployment_context is not None:
         context["deployments"] = deployment_context
+        version = FOLDER_REVIEW_VERSION if "folder_reviews" in deployment_context else VERSION
     assignment_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     manifest = {
         "format": FORMAT,
-        "version": VERSION if deployment_context is not None else 1,
+        "version": version,
         "direction": "setup",
         "assignment_id": assignment_id,
         "source_project_id": project_id,

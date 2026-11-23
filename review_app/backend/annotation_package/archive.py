@@ -13,6 +13,7 @@ from review_app.backend.annotation_package.scope import safe_relative
 FORMAT = "review-app.assignment"
 VERSION = 2
 RETIRED_REFERENCE_VERSION = 3
+FOLDER_REVIEW_VERSION = 4
 MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 MEMBERS = ("manifest.json", "context.json", "work.json")
@@ -59,20 +60,25 @@ def _records(value, schema, key):
 
 
 def validate_snapshot(manifest, context, work):
-    if isinstance(context, dict) and "deployments" in context:
-        base = {key: value for key, value in context.items() if key != "deployments"}
-        _validate_snapshot(manifest, base, work)
-        if (
-            manifest["version"] not in {VERSION, RETIRED_REFERENCE_VERSION}
-            or manifest["direction"] != "setup"
-        ):
+    has_deployments = isinstance(context, dict) and "deployments" in context
+    base = (
+        {key: value for key, value in context.items() if key != "deployments"}
+        if has_deployments
+        else context
+    )
+    _validate_snapshot(manifest, base, work)
+    version = manifest["version"]
+    if has_deployments:
+        if version == 1 or manifest["direction"] != "setup":
             raise ValueError("Unexpected assignment deployment context")
         from review_app.backend.annotation_package import deployments
 
-        deployments.validate(context["deployments"], base)
-        return
-    _validate_snapshot(manifest, context, work)
-    if manifest["version"] == VERSION and manifest["direction"] == "setup":
+        deployments.validate(
+            context["deployments"], base, work, include_reviews=version == FOLDER_REVIEW_VERSION
+        )
+    elif version == FOLDER_REVIEW_VERSION or (
+        version == VERSION and manifest["direction"] == "setup"
+    ):
         raise ValueError("Assignment deployment context is missing")
 
 
@@ -97,6 +103,7 @@ def _validate_snapshot(manifest, context, work):
         1,
         VERSION,
         RETIRED_REFERENCE_VERSION,
+        FOLDER_REVIEW_VERSION,
     }:
         raise ValueError("Unsupported assignment format/version")
     if manifest["stage"] not in {"species", "distance"} or manifest["direction"] not in {
@@ -301,6 +308,9 @@ def _json(value):
 
 
 def encode_archive(manifest: dict, context: dict, work: list[dict]) -> bytes:
+    # Folder reviews are setup-only; keep the return on its existing wire format.
+    if manifest["direction"] == "return" and manifest["version"] == FOLDER_REVIEW_VERSION:
+        manifest = {**manifest, "version": VERSION}
     if (
         manifest["stage"] == "distance"
         and manifest["version"] in {1, VERSION}

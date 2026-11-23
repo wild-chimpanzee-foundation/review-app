@@ -3,9 +3,21 @@
 from datetime import date
 from pathlib import PurePosixPath
 
-from review_app.backend.annotation_package.archive import OPTIONAL_TEXT, TEXT, _record, _records
+from review_app.backend.annotation_package.archive import (
+    OPTIONAL_TEXT,
+    TEXT,
+    _record,
+    _records,
+    _strings,
+)
 from review_app.backend.annotation_package.scope import id_selection, safe_relative
-from review_app.backend.db.models import Deployment, DeploymentFolderLink, ReferenceVideo, Video
+from review_app.backend.db.models import (
+    Deployment,
+    DeploymentFolderLink,
+    DeploymentFolderReview,
+    ReferenceVideo,
+    Video,
+)
 
 METADATA = (
     "name",
@@ -19,7 +31,43 @@ METADATA = (
 DATES = ("installation_date", "retrieval_date")
 
 
-def collect(session, project_id, context, roots):
+def _folder_key(media):
+    return media["root_id"], PurePosixPath(media["video_path"]).parent.as_posix()
+
+
+def _reference_folders(context, work):
+    species_work = context["distance"]["species_work"] if "distance" in context else work
+    references = {
+        unit["video_id"]
+        for unit in species_work
+        if any(tag["key"] == "reference_video" for tag in unit["tags"])
+    }
+    return {_folder_key(row) for row in context["media"] if row["video_id"] in references}
+
+
+def _collect_folder_reviews(session, folders, deployment_ids):
+    if not folders:
+        return []
+    reviews = (
+        session.query(DeploymentFolderReview)
+        .filter(DeploymentFolderReview.project_dir_id.in_(id_selection({r for r, _ in folders})))
+        .order_by(DeploymentFolderReview.project_dir_id, DeploymentFolderReview.folder_path)
+    )
+    return [
+        {
+            "root_id": review.project_dir_id,
+            "folder_path": review.folder_path,
+            "note": review.note,
+            "available_candidates": sorted(
+                deployment_ids.intersection(review.available_candidates)
+            ),
+        }
+        for review in reviews
+        if (review.project_dir_id, review.folder_path) in folders
+    ]
+
+
+def collect(session, project_id, context, work, roots):
     media = context["media"]
     videos = {
         row.video_id: row
@@ -49,14 +97,14 @@ def collect(session, project_id, context, roots):
         key: videos[key].deployment_id if key in videos else references.get(key)
         for key in (row["video_id"] for row in media)
     }
+    keys = {key for key in (*assignments.values(), *references.values()) if key is not None}
+    reviews = _collect_folder_reviews(session, _reference_folders(context, work), keys)
     if (
-        not any(assignments.values())
-        and not any(references.values())
+        not keys
+        and not reviews
         and all(row.deployment_assignment == "legacy" for row in videos.values())
     ):
         return None
-
-    keys = {key for key in (*assignments.values(), *references.values()) if key is not None}
     deployments = {
         row.id: row
         for row in session.query(Deployment).filter(
@@ -66,9 +114,7 @@ def collect(session, project_id, context, roots):
     if keys != deployments.keys():
         raise ValueError("Assignment footage links to a deployment outside its project")
 
-    folders = {
-        (row["root_id"], PurePosixPath(row["video_path"]).parent.as_posix()) for row in media
-    }
+    folders = {_folder_key(row) for row in media}
     links = session.query(DeploymentFolderLink).filter(
         DeploymentFolderLink.project_dir_id.in_(id_selection({root for root, _ in folders}))
     )
@@ -106,11 +152,15 @@ def collect(session, project_id, context, roots):
             if (link.project_dir_id, link.folder_path) in folders
             and (link.deployment_id is None or link.deployment_id in deployments)
         ],
+        **({"folder_reviews": reviews} if reviews else {}),
     }
 
 
-def validate(snapshot, context):
-    _record(snapshot, {key: (list,) for key in ("records", "media", "references", "folders")})
+def validate(snapshot, context, work, *, include_reviews):
+    schema = {key: (list,) for key in ("records", "media", "references", "folders")}
+    if include_reviews:
+        schema["folder_reviews"] = (list,)
+    _record(snapshot, schema)
     deployments = _records(
         snapshot["records"],
         {"id": TEXT, "deployment_id": TEXT, **dict.fromkeys(METADATA, OPTIONAL_TEXT)},
@@ -139,10 +189,7 @@ def validate(snapshot, context):
     if linked != deployments.keys():
         raise ValueError("Deployment records must match footage links")
 
-    folders = {
-        (row["root_id"], PurePosixPath(row["video_path"]).parent.as_posix())
-        for row in context["media"]
-    }
+    folders = {_folder_key(row) for row in context["media"]}
     seen = set()
     for row in snapshot["folders"]:
         _record(
@@ -159,6 +206,28 @@ def validate(snapshot, context):
         ):
             raise ValueError("Invalid deployment folder link")
         seen.add(key)
+
+    if include_reviews:
+        reference_folders = _reference_folders(context, work)
+        seen = set()
+        for row in snapshot["folder_reviews"]:
+            _record(
+                row,
+                {
+                    "root_id": TEXT,
+                    "folder_path": TEXT,
+                    "note": OPTIONAL_TEXT,
+                    "available_candidates": (list,),
+                },
+            )
+            key = row["root_id"], row["folder_path"]
+            if (
+                key not in reference_folders
+                or key in seen
+                or not _strings(row["available_candidates"]) <= deployments.keys()
+            ):
+                raise ValueError("Invalid deployment folder review")
+            seen.add(key)
 
 
 def restore(session, project_id, snapshot, identities, videos, paths):
@@ -193,5 +262,14 @@ def restore(session, project_id, snapshot, identities, videos, paths):
                 folder_path=row["folder_path"],
                 deployment_id=local[row["deployment_id"]],
                 source=row["source"],
+            )
+        )
+    for row in snapshot.get("folder_reviews", []):
+        session.add(
+            DeploymentFolderReview(
+                project_dir_id=identities.local("root", row["root_id"]),
+                folder_path=row["folder_path"],
+                note=row["note"],
+                available_candidates=sorted(local[key] for key in row["available_candidates"]),
             )
         )

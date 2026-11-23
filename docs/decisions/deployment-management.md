@@ -73,8 +73,10 @@ the reference review queue for confirmation. **Skip** leaves the folder pending.
 
 Reassignment previews are revalidated inside the write transaction. Saved
 Distance evidence, calibrated references, and frozen handoff bindings block
-changes that would invalidate their scope. Assignment archives retain their
-existing version and package-opening behavior.
+changes that would invalidate their scope. Newly prepared assignments carry saved
+reference folder outcomes and notes for the footage they include. Older setup
+archives still open, but do not carry these outcomes. Return packages do not
+change the source project's deployment setup.
 
 ## Manual verification
 

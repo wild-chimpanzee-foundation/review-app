@@ -247,17 +247,36 @@ def test_complete_setup_same_frame_people_and_projected_ai_round_trip(distance_a
     assert copied.copied_count == 3
 
 
-def test_retired_reference_with_same_distance_alternative_survives_handoff(distance_assignment):
+@pytest.mark.parametrize("with_folder_review", [False, True])
+def test_retired_reference_with_same_distance_alternative_survives_handoff(
+    distance_assignment, with_folder_review
+):
     dp, project, root, ids, _, _ = distance_assignment
+    if with_folder_review:
+        dp.sync_videos(active_project_id=project.id)
+        reference = next(
+            row
+            for row in dp.get_deployment_management(project.id)["videos"]
+            if row["filename"] == "reference.mp4"
+        )
+        dp.set_video_tags(reference["video_id"], ["reference_video"])
+        dp.set_folder_ordinary_unavailable(project.id, root.id, "cam_x", "Review complete")
     alternative = dp.add_reference_frame("ref", 1500, 5)
     assert dp.delete_reference_frame("frame-0") > 0
     saved = dp.prepare_assignment(
         project.id, AssignmentRequest("alice", tuple(ids), "distance", "deer")
     )
     package = dp.export_assignment(saved.id)
-    manifest, _, _ = decode_archive(package)
-    assert manifest["version"] == 3
+    manifest, context, _ = decode_archive(package)
+    assert manifest["version"] == (4 if with_folder_review else 3)
     opened = dp.open_assignment(package, "Retired reference", {root.id: root.path})
+    if with_folder_review:
+        (review,) = context["deployments"]["folder_reviews"]
+        assert review["available_candidates"]
+        local_root = dp.get_project_dirs(opened.project_id)[0]
+        folder, _, _ = dp.get_deployment_folder(opened.project_id, local_root.id, "cam_x")
+        assert folder["ordinary_unavailable"]
+        assert folder["review_note"] == "Review complete"
     with dp.Session() as session:
         local = {
             (row.kind, row.portable_id): row.local_id
@@ -271,6 +290,9 @@ def test_retired_reference_with_same_distance_alternative_survives_handoff(dista
     samples = [row for row in after["samples"] if row["reference_frame_id"] == retired]
     assert samples and all(row["display_reference_frame_id"] == fallback for row in samples)
     returned = dp.export_assignment_return(opened.project_id)
+    return_manifest, return_context, _ = decode_archive(returned)
+    assert return_manifest["version"] == 3
+    assert "deployments" not in return_context
     assert dp.preview_assignment_return(project.id, returned).totals["unchanged"] == len(ids)
 
 

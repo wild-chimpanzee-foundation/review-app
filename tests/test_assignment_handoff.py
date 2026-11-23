@@ -139,6 +139,49 @@ def test_assignment_preserves_deployment_metadata_and_manual_links(
     assert "deployments" not in return_context
 
 
+def test_assignment_preserves_unavailable_ordinary_footage_review(provider_with_project):
+    dp, project, root = provider_with_project
+    folders = ("T98/98_Cam150_voler_VR", "T136/136_Cam296_VR")
+    for folder in folders:
+        reference = Path(root.path) / folder / "reference.mp4"
+        reference.parent.mkdir(parents=True)
+        reference.touch()
+    dp.sync_videos(active_project_id=project.id)
+    for folder in folders:
+        dp.set_folder_ordinary_unavailable(project.id, root.id, folder, "Camera stolen")
+    assert not dp.get_deployment_summary(project.id)["has_pending_reference_reviews"]
+    reference_ids = [
+        video["video_id"]
+        for video in dp.get_deployment_management(project.id)["videos"]
+        if video["folder"] == folders[0]
+    ]
+    prepared = dp.prepare_assignment(project.id, AssignmentRequest("alice", tuple(reference_ids)))
+    package = dp.export_assignment(prepared.id)
+    manifest, context, work = archive.decode_archive(package)
+    (review,) = context["deployments"]["folder_reviews"]
+    assert review["folder_path"] == folders[0]
+    review["folder_path"] = folders[1]
+    with pytest.raises(ValueError, match="Invalid deployment folder review"):
+        archive.decode_archive(repack(manifest, context, work))
+
+    opened = dp.open_assignment(package, "Remote project", {root.id: root.path})
+    summary = dp.get_deployment_summary(opened.project_id)
+    assert summary["unmatched_references"] == 1
+    assert not summary["has_pending_reference_reviews"]
+    local_root = dp.get_project_dirs(opened.project_id)[0]
+    assert local_root.id != root.id
+    folder, _, _ = dp.get_deployment_folder(opened.project_id, local_root.id, folders[0])
+    assert folder["ordinary_unavailable"]
+    assert folder["review_note"] == "Camera stolen"
+    assert {
+        row["folder"] for row in dp.get_deployment_management(opened.project_id)["folders"]
+    } == {folders[0]}
+    returned = dp.export_assignment_return(opened.project_id)
+    return_manifest, return_context, _ = archive.decode_archive(returned)
+    assert return_manifest["version"] == 2
+    assert "deployments" not in return_context
+
+
 def unpack(prepared):
     dp, _, _, _, result = prepared
     return archive.decode_archive(dp.export_assignment(result.id))

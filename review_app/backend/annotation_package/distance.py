@@ -14,7 +14,10 @@ from pathlib import Path
 from sqlalchemy import JSON, Boolean, DateTime, Float, Integer
 
 from review_app.backend.annotation_package import species
-from review_app.backend.annotation_package.archive import RETIRED_REFERENCE_VERSION
+from review_app.backend.annotation_package.archive import (
+    FOLDER_REVIEW_VERSION,
+    RETIRED_REFERENCE_VERSION,
+)
 from review_app.backend.annotation_package.scope import id_selection
 from review_app.backend.db.models import (
     DistanceImport,
@@ -442,7 +445,10 @@ def validate(manifest, context, work):
     for frame in deps["frames"]:
         fields = FRAME
         if isinstance(frame, dict) and "retired" in frame:
-            if manifest["version"] != RETIRED_REFERENCE_VERSION or frame["retired"] is not True:
+            if (
+                manifest["version"] not in {RETIRED_REFERENCE_VERSION, FOLDER_REVIEW_VERSION}
+                or frame["retired"] is not True
+            ):
                 raise ValueError("Invalid retired reference frame")
             fields += " retired"
         validate_rows([frame], ReferenceFrame, fields)
