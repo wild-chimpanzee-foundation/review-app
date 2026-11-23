@@ -817,6 +817,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
             conn, "reference_frames", "retired", "BOOLEAN NOT NULL DEFAULT 0"
         ),
     ),
+    (33, lambda conn: _migration_v33(conn)),
 ]
 
 
@@ -1238,6 +1239,58 @@ def _migration_v30(conn) -> None:
     """)
     conn.exec_driver_sql("DROP TABLE reference_frames")
     conn.exec_driver_sql("ALTER TABLE reference_frames_v30 RENAME TO reference_frames")
+
+
+def _migration_v33(conn: Connection) -> None:
+    """Reconcile Species records with their videos and enforce behavior links."""
+    ownership = conn.exec_driver_sql("""
+        UPDATE individual_observations AS io
+        SET project_id = (SELECT v.project_id FROM videos AS v WHERE v.video_id = io.video_id)
+        WHERE EXISTS (
+            SELECT 1 FROM videos AS v
+            WHERE v.video_id = io.video_id AND v.project_id IS NOT io.project_id
+        )
+    """).rowcount
+    labels = conn.exec_driver_sql("""
+        UPDATE video_labels AS vl SET is_blank = 0
+        WHERE vl.is_blank = 1 AND EXISTS (
+            SELECT 1 FROM individual_observations AS io WHERE io.video_id = vl.video_id
+        )
+    """).rowcount
+    orphans = conn.exec_driver_sql("""
+        DELETE FROM observation_tags AS ot
+        WHERE NOT EXISTS (
+            SELECT 1 FROM individual_observations AS io
+            WHERE io.video_id = ot.video_id AND io.id = ot.observation_id
+        )
+    """).rowcount
+    conn.exec_driver_sql("""
+        CREATE TABLE observation_tags_v33 (
+            video_id VARCHAR NOT NULL,
+            observation_id INTEGER NOT NULL,
+            behavior_id VARCHAR NOT NULL REFERENCES behaviors(id),
+            PRIMARY KEY (video_id, observation_id, behavior_id),
+            FOREIGN KEY (video_id, observation_id)
+                REFERENCES individual_observations(video_id, id) ON DELETE CASCADE
+        )
+    """)
+    conn.exec_driver_sql("""
+        INSERT INTO observation_tags_v33 (video_id, observation_id, behavior_id)
+        SELECT video_id, observation_id, behavior_id FROM observation_tags
+    """)
+    conn.exec_driver_sql("DROP TABLE observation_tags")
+    conn.exec_driver_sql("ALTER TABLE observation_tags_v33 RENAME TO observation_tags")
+    conn.exec_driver_sql("""
+        CREATE INDEX idx_observation_tags_video ON observation_tags (video_id, behavior_id)
+    """)
+    if ownership or labels or orphans:
+        logger.warning(
+            "Species upgrade reconciled %d observation projects, cleared %d blank labels,"
+            " and removed %d behavior links without an observation",
+            ownership,
+            labels,
+            orphans,
+        )
 
 
 class SchemaVersionError(ValueError):

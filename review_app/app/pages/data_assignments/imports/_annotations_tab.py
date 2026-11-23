@@ -224,6 +224,10 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                 skipped = validation["skipped"]
                 blanks = validation.get("blanks_to_set", 0)
                 blanks_already = validation.get("blanks_already_set", 0)
+                blanks_to_clear = validation.get("blanks_to_clear", 0)
+                blanks_blocked = validation.get("blanks_blocked_by_observations", 0)
+                clips_without_review = validation.get("clips_without_species_review", 0)
+                behavior_changes = validation.get("obs_behavior_changes", 0)
                 ins = validation["obs_to_insert"]
                 chg = validation.get("obs_to_change", validation.get("obs_to_update", 0))
                 unch = validation.get("obs_unchanged", 0)
@@ -252,7 +256,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                             ).classes("h-48")
 
                     ui.separator().classes("q-my-sm")
-                    no_changes = ins == 0 and chg == 0 and dlt == 0 and blanks == 0
+                    no_changes = not any((ins, chg, dlt, blanks, blanks_to_clear))
                     if no_changes:
                         ui.label(t("app_csv_no_changes")).classes("text-caption text-grey")
                     else:
@@ -260,12 +264,20 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                             ui.label(t("app_csv_blanks", count=blanks)).classes(
                                 "text-body2 text-positive"
                             )
+                        if blanks_to_clear:
+                            ui.label(t("app_csv_blanks_to_clear", count=blanks_to_clear)).classes(
+                                "text-body2"
+                            )
                         if ins:
                             ui.label(t("app_csv_obs_insert", count=ins)).classes(
                                 "text-body2 text-positive"
                             )
                         if chg:
                             ui.label(t("app_csv_obs_update", count=chg)).classes("text-body2")
+                        if behavior_changes:
+                            ui.label(
+                                t("app_csv_behavior_changes", count=behavior_changes)
+                            ).classes("text-caption")
                         if dlt:
                             ui.label(t("app_csv_obs_delete", count=dlt)).classes(
                                 "text-body2 text-warning"
@@ -281,6 +293,14 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                         if unch:
                             already_parts.append(t("app_csv_obs_unchanged", count=unch))
                         ui.label(" · ".join(already_parts)).classes("text-caption text-grey")
+                    if blanks_blocked:
+                        ui.label(t("app_csv_blanks_blocked", count=blanks_blocked)).classes(
+                            "text-body2 text-warning"
+                        )
+                    if clips_without_review:
+                        ui.label(
+                            t("app_csv_clips_without_review", count=clips_without_review)
+                        ).classes("text-caption text-grey")
 
                 if unknown:
                     with ui.card().classes("full-width q-pa-md q-mb-md"):

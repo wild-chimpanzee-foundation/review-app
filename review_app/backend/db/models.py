@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
@@ -183,8 +184,15 @@ class Behavior(Base):
 
 class ObservationTag(Base):
     __tablename__ = "observation_tags"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ("video_id", "observation_id"),
+            ("individual_observations.video_id", "individual_observations.id"),
+            ondelete="CASCADE",
+        ),
+    )
 
-    video_id: Mapped[str] = mapped_column(String, ForeignKey("videos.video_id"), primary_key=True)
+    video_id: Mapped[str] = mapped_column(String, primary_key=True)
     observation_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     behavior_id: Mapped[str] = mapped_column(String, ForeignKey("behaviors.id"), primary_key=True)
 

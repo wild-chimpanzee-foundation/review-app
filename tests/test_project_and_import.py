@@ -737,6 +737,65 @@ def _project_clip_paths(dp, project):
     return {dp.get_video_detail(vid)["video_path"]: vid for vid in queue}
 
 
+@pytest.mark.parametrize("mode", ["append", "override"])
+def test_csv_preview_counts_behavior_updates_and_preserves_empty_rows(provider_with_project, mode):
+    dp, project, _ = provider_with_project
+    video_ids = dp.get_video_queue({}, active_project_id=project.id)
+    for video_id in video_ids:
+        dp.update_manual_review(
+            video_id, [{"species": "deer", "tags": ["grazing"]}], active_project_id=project.id
+        )
+    edited_path, empty_path = [dp.get_video_detail(vid)["video_path"] for vid in video_ids]
+    exported = dp.export_annotations_csv(project.id)
+    edited = exported.loc[exported["video_path"] == edited_path].copy()
+    edited["attributes"] = "running"
+    empty = pd.DataFrame([{"video_path": empty_path, "is_blank": None}])
+    df = pd.concat([edited, empty], ignore_index=True)
+
+    preview = dp.validate_annotations_csv(df, project.id, mode=mode)
+    assert preview["obs_to_change"] == preview["obs_behavior_changes"] == 1
+    assert preview["obs_to_insert"] == preview["obs_to_delete"] == 0
+    assert preview["clips_without_species_review"] == 1
+
+    dp.import_annotations_csv(df, project.id, mode=mode)
+    after = dp.export_annotations_csv(project.id).set_index("video_path")
+    assert after.loc[edited_path, "attributes"] == "running"
+    assert after.loc[empty_path, "attributes"] == "grazing"
+
+
+@pytest.mark.parametrize("mode", ["append", "override"])
+def test_csv_preview_reports_what_explicit_blank_does(provider_with_project, mode):
+    dp, project, _ = provider_with_project
+    video_id = dp.get_video_queue({}, active_project_id=project.id)[0]
+    dp.update_manual_review(video_id, [{"species": "deer"}], active_project_id=project.id)
+    df = pd.DataFrame([{"video_id": video_id, "is_blank": 1}])
+
+    preview = dp.validate_annotations_csv(df, project.id, mode=mode)
+    override = mode == "override"
+    assert preview["blanks_to_set"] == preview["obs_to_delete"] == int(override)
+    assert preview["blanks_blocked_by_observations"] == int(not override)
+
+    dp.import_annotations_csv(df, project.id, mode=mode)
+    detail = dp.get_video_detail(video_id)
+    assert bool(detail["is_blank"]) == override
+    assert len(detail["manual_selections"]) == int(not override)
+
+
+def test_csv_preview_reports_blank_label_cleared_by_incoming_observation(provider_with_project):
+    dp, project, _ = provider_with_project
+    video_id = dp.get_video_queue({}, active_project_id=project.id)[0]
+    dp.update_manual_review(video_id, [], is_blank=True, active_project_id=project.id)
+    df = pd.DataFrame([{"video_id": video_id, "is_blank": 0, "species": "deer"}])
+
+    preview = dp.validate_annotations_csv(df, project.id, mode="append")
+    assert preview["blanks_to_clear"] == preview["obs_to_insert"] == 1
+
+    dp.import_annotations_csv(df, project.id, mode="append")
+    detail = dp.get_video_detail(video_id)
+    assert detail["is_blank"] is False
+    assert [obs["species"] for obs in detail["manual_selections"]] == ["deer"]
+
+
 def test_validate_flags_unconfigured_species(provider_with_project):
     """A species that exists globally but isn't in the project surfaces as unknown."""
     dp, project, _ = provider_with_project

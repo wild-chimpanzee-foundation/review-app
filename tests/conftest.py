@@ -255,7 +255,13 @@ def distance_data(provider_with_project):
     with dp.Session.begin() as session:
         for video_id in videos:
             session.add(
-                IndividualObservation(video_id=video_id, id=1000, species_id=species_id, count=1)
+                IndividualObservation(
+                    video_id=video_id,
+                    project_id=project.id,
+                    id=1000,
+                    species_id=species_id,
+                    count=1,
+                )
             )
     reference = dp.register_reference_video(project.id, "cam_x", "references/patrol.mp4")
     frame = dp.add_reference_frame(reference["id"], 3500, 5.0)

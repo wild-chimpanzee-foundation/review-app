@@ -17,7 +17,9 @@ from review_app.backend.db.migrations import (
     run_migrations,
 )
 from review_app.backend.db.models import Base
+from review_app.backend.errors import VideoError
 from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import IntegrityError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -69,6 +71,83 @@ def test_fresh_db_is_stamped_at_latest_version(tmp_path):
     engine = _make_engine(tmp_path / "test.db")
     run_migrations(engine)
     assert _get_version(engine) == len(MIGRATIONS)
+
+
+@pytest.mark.parametrize("bulk", [False, True])
+def test_species_writer_uses_video_project(provider_with_project, bulk):
+    dp, project, _ = provider_with_project
+    other = dp.create_project("Other project", "")
+    video_id = dp.get_video_queue({}, active_project_id=project.id)[0]
+    selections = [{"species": "deer"}]
+
+    def save(project_id):
+        if bulk:
+            dp.apply_manual_reviews(
+                [{"video_id": video_id, "selections": selections, "is_blank": False}],
+                active_project_id=project_id,
+            )
+        else:
+            dp.update_manual_review(video_id, selections, active_project_id=project_id)
+
+    with pytest.raises(VideoError, match="does not belong"):
+        save(other.id)
+    assert dp.export_annotations_csv(project.id)["species"].dropna().empty
+
+    save(None)
+    stats = dp.get_overview_stats(project.id)
+    assert stats["species_counts"] == [{"species": "deer", "observations": 1, "videos": 1}]
+
+
+def test_species_upgrade_repairs_ownership_and_behavior_links(provider_with_project):
+    from review_app.backend.provider.local_data_provider import LocalDataProvider
+
+    dp, project, _ = provider_with_project
+    other = dp.create_project("Other project", "")
+    video_id = dp.get_video_queue({}, active_project_id=project.id)[0]
+    dp.update_manual_review(
+        video_id, [{"species": "deer", "tags": ["grazing"]}], active_project_id=project.id
+    )
+    with dp.engine.begin() as conn:
+        # Recreate the pre-upgrade table so it can hold a link to a missing observation.
+        conn.exec_driver_sql("ALTER TABLE observation_tags RENAME TO saved_tags")
+        conn.exec_driver_sql("""
+            CREATE TABLE observation_tags (
+                video_id VARCHAR NOT NULL REFERENCES videos(video_id),
+                observation_id INTEGER NOT NULL,
+                behavior_id VARCHAR NOT NULL REFERENCES behaviors(id),
+                PRIMARY KEY (video_id, observation_id, behavior_id)
+            )
+        """)
+        conn.exec_driver_sql("INSERT INTO observation_tags SELECT * FROM saved_tags")
+        conn.exec_driver_sql("""
+            INSERT INTO observation_tags SELECT video_id, observation_id + 1, behavior_id
+            FROM saved_tags
+        """)
+        conn.exec_driver_sql("DROP TABLE saved_tags")
+        conn.exec_driver_sql("UPDATE individual_observations SET project_id = ?", (other.id,))
+        conn.exec_driver_sql("UPDATE video_labels SET is_blank = 1")
+    _set_version(dp.engine, 32)
+    dp.engine.dispose()
+
+    dp = LocalDataProvider()
+    exported = dp.export_annotations_csv(project.id).dropna(subset=["species"])
+    assert exported[["species", "attributes", "is_blank"]].to_dict("records") == [
+        {"species": "deer", "attributes": "grazing", "is_blank": 0}
+    ]
+    stats = dp.get_overview_stats(project.id)
+    assert stats["species_counts"] == [{"species": "deer", "observations": 1, "videos": 1}]
+    assert stats["behavior_counts"] == [{"behavior": "grazing", "observations": 1, "videos": 1}]
+    assert dp.get_overview_stats(other.id)["species_counts"] == []
+
+    with dp.engine.begin() as conn:
+        assert conn.exec_driver_sql("SELECT count(*) FROM observation_tags").scalar_one() == 1
+        with pytest.raises(IntegrityError, match="FOREIGN KEY"):
+            conn.exec_driver_sql("""
+                INSERT INTO observation_tags SELECT video_id, observation_id + 1, behavior_id
+                FROM observation_tags
+            """)
+        conn.exec_driver_sql("DELETE FROM individual_observations WHERE video_id = ?", (video_id,))
+        assert conn.exec_driver_sql("SELECT count(*) FROM observation_tags").scalar_one() == 0
 
 
 @pytest.mark.parametrize("entry_point", ["runner", "provider"])

@@ -1,10 +1,7 @@
 """apply_manual_reviews must match a per-video update_manual_review sequence exactly.
 
-The bulk method is the import path's replacement for calling update_manual_review /
-set_review_later / set_video_tags / assignment restore once per video. The single-video
-methods stay untouched (the review UI uses them), so they serve as the reference
-implementation here: two identical providers, one driven per video, one via the bulk
-call, must end up with byte-identical tables.
+Two identical providers, one driven by the single-clip review and metadata methods
+and one by the bulk import method, must end up with byte-identical tables.
 """
 
 from datetime import datetime, timezone
@@ -248,3 +245,29 @@ def test_bulk_apply_empty_is_a_noop(tmp_db, mock_probe, monkeypatch, frozen_cloc
     before = _dump(dp)
     dp.apply_manual_reviews([])
     assert _dump(dp) == before
+
+
+def test_single_clip_review_attributes_behavior_edit_and_clears_review(provider_with_project):
+    dp, project, _ = provider_with_project
+    video_id = dp.get_video_queue({}, active_project_id=project.id)[0]
+    dp.update_manual_review(
+        video_id, [{"species": "deer", "tags": ["grazing"]}], labeled_by="alice"
+    )
+    dp.set_review_later(video_id)
+
+    selection = dp.get_video_detail(video_id)["manual_selections"][0]
+    dp.update_manual_review(video_id, [selection], labeled_by="bob")
+    unchanged = dp.get_video_detail(video_id)["manual_selections"][0]
+    assert unchanged["labeled_by"] == "alice"
+
+    dp.update_manual_review(video_id, [{**unchanged, "tags": ["running"]}], labeled_by="bob")
+    edited = dp.get_video_detail(video_id)["manual_selections"][0]
+    assert edited["observation_uuid"] == selection["observation_uuid"]
+    assert edited["labeled_by"] == "bob"
+    assert edited["tags"] == ["running"]
+
+    dp.update_manual_review(video_id, None)
+    cleared = dp.get_video_detail(video_id)
+    assert cleared["manual_selections"] == []
+    assert cleared["is_blank"] is None
+    assert not cleared["review_later"]

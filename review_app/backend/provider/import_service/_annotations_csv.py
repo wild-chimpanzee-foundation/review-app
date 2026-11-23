@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
@@ -14,6 +15,11 @@ from review_app.backend.provider.import_service._shared import (
     BLANK_SENTINEL,
     IGNORE_SENTINEL,
     ImportSharedMixin,
+)
+from review_app.backend.provider.manual_review import (
+    normalize_manual_selections,
+    observation_fields_changed,
+    review_blank_status,
 )
 from review_app.backend.provider.observation_identity import (
     match_observation_id,
@@ -41,6 +47,90 @@ def _extract_builtin_tag_keys(row: dict | Any, columns) -> list[str] | None:
         if pd.notna(val) and str(val).strip() == "1":
             keys.append(col[4:])  # strip "tag_" prefix
     return keys
+
+
+def _annotation_csv_review(
+    group: pd.DataFrame, mode: str, map_species: Callable[[str], str | None]
+) -> tuple[dict | None, int]:
+    """Translate one clip's rows into the review operation used by Preview and Import."""
+    first = group.iloc[0]
+    is_blank_raw = first["is_blank"]
+    is_blank = bool(int(is_blank_raw)) if pd.notna(is_blank_raw) else None
+    blank_labeled_by = (
+        str(first["annotator"])
+        if "annotator" in group.columns and pd.notna(first.get("annotator"))
+        else None
+    )
+
+    video_id = str(first["video_id"])
+    if is_blank:
+        return {
+            "video_id": video_id,
+            "selections": [],
+            "is_blank": True,
+            "labeled_by": blank_labeled_by,
+        }, 0
+
+    skipped_observations = 0
+    selections = []
+    blank_votes = 0
+    for _, row in group.iterrows():
+        sp_raw = row.get("species")
+        sp = str(sp_raw).strip() if pd.notna(sp_raw) else ""
+        if not sp:
+            continue
+        sp = map_species(sp)
+        if sp == BLANK_SENTINEL:
+            blank_votes += 1
+            continue
+        if sp is None:
+            skipped_observations += 1
+            continue
+        beh_raw = row.get("attributes") or row.get("behavior") or ""
+        labeled_by = str(row["annotator"]) if pd.notna(row.get("annotator")) else None
+        labeled_at = (
+            pd.to_datetime(row["labeled_at"], errors="coerce")
+            if pd.notna(row.get("labeled_at"))
+            else None
+        )
+        if labeled_at is pd.NaT:
+            labeled_at = None
+        # Numeric IDs are local to one database. UUIDs are portable and are
+        # therefore retained in every mode so repeated merges are idempotent.
+        obs_id_raw = row.get("observation_id")
+        obs_id = int(obs_id_raw) if pd.notna(obs_id_raw) and mode != "append" else None
+        obs_uuid = normalize_observation_uuid(row.get("observation_uuid"))
+        count_raw = row.get("count")
+        count_val = int(count_raw) if pd.notna(count_raw) else None
+
+        selections.append(
+            {
+                "id": obs_id,
+                "observation_uuid": obs_uuid,
+                "species": sp,
+                "tags": str(beh_raw),
+                "count": count_val,
+                "start_sec": row.get("start_sec"),
+                "end_sec": row.get("end_sec"),
+                "labeled_by": labeled_by,
+                "labeled_at": labeled_at,
+            }
+        )
+    if selections:
+        return {
+            "video_id": video_id,
+            "selections": selections,
+            "is_blank": None,
+            "labeled_by": None,
+        }, skipped_observations
+    if blank_votes:
+        return {
+            "video_id": video_id,
+            "selections": [],
+            "is_blank": True,
+            "labeled_by": blank_labeled_by,
+        }, skipped_observations
+    return None, skipped_observations
 
 
 class AnnotationsCsvMixin(ImportSharedMixin):
@@ -199,102 +289,15 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                 if annotator:
                     assignments[str(video_id)] = annotator
 
-            is_blank_raw = first["is_blank"]
-            is_blank = bool(int(is_blank_raw)) if pd.notna(is_blank_raw) else None
-            blank_labeled_by = (
-                str(first["annotator"])
-                if "annotator" in group.columns and pd.notna(first.get("annotator"))
-                else None
-            )
-
-            if is_blank:
-                reviews.append(
-                    {
-                        "video_id": str(video_id),
-                        "selections": [],
-                        "is_blank": True,
-                        "labeled_by": blank_labeled_by,
-                    }
-                )
-                observations_by_annotator[blank_labeled_by or ""] += 1
-            else:
-                selections = []
-                blank_votes = 0
-                for _, row in group.iterrows():
-                    sp_raw = row.get("species")
-                    sp = str(sp_raw).strip() if pd.notna(sp_raw) else ""
-                    if not sp:
-                        continue
-                    sp = map_species(sp)
-                    if sp == BLANK_SENTINEL:
-                        blank_votes += 1
-                        continue
-                    if sp is None:
-                        skipped_observations += 1
-                        continue
-                    beh_raw = row.get("attributes") or row.get("behavior") or ""
-                    tags_list = [
-                        t.strip()
-                        for t in str(beh_raw).split(",")
-                        if t.strip() and t.strip() not in ("unlabeled", "does_not_react")
-                    ]
-                    labeled_by = (
-                        str(row["annotator"])
-                        if "annotator" in group.columns and pd.notna(row.get("annotator"))
-                        else None
-                    )
-                    labeled_at = (
-                        pd.to_datetime(row["labeled_at"], errors="coerce")
-                        if "labeled_at" in group.columns and pd.notna(row.get("labeled_at"))
-                        else None
-                    )
-                    if labeled_at is pd.NaT:
-                        labeled_at = None
-                    # Numeric IDs are local to one database. UUIDs are portable and are
-                    # therefore retained in every mode so repeated merges are idempotent.
-                    obs_id_raw = row.get("observation_id")
-                    obs_id = int(obs_id_raw) if pd.notna(obs_id_raw) and mode != "append" else None
-                    obs_uuid = normalize_observation_uuid(row.get("observation_uuid"))
-                    count_raw = row.get("count")
-                    count_val = int(count_raw) if pd.notna(count_raw) else None
-
-                    selections.append(
-                        {
-                            "id": obs_id,
-                            "observation_uuid": obs_uuid,
-                            "species": sp,
-                            "tags": tags_list,
-                            "count": count_val,
-                            "start_sec": row.get("start_sec"),
-                            "end_sec": row.get("end_sec"),
-                            "labeled_by": labeled_by,
-                            "labeled_at": labeled_at,
-                        }
-                    )
-                if selections:
-                    reviews.append(
-                        {
-                            "video_id": str(video_id),
-                            "selections": selections,
-                            "is_blank": None,
-                            "labeled_by": None,
-                        }
-                    )
-                    for sel in selections:
-                        observations_by_annotator[sel.get("labeled_by") or ""] += 1
-                elif blank_votes:
-                    # Every species this video named means "nothing was there", so the
-                    # video itself is blank. Only when nothing else survived: one real
-                    # observation outvotes the blank rows.
-                    reviews.append(
-                        {
-                            "video_id": str(video_id),
-                            "selections": [],
-                            "is_blank": True,
-                            "labeled_by": blank_labeled_by,
-                        }
-                    )
-                    observations_by_annotator[blank_labeled_by or ""] += 1
+            review, skipped_count = _annotation_csv_review(group, mode, map_species)
+            skipped_observations += skipped_count
+            if review is not None:
+                reviews.append(review)
+                if review["is_blank"]:
+                    observations_by_annotator[review["labeled_by"] or ""] += 1
+                else:
+                    for selection in review["selections"]:
+                        observations_by_annotator[selection["labeled_by"] or ""] += 1
 
             # Restore review_later — reset to False too so override is complete
             rl_raw = first.get("review_later") if "review_later" in group.columns else None
@@ -438,6 +441,10 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         obs_to_delete = 0
         blanks_to_set = 0
         blanks_already_set = 0
+        blanks_to_clear = 0
+        blanks_blocked_by_observations = 0
+        clips_without_species_review = 0
+        obs_behavior_changes = 0
         append = mode == "append"
 
         with self.engine.connect() as conn:
@@ -455,6 +462,23 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                 r[0]: r[1]
                 for r in conn.execute(text("SELECT scientific_name, id FROM species")).fetchall()
             }
+            behavior_id_map = dict(
+                conn.execute(text("SELECT key, id FROM behaviors")).tuples().all()
+            )
+            existing_behaviors: dict[tuple[str, int], set[str]] = {}
+            params = {"pid": active_project_id} if active_project_id else {}
+            project_filter = "WHERE io.project_id = :pid" if active_project_id else ""
+            for vid, oid, behavior_id in conn.execute(
+                text(f"""
+                    SELECT ot.video_id, ot.observation_id, ot.behavior_id
+                    FROM observation_tags ot
+                    JOIN individual_observations io
+                        ON io.video_id = ot.video_id AND io.id = ot.observation_id
+                    {project_filter}
+                """),
+                params,
+            ):
+                existing_behaviors.setdefault((vid, oid), set()).add(behavior_id)
             already_blank: set[str] = {
                 r[0]
                 for r in conn.execute(
@@ -476,20 +500,21 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         # import directly; non-configured ones either map to a configured species,
         # get added to the project ("create as new"), are ignored, or stay pending.
         valid_species = set(self.get_valid_species(active_project_id))
+        preview_species = valid_species.copy()
         unknown_species: set[str] = set()
         species_to_add: set[str] = set()
 
         def resolve_species(sp: str) -> str | None:
             """Mapped target if importable, BLANK_SENTINEL if it means "video is blank",
             else None (ignored / pending)."""
-            if sp in valid_species:
+            if active_project_id and sp in valid_species:
                 return sp
-            target = mappings.get(sp, "")
+            target = mappings.get(sp, "") if active_project_id else mappings.get(sp) or sp
             if target == IGNORE_SENTINEL:
                 return None
             if target == BLANK_SENTINEL:
                 return BLANK_SENTINEL
-            if not target:
+            if not target or (not active_project_id and target not in valid_species):
                 unknown_species.add(sp)  # awaiting a mapping decision
                 return None
             if target in valid_species:
@@ -497,6 +522,9 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             # Non-configured target: added to the project on import, creating it in the
             # global catalog first if it isn't there yet ("create as a new species").
             species_to_add.add(target)
+            preview_species.add(target)
+            # New vocabulary has no database ID during a dry run.
+            species_id_map.setdefault(target, target)
             return target
 
         for video_id, group in df.groupby("video_id", sort=False, dropna=False):
@@ -508,79 +536,61 @@ class AnnotationsCsvMixin(ImportSharedMixin):
 
             matched += 1
             existing_ids = existing_obs_by_video.get(str(video_id), set())
-            first = group.iloc[0]
-            is_blank_raw = first["is_blank"]
-            is_blank = bool(int(is_blank_raw)) if pd.notna(is_blank_raw) else None
+            review, _ = _annotation_csv_review(group, mode, resolve_species)
+            if review is None:
+                clips_without_species_review += 1
+                continue
 
-            if is_blank:
-                if str(video_id) in already_blank:
+            if review["is_blank"]:
+                remaining_observations = len(existing_ids) if append else 0
+                if not review_blank_status(True, remaining_observations):
+                    blanks_blocked_by_observations += 1
+                elif video_id in already_blank:
                     blanks_already_set += 1
                 else:
                     blanks_to_set += 1
-                if not append and existing_ids:
+                if not append:
                     obs_to_delete += len(existing_ids)
                 continue
 
+            if video_id in already_blank:
+                blanks_to_clear += 1
             incoming_ids: set[int] = set()
-            blank_votes = 0
-            resolved_any = False
-            for _, row in group.iterrows():
-                sp_raw = row.get("species")
-                sp = str(sp_raw).strip() if pd.notna(sp_raw) else ""
-                if not sp:
-                    continue
-                resolved = resolve_species(sp)
-                if resolved == BLANK_SENTINEL:
-                    blank_votes += 1
-                    continue
-                if resolved is None:
-                    continue  # ignored or pending — not counted in the diff
-                sp = resolved
-                resolved_any = True
-                obs_id_raw = row.get("observation_id")
-                obs_id = int(obs_id_raw) if pd.notna(obs_id_raw) and not append else None
-                obs_uuid = normalize_observation_uuid(row.get("observation_uuid"))
+            normalized = normalize_manual_selections(
+                review["selections"],
+                preview_species,
+                species_id_map,
+                behavior_id_map,
+            )
+            for selection in normalized:
                 existing_id = match_observation_id(
-                    obs_uuid, obs_id, existing_ids, existing_uuid_ids.get(str(video_id), {})
+                    selection["observation_uuid"],
+                    selection["id"],
+                    existing_ids,
+                    existing_uuid_ids.get(video_id, {}),
                 )
-                if existing_id is not None:
-                    obs_id = existing_id
-                    incoming_ids.add(obs_id)
-                    existing = existing_obs_data.get((str(video_id), obs_id))
-                    if existing is not None:
-                        ex_sp, ex_cnt, ex_start, ex_end = existing
-                        incoming_sp_id = species_id_map.get(sp)
-                        count_raw = row.get("count")
-                        incoming_cnt = int(count_raw) if pd.notna(count_raw) else None
-                        start_raw = pd.to_numeric(row.get("start_sec"), errors="coerce")
-                        incoming_start = 0.0 if pd.isna(start_raw) else float(start_raw)
-                        end_raw = pd.to_numeric(row.get("end_sec"), errors="coerce")
-                        incoming_end = None if pd.isna(end_raw) else float(end_raw)
-                        changed = (
-                            incoming_sp_id != ex_sp
-                            or incoming_cnt != ex_cnt
-                            or abs(incoming_start - (ex_start or 0.0)) > 0.001
-                            or incoming_end != ex_end
-                        )
-                        if changed:
-                            obs_to_change += 1
-                        else:
-                            obs_unchanged += 1
-                    else:
-                        obs_to_change += 1
-                else:
+                if existing_id is None:
                     obs_to_insert += 1
-
-            if blank_votes and not resolved_any:
-                # Mirrors import_annotations_csv: nothing survived except blank votes, so
-                # the video is labelled blank and its existing observations go.
-                if str(video_id) in already_blank:
-                    blanks_already_set += 1
+                    continue
+                incoming_ids.add(existing_id)
+                key = (video_id, existing_id)
+                incoming_behaviors = set(selection["tag_ids"])
+                tags_changed = incoming_behaviors != existing_behaviors.get(key, set())
+                if tags_changed:
+                    obs_behavior_changes += 1
+                fields_changed = observation_fields_changed(
+                    existing_obs_data[key],
+                    (
+                        selection["species_id"],
+                        selection["count"],
+                        selection["start_sec"],
+                        selection["end_sec"],
+                    ),
+                )
+                if tags_changed or fields_changed:
+                    obs_to_change += 1
                 else:
-                    blanks_to_set += 1
-                if not append and existing_ids:
-                    obs_to_delete += len(existing_ids)
-                continue
+                    obs_unchanged += 1
 
             if not append:
                 obs_to_delete += len(existing_ids - incoming_ids)

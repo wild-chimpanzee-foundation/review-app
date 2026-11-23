@@ -17,35 +17,27 @@ label and observation in one transaction. The remaining findings below are open.
   [Settings rollback](../../review_app/app/pages/settings/database.py#L118) ·
   [Restore validation](../../review_app/backend/db/backup.py#L384) ·
   [Database and recovery work checklist](database-and-recovery.md#work-checklist)
-- [ ] **Preserve the reference frame behind saved Distance measurements.** A
-  manual position edit changed the frame behind five saved measurements while
-  the task stayed complete. The multiple-timestamp changes in progress add a way
-  to save a separate frame at the same distance. The explicit edit still changes
-  the existing frame in place. Define what happens when editing a frame used by
-  saved work, then test the policy against completed reviews and assignment
-  round trips. A saved sample must keep its original frame unless an explicit,
-  previewed correction reconciles the affected evidence and completion.
-  [Reference position edit](../../review_app/backend/provider/distance_references.py#L288) ·
-  [Reference workflow](reference-based-distance-annotation.md#on-demand-reference-calibration)
-- [ ] **Enforce Species observation ownership and behavior links.** The writer
-  can assign a video from one project to an observation in another, and SQLite
-  accepts a behavior link to a missing observation. Resolve the video’s project
-  in the write path and enforce referential integrity for the observation key.
-  Check existing data before adding constraints and define how to handle any
-  mismatched ownership, orphan behavior links, or blank clips with observations.
-  Verify that overview counts and exports agree on ownership after upgrade.
-  [Observation schema](../../review_app/backend/db/models.py#L177) ·
-  [Species writer](../../review_app/backend/provider/annotation_repository.py#L913) ·
-  [Overview counts](../../review_app/backend/provider/stats_service.py#L80)
+- [x] **Preserve Distance measurements when calibration changes.** Review uses
+  the current position of the saved frame. Deletion preserves the distance and
+  review completion, with display fallback to the same calibration distance on
+  the original reference clip. Covered by completed-review and handoff tests.
+- [x] **Enforce Species observation ownership and behavior links.** Single and
+  bulk review writes use the video's project and reject requests scoped to a
+  different project. Schema v33 aligns existing observations with their videos,
+  clears conflicting blank flags, and removes behavior links whose observation
+  is missing. A composite foreign key enforces the observation link and removes
+  its behavior links on deletion. Upgrade coverage checks overview counts and
+  CSV export.
+  [Observation schema](../../review_app/backend/db/models.py#L185) ·
+  [Species writer](../../review_app/backend/provider/annotation_repository.py#L495) ·
+  [Upgrade tests](../../tests/test_migrations.py#L75)
 
 ### Import and performance
 
-- [ ] **Reject ambiguous media paths in CSV imports.** The shared suffix
-  lookup can overwrite one video's path with another when separate project roots
-  contain the same relative path. An import from another machine can then attach
-  annotations or predictions to the wrong clip. Preserve all matches and report
-  ambiguous paths for manual resolution across manual, historic, and model CSV
-  imports.
+- [x] **Reject ambiguous media paths in CSV imports.** The shared lookup retains
+  all candidates and stops at a tie. Manual, historic, and model CSV previews
+  report ambiguous paths and skip those rows. A unique full local path can
+  resolve a shared suffix. Covered by imports with duplicate paths under two roots.
   [Path lookup](../../review_app/backend/path_matching.py#L39) ·
   [Annotation CSV resolution](../../review_app/backend/provider/import_service/_shared.py#L95)
 - [ ] **Preserve multiple AI detections with the same label.** Model CSV
@@ -56,57 +48,50 @@ label and observation in one transaction. The remaining findings below are open.
   counts against exported predictions.
   [Model CSV import](../../review_app/backend/provider/import_service/_model_csv.py#L503) ·
   [Model annotation identity](../../review_app/backend/db/models.py#L238)
-- [ ] **Keep Species blank state consistent during Append returns.** Append
-  retains an existing blank video label while adding returned observations. The
-  clip then exports as blank and re-importing that CSV in Override mode deletes
-  those observations. Define and preview the result when blank state conflicts
-  with returned observations, and verify the accepted project survives a CSV
-  export/import round trip.
+- [x] **Keep Species blank state consistent during Append returns.** The
+  preview reports when the merged observations will clear a blank label. The
+  accepted observations survive an annotation CSV export and Override import.
   [Species Append merge](../../review_app/backend/annotation_package/species.py#L159) ·
   [Annotation CSV import](../../review_app/backend/provider/import_service/_annotations_csv.py#L207)
-- [ ] **Make CSV dry-run counts match the writes.** The app-format annotation
-  CSV preview misses behavior-only updates and can count a deletion for an empty
-  row that the importer leaves untouched. Share the preview and apply decisions
-  for observation identity, behavior links, and empty states, then compare the
-  reported counts with the resulting database state.
+- [x] **Make CSV dry-run counts match the writes.** The app-format annotation
+  CSV preview and import share the per-clip review decision. The preview counts
+  behavior updates, shows when a blank request preserves existing observations
+  in Append, and reports clips without a Species review. Regression tests
+  compare the preview with the saved results in Append and Override.
   [CSV preview](../../review_app/backend/provider/import_service/_annotations_csv.py#L414) ·
   [CSV apply](../../review_app/backend/provider/import_service/_annotations_csv.py#L146)
-- [ ] **Ensure prepared Distance assignments are reviewable after opening.**
-  Selection currently allows confirmed clips with unresolved camera/deployment
-  identity, while the recipient's Distance queue filters clips without a camera
-  ID. Resolve or exclude these clips during preparation and show the reason
-  before delivery.
+- [x] **Ensure prepared Distance assignments are reviewable after opening.**
+  Selection reports and excludes clips without an effective camera or deployment
+  identity. Preparation enforces the same requirement, and the recipient queue
+  test verifies the remaining clip is reviewable.
   [Distance selection](../../review_app/backend/annotation_package/scope.py#L111) ·
   [Distance queue](../../review_app/backend/provider/distance_references.py#L48)
-- [ ] **Use one canonical path for packaged reference footage.** Assignment
-  opening resolves located media paths, but Distance reference restoration and
-  deployment restoration use inconsistent path forms. A symlinked reference
-  clip can pass the media check and then fail package opening. Normalize paths
-  consistently and test opening and returning a package with symlinked footage.
+- [x] **Use one canonical path for packaged reference footage.** Distance
+  setup uses the same resolved path for the footage, its reference record, and
+  its deployment link. The Distance handoff test opens a package with symlinked
+  reference footage and verifies that its return previews as unchanged.
   [Media location](../../review_app/backend/annotation_package/handoff.py#L124) ·
   [Distance references](../../review_app/backend/annotation_package/distance.py#L834) ·
   [Deployment restore](../../review_app/backend/annotation_package/deployments.py#L188)
-- [ ] **Avoid exposing partial copies as delivered footage.** A failed file
-  copy can leave a partial destination file, while the package-opening check
-  sees only that the path exists. Stage each file and publish it only after a
-  successful copy, then test retries after a partial write failure.
+- [x] **Avoid exposing partial copies as delivered footage.** Each file is
+  staged in the destination directory and published only after a successful
+  copy. The delivery test simulates a partial write, checks that package opening
+  reports the clip as missing, and verifies a retry in a new output folder.
   [Footage copy](../../review_app/backend/annotation_package/delivery.py#L80) ·
   [Media check](../../review_app/backend/annotation_package/handoff.py#L137)
-- [ ] **Align legacy package detection and assignment version support.** The
-  project picker requires `bundle.json`, although the legacy importer supports
-  CSV-only bundles. Also document the recipient app version needed for v2
-  deployment packages. Test both picker compatibility and cross-version handoff.
+- [x] **Align legacy package detection and assignment version support.** The
+  package picker, contents preview, and importer recognize CSV-only legacy
+  bundles. The delivery guide documents the required recipient support for v2
+  deployment packages and current support for opening v1 assignments.
   [Package detection](../../review_app/backend/annotation_package/detection.py#L37) ·
   [Assignment version selection](../../review_app/backend/annotation_package/handoff.py#L55) ·
   [Delivery guide](../../userdocs/exporting.md#assignment-delivery)
 
-- [ ] **Make CSV preview and apply share the same Species decisions.** In append
-  mode a preview can promise to mark a clip blank even though apply preserves
-  the existing observations and leaves it nonblank. The single-video writer,
-  bulk writer and CSV preview independently encode parts of the same rules.
-  Share the decisions for identity, attribution, behavior tags and blank state
-  while retaining efficient bulk writes. Verify preview counts against the
-  resulting database state for both append and override.
+- [x] **Share Species decisions across review writers and CSV preview.** The
+  single-clip editor and CSV imports use the same transactional writer for
+  attribution, behavior links, and blank state. CSV preview uses the same
+  selection normalization, observation matching and comparison, and blank-state
+  rule. Bulk writes remain batched.
   [CSV preview](../../review_app/backend/provider/import_service/_annotations_csv.py#L414) ·
   [Bulk writer](../../review_app/backend/provider/annotation_repository.py#L495) ·
   [Single-video writer](../../review_app/backend/provider/annotation_repository.py#L791)
@@ -135,11 +120,10 @@ label and observation in one transaction. The remaining findings below are open.
   [Provider](../../review_app/backend/provider/local_data_provider.py#L37) ·
   [Distance page](../../review_app/app/pages/distance_review/page.py#L143) ·
   [Setup wizard](../../review_app/app/setup_wizard.py#L51)
-- [ ] **Extract shared Distance selection rules from the retired ZIP code.**
-  Active handoff imports eligibility and time-window helpers from the old manual
-  transfer module. Separate those rules from the archive implementation, then
-  review which legacy entry points still have callers. Update the Distance design
-  doc to reflect the current analysis TSV and implemented assignment handoff.
+- [x] **Extract shared Distance selection rules from the retired ZIP code.**
+  Assignment selection and manual export share confirmed-species and camera-time
+  rules. The UI uses the manual analysis TSV and assignment ZIPs. Legacy editable
+  ZIP methods remain available in the backend and have test coverage.
   [Handoff selection](../../review_app/backend/annotation_package/scope.py#L117) ·
   [Distance design](reference-based-distance-annotation.md#manual-distance-export-and-restore) ·
   [Current export guide](../../userdocs/exporting.md)
