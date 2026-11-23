@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from review_app.app.pages.distance_review import page as page_module
 from review_app.app.pages.distance_review.page import DistanceReviewPage
+from review_app.backend import transcoding
 
 
 def test_completion_discrepancies_check_all_reviewed_species():
@@ -577,24 +578,23 @@ async def test_only_frame_rate_metadata_is_read_once_for_each_displayed_file(
     page.queue, page.index = [{"video_path": str(path)}], 0
     probe = Mock(return_value=30000 / 1001)
     monkeypatch.setattr(page_module, "_probe_frame_rate", probe)
+    validate = Mock()
+    monkeypatch.setattr(transcoding, "validate_transcoded_video", validate)
     await page.load_sample_timing()
     await page.load_sample_timing()
     probe.assert_called_once_with(path, timeout_sec=2)
     assert page.sample_frame_offset(1000) == 1001
-    converted = tmp_path / "converted.mp4"
+    converted = tmp_path / transcoding.transcoded_cache_filename("animal")
+    converted.touch()
     page.video["transcoded_path"] = str(converted)
-    monkeypatch.setattr(
-        page_module, "inspect_transcoded_cache", Mock(return_value=SimpleNamespace(current=True))
-    )
     await page.load_sample_timing()
-    assert probe.call_args.args == (converted,)
+    await page.load_sample_timing()
+    probe.assert_called_with(converted, timeout_sec=2)
     assert probe.call_count == 2
-    page.video.pop("transcoded_path")
-    monkeypatch.setattr(
-        page_module, "inspect_transcoded_cache", Mock(return_value=SimpleNamespace(current=False))
-    )
+    converted.unlink()
     await page.load_sample_timing()
     assert probe.call_count == 2
+    validate.assert_not_called()
 
 
 async def test_busy_save_does_not_write_twice(distance_page):

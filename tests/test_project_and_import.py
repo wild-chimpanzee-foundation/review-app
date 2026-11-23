@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 from conftest import seed_builtin_tags
+from review_app.backend.db.models import Video
 from review_app.backend.errors import DataImportError
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 from sqlalchemy.exc import IntegrityError
@@ -703,11 +704,17 @@ def test_overview_stats_project_filter(provider_with_project):
 
 
 def test_overview_stats_includes_unresolved_footage(populated_provider):
-    dp, _ = populated_provider
+    dp, videos = populated_provider
     (group,) = dp.get_overview_stats()["deployment_footage"]
     assert group["deployment_id"] is None
     assert group["total_videos"] == 4
     assert group["labeled"] == 3
+    assert Path(group["sample_video_path"]).name == "v1.mp4"
+
+    with dp.Session.begin() as session:
+        session.get(Video, videos["v1"]).is_missing = True
+    (group,) = dp.get_overview_stats()["deployment_footage"]
+    assert group["total_videos"] == 4
     assert Path(group["sample_video_path"]).name == "v2.mp4"
 
 

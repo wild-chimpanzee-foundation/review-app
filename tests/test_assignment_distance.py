@@ -805,8 +805,8 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
     media = dp.get_assignment_media(project.id, saved["id"])
     assert sum(row["assigned"] for row in media) == 2
     assert sum(not row["assigned"] for row in media) == 1
-    # The newly prepared handoff opens directly in the saved-assignment details.
     assert not dp.get_assigned_video_ids(project.id, "alice")
+    user.find(t("assign_view"), kind=ui.button).click()
     await user.should_see(marker="open-delivery", retries=20)
     user.find(marker="open-delivery").click()
     with user:
@@ -1039,8 +1039,9 @@ async def test_distance_ui_selection_filters_subset_and_prepare_revalidation(
     await user.should_see(t("handoff_prepared", count=1), retries=20)
     saved = dp.list_assignments(project.id)[0]
     assert decode_archive(dp.export_assignment(saved["id"]))[0]["work_keys"] == [ids[1]]
-    await user.should_see(marker="open-delivery", retries=20)
+    await user.should_see(marker="download-packages", retries=20)
     # A label edit after loading must fail preparation, never silently drop selection.
+    await user.open("/distance-handoff-admin")
     await load_distance_selection(user)
     with user:
         narrow_distance_selection(user, [ids[1]])

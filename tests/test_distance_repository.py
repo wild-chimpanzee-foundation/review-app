@@ -300,6 +300,10 @@ def test_reference_frames_preserve_known_distance_and_playback_offset(distance_d
     same_position = dp.add_reference_frame(reference["id"], 0, 10)
     assert same_position["id"] != close["id"]
     assert same_position["offset_ms"] == close["offset_ms"]
+    same_distance = dp.add_reference_frame(reference["id"], 1500, 10)
+    assert same_distance["id"] != same_position["id"]
+    assert same_distance["distance_m"] == same_position["distance_m"]
+    assert same_distance["offset_ms"] == 1500
     with pytest.raises(IntegrityError):
         dp.add_reference_frame(reference["id"], 1500, 10)
 

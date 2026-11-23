@@ -459,13 +459,14 @@ async def test_species_roundtrip_through_prepare_open_return_preview_accept(
     user.find(t("assign_prepare"), kind=ui.button).click()
     await user.should_see(t("handoff_prepared", count=2))
     assert len(dp.list_assignments(project.id)) == 1
-    user.find(marker="open-delivery").click()
-    user.find(t("handoff_copy_output")).type(str(tmp_path))
-    user.find(marker="save-delivery").click()
     saved = dp.list_assignments(project.id)[0]
-    path = tmp_path / f"assignment-{saved['assignment_id']}"
-    await user.should_see(t("assign_delivery_saved", path=str(path)))
-    setup = (path / "assignment.zip").read_bytes()
+    user.find(marker="download-packages").click()
+    user.find(t("handoff_copy_output"), kind=ui.input).type(str(tmp_path))
+    user.find(marker="save-packages").click()
+    await user.should_see(t("assign_download_saved", count=1, path=str(tmp_path)))
+    (package,) = tmp_path.glob("*.zip")
+    assert package.name == f"setup-alice-{saved['assignment_id']}.zip"
+    setup = package.read_bytes()
     info = dp.inspect_assignment(setup)
     assert info["recipient"] == "alice" and info["video_count"] == 2
 

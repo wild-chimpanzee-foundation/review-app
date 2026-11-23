@@ -217,11 +217,18 @@ def test_v30_keeps_existing_frame_ids_and_sample_links(
         with monkeypatch.context() as patch:
             patch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:29])
             migrations.run_migrations(engine)
+    frame_snapshot = (
+        "SELECT id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id "
+        "FROM reference_frames ORDER BY id"
+    )
     with engine.connect() as conn:
-        saved = conn.exec_driver_sql("SELECT * FROM reference_frames ORDER BY id").all()
+        saved = conn.exec_driver_sql(frame_snapshot).all()
         samples = conn.exec_driver_sql("SELECT * FROM distance_samples ORDER BY id").all()
     migrations.run_migrations(engine)
     with engine.connect() as conn:
-        assert conn.exec_driver_sql("SELECT * FROM reference_frames ORDER BY id").all() == saved
+        assert conn.exec_driver_sql(frame_snapshot).all() == saved
+        assert conn.exec_driver_sql("SELECT retired FROM reference_frames").scalars().all() == [
+            0 for _ in saved
+        ]
         assert conn.exec_driver_sql("SELECT * FROM distance_samples ORDER BY id").all() == samples
         assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []

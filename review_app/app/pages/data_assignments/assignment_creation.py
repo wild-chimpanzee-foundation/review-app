@@ -234,8 +234,9 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
         if len(requests) == 1 and prepared:
             ui.notify(outcomes[0], type="warning" if prepared[0].missing_video_ids else "positive")
 
-    with ui.dialog().props("persistent") as packages_dialog, ui.card().classes(
-        "w-full max-w-xl gap-3"
+    with (
+        ui.dialog().props("persistent") as packages_dialog,
+        ui.card().classes("w-full max-w-xl gap-3"),
     ):
         ui.label(t("assign_download_packages")).classes("text-h6")
         ui.label(t("assign_download_help")).classes("text-body2 text-grey-7")
@@ -270,9 +271,9 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                 output.enable()
 
         with ui.row().classes("w-full justify-end gap-2"):
-            close_packages_button = ui.button(
-                t("close"), on_click=packages_dialog.close
-            ).props("flat")
+            close_packages_button = ui.button(t("close"), on_click=packages_dialog.close).props(
+                "flat"
+            )
             save_packages_button = ui.button(
                 t("assign_download_packages"), on_click=download_packages, icon="download"
             ).mark("save-packages")

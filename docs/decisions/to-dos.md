@@ -141,12 +141,11 @@ label and observation in one transaction. Unchecked findings below are open.
   [Release workflow](../../.github/workflows/build.yml#L31) ·
   [CI workflow](../../.github/workflows/ci.yml#L25) ·
   [Type-check configuration](../../pyproject.toml#L36)
-- [ ] **Reconcile the unresolved-footage sample test with overview selection.**
-  The test expects `v2.mp4`, while the overview query chooses the first
-  available non-reference path, `v1.mp4` in this fixture. Confirm the intended
-  sample-selection rule and align the query and test.
+- [x] **Reconcile the unresolved-footage sample test with overview selection.**
+  The test verifies that the overview picks the first available non-reference
+  path and skips it when the video is marked missing.
   [Overview query](../../review_app/backend/provider/stats_service.py#L167) ·
-  [Failing test](../../tests/test_project_and_import.py#L704)
+  [Overview test](../../tests/test_project_and_import.py#L706)
 
 ### Operator verification
 
