@@ -257,12 +257,7 @@ def configure_reference_distance(
     *,
     playback_offset_ms: float | None = None,
 ) -> dict:
-    """Fill an unknown distance without replacing an existing mapping.
-
-    Video/distance uniqueness arbitrates simultaneous first clicks. A repeated
-    configuration reuses the saved position; correcting it requires the explicit
-    position-update API. Different distances may use the same timestamp.
-    """
+    """Save a frame or reuse the existing mapping at the same distance and offset."""
     _validate_reference_position(offset_ms, playback_offset_ms)
     if (
         isinstance(distance_m, bool)
@@ -274,7 +269,7 @@ def configure_reference_distance(
     if session.get(ReferenceVideo, reference_video_id) is None:
         raise ValueError("Reference video not found")
     existing = session.query(ReferenceFrame).filter_by(
-        reference_video_id=reference_video_id, distance_m=distance_m
+        reference_video_id=reference_video_id, distance_m=distance_m, offset_ms=offset_ms
     )
     session.execute(
         sqlite_insert(ReferenceFrame)
@@ -285,7 +280,7 @@ def configure_reference_distance(
             distance_m=distance_m,
             playback_offset_ms=playback_offset_ms,
         )
-        .on_conflict_do_nothing(index_elements=["reference_video_id", "distance_m"])
+        .on_conflict_do_nothing(index_elements=["reference_video_id", "distance_m", "offset_ms"])
     )
     return _record(existing.one())
 

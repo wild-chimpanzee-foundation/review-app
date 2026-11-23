@@ -170,7 +170,7 @@
         repaint();
     }
     overlay.addEventListener('pointerdown', event => {
-        if (!mode || !individual || event.button !== 0 || video.readyState < 2) return;
+        if (!mode || !individual || event.button !== 0 || video.seeking || video.readyState < 2) return;
         if (!video.paused) video._distanceSuppressedPauseEvents =
             (video._distanceSuppressedPauseEvents || 0) + 1;
         video.pause();

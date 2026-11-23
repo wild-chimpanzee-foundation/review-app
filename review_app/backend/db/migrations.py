@@ -787,25 +787,20 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
                 transect_id VARCHAR,
                 habitat VARCHAR,
                 notes VARCHAR,
-                folder_path VARCHAR,
-                source VARCHAR NOT NULL,
                 CONSTRAINT uq_deployment_project_key UNIQUE (project_id, deployment_id),
-                CONSTRAINT ck_deployment_key CHECK (length(trim(deployment_id)) > 0),
-                CONSTRAINT ck_deployment_source CHECK (source IN ('csv', 'inferred'))
+                CONSTRAINT ck_deployment_key CHECK (length(trim(deployment_id)) > 0)
             )
             """,
             "CREATE INDEX IF NOT EXISTS ix_deployments_project_id ON deployments (project_id)",
         ],
     ),
     (29, lambda conn: _migration_v29(conn)),
+    (30, lambda conn: _migration_v30(conn)),
 ]
 
 
 def _migration_v29(conn) -> None:
     """Keep legacy labels/evidence intact; assignment initialization is session-aware."""
-    _add_column_if_missing(
-        conn, "projects", "deployment_mode", "VARCHAR NOT NULL DEFAULT 'legacy'"
-    )
     _add_column_if_missing(conn, "videos", "inferred_camera_id", "VARCHAR")
     _add_column_if_missing(conn, "videos", "deployment_id", "VARCHAR REFERENCES deployments(id)")
     _add_column_if_missing(
@@ -816,14 +811,6 @@ def _migration_v29(conn) -> None:
     )
     conn.execute(
         text("UPDATE videos SET inferred_camera_id = camera_id WHERE inferred_camera_id IS NULL")
-    )
-    conn.execute(
-        text("""
-        UPDATE projects SET deployment_mode = CASE
-            WHEN EXISTS (SELECT 1 FROM deployments d WHERE d.project_id=projects.id AND d.source='csv') THEN 'csv'
-            WHEN EXISTS (SELECT 1 FROM deployments d WHERE d.project_id=projects.id) THEN 'inferred'
-            ELSE 'legacy' END
-    """)
     )
     conn.execute(
         text("""
@@ -1203,6 +1190,35 @@ def _migration_v26(conn) -> None:
     conn.exec_driver_sql("DROP TABLE reference_frame_map_v26")
 
 
+def _migration_v30(conn) -> None:
+    """Allow multiple timestamps at each distance while preserving frame IDs."""
+    conn.exec_driver_sql("""
+        CREATE TABLE reference_frames_v30 (
+            id VARCHAR NOT NULL PRIMARY KEY,
+            reference_video_id VARCHAR NOT NULL,
+            offset_ms INTEGER NOT NULL,
+            playback_offset_ms FLOAT,
+            distance_m FLOAT NOT NULL,
+            mask JSON,
+            import_id VARCHAR,
+            CONSTRAINT uq_reference_frame_position UNIQUE (reference_video_id, distance_m, offset_ms),
+            CONSTRAINT ck_reference_frame_offset CHECK (offset_ms >= 0),
+            CONSTRAINT ck_reference_frame_playback CHECK (playback_offset_ms >= 0),
+            CONSTRAINT ck_reference_frame_distance CHECK (distance_m > 0),
+            FOREIGN KEY(reference_video_id) REFERENCES reference_videos (id) ON DELETE CASCADE,
+            FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL
+        )
+    """)
+    conn.exec_driver_sql("""
+        INSERT INTO reference_frames_v30
+            (id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id)
+        SELECT id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id
+        FROM reference_frames
+    """)
+    conn.exec_driver_sql("DROP TABLE reference_frames")
+    conn.exec_driver_sql("ALTER TABLE reference_frames_v30 RENAME TO reference_frames")
+
+
 def check_schema_version(conn) -> None:
     """Reject newer databases without writing anything, including startup DDL."""
     if not conn.exec_driver_sql(
@@ -1231,6 +1247,10 @@ def _apply_migrations(conn) -> bool:
         logger.info("Running %d migration(s): v%d → v%d", len(pending), current, len(MIGRATIONS))
     for version, migration in MIGRATIONS:
         if version > current:
+            # v30 can rebuild directly from the older schema. Running v26 first
+            # would merge distinct timestamps and lose existing frame links.
+            if version == 26 and 30 in pending:
+                continue
             logger.debug("Applying migration v%d", version)
             if callable(migration):
                 migration(conn)

@@ -444,7 +444,7 @@ def accept_return(session, project_id, data, policy, preview_token):
     if selected and binding.stage == "distance":
         from review_app.backend.annotation_package.distance_handoff import accept
 
-        accept(session, binding, context, selected)
+        accept(session, binding, context, selected, preview.reference_substitutions)
         return AcceptanceResult(binding.assignment_id, preview.totals)
     if selected:
         vocab = vocabulary(session, context, [unit for _, unit in selected])

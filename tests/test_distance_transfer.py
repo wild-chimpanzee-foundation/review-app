@@ -283,7 +283,7 @@ def test_reference_conflicts_block_only_the_dependent_task(manual_data):
 
 
 @pytest.mark.parametrize("distance", [3.75, 6])
-def test_manual_import_matches_distance_not_ambiguous_timestamp(manual_data, distance):
+def test_manual_import_matches_distance_and_timestamp(manual_data, distance):
     dp, project, _, _, _, deer, _, _, frame = manual_data
     archive = dp.export_distance_annotations(project.id, [deer])
     manifest, tables = decode_archive(archive)
@@ -323,7 +323,7 @@ def test_manual_import_does_not_substitute_different_position_for_same_distance(
     assert export_state(dp, project.id, [deer]) == before
 
 
-def test_legacy_repeated_distances_are_previewed_as_calibration_conflicts(manual_data):
+def test_repeated_distance_at_different_timestamps_restores_exact_frames(manual_data):
     dp, project, _, _, _, deer, fox, _, frame = manual_data
     archive = dp.export_distance_annotations(project.id, [deer, fox])
     manifest, tables = decode_archive(archive)
@@ -335,8 +335,6 @@ def test_legacy_repeated_distances_are_previewed_as_calibration_conflicts(manual
             "playback_offset_ms": 2250.25,
         }
     )
-    # Manual v1 permits the same distance at distinct positions. Its old graph
-    # remains valid, but cannot silently choose calibration under the new schema.
     second_offset = next(
         row["offset_ms"] for row in tables["samples"] if row["status"] == "skipped"
     )
@@ -349,15 +347,22 @@ def test_legacy_repeated_distances_are_previewed_as_calibration_conflicts(manual
                 distance_m=frame["distance_m"],
             )
     archive = encode_archive(tables, manifest)
-    before = export_state(dp, project.id, [deer, fox])
     preview = {
         row["task_id"]: row for row in dp.preview_distance_annotations_import(project.id, archive)
     }
-    assert "same video/distance" in preview[deer]["error"]
+    assert preview[deer]["error"] is None
     assert preview[fox]["error"] is None
-    with pytest.raises(ValueError, match="same video/distance"):
-        dp.import_distance_annotations(project.id, archive, {deer: "replace"})
-    assert export_state(dp, project.id, [deer, fox]) == before
+    dp.import_distance_annotations(project.id, archive, {deer: "replace"})
+    restored = dp.get_distance_review_state(deer, "alice")["samples"]
+    assert {row["reference_frame_id"] for row in restored if row["status"] == "annotated"} == {
+        frame["id"],
+        "legacy-second-position",
+    }
+    _, roundtrip = decode_archive(dp.export_distance_annotations(project.id, [deer]))
+    assert {(row["distance_m"], row["offset_ms"]) for row in roundtrip["references"]} == {
+        (frame["distance_m"], frame["offset_ms"]),
+        (frame["distance_m"], 2250),
+    }
 
 
 def test_manual_v1_still_rejects_two_distances_at_one_timestamp(manual_data):
@@ -443,15 +448,9 @@ def test_restore_checks_destination_reference_assignment(
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
-    destination = target.create_project_with_deployments(
-        "Destination", str(root), csv_data=b"deployment_id\ncam_x\nother\n"
-    )
+    destination = target.create_project("Destination", str(root))
+    other = target.save_deployment(destination.id, {"deployment_id": "other"})
     target.sync_videos(active_project_id=destination.id)
-    other = next(
-        row["id"]
-        for row in target.get_project_deployments(destination.id)
-        if row["deployment_id"] == "other"
-    )
     reference = next(
         row
         for row in target.get_deployment_management(destination.id)["videos"]

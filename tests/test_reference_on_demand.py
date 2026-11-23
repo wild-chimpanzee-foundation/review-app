@@ -21,10 +21,15 @@ def test_configure_is_persistent_and_never_overwrites(distance_data):
     frame = dp.configure_reference_distance(reference["id"], 333, 4, playback_offset_ms=333.334)
     assert frame["distance_m"] == 4
     assert frame["playback_offset_ms"] == 333.334
-    assert dp.configure_reference_distance(reference["id"], 800, 4) == frame
-    assert dp.configure_reference_distance(reference["id"], 900, 5) == distance_data["frame"]
+    assert dp.configure_reference_distance(reference["id"], 333, 4) == frame
+    second = dp.configure_reference_distance(reference["id"], 800, 4)
+    assert second["id"] != frame["id"]
     reopened = LocalDataProvider()
-    assert reopened.list_reference_frames(reference["id"]) == [frame, distance_data["frame"]]
+    assert reopened.list_reference_frames(reference["id"]) == [
+        frame,
+        second,
+        distance_data["frame"],
+    ]
     with dp.Session() as session:
         assert session.query(DistanceSample).count() == 0
 
@@ -36,7 +41,7 @@ def test_configure_is_scoped_to_reference_and_distances_can_share_positions(dist
     assert frame["id"] != data["frame"]["id"]
     same_position = dp.configure_reference_distance(other["id"], 3500, 6)
     assert same_position["offset_ms"] == frame["offset_ms"]
-    assert dp.configure_reference_distance(other["id"], 4000, 6) == same_position
+    assert dp.configure_reference_distance(other["id"], 3500, 6) == same_position
     assert dp.list_reference_frames(other["id"]) == [frame, same_position]
     assert dp.list_reference_frames(data["reference"]["id"]) == [data["frame"]]
 
@@ -138,8 +143,8 @@ async def test_unconfigured_click_saves_then_configured_click_seeks(user: User, 
     assert page.sample_values == values
     assert page.reference_player is player
     holder["render"].assert_called_once()
+    await wait_for(lambda: distance_button(user, 4).props["data-reference-state"] == "configured")
     distance_button(user, 4).mark("four-saved")
-    assert distance_button(user, 4).props["data-reference-state"] == "configured"
     holder["seek"].reset_mock()
     user.find(marker="four-saved").click()
     await wait_for(lambda: holder["seek"].called)
@@ -251,7 +256,7 @@ async def test_add_custom_distance_with_enter_persists_and_suggests_next_meter(
     await user.open("/reference-on-demand-test")
     page = on_demand_page["page"]
     player, values = page.reference_player, dict(page.sample_values)
-    user.find("Add distance").click()
+    user.find("Add reference frame").click()
     await user.should_see("Known distance (m)")
     number = next(iter(user.find(ui.number).elements))
     assert number.value == 16
@@ -269,28 +274,46 @@ async def test_add_custom_distance_with_enter_persists_and_suggests_next_meter(
     assert page.reference_player is player
     on_demand_page["capture"].assert_awaited_once_with(player, exact=True)
     on_demand_page["render"].assert_called_once()
-    user.find("Add distance").click()
+    user.find("Add reference frame").click()
     await user.should_see("Known distance (m)")
     assert next(iter(user.find(ui.number).elements)).value == 26
 
 
-async def test_add_existing_distance_selects_without_overwriting(user: User, on_demand_page):
+async def test_repeat_distance_has_one_distance_button_and_multiple_timestamps(
+    user: User, on_demand_page
+):
     await user.open("/reference-on-demand-test")
     page = on_demand_page["page"]
-    user.find("Add distance").click()
+    original = on_demand_page["data"]["frame"]
+    user.find("Add reference frame").click()
     await user.should_see("Known distance (m)")
     next(iter(user.find(ui.number).elements)).set_value(5)
     user.find("Save current frame").click()
     await user.should_not_see("Known distance (m)")
-    assert page.frames == [on_demand_page["data"]["frame"]]
+    assert len(page.frames) == 2
+    assert original in page.frames
     assert page.selected_frame_id == page.frames[0]["id"]
-    on_demand_page["capture"].assert_not_awaited()
+    await user.should_see("Reference timestamps")
+    assert (
+        len(
+            [
+                e
+                for e in user.find(ui.button).elements
+                if e.props.get("data-reference-distance") == "5"
+            ]
+        )
+        == 1
+    )
+    user.find("00:03.500", kind=ui.button).click()
+    assert page.selected_frame_id == original["id"]
+    on_demand_page["seek"].assert_called_with(page.reference_player, 3500)
+    assert page.samples == []
 
 
 @pytest.mark.parametrize("value", [None, 0, 20.5])
 async def test_add_distance_rejects_missing_or_invalid_value(user: User, on_demand_page, value):
     await user.open("/reference-on-demand-test")
-    user.find("Add distance").click()
+    user.find("Add reference frame").click()
     await user.should_see("Known distance (m)")
     number = next(iter(user.find(ui.number).elements))
     number.set_value(value)
@@ -308,7 +331,7 @@ async def test_add_distance_rejects_missing_or_invalid_value(user: User, on_dema
 async def test_add_distance_failed_save_keeps_input_for_retry(user: User, on_demand_page):
     on_demand_page["capture"].side_effect = TimeoutError()
     await user.open("/reference-on-demand-test")
-    user.find("Add distance").click()
+    user.find("Add reference frame").click()
     await user.should_see("Known distance (m)")
     number = next(iter(user.find(ui.number).elements))
     number.set_value(30)
@@ -325,7 +348,7 @@ async def test_add_distance_failed_save_keeps_input_for_retry(user: User, on_dem
 
 async def test_cancel_add_distance_does_not_save(user: User, on_demand_page):
     await user.open("/reference-on-demand-test")
-    user.find("Add distance").click()
+    user.find("Add reference frame").click()
     await user.should_see("Known distance (m)")
     user.find("Cancel").click()
     await user.should_not_see("Known distance (m)")

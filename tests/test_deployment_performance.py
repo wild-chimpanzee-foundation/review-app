@@ -1,5 +1,6 @@
 """Backend regression budgets: no per-video SQL/filesystem work during page reads."""
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -149,9 +150,7 @@ def test_unchanged_rescan_loads_assignment_inputs_once(tmp_db, mock_probe):
         path.parent.mkdir(exist_ok=True)
         path.touch()
     dp = LocalDataProvider()
-    project = dp.create_project_with_deployments(
-        "Rescan", str(root), csv_data=b"deployment_id\ncam0\ncam1\ncam2\n"
-    )
+    project = dp.create_project("Rescan", str(root))
     dp.sync_videos(active_project_id=project.id)
     statements = []
 
@@ -164,3 +163,24 @@ def test_unchanged_rescan_loads_assignment_inputs_once(tmp_db, mock_probe):
     finally:
         event.remove(dp.engine, "before_cursor_execute", count)
     assert len(statements) <= 35, f"{len(statements)} SQL executions for an unchanged rescan"
+
+
+@pytest.mark.parametrize("reference_count", [500, 1000])
+def test_large_initial_sync_respects_sqlite_variable_limit(tmp_db, mock_probe, reference_count):
+    root = tmp_db["video_dir"]
+    reference_folder = root / "ref" / "cam_b"
+    reference_folder.mkdir(parents=True)
+    for index in range(reference_count):
+        (reference_folder / f"reference{index}.mp4").touch()
+    ordinary_folder = root / "videos" / "cam_a"
+    ordinary_folder.mkdir(parents=True)
+    (ordinary_folder / "clip.mp4").touch()
+
+    dp = LocalDataProvider()
+    project = dp.create_project("Large footage sync", str(root))
+    with dp.engine.connect() as connection:
+        connection.connection.driver_connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+
+    assert dp.sync_videos(active_project_id=project.id)["added"] == reference_count + 1
+    assert dp.get_deployment_summary(project.id)["unmatched_references"] == reference_count
+    assert dp.sync_videos(active_project_id=project.id)["added"] == 0

@@ -1,4 +1,4 @@
-"""M4: video/distance identity on fresh databases and lossless v25 upgrades."""
+"""Reference identity on fresh databases and SQLite upgrades."""
 
 import sqlite3
 from pathlib import Path
@@ -53,7 +53,7 @@ def v25_references(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("upgraded", [False, True])
-def test_reference_identity_is_distance_not_timestamp(v25_references, tmp_path, upgraded):
+def test_reference_identity_includes_distance_and_timestamp(v25_references, tmp_path, upgraded):
     if upgraded:
         engine = v25_references
         migrations.run_migrations(engine)
@@ -76,16 +76,21 @@ def test_reference_identity_is_distance_not_timestamp(v25_references, tmp_path, 
             conn.exec_driver_sql(
                 "INSERT INTO reference_frames (id, reference_video_id, offset_ms, distance_m) VALUES ('same-time', 'r', 2000, 6)"
             )
-        with pytest.raises(IntegrityError), engine.begin() as conn:
             conn.exec_driver_sql(
                 "INSERT INTO reference_frames (id, reference_video_id, offset_ms, distance_m) VALUES ('same-distance', 'r', 4000, 5)"
+            )
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.exec_driver_sql(
+                "INSERT INTO reference_frames (id, reference_video_id, offset_ms, distance_m) VALUES ('same-frame', 'r', 2000, 5)"
             )
     finally:
         if not upgraded:
             engine.dispose()
 
 
-def test_upgrade_remaps_duplicate_frames_without_altering_sample_evidence(v25_references):
+def test_v26_upgrade_remaps_duplicate_frames_without_altering_sample_evidence(
+    v25_references, monkeypatch
+):
     engine = v25_references
     with engine.connect() as conn:
         samples = (
@@ -103,6 +108,7 @@ def test_upgrade_remaps_duplicate_frames_without_altering_sample_evidence(v25_re
             )
         }
         keeper = conn.exec_driver_sql("SELECT * FROM reference_frames WHERE id='a'").one()
+    monkeypatch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:26])
     migrations.run_migrations(engine)
     migrations.run_migrations(engine)
     with engine.connect() as conn:
@@ -147,7 +153,7 @@ def test_failed_reference_identity_upgrade_rolls_back(v25_references, monkeypatc
         patch.setattr(
             migrations,
             "MIGRATIONS",
-            [(v, fail if v == 26 else m) for v, m in migrations.MIGRATIONS],
+            [(v, fail if v == 26 else m) for v, m in migrations.MIGRATIONS[:26]],
         )
         with pytest.raises(RuntimeError, match="abort reference upgrade"):
             migrations.run_migrations(engine)
@@ -156,3 +162,22 @@ def test_failed_reference_identity_upgrade_rolls_back(v25_references, monkeypatc
         assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
         assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
     migrations.run_migrations(engine)
+
+
+@pytest.mark.parametrize("starting_version", [25, 29])
+def test_v30_keeps_existing_frame_ids_and_sample_links(
+    v25_references, monkeypatch, starting_version
+):
+    engine = v25_references
+    if starting_version == 29:
+        with monkeypatch.context() as patch:
+            patch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:29])
+            migrations.run_migrations(engine)
+    with engine.connect() as conn:
+        saved = conn.exec_driver_sql("SELECT * FROM reference_frames ORDER BY id").all()
+        samples = conn.exec_driver_sql("SELECT * FROM distance_samples ORDER BY id").all()
+    migrations.run_migrations(engine)
+    with engine.connect() as conn:
+        assert conn.exec_driver_sql("SELECT * FROM reference_frames ORDER BY id").all() == saved
+        assert conn.exec_driver_sql("SELECT * FROM distance_samples ORDER BY id").all() == samples
+        assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []

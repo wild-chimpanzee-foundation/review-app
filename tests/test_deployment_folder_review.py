@@ -105,6 +105,32 @@ def test_suggestion_order_is_stable_and_limit_is_respected():
     assert len(rank_folder_deployments(folder, rows, limit=2)) == 2
 
 
+def test_nested_reference_suggestions_look_for_ordinary_footage_in_the_same_transect():
+    parent = "DS_M1Phase5_E3/T44"
+    cam489 = f"{parent}/44_cam489_802176_1104161_20260210"
+    cam559 = f"{parent}/44_cam559_802831_1104239_20260210"
+    ref448 = f"{parent}/VR-Cam_448"
+    ref559 = f"{parent}/VR-Cam_559"
+    other = "DS_M1Phase5_E3/T46/46_cam589_808726_1110872_20260212"
+    rows = inventory(cam489, cam559, ref448, ref559, other)
+
+    def suggestions(folder):
+        return rank_folder_deployments(
+            {"folder": folder, "unmatched_references": 1},
+            rows,
+            ordinary_deployments={cam489, cam559, other},
+        )
+
+    assert {row["id"] for row in suggestions(ref448)} == {cam489, cam559}
+    assert all("deployment_reason_other_camera" in row["reasons"] for row in suggestions(ref448))
+    exact = suggestions(ref559)[0]
+    assert exact["id"] == cam559
+    assert exact["reasons"][:2] == [
+        "deployment_reason_same_transect",
+        "deployment_reason_same_camera",
+    ]
+
+
 @pytest.fixture
 def folders(tmp_db, mock_probe):
     root = tmp_db["video_dir"]
@@ -118,9 +144,16 @@ def folders(tmp_db, mock_probe):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     dp = LocalDataProvider()
-    project = dp.create_project_with_deployments(
-        "Folders", str(root), csv_data=b"deployment_id\n7_cam433\n7_cam536\n"
-    )
+    project = dp.create_project("Folders", str(root))
+    for identifier in ("7_cam433", "7_cam536"):
+        dp.save_deployment(project.id, {"deployment_id": identifier})
+    directory = dp.get_project_dirs(project.id)[0]
+    for folder in ("T7/07_Cam433_suffix", "T7/07_Cam433_suffix/child", "T7/07_Cam433_suffix_VR"):
+        dp.apply_deployment_assignment(
+            dp.preview_deployment_assignment(
+                project.id, action="folder", folder={"root_id": directory.id, "path": folder}
+            )
+        )
     dp.sync_videos(active_project_id=project.id)
     return dp, project, root
 

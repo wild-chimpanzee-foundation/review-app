@@ -155,6 +155,29 @@ def plan(session, binding, manifest, context, work, data, policy, original):
             ([unit["task"]] if unit["task"] else []) + unit["individuals"] + unit["samples"]
         ):
             owners[row["id"]] = unit["video_id"]
+    current_refs = {r["id"]: r["video_id"] for r in current_context["distance"]["references"]}
+    returned_refs = {r["id"]: r["video_id"] for r in context["distance"]["references"]}
+    current_frames = [
+        {**f, "reference_video_id": current_refs[f["reference_video_id"]]}
+        for f in current_context["distance"]["frames"]
+    ]
+    returned_frames = [
+        {**f, "reference_video_id": returned_refs[f["reference_video_id"]]}
+        for f in context["distance"]["frames"]
+    ]
+    matches = distance.match_reference_frames(
+        returned_frames, current_frames, {f["id"]: f["id"] for f in current_frames}
+    )
+    comparison_context = {
+        **context,
+        "distance": {
+            **context["distance"],
+            "frames": [
+                {**f, "offset_ms": matches[f["id"]]["offset_ms"]} if f["id"] in matches else f
+                for f in context["distance"]["frames"]
+            ],
+        },
+    }
     for returned in sorted(work, key=lambda u: u["video_id"]):
         for row in (
             ([returned["task"]] if returned["task"] else [])
@@ -165,7 +188,9 @@ def plan(session, binding, manifest, context, work, data, policy, original):
                 raise ValueError("Returned Distance identity belongs to another task")
         local = current[returned["video_id"]]
         before, after = distance.counts(local), distance.counts(returned)
-        if canonical(local, current_context) == canonical(returned, context):
+        old = canonical(local, current_context)
+        new = canonical(returned, comparison_context)
+        if old == new:
             classification, action = "identical", "unchanged"
         elif not any(before.values()):
             classification, action = "new", "added"
@@ -175,7 +200,6 @@ def plan(session, binding, manifest, context, work, data, policy, original):
                 "replaced" if policy == "use_imported" else "unapplied",
             )
         # Report removed graph identities/links, not just a net count decrease.
-        old, new = canonical(local, current_context), canonical(returned, context)
 
         def keys(unit):
             return {
@@ -220,17 +244,9 @@ def plan(session, binding, manifest, context, work, data, policy, original):
             "Species context has changed since preparation; saved Distance scope remains eligible and labels will not be restored."
         )
     dependencies = scoped_context(context, [u for _, u in selected])
-    current_refs = {r["id"]: r["video_id"] for r in current_context["distance"]["references"]}
-    current_frames = {
-        (current_refs[f["reference_video_id"]], f["distance_m"]): f
-        for f in current_context["distance"]["frames"]
-    }
-    returned_refs = {r["id"]: r["video_id"] for r in dependencies["distance"]["references"]}
     substitutions = []
     for frame in dependencies["distance"]["frames"]:
-        existing = current_frames.get(
-            (returned_refs[frame["reference_video_id"]], frame["distance_m"])
-        )
+        existing = matches.get(frame["id"])
         if existing and (
             existing["id"] != frame["id"]
             or any(existing[k] != frame[k] for k in ("offset_ms", "playback_offset_ms", "mask"))
@@ -253,7 +269,7 @@ def plan(session, binding, manifest, context, work, data, policy, original):
             )
     if substitutions:
         warnings.append(
-            "Existing admin calibration will be reused by video/distance; returned sample distances are preserved."
+            "Existing admin calibration will be reused for matching reference frames; returned sample distances are preserved."
         )
     if totals["unapplied"]:
         warnings.append("Keep existing leaves later annotator updates unapplied.")
@@ -285,7 +301,7 @@ def plan(session, binding, manifest, context, work, data, policy, original):
     return binding, dependencies, selected, preview
 
 
-def accept(session, binding, context, selected):
+def accept(session, binding, context, selected, approved_substitutions):
     identities = IdentityMap(session, binding.id)
     maps = {
         r.portable_id: r.local_id
@@ -304,7 +320,14 @@ def accept(session, binding, context, selected):
     }
     vocab = species.vocabulary(session, definitions)
     mapping = distance.restore_dependencies(
-        session, binding.project_id, context, identities, maps, roots, work
+        session,
+        binding.project_id,
+        context,
+        identities,
+        maps,
+        roots,
+        work,
+        approved_substitutions=approved_substitutions,
     )
     for video_id, unit in selected:
         distance.restore_work(

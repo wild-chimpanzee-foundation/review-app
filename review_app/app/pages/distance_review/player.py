@@ -159,6 +159,7 @@ def stop_player(player) -> None:
         ui.run_javascript(f"""
             const video = {video_element(player)};
             if (video) {{
+                video._distancePlayback = (video._distancePlayback || 0) + 1;
                 if (!video.paused) video._distanceSuppressedPauseEvents =
                     (video._distanceSuppressedPauseEvents || 0) + 1;
                 video.pause(); video.removeAttribute('src'); video.load();

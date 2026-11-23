@@ -294,7 +294,8 @@ def test_saved_scope_after_species_edits_and_calibration_substitution(distance_a
     assert dp.preview_assignment_return(project.id, returned).totals["unchanged"] == 2
 
 
-def test_new_frame_at_shared_timestamp_and_stale_preview(distance_assignment):
+@pytest.mark.parametrize(("distance", "offset"), [(15, 1000), (5, 2500)])
+def test_new_frame_and_stale_preview(distance_assignment, distance, offset):
     dp, project, _, _, _, _ = distance_assignment
     opened = open_work(distance_assignment)
     with dp.Session.begin() as session:
@@ -303,8 +304,8 @@ def test_new_frame_at_shared_timestamp_and_stale_preview(distance_assignment):
             ReferenceFrame(
                 id="new-frame",
                 reference_video_id=mapping.local_id,
-                distance_m=15,
-                offset_ms=1000,
+                distance_m=distance,
+                offset_ms=offset,
                 mask={"person": 3},
             )
         )
@@ -312,7 +313,7 @@ def test_new_frame_at_shared_timestamp_and_stale_preview(distance_assignment):
             DistanceSample,
             session.get(HandoffIdentityMap, (opened.id, "distance_sample", "sample-1")).local_id,
         )
-        sample.reference_frame_id, sample.distance_m = "new-frame", 15.25
+        sample.reference_frame_id, sample.distance_m = "new-frame", distance + 0.25
     returned = dp.export_assignment_return(opened.project_id)
     assert (
         decode_archive(dp.export_assignment_return(opened.project_id))[2]
@@ -328,8 +329,11 @@ def test_new_frame_at_shared_timestamp_and_stale_preview(distance_assignment):
     with dp.Session() as session:
         frames = session.query(ReferenceFrame).filter_by(reference_video_id="ref").all()
         assert len(frames) == 3
-        assert {f.offset_ms for f in frames} == {1000}
-        assert session.get(DistanceSample, "sample-1").distance_m == 15.25
+        assert {f.offset_ms for f in frames} == {1000, offset}
+        sample = session.get(DistanceSample, "sample-1")
+        assert sample.distance_m == distance + 0.25
+        assert sample.reference_frame_id != "frame-0"
+        assert session.get(ReferenceFrame, sample.reference_frame_id).offset_ms == offset
 
 
 @pytest.mark.parametrize("mutation", ["scope", "species", "dangling", "carrier", "duplicate"])

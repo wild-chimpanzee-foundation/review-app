@@ -35,7 +35,6 @@ class Project(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String, unique=True)
-    deployment_mode: Mapped[str] = mapped_column(String, default="legacy", server_default="legacy")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     last_opened: Mapped[datetime | None] = mapped_column(DateTime)
     collection_id: Mapped[str | None] = mapped_column(String, ForeignKey("species_collections.id"))
@@ -65,7 +64,6 @@ class Deployment(Base):
     __table_args__ = (
         UniqueConstraint("project_id", "deployment_id", name="uq_deployment_project_key"),
         CheckConstraint("length(trim(deployment_id)) > 0", name="ck_deployment_key"),
-        CheckConstraint("source IN ('csv', 'inferred')", name="ck_deployment_source"),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -80,8 +78,6 @@ class Deployment(Base):
     transect_id: Mapped[str | None] = mapped_column(String)
     habitat: Mapped[str | None] = mapped_column(String)
     notes: Mapped[str | None] = mapped_column(String)
-    folder_path: Mapped[str | None] = mapped_column(String)
-    source: Mapped[str] = mapped_column(String)
 
 
 class DeploymentFolderLink(Base):
@@ -399,7 +395,9 @@ class ReferenceVideo(Base):
 class ReferenceFrame(Base):
     __tablename__ = "reference_frames"
     __table_args__ = (
-        UniqueConstraint("reference_video_id", "distance_m", name="uq_reference_frame_distance"),
+        UniqueConstraint(
+            "reference_video_id", "distance_m", "offset_ms", name="uq_reference_frame_position"
+        ),
         CheckConstraint("offset_ms >= 0", name="ck_reference_frame_offset"),
         CheckConstraint("playback_offset_ms >= 0", name="ck_reference_frame_playback"),
         CheckConstraint("distance_m > 0", name="ck_reference_frame_distance"),

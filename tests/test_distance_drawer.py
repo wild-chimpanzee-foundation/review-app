@@ -519,6 +519,74 @@ async def wait_for_saved_timing_disabled(page):
     raise AssertionError("Replay must be disabled while busy")
 
 
+@pytest.mark.parametrize(
+    ("offset_ms", "start_ms", "interrupted"),
+    [(0, None, False), (750, 0, False), (2250, 1000.125, False), (3000, 1000.125, True)],
+)
+async def test_add_individual_replays_to_the_captured_frame(
+    user: User, drawer_page, monkeypatch, offset_ms, start_ms, interrupted
+):
+    holder, _, _ = drawer_page
+    await user.open("/distance-drawer-test")
+    page = holder["page"]
+    page.animal_player = SimpleNamespace(id=999, source="/main-video")
+    page.queue[0]["duration_sec"] = 10
+    page.review = {"verified_by": "alice"}
+    page.sample_offset = 3000
+    page.offsets = [1000, 3000]
+    page.sample_seek_offset = Mock(side_effect=lambda offset: offset + 0.125)
+    preview = SimpleNamespace(id=1000, on=Mock())
+    seek, install = Mock(), Mock()
+    monkeypatch.setattr(page_module, "capture_offset", AsyncMock(return_value=offset_ms))
+    monkeypatch.setattr(page_module, "image_filters", AsyncMock(return_value={}))
+    monkeypatch.setattr(anchor_module, "render_custom_video_player", Mock(return_value=preview))
+    monkeypatch.setattr(anchor_module, "seek_paused", seek)
+    monkeypatch.setattr(anchor_module, "install_anchor_editor", install)
+    monkeypatch.setattr(anchor_module, "configure_anchor", Mock())
+    monkeypatch.setattr(anchor_module, "anchor_mode", Mock())
+    release = asyncio.Event()
+
+    async def play(*_):
+        await release.wait()
+        if interrupted:
+            raise ValueError("distance_playback_interrupted")
+
+    playback = AsyncMock(side_effect=play)
+    monkeypatch.setattr(anchor_module, "play_to_sample", playback)
+    await page.add_individual_dialog()
+
+    if start_ms is None:
+        await user.should_not_see("Play to this frame")
+        playback.assert_not_awaited()
+        return
+
+    draw, draft = install.call_args.args[1:3]
+    await draw(
+        SimpleNamespace(
+            args={
+                "individual_id": draft["id"],
+                "offset_ms": offset_ms,
+                "anchor": {"x": 0.2, "y": 0.2, "width": 0.3, "height": 0.3},
+            }
+        )
+    )
+    create_button = next(iter(user.find("Create individual", kind=ui.button).elements))
+    draw_button = next(iter(user.find("Draw box", kind=ui.button).elements))
+    assert create_button.enabled
+
+    user.find("Play to this frame").click()
+    await wait_for_saved(page, lambda: playback.await_count == 1)
+    playback.assert_awaited_once_with(preview, start_ms, offset_ms)
+    assert not create_button.enabled and not draw_button.enabled
+    release.set()
+    await wait_for_saved(page, lambda: create_button.enabled)
+    assert draw_button.enabled
+    assert page.sample_offset == 3000
+    assert draft["first_seen_offset_ms"] == offset_ms
+    assert seek.call_count == (2 if interrupted else 1)
+    seek.assert_called_with(preview, offset_ms)
+
+
 @pytest.mark.parametrize("dialog_kind", ["creation", "redraw"])
 @pytest.mark.parametrize("finish", ["cancel", "save"])
 @pytest.mark.parametrize("create_infant", [False, True])

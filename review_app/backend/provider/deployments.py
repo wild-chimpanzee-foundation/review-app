@@ -7,9 +7,7 @@ identity. Legacy/package labels are retained when reconstructing historical scop
 
 from __future__ import annotations
 
-import csv
 import hashlib
-import io
 import json
 import os
 from collections import defaultdict
@@ -35,15 +33,13 @@ from review_app.backend.db.models import (
 )
 from review_app.backend.deployment_review import group_deployment_folders
 from review_app.backend.deployments import (
-    CSV_COLUMNS,
     DeploymentInputError,
-    _folder_path,
-    csv_folder_candidates,
-    deployment_id_index,
-    parse_deployment_csv,
+    relative_deployment_folder,
+    validate_deployment_fields,
 )
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
+from review_app.backend.utils import sqlite_values
 
 
 def _path(value):
@@ -93,9 +89,11 @@ class _AssignmentDependencies:
     """One transaction-local snapshot for bulk initialization, never a cross-call cache."""
 
     def __init__(self, session, project_id, videos=None):
-        video_ids = None if videos is None else [video.video_id for video in videos]
+        video_ids = None if videos is None else sqlite_values(video.video_id for video in videos)
         paths = (
-            None if videos is None else [normalize_path_str(video.video_path) for video in videos]
+            None
+            if videos is None
+            else sqlite_values(normalize_path_str(video.video_path) for video in videos)
         )
         tasks = (
             session.query(DistanceReviewTask.video_id)
@@ -161,7 +159,7 @@ class _AssignmentDependencies:
 
 
 def ensure_project_initialized(session, project_id):
-    """Read without a write lock unless legacy rows or missing initial links exist."""
+    """Read without a write lock unless legacy videos need initialization."""
     project = session.get(Project, project_id)
     if project is None:
         raise DeploymentInputError("deployment_error_project")
@@ -170,29 +168,7 @@ def ensure_project_initialized(session, project_id):
         .filter_by(project_id=project_id, deployment_assignment="legacy")
         .first()
     )
-    roots = _roots(session, project_id)
-    missing_link = False
-    if len(roots) == 1:
-        linked = (
-            session.query(DeploymentFolderLink.id)
-            .filter(
-                DeploymentFolderLink.project_dir_id == roots[0].id,
-                DeploymentFolderLink.folder_path == Deployment.folder_path,
-            )
-            .exists()
-        )
-        missing_link = (
-            session.query(Deployment.id)
-            .filter(
-                Deployment.project_id == project_id,
-                Deployment.source == "csv",
-                Deployment.folder_path.is_not(None),
-                ~linked,
-            )
-            .first()
-            is not None
-        )
-    if pending or missing_link:
+    if pending:
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
         return initialize_project(session, project_id)
     return project
@@ -262,9 +238,7 @@ def _legacy_deployment(session, project_id, label, root, cache):
             (
                 row
                 for row in linked
-                if row.source == "inferred"
-                and row.deployment_id.startswith(f"{label} [")
-                and row.name == label
+                if row.deployment_id.startswith(f"{label} [") and row.name == label
             ),
             None,
         )
@@ -291,22 +265,11 @@ def _legacy_deployment(session, project_id, label, root, cache):
             while identifier in used:
                 identifier = f"{label} [{suffix}]"
                 suffix += 1
-            row = Deployment(
-                project_id=project_id, deployment_id=identifier, name=label, source="inferred"
-            )
+            row = Deployment(project_id=project_id, deployment_id=identifier, name=label)
             session.add(row)
             session.flush()
     cache[key] = row
     return row
-
-
-def _confirmed_link(link, deployments):
-    """Only explicit admin rules and declared CSV paths control future scans."""
-    return link.source == "manual" or (
-        link.source == "csv"
-        and link.deployment_id in deployments
-        and deployments[link.deployment_id].source == "csv"
-    )
 
 
 def _set_assignment(video, target, source, *, references, preserve_label=False):
@@ -332,24 +295,6 @@ def initialize_project(session, project_id):
             DeploymentFolderLink.project_dir_id.in_([root.id for root in roots])
         )
     }
-    if len(roots) == 1:
-        declarations = session.query(Deployment).filter(
-            Deployment.project_id == project_id,
-            Deployment.source == "csv",
-            Deployment.folder_path.is_not(None),
-        )
-        for deployment in declarations:
-            key = roots[0].id, deployment.folder_path
-            if key not in links:
-                link = DeploymentFolderLink(
-                    project_dir_id=roots[0].id,
-                    folder_path=deployment.folder_path,
-                    deployment_id=deployment.id,
-                    source=deployment.source,
-                )
-                session.add(link)
-                links[key] = link
-    session.flush()
     legacy = (
         session.query(Video).filter_by(project_id=project_id, deployment_assignment="legacy").all()
     )
@@ -358,11 +303,6 @@ def initialize_project(session, project_id):
     dependencies = _AssignmentDependencies(session, project_id)
     locations = _StoredLocations(roots)
     cache = {}
-    automatic = (
-        _automatic_targets(session, project, roots, legacy)
-        if project.deployment_mode == "csv"
-        else {}
-    )
     # Queries for a new group must not flush every preceding individual video.
     # Assignment updates can be sent in batches while target/link creation stays atomic.
     with session.no_autoflush:
@@ -376,20 +316,8 @@ def initialize_project(session, project_id):
                 root = roots[0]
             reason = dependencies.block_reason(video)
             references = dependencies.references_for(video)
-            if project.deployment_mode == "csv":
-                desired = automatic.get(video.video_id)
-                if video.camera_id == (desired.deployment_id if desired else None) or not reason:
-                    _set_assignment(
-                        video,
-                        desired,
-                        "folder" if desired else "unresolved",
-                        references=references,
-                    )
-                    continue
-                # A v28 inventory may coexist with already saved legacy work.
-                # Preserve that established scope instead of reinterpreting it.
             target = _legacy_deployment(session, project_id, video.camera_id, root, cache)
-            if root and folder is not None and project.deployment_mode != "csv":
+            if root and folder is not None:
                 key = root.id, folder
                 if key not in links:
                     link = DeploymentFolderLink(
@@ -428,13 +356,10 @@ def _automatic_targets(session, project, roots, videos, *, scanned_paths=(), res
         )
     }
     groups = defaultdict(list)
-    explicit_roots = defaultdict(set)
     known_roots = defaultdict(set)
     for (root_id, _), link in links.items():
         if link.deployment_id:
             known_roots[link.deployment_id].add(root_id)
-            if _confirmed_link(link, deployments):
-                explicit_roots[link.deployment_id].add(root_id)
     for video in videos:
         root, folder = locations.locate(video.video_path)
         if root is None:
@@ -442,75 +367,48 @@ def _automatic_targets(session, project, roots, videos, *, scanned_paths=(), res
         groups[root.id, folder].append(video)
         if video.deployment_id and video.video_id not in reset_ids:
             known_roots[video.deployment_id].add(root.id)
-            if video.deployment_assignment == "manual":
-                explicit_roots[video.deployment_id].add(root.id)
 
     targets = {}
-    if project.deployment_mode == "csv":
-        index = deployment_id_index(by_identifier)
-        candidates_by_folder = {}
-        candidate_roots = defaultdict(set)
-        for key, members in groups.items():
-            root_id, folder = key
-            link = links.get(key)
-            if link and _confirmed_link(link, deployments):
-                targets[key] = deployments.get(link.deployment_id)
-                continue
-            candidates = {
-                identifier
-                for baseline in {v.inferred_camera_id or v.camera_id or "" for v in members}
-                for identifier in csv_folder_candidates(folder, baseline, index)
-            }
-            if len(candidates) == 1:
-                target = by_identifier[candidates.pop()]
-                candidates_by_folder[key] = target
-                candidate_roots[target.id].add(root_id)
-        for key, target in candidates_by_folder.items():
-            allowed = explicit_roots[target.id]
-            if key[0] in allowed or (not allowed and len(candidate_roots[target.id]) == 1):
-                targets[key] = target
-    else:
-        inferred = {}
-        scanned_labels = {
-            (root_id, video.inferred_camera_id or video.camera_id)
-            for (root_id, _), members in groups.items()
-            for video in members
-            if video.video_path in scanned_paths and video.deployment_assignment != "manual"
-        }
-        for key, members in sorted(groups.items()):
-            root_id, _ = key
-            link = links.get(key)
-            if link and _confirmed_link(link, deployments):
-                targets[key] = deployments.get(link.deployment_id)
-                continue
-            labels = {v.inferred_camera_id or v.camera_id for v in members}
-            if len(labels) != 1 or None in labels:
-                continue
-            label = labels.pop()
-            if (root_id, label) not in inferred:
-                identifier = label
-                suffix = 2
-                while identifier in by_identifier:
-                    existing = by_identifier[identifier]
-                    if not known_roots[existing.id] or root_id in known_roots[existing.id]:
-                        break
-                    identifier = f"{label} [{suffix}]"
-                    suffix += 1
-                target = by_identifier.get(identifier)
-                if target is None and (root_id, label) in scanned_labels:
-                    target = Deployment(
-                        project_id=project.id,
-                        deployment_id=identifier,
-                        name=label,
-                        source="inferred",
-                    )
-                    session.add(target)
-                    session.flush([target])
-                    by_identifier[identifier] = target
-                if target is not None:
-                    known_roots[target.id].add(root_id)
-                inferred[root_id, label] = target
-            targets[key] = inferred[root_id, label]
+    inferred = {}
+    scanned_labels = {
+        (root_id, video.inferred_camera_id or video.camera_id)
+        for (root_id, _), members in groups.items()
+        for video in members
+        if video.video_path in scanned_paths and video.deployment_assignment != "manual"
+    }
+    for key, members in sorted(groups.items()):
+        root_id, _ = key
+        link = links.get(key)
+        if link and link.source == "manual":
+            targets[key] = deployments.get(link.deployment_id)
+            continue
+        labels = {v.inferred_camera_id or v.camera_id for v in members}
+        if len(labels) != 1 or None in labels:
+            continue
+        label = labels.pop()
+        if (root_id, label) not in inferred:
+            identifier = label
+            suffix = 2
+            while identifier in by_identifier:
+                existing = by_identifier[identifier]
+                if not known_roots[existing.id] or root_id in known_roots[existing.id]:
+                    break
+                identifier = f"{label} [{suffix}]"
+                suffix += 1
+            target = by_identifier.get(identifier)
+            if target is None and (root_id, label) in scanned_labels:
+                target = Deployment(
+                    project_id=project.id,
+                    deployment_id=identifier,
+                    name=label,
+                )
+                session.add(target)
+                session.flush([target])
+                by_identifier[identifier] = target
+            if target is not None:
+                known_roots[target.id].add(root_id)
+            inferred[root_id, label] = target
+        targets[key] = inferred[root_id, label]
     return {video.video_id: target for key, target in targets.items() for video in groups[key]}
 
 
@@ -579,7 +477,7 @@ def reconstruct_package_assignments(session, project_id):
 
 def restore_effective_assignments(session, project_id, assignments):
     """Restore the existing metadata CSV's effective labels, in its write transaction."""
-    project = initialize_project(session, project_id)
+    initialize_project(session, project_id)
     locations = _StoredLocations(_roots(session, project_id))
     dependencies = _AssignmentDependencies(session, project_id)
     by_identifier = {
@@ -595,8 +493,6 @@ def restore_effective_assignments(session, project_id, assignments):
             continue  # Preserve the durable assignment and its provenance on a round trip.
         target = by_identifier.get(label) if label else None
         if label and target is None:
-            if project.deployment_mode == "csv":
-                raise DeploymentInputError("deployment_error_metadata_id", value=label)
             root, _ = locations.locate(video.video_path)
             key = (root.id if root else None, label)
             if key not in legacy:
@@ -667,6 +563,16 @@ def _management_link(link, deployments):
     }
 
 
+def _playback_fields(video):
+    return {
+        "video_id": video.video_id,
+        "video_path": video.video_path,
+        "filename": Path(normalize_path_str(video.video_path)).name,
+        "is_web_safe": video.is_web_safe,
+        "transcoded_path": video.transcoded_path,
+    }
+
+
 def _fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -715,7 +621,7 @@ class DeploymentMixin(ProviderBase):
                 for link in session.query(DeploymentFolderLink).filter(
                     DeploymentFolderLink.project_dir_id.in_([root.id for root in roots])
                 )
-                if _confirmed_link(link, deployments)
+                if link.source == "manual"
             ]
             return {
                 "videos": videos,
@@ -725,7 +631,7 @@ class DeploymentMixin(ProviderBase):
             }
 
     def get_deployment_folder(self, project_id, root_id, folder):
-        """Refresh one folder for review, including clips resolved elsewhere in the project."""
+        """Refresh a folder and find the project's deployments with ordinary footage."""
         with self.Session.begin() as session:
             roots = _roots(session, project_id)
             root = next((row for row in roots if row.id == root_id), None)
@@ -737,19 +643,17 @@ class DeploymentMixin(ProviderBase):
             }
             videos = [
                 _management_video(video, reference, locations, deployments)
+                | _playback_fields(video)
                 for video, reference in _folder_videos(
                     session, project_id, root, folder, locations
                 )
             ]
-            reference_targets = {
-                row["deployment_id"] for row in videos if row["reference"] and row["deployment_id"]
-            }
             ordinary = {
                 identifier
                 for (identifier,) in session.query(Video.deployment_id)
                 .filter(
                     Video.project_id == project_id,
-                    Video.deployment_id.in_(reference_targets),
+                    Video.deployment_id.is_not(None),
                     ~_reference_tagged(session),
                 )
                 .distinct()
@@ -759,26 +663,38 @@ class DeploymentMixin(ProviderBase):
                 for row in session.query(DeploymentFolderLink).filter_by(
                     project_dir_id=root_id, folder_path=folder
                 )
-                if _confirmed_link(row, deployments)
+                if row.source == "manual"
             ]
             summaries = group_deployment_folders(videos, links, ordinary=ordinary)
-            return (summaries[0] if summaries else None), videos
+            return (summaries[0] if summaries else None), videos, ordinary
+
+    def get_deployment_comparison_clip(self, project_id, deployment_id):
+        """Pick the first ordinary clip by path, preferring footage still on disk."""
+        with self.Session() as session:
+            video = (
+                session.query(Video)
+                .filter(
+                    Video.project_id == project_id,
+                    Video.deployment_id == deployment_id,
+                    ~_reference_tagged(session),
+                )
+                .order_by(Video.is_missing, Video.video_path)
+                .first()
+            )
+            if video is None:
+                return None
+            locations = _StoredLocations(_roots(session, project_id))
+            root, _ = locations.locate(video.video_path)
+            return _playback_fields(video) | {"root_path": root.path if root else None}
 
     def save_deployment(self, project_id, values, *, deployment_id=None):
         """Create or edit inventory. The stable public key is immutable after creation."""
-        buffer = io.StringIO()
-        writer = csv.DictWriter(buffer, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-        writer.writerow({key: values.get(key) or "" for key in CSV_COLUMNS})
+        row_values = validate_deployment_fields(values)
+        if values.get("folder_path"):
+            raise DeploymentInputError("deployment_error_edit_folder")
         with self.Session.begin() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             initialize_project(session, project_id)
-            roots = _roots(session, project_id)
-            preview = parse_deployment_csv(
-                buffer.getvalue().encode(), roots[0].path if len(roots) == 1 else ""
-            )
-            row_values = dict(preview.rows[0])
-            folder = row_values.pop("folder_path")
             if deployment_id:
                 row = session.get(Deployment, deployment_id)
                 if row is None or row.project_id != project_id:
@@ -786,10 +702,8 @@ class DeploymentMixin(ProviderBase):
                 if row.deployment_id != row_values["deployment_id"]:
                     raise DeploymentInputError("deployment_error_immutable")
                 for key, value in row_values.items():
-                    if key not in {"deployment_id", "source"}:
+                    if key != "deployment_id":
                         setattr(row, key, value)
-                if folder != row.folder_path:
-                    raise DeploymentInputError("deployment_error_edit_folder")
             else:
                 if (
                     session.query(Deployment.id)
@@ -797,12 +711,8 @@ class DeploymentMixin(ProviderBase):
                     .first()
                 ):
                     raise DeploymentInputError(
-                        "deployment_error_duplicate", row=2, value=row_values["deployment_id"]
+                        "deployment_error_duplicate", value=row_values["deployment_id"]
                     )
-                if folder is not None:
-                    # Applying a folder is a separately previewed operation, never a
-                    # hidden side effect of creating/editing inventory metadata.
-                    raise DeploymentInputError("deployment_error_edit_folder")
                 row = Deployment(project_id=project_id, **row_values)
                 session.add(row)
             session.flush()
@@ -825,7 +735,7 @@ class DeploymentMixin(ProviderBase):
             root = next((r for r in roots if r.id == folder.get("root_id")), None)
             if root is None:
                 raise DeploymentInputError("deployment_error_root")
-            relative = _folder_path(folder.get("path", ""), _path(root.path), 0)
+            relative = relative_deployment_folder(folder.get("path", ""), _path(root.path))
             folder_info = {"root_id": root.id, "path": relative}
             videos = [
                 video
@@ -841,7 +751,9 @@ class DeploymentMixin(ProviderBase):
                 raise DeploymentInputError("deployment_error_selection")
             videos = (
                 session.query(Video)
-                .filter(Video.video_id.in_(video_ids), Video.project_id == project_id)
+                .filter(
+                    Video.video_id.in_(sqlite_values(video_ids)), Video.project_id == project_id
+                )
                 .all()
             )
             if {v.video_id for v in videos} != set(video_ids):

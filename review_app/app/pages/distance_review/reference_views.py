@@ -21,7 +21,6 @@ class ReferenceViewsContext:
     frames: list[dict]
     selection_id: str | None
     skip_choices: tuple[dict, ...]
-    busy: bool
     busy_state: object
     distance_locked: bool
     reference_player: object | None
@@ -29,8 +28,6 @@ class ReferenceViewsContext:
     reference_name: Callable[[dict], str]
     prepare_reference: Callable
     refresh_references: Callable
-    seek_reference: Callable
-    reference_load_failed: Callable
     cycle_reference: Callable[[int], object]
     open_reference: Callable[[dict], object]
     preview_frame: Callable[[dict], object]
@@ -46,14 +43,12 @@ class ReferenceViewsContext:
     render_actions: Callable
 
 
-def distance_choices(context: ReferenceViewsContext) -> list[dict]:
-    choices = {frame["distance_m"]: frame for frame in reversed(context.frames)}
-    selected = next(
-        (frame for frame in context.frames if frame["id"] == context.selection_id), None
-    )
+def frames_by_distance(frames: list[dict], selected_id: str | None) -> dict[float, dict]:
+    choices = {frame["distance_m"]: frame for frame in reversed(frames)}
+    selected = next((frame for frame in frames if frame["id"] == selected_id), None)
     if selected:
         choices[selected["distance_m"]] = selected
-    return [choices[meters] for meters in sorted(choices)] + list(context.skip_choices)
+    return choices
 
 
 def render_references(context: ReferenceViewsContext) -> None:
@@ -69,16 +64,7 @@ def render_references(context: ReferenceViewsContext) -> None:
                 context.busy_state, "busy", backward=lambda busy: context.has_camera and not busy
             )
         if context.reference:
-            player = context.render_player(context.reference, context.reference_duration, panel)
-            player.on(
-                "loadedmetadata", lambda: context.seek_reference() if not context.busy else None
-            )
-            player.on("error", context.reference_load_failed)
-            selected = next(
-                (frame for frame in context.frames if frame["id"] == context.selection_id), None
-            )
-            if selected:
-                context.seek_reference()
+            context.render_player(context.reference, context.reference_duration, panel)
         else:
             with ui.column().classes(
                 "distance-placeholder w-full items-center justify-center q-pa-md"
@@ -176,7 +162,8 @@ def render_frames(context: ReferenceViewsContext) -> None:
                 "busy",
                 backward=lambda busy: bool(context.reference and not busy),
             )
-    choices = distance_choices(context)
+    configured = frames_by_distance(context.frames, context.selection_id)
+    choice_count = len(configured) + len(context.skip_choices)
     with ui.element("div").classes("distance-choice-toolbar"):
         with ui.row().classes("distance-choice-navigation items-center gap-1 no-wrap"):
             ui.button(
@@ -187,7 +174,7 @@ def render_frames(context: ReferenceViewsContext) -> None:
                 context.busy_state,
                 "busy",
                 backward=lambda busy: bool(
-                    len(choices) > 1 and not busy and not context.distance_locked
+                    choice_count > 1 and not busy and not context.distance_locked
                 ),
             )
             ui.button(icon="keyboard_arrow_up", on_click=lambda: context.move_distance(1)).props(
@@ -196,18 +183,18 @@ def render_frames(context: ReferenceViewsContext) -> None:
                 context.busy_state,
                 "busy",
                 backward=lambda busy: bool(
-                    len(choices) > 1 and not busy and not context.distance_locked
+                    choice_count > 1 and not busy and not context.distance_locked
                 ),
             )
             ui.icon("keyboard", size="xs").classes("text-grey-6").tooltip(t("distance_arrow_help"))
         with ui.row().classes("distance-frames") as distance_strip:
-            configured = {frame["distance_m"] for frame in context.frames}
             meters = sorted(
-                configured | (set(DISTANCE_REFERENCE_METERS) if context.reference else set())
+                configured.keys()
+                | (set(DISTANCE_REFERENCE_METERS) if context.reference else set())
             )
             for distance in meters:
-                frames = [frame for frame in context.frames if frame["distance_m"] == distance]
-                if not frames:
+                frame = configured.get(distance)
+                if frame is None:
                     ui.button(
                         f"{distance:g} m",
                         icon="add",
@@ -226,7 +213,7 @@ def render_frames(context: ReferenceViewsContext) -> None:
                             context.reference_player and not busy and not context.distance_locked
                         ),
                     )
-                for frame in sorted(frames, key=lambda row: row["offset_ms"]):
+                else:
                     ui.button(
                         f"{frame['distance_m']:g} m",
                         icon="check",
@@ -276,3 +263,34 @@ def render_frames(context: ReferenceViewsContext) -> None:
                     "busy",
                     backward=lambda busy: not busy and not context.distance_locked,
                 )
+
+    selected = next(
+        (frame for frame in context.frames if frame["id"] == context.selection_id), None
+    )
+    if selected is None:
+        return
+    variants = sorted(
+        (frame for frame in context.frames if frame["distance_m"] == selected["distance_m"]),
+        key=lambda frame: frame["offset_ms"],
+    )
+    if len(variants) <= 1:
+        return
+    with (
+        ui.row()
+        .classes("distance-frames items-center")
+        .props(f'role="group" aria-label="{t("distance_reference_timestamps")}"')
+    ):
+        ui.label(t("distance_reference_timestamps")).classes("text-caption shrink-0")
+        for frame in variants:
+            active = frame["id"] == context.selection_id
+            ui.button(
+                frame_time(frame["offset_ms"]),
+                on_click=lambda _e, frame=frame: context.preview_frame(frame),
+            ).props(
+                ("dense unelevated" if active else "dense outline")
+                + f' aria-pressed="{str(active).lower()}"'
+            ).bind_enabled_from(
+                context.busy_state,
+                "busy",
+                backward=lambda busy: not busy and not context.distance_locked,
+            )

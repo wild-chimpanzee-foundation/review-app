@@ -133,11 +133,18 @@ async def setup_overview():
                 ui.label(t("deployment_count", count=deployment_summary["deployments"])).classes(
                     "text-subtitle1"
                 )
-                ui.button(
-                    t("deployment_view"),
-                    icon="list_alt",
-                    on_click=lambda: ui.navigate.to("/deployments"),
-                ).props("outline")
+                with ui.row().classes("items-center gap-2"):
+                    if deployment_summary["unmatched_references"]:
+                        ui.button(
+                            t("deployment_review_references"),
+                            icon="playlist_add_check",
+                            on_click=lambda: ui.navigate.to("/deployments?review=references"),
+                        )
+                    ui.button(
+                        t("deployment_view"),
+                        icon="list_alt",
+                        on_click=lambda: ui.navigate.to("/deployments"),
+                    ).props("outline")
             ui.label(t("deployment_summary", **deployment_summary)).classes(
                 "text-caption text-grey-6"
             )

@@ -56,7 +56,11 @@ def _reference_plan(session, project_id, row, path):
     if frame is None and reference is not None:
         frame = (
             session.query(ReferenceFrame)
-            .filter_by(reference_video_id=reference.id, distance_m=row["distance_m"])
+            .filter_by(
+                reference_video_id=reference.id,
+                distance_m=row["distance_m"],
+                offset_ms=row["offset_ms"],
+            )
             .one_or_none()
         )
     if frame is not None and any(
@@ -85,9 +89,14 @@ def plan_import(session, project_id, manifest, tables, root_map):
     ):
         raise ValueError("Media-root mapping contains an unknown source root")
     reference_rows = {row["id"]: row for row in tables["references"]}
-    reference_distances = Counter(
-        (row["root_id"], row["video_path"], row["distance_m"]) for row in reference_rows.values()
-    )
+    frame_keys = {}
+    for frame_id, row in reference_rows.items():
+        try:
+            path = _media_path(row, roots, manifest, root_map)
+        except ValueError:
+            continue  # Report missing mappings on the tasks that use them.
+        frame_keys[frame_id] = (path, row["distance_m"], row["offset_ms"])
+    reference_positions = Counter(frame_keys.values())
     plans = []
     for task in tables["tasks"]:
         plan = {
@@ -150,14 +159,11 @@ def plan_import(session, project_id, manifest, tables, root_map):
                 row["reference_frame_id"] for row in samples if row["reference_frame_id"]
             }:
                 row = reference_rows[frame_id]
-                # Manual v1 may contain repeated distances at distinct positions.
-                # Do not silently substitute calibration or let the new UNIQUE
-                # constraint fail after a misleadingly clean preview.
-                if reference_distances[(row["root_id"], row["video_path"], row["distance_m"])] > 1:
-                    raise ValueError(
-                        "Reference calibration conflicts: multiple frames for the same video/distance"
-                    )
                 ref_path = _media_path(row, roots, manifest, root_map)
+                if reference_positions[frame_keys[frame_id]] > 1:
+                    raise ValueError(
+                        "Reference calibration conflicts: multiple frames at the same distance and timestamp"
+                    )
                 scope_roots = [(root.id, root.path) for root in roots]
                 scope = resolved_scope(session, video, scope_roots)
                 reference_plan = _reference_plan(session, project_id, row, ref_path)

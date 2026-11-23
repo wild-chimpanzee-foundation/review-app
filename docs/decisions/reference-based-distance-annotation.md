@@ -183,6 +183,9 @@ samples remain editable; a missing sample row means unreviewed, not absent.
 - **Play to this sample** replays from the preceding scheduled sample. For the
   first scheduled sample, replay from the video opening when its offset is
   nonzero; omit the action when the first sample is already the opening frame.
+  In **Add individual**, **Play to this frame** replays from the last scheduled
+  sample before the chosen first-seen frame, or from the opening. Playback returns
+  to the chosen frame so the annotator can use the movement to place the box.
   Playback pauses at the selected sample without saving evidence or navigating.
 - Manual annotation pauses snap to the most recent scheduled sample at/before
   the pause position. Automatic stops seek the intended next scheduled frame to
@@ -386,29 +389,27 @@ mappings remain freshly queried so edits/deletions are never hidden by caching.
 
 The default workflow offers whole-meter buttons from **1–15 m** below the current
 reference video (`DISTANCE_REFERENCE_METERS` in `review_app/app/config.py`).
-Existing saved distances outside this range, fractional distances, and repeated
-legacy reference frames remain accessible without conversion or deletion.
-**+ Add distance** beside the buttons opens a small whole-meter input for any
-additional distance, including values above 15 m. It suggests the next meter after
-the highest default or configured distance (initially 16 m). Enter saves the
-current reference frame and adds its persistent button without saving animal
-evidence. Existing distances are selected rather than overwritten; failed saves
-keep the input open for retry.
+Existing saved distances outside this range and fractional distances are also
+available. **+ Add reference frame** opens a whole-meter input and suggests the next
+meter above the highest default or configured distance. Pause at a new timestamp
+and enter a distance already used in the clip to add another frame at that distance.
+Failed saves keep the input open for retry.
 
 - Unconfigured buttons show a **plus** and dashed outline. Pause/scrub the
   reference video (or use its ±1/5-frame controls), then click a distance to save
   the displayed frame's precise playback position and rounded millisecond ID.
-- Configured buttons show a **check**. Clicking seeks to the saved frame and
-  selects that distance as an unsaved animal-sample choice; it never overwrites
-  the reference position. Keyboard distance navigation only visits configured
-  references and visibility choices, so it cannot accidentally calibrate frames.
+- Configured buttons show a **check**. Each distance has one button. When the
+  selected distance has several frames, **Reference timestamps** lists them below
+  the distance controls. Pick a timestamp to preview its exact frame. Confirming
+  saves that frame's ID, and revisiting the sample restores it. Keyboard distance
+  navigation visits configured distances and visibility choices.
 - First-time configuration also selects the new distance as an unsaved choice.
   Neither configuring nor selecting a reference saves animal evidence. The usual
   **Confirm selection and advance** or **Apply to end** action is still required.
 - Missing distances do not block starting a review. Mappings persist per reference
   video across animals and sessions; no database rows are created for unknown
-  distances. Concurrent first-time configuration reuses an existing distance
-  mapping rather than replacing it. Failed saves leave the distance unconfigured.
+  distances. Concurrent configuration at the same distance and timestamp reuses
+  the saved frame. Failed saves leave the existing calibration available.
 - The preparation dialog remains available for additional distances and upfront
   calibration. Its explicit **Edit reference frame** action selects an existing
   mapping; **Update reference frame** saves a replacement position while retaining
@@ -512,7 +513,7 @@ rebuild tool.
 |---|---|
 | `distance_imports` | Immutable original package, manifest, content hash and import time; unique project/content hash. |
 | `reference_videos` | UUID, project, camera label, normalized path; unique project/path. |
-| `reference_frames` | UUID, source reference, integer offset, optional precise playback offset, known meters; unique source/offset. |
+| `reference_frames` | UUID, source reference, integer offset, optional precise playback offset, known meters; unique source/distance/offset. |
 | `distance_individuals` | UUID, task, video, task-local number, fixed target species, age/sex, first-seen offset and optional complete box, attribution and derived completion; unique task/number. |
 | `distance_samples` | UUID, individual/offset, pending/annotated/skipped state, original AI suggestion, separate human reference/distance or skip, optional carrier, attribution; unique individual/offset. |
 | `distance_individual_tags` | Individual/tag pair with attribution/time. |

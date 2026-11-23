@@ -5,6 +5,7 @@ return await new Promise(resolve => {
         (video._distanceSuppressedPauseEvents || 0) + 1;
     video.pause();
     const token = video._distancePlayback = (video._distancePlayback || 0) + 1;
+    video._distanceIntervalPlayback = token;
     const startTime = __FROM__, endTime = __TO__;
     const maxDelay = __MAX_DELAY__;
     const frameCallbacks = typeof video.requestVideoFrameCallback === 'function';
@@ -28,6 +29,7 @@ return await new Promise(resolve => {
                 (video._distanceSuppressedPauseEvents || 0) + 1;
             video.pause();
         }
+        if (video._distanceIntervalPlayback === token) delete video._distanceIntervalPlayback;
         resolve(completed);
     };
     const watchdog = setTimeout(() => finish(), __WATCHDOG__);

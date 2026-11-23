@@ -12,6 +12,11 @@ from pathlib import Path
 from nicegui import app, run, ui
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from review_app.app.components.playback import (
+    PlaybackConversion,
+    playback_source,
+    watch_playback_errors,
+)
 from review_app.app.components.review_layout import ReviewLayout
 from review_app.app.config import DISTANCE_REFERENCE_METERS, get_user_data_dir
 from review_app.app.pages.distance_review.anchor_dialogs import (
@@ -62,6 +67,7 @@ from review_app.app.pages.distance_review.reference_media import (
 from review_app.app.pages.distance_review.reference_probe import ReferenceProbeCache
 from review_app.app.pages.distance_review.reference_views import (
     ReferenceViewsContext,
+    frames_by_distance,
 )
 from review_app.app.pages.distance_review.reference_views import (
     render_frames as render_reference_frames,
@@ -104,7 +110,6 @@ from review_app.backend.distance_timing import (
 )
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.video import ProbeResult, _probe_frame_rate, _probe_video
-from review_app.backend.transcoding import inspect_transcoded_cache
 from review_app.backend.utils import generate_thumbnail
 
 logger = logging.getLogger(__name__)
@@ -125,9 +130,7 @@ def task_key(row: dict) -> str:
 
 
 def reference_path(reference: dict) -> Path:
-    cache = inspect_transcoded_cache(reference.get("transcoded_path"), validate_contents=False)
-    path = reference["transcoded_path"] if cache.current else reference["video_path"]
-    return Path(normalize_path_str(path))
+    return playback_source(reference, validate_contents=False).path
 
 
 def stable_client(callback):
@@ -425,15 +428,15 @@ class DistanceReviewPage:
 
     async def load_sample_timing(self) -> None:
         video = self.video
-        path = Path(normalize_path_str(video["video_path"]))
-        cache = inspect_transcoded_cache(video.get("transcoded_path"), validate_contents=False)
-        if cache.current:
-            path = Path(video["transcoded_path"])
+        path = playback_source(video, validate_contents=False).path
+        if path is None:
+            return
         if path not in self.animal_frame_rates:
             self.animal_frame_rates[path] = await run.io_bound(
                 _probe_frame_rate, path, timeout_sec=2
             )
-        self.animal_frame_rate = self.animal_frame_rates[path]
+        if self.video is video:
+            self.animal_frame_rate = self.animal_frame_rates[path]
 
     def sample_frame_offset(self, offset_ms: int) -> float:
         if self.review and self.review.get("alignment_mode") == "imported":
@@ -872,35 +875,27 @@ class DistanceReviewPage:
             ui.label(t("distance_animal_video")).classes("text-subtitle1 ellipsis w-full").tooltip(
                 t("distance_animal_video")
             )
-            path = Path(normalize_path_str(video["video_path"]))
-            cache = inspect_transcoded_cache(video.get("transcoded_path"), validate_contents=False)
-            if cache.current:
-                path = Path(video["transcoded_path"])
-            if not path.is_file():
+            playback = playback_source(video, validate_contents=False)
+            path = playback.path
+            if path is None or not path.is_file():
                 ui.label(t("video_not_found", path=str(path))).classes("text-negative break-all")
                 return
-            if video.get("is_web_safe") is False and not cache.current:
-                ui.label(t("distance_needs_conversion")).classes("text-grey-6")
 
-                @self.client_handler
-                async def convert():
-                    conversion.set_enabled(False)
-                    try:
-                        result = await run.io_bound(
-                            self.dp.ensure_web_safe_video, video["video_id"]
-                        )
-                        if result.success:
-                            video["transcoded_path"] = result.new_path
-                            if self.review:
-                                await self.load_sample_timing()
-                            self.render_animal.refresh()
-                            self.render_individuals.refresh()
-                        else:
-                            ui.notify(t("transcode_failed", error=result.error), type="negative")
-                    finally:
-                        conversion.set_enabled(True)
+            async def converted(path):
+                video["transcoded_path"] = str(path)
+                if self.review:
+                    await self.load_sample_timing()
+                if self.video is video:
+                    self.render_animal.refresh()
+                    self.render_individuals.refresh()
 
-                conversion = ui.button(t("transcode_for_playback"), on_click=convert, icon="movie")
+            conversion = None
+            if not playback.converted:
+                conversion = PlaybackConversion(
+                    self.dp, video["video_id"], converted, is_current=lambda: self.video is video
+                )
+            if playback.needs_conversion:
+                ui.timer(0, self.client_handler(conversion.offer), once=True)
                 return
             self.animal_player = render_custom_video_player(
                 self.media_url(path),
@@ -910,9 +905,12 @@ class DistanceReviewPage:
                 keyboard=False,
                 compact=True,
             )
-            self.animal_player.on(
-                "error", lambda: ui.notify(t("distance_media_error"), type="warning")
-            )
+            if conversion:
+                conversion.watch_original(self.animal_player)
+            else:
+                self.animal_player.on(
+                    "error", lambda: ui.notify(t("distance_media_error"), type="warning")
+                )
             self.animal_player.on("loadedmetadata", self.seek_sample)
             install_manual_pause_snap(self.animal_player, self.on_manual_pause)
             playback_shortcuts(panel, self.animal_player)
@@ -1352,6 +1350,8 @@ class DistanceReviewPage:
         if not self.video or self.task_id != task_id:
             return
         draft = {"id": str(uuid.uuid4()), "first_seen_offset_ms": offset_ms}
+        previous = next((offset for offset in reversed(self.offsets) if offset < offset_ms), None)
+        replay_from_ms = self.sample_seek_offset(previous) if previous is not None else 0
         filters = await image_filters(player)
         await open_create_individual_dialog(
             AnchorDialogContext(
@@ -1369,6 +1369,7 @@ class DistanceReviewPage:
                     self.create_individual(task_id, species_id, first_seen, anchor, **choices)
                 ),
                 save_anchor=lambda _anchor: False,
+                replay_from_ms=replay_from_ms,
             )
         )
 
@@ -1435,11 +1436,10 @@ class DistanceReviewPage:
             return
         video = self.video
         task_id = self.task_id
-        path = Path(normalize_path_str(video["video_path"]))
-        cache = inspect_transcoded_cache(video.get("transcoded_path"), validate_contents=False)
-        if cache.current:
-            path = Path(video["transcoded_path"])
-        playable = path.is_file() and (cache.current or video.get("is_web_safe") is not False)
+        playback = playback_source(video, validate_contents=False)
+        path = playback.path
+        exists = path is not None and path.is_file()
+        playable = exists and not playback.needs_conversion
         if playable:
             await self.load_sample_timing()
         if not self.video or self.task_id != task_id:
@@ -1466,9 +1466,7 @@ class DistanceReviewPage:
             self.refresh_sample_ui()
 
         unavailable = (
-            t("video_not_found", path=str(path))
-            if not path.is_file()
-            else t("distance_needs_conversion")
+            t("video_not_found", path=str(path)) if not exists else t("distance_needs_conversion")
         )
         await open_clock_alignment_dialog(
             ClockDialogContext(
@@ -2185,7 +2183,6 @@ class DistanceReviewPage:
             frames=self.frames,
             selection_id=self.selected_frame_id,
             skip_choices=SKIP_CHOICES,
-            busy=self.busy,
             busy_state=self,
             distance_locked=self.distance_locked,
             reference_player=self.reference_player,
@@ -2193,8 +2190,6 @@ class DistanceReviewPage:
             reference_name=lambda row: Path(normalize_path_str(row["video_path"])).name,
             prepare_reference=self.prepare_reference_dialog,
             refresh_references=self.refresh_references,
-            seek_reference=self.seek_reference,
-            reference_load_failed=self.reference_load_failed,
             cycle_reference=self.cycle_reference,
             open_reference=self.open_reference,
             preview_frame=self.preview_frame,
@@ -2222,8 +2217,26 @@ class DistanceReviewPage:
         self.reference_player.on(
             "loadedmetadata", lambda: self.seek_reference() if not self.busy else None
         )
-        self.reference_player.on("error", self.reference_load_failed)
         player = self.reference_player
+
+        async def failed(convertible):
+            if self.reference_player is not player or self.busy:
+                return
+            reference = self.reference
+            selected = self.selected_frame_id
+            can_convert = bool(
+                reference
+                and reference.get("source_video_id")
+                and convertible
+                and not playback_source(reference, validate_contents=False).converted
+            )
+            self.reference_load_failed(notify=not can_convert)
+            if can_convert:
+                await self.offer_reference_conversion(
+                    reference, seek_animal=False, selected_frame_id=selected
+                )
+
+        watch_playback_errors(player, failed)
 
         def on_browse():
             if self.reference_player is player and not self.busy:
@@ -2285,12 +2298,7 @@ class DistanceReviewPage:
         await self.open_reference(self.references[(position + delta) % len(self.references)])
 
     def distance_choices(self) -> list[dict]:
-        choices = {frame["distance_m"]: frame for frame in reversed(self.frames)}
-        selected = next(
-            (frame for frame in self.frames if frame["id"] == self.selected_frame_id), None
-        )
-        if selected:
-            choices[selected["distance_m"]] = selected
+        choices = frames_by_distance(self.frames, self.selected_frame_id)
         return [choices[meters] for meters in sorted(choices)] + list(SKIP_CHOICES)
 
     def move_distance(self, delta: int) -> None:
@@ -2384,10 +2392,7 @@ class DistanceReviewPage:
                 save.set_enabled(False)
                 distance.set_enabled(False)
                 try:
-                    await self.configure_reference_distance(value)
-                    if self.reference == reference and any(
-                        frame["distance_m"] == value for frame in self.frames
-                    ):
+                    if await self.configure_reference_distance(value):
                         dialog.close()
                 finally:
                     saving = False
@@ -2405,20 +2410,16 @@ class DistanceReviewPage:
         dialog.open()
 
     @stable_client
-    async def configure_reference_distance(self, distance_m: float) -> None:
+    async def configure_reference_distance(self, distance_m: float) -> bool:
         if self.busy or self.distance_locked or not self.reference or not self.reference_player:
-            return
-        existing = next((row for row in self.frames if row["distance_m"] == distance_m), None)
-        if existing:
-            self.preview_frame(existing)
-            return
+            return False
         reference, player = self.reference, self.reference_player
         self.busy = True
         frame = None
         try:
             playback_offset = await capture_offset(player, exact=True)
             if self.reference != reference or self.reference_player is not player:
-                return
+                return False
             frame = await run.io_bound(
                 self.dp.configure_reference_distance,
                 reference["id"],
@@ -2429,7 +2430,7 @@ class DistanceReviewPage:
             frames = await run.io_bound(self.dp.list_reference_frames, reference["id"])
             if self.reference != reference or self.reference_player is not player:
                 frame = None
-                return
+                return False
             self.frames = frames
             ui.notify(t("distance_frame_saved"), type="positive")
         except (ValueError, TimeoutError) as exc:
@@ -2452,6 +2453,7 @@ class DistanceReviewPage:
                 self.preview_frame(frame)
             else:
                 self.refresh_sample_ui()
+        return frame is not None
 
     @stable_client
     async def prepare_reference_dialog(self) -> None:
@@ -2544,8 +2546,9 @@ class DistanceReviewPage:
         *,
         seek_animal: bool = True,
         selected_frame_id: str | None = None,
+        allow_conversion: bool = True,
     ) -> None:
-        video_id = self.video["video_id"]
+        video = self.video
         previous_skip = self.selected_skip_reason
         previous_frame = next(
             (frame for frame in self.frames if frame["id"] == self.selected_frame_id), None
@@ -2555,13 +2558,26 @@ class DistanceReviewPage:
             ui.notify(t("video_not_found", path=str(path)), type="warning")
             return
         probe = await self.probe_reference(path)
-        if not probe.is_valid or not probe.is_web_safe or not probe.duration_sec:
-            ui.notify(t("distance_reference_format"), type="warning")
+        if self.video is not video or not any(
+            row["id"] == reference["id"] for row in self.references
+        ):
             return
-        if not any(row["id"] == reference["id"] for row in self.references):
+        if not probe.is_valid or not probe.is_web_safe or not probe.duration_sec:
+            original = Path(normalize_path_str(reference["video_path"]))
+            if (
+                allow_conversion
+                and reference.get("source_video_id")
+                and (probe.is_valid or path != original)
+                and original.is_file()
+            ):
+                await self.offer_reference_conversion(
+                    reference, seek_animal=seek_animal, selected_frame_id=selected_frame_id
+                )
+            else:
+                ui.notify(t("distance_reference_format"), type="warning")
             return
         frames = await run.io_bound(self.dp.list_reference_frames, reference["id"])
-        if not self.video or self.video["video_id"] != video_id:
+        if self.video is not video:
             return
         if seek_animal:
             if previous_skip:
@@ -2586,7 +2602,19 @@ class DistanceReviewPage:
             except (ValueError, TimeoutError):
                 ready = False
             if not ready:
-                self.reference_load_failed()
+                can_convert = (
+                    allow_conversion
+                    and reference.get("source_video_id")
+                    and path == Path(normalize_path_str(reference["video_path"]))
+                )
+                self.reference_load_failed(notify=not can_convert)
+                if can_convert:
+                    await self.offer_reference_conversion(
+                        reference,
+                        seek_animal=seek_animal,
+                        selected_frame_id=selected_frame_id,
+                        automatic=False,
+                    )
                 return
         # Only expose candidate evidence after the source has loaded and sought.
         self.reference = reference
@@ -2602,7 +2630,44 @@ class DistanceReviewPage:
             self.render_references.refresh()
         self.refresh_sample_ui()
 
-    def reference_load_failed(self) -> None:
+    @stable_client
+    async def offer_reference_conversion(
+        self, reference, *, seek_animal, selected_frame_id, automatic=True
+    ):
+        video = self.video
+        with ui.dialog().props("persistent") as dialog, keyboard_dialog_card():
+            ui.label(t("distance_reference_clip")).classes("text-h6")
+            ui.label(Path(normalize_path_str(reference["video_path"])).name).classes("break-all")
+
+            async def converted(path):
+                reference["transcoded_path"] = str(path)
+                was_busy = self.busy
+                self.busy = True
+                try:
+                    await self.load_reference(
+                        reference,
+                        seek_animal=seek_animal,
+                        selected_frame_id=selected_frame_id,
+                        allow_conversion=False,
+                    )
+                finally:
+                    self.busy = was_busy
+                    self.refresh_sample_ui()
+                    self.render_sample_navigation.refresh()
+                dialog.close()
+
+            conversion = PlaybackConversion(
+                self.dp,
+                reference["source_video_id"],
+                converted,
+                is_current=lambda: dialog.value and self.video is video,
+            )
+            ui.button(t("close"), on_click=dialog.close).props("flat")
+        dialog.on("hide", dialog.delete)
+        dialog.open()
+        await conversion.offer(automatic=automatic)
+
+    def reference_load_failed(self, *, notify=True) -> None:
         if self.reference_player is None:
             return
         stop_player(self.reference_player)
@@ -2613,7 +2678,8 @@ class DistanceReviewPage:
         self.selected_frame_id = None
         self.render_references.refresh()
         self.refresh_sample_ui()
-        ui.notify(t("distance_media_error"), type="warning")
+        if notify:
+            ui.notify(t("distance_media_error"), type="warning")
 
     def seek_reference(self) -> None:
         frame = next((row for row in self.frames if row["id"] == self.selected_frame_id), None)

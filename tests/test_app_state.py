@@ -86,7 +86,7 @@ class TestResetAppState:
 
 
 class TestLoadSettingsFromDb:
-    def test_loads_all_settings_from_provider(self):
+    def test_loads_preferences_without_selecting_annotator_or_project(self):
         class MockDP:
             def get_setting(self, key, default=None):
                 values = {
@@ -109,7 +109,7 @@ class TestLoadSettingsFromDb:
         assert state.get_annotator_name() == ""
         assert state.get_blank_threshold() == 0.5
         assert state.get_species_threshold() == 0.6
-        assert state.get_active_project_id() == "proj-123"
+        assert state.get_active_project_id() is None
         assert state.is_dark_mode() is False
         assert state.get_language() == "fr"
         assert state.is_autoplay() is False

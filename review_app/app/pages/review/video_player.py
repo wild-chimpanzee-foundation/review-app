@@ -196,8 +196,11 @@ def render_custom_video_player(
                 const fixedOffset = {json.dumps(fixed_offset_ms)};
                 if (fixedOffset !== null) {{
                     let restoring = false;
+                    const replayingInterval = () => videoEl._distanceIntervalPlayback !== undefined &&
+                        videoEl._distanceIntervalPlayback === videoEl._distancePlayback;
                     const restoreFixedFrame = () => {{
-                        if (restoring || Math.abs(videoEl.currentTime * 1000 - fixedOffset) < 1) return;
+                        if (replayingInterval() || restoring ||
+                            Math.abs(videoEl.currentTime * 1000 - fixedOffset) < 1) return;
                         restoring = true;
                         videoEl.pause();
                         videoEl.currentTime = fixedOffset / 1000;
@@ -205,7 +208,11 @@ def render_custom_video_player(
                     }};
                     videoEl.addEventListener('seeking', restoreFixedFrame);
                     videoEl.addEventListener('timeupdate', restoreFixedFrame);
-                    videoEl.addEventListener('play', () => {{ videoEl.pause(); restoreFixedFrame(); }});
+                    videoEl.addEventListener('play', () => {{
+                        if (replayingInterval()) return;
+                        videoEl.pause();
+                        restoreFixedFrame();
+                    }});
                 }}
 
                 const playerEvents = new AbortController();

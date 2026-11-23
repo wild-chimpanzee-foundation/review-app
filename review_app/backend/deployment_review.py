@@ -10,6 +10,10 @@ from pathlib import PurePosixPath
 
 from review_app.backend.path_matching import normalize_path_str
 
+_FULL_CAMERA = re.compile(r"^(\d+)[\s_-]+cam[\s_-]*(\d+)(?:$|[\s_-])", re.IGNORECASE)
+_CAMERA = re.compile(r"\bcam[\s_-]*(\d+)", re.IGNORECASE)
+_TRANSECT = re.compile(r"t[\s_-]*(\d+)", re.IGNORECASE)
+
 
 def group_deployment_folders(videos, links, *, ordinary=None):
     if ordinary is None:
@@ -82,7 +86,18 @@ def _number(value):
     return (match[1].lstrip("0") or "0") if match else None
 
 
-def rank_folder_deployments(folder, inventory, limit=5):
+def _transect(parts):
+    return next(
+        (match[1] for part in reversed(parts) if (match := _TRANSECT.fullmatch(part))), None
+    )
+
+
+def _camera_core(leaf):
+    core = re.split(r"[\s_-]+\d{5,}", leaf, maxsplit=1)[0]
+    return re.sub(r"[\s_-]+(?:vr|ref|references?)$", "", core, flags=re.IGNORECASE)
+
+
+def rank_folder_deployments(folder, inventory, limit=5, *, ordinary_deployments=()):
     """Rank edit-distance suggestions; scores are similarity, not confidence.
 
     A matching transect takes precedence over a camera reused elsewhere. Leading
@@ -92,19 +107,10 @@ def rank_folder_deployments(folder, inventory, limit=5):
     leaf = parts[-1] if parts else ""
     if _key(leaf) in {"videos", "references", "reference", "vr", "ref"} and len(parts) > 1:
         leaf = parts[-2]
-    # Discard long numeric suffixes for suggestions, not scientific metadata.
-    core = re.split(r"[\s_-]+\d{5,}", leaf, maxsplit=1)[0]
-    core = re.sub(r"[\s_-]+(?:vr|ref|references?)$", "", core, flags=re.IGNORECASE)
-    full = re.match(r"^(\d+)[\s_-]+cam[\s_-]*(\d+)(?:$|[\s_-])", core, re.IGNORECASE)
-    camera = re.search(r"\bcam[\s_-]*(\d+)", core.replace("_", " "), re.IGNORECASE)
-    transect_raw = next(
-        (
-            m[1]
-            for part in reversed(parts[:-1])
-            if (m := re.fullmatch(r"t[\s_-]*(\d+)", part, re.IGNORECASE))
-        ),
-        None,
-    )
+    core = _camera_core(leaf)
+    full = _FULL_CAMERA.match(core)
+    camera = _CAMERA.search(core.replace("_", " "))
+    transect_raw = _transect(parts[:-1])
     transect = _number(transect_raw) if transect_raw else _number(full[1]) if full else None
     camera_number = _number(camera[1]) if camera else None
     if full:
@@ -119,17 +125,28 @@ def rank_folder_deployments(folder, inventory, limit=5):
         and transect is None
     ):
         return []
+    unmatched_reference = bool(folder.get("unmatched_references"))
     ranked = []
     for row in inventory:
-        identifier = _key(row["deployment_id"])
-        match = re.match(
-            r"^(\d+)[\s_-]+cam[\s_-]*(\d+)(?:$|[\s_-])", row["deployment_id"], re.IGNORECASE
+        if unmatched_reference and row["id"] not in ordinary_deployments:
+            continue
+        path = PurePosixPath(normalize_path_str(row["deployment_id"]))
+        core = _camera_core(path.name)
+        match = _FULL_CAMERA.match(core)
+        identifier = _key(f"{match[1]}_cam{match[2]}" if match else core)
+        candidate_transect = _number(row.get("transect_id") or "") or _number(
+            _transect(path.parts[:-1]) or (match[1] if match else "")
         )
-        candidate_transect = _number(row.get("transect_id") or "") or (
-            _number(match[1]) if match else None
+        camera_metadata = (row.get("camera_id") or "").strip()
+        camera_match = _CAMERA.search(camera_metadata.replace("_", " ")) or _CAMERA.search(
+            core.replace("_", " ")
         )
-        candidate_camera = re.search(
-            r"cam[\s_-]*(\d+)", row.get("camera_id") or row["deployment_id"], re.IGNORECASE
+        candidate_camera = _number(
+            camera_metadata
+            if camera_metadata.isdecimal()
+            else camera_match[1]
+            if camera_match
+            else ""
         )
         same_transect = transect is not None and candidate_transect == transect
         different_transect = (
@@ -137,11 +154,14 @@ def rank_folder_deployments(folder, inventory, limit=5):
             and candidate_transect is not None
             and candidate_transect != transect
         )
-        same_camera = (
-            camera_number is not None
-            and candidate_camera is not None
-            and _number(candidate_camera[1]) == camera_number
-        )
+        same_camera = camera_number is not None and candidate_camera == camera_number
+        if (
+            unmatched_reference
+            and transect
+            and camera_number
+            and not (same_transect or same_camera)
+        ):
+            continue
         queries = {query}
         if not full and not (camera and transect_raw):
             queries.add("_".join(query.split("_")[: len(identifier.split("_"))]))
@@ -160,7 +180,7 @@ def rank_folder_deployments(folder, inventory, limit=5):
             reasons.append("deployment_reason_other_camera")
         if full and match and full[1] != match[1] and _number(full[1]) == _number(match[1]):
             reasons.append("deployment_reason_zero_padding")
-        if not full and camera and transect_raw:
+        if not full and same_camera and same_transect:
             reasons.append("deployment_reason_short_reference")
         reasons.append("deployment_reason_edit_distance")
         ranked.append(

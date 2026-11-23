@@ -24,11 +24,18 @@ def managed(tmp_db, mock_probe):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     dp = LocalDataProvider()
-    project = dp.create_project_with_deployments(
-        "Managed",
-        str(root),
-        csv_data=(b"deployment_id,folder_path,name\nA,animals,Display A\nB,,Display B\n"),
-    )
+    project = dp.create_project("Managed", str(root))
+    target = dp.save_deployment(project.id, {"deployment_id": "A", "name": "Display A"})
+    directory = dp.get_project_dirs(project.id)[0]
+    for folder, deployment_id in (("animals", target), ("shared", None), ("misc", None)):
+        assign(
+            dp,
+            project.id,
+            (),
+            deployment_id,
+            action="folder",
+            folder={"root_id": directory.id, "path": folder},
+        )
     dp.sync_videos(active_project_id=project.id)
     with dp.Session() as session:
         videos = {
@@ -56,7 +63,7 @@ def assign(dp, project_id, videos, target, **kwargs):
     return dp.apply_deployment_assignment(preview)
 
 
-def test_csv_paths_and_id_fallback_drive_grouping_and_unresolved_distance(managed):
+def test_folder_links_and_inference_drive_grouping_and_unresolved_distance(managed):
     dp, project, root, videos, inventory = managed
     assert row(dp, videos["animals/a.mp4"])[:2] == ("A", inventory["A"])
     assert row(dp, videos["B/videos/b.mp4"])[:2] == ("B", inventory["B"])
@@ -115,7 +122,7 @@ def test_folder_link_direct_future_files_video_exceptions_and_reset(managed):
     management = {r["filename"]: r for r in dp.get_deployment_management(project.id)["videos"]}
     assert management["a.mp4"]["deployment"] == "B"
     assert management["new.mp4"]["deployment"] == "A"
-    assert management["inside.mp4"]["deployment_id"] is None  # No recursive directory inheritance.
+    assert management["inside.mp4"]["deployment"] == "animals/sub"
     assign(dp, project.id, [videos["animals/a.mp4"]], None, action="reset")
     assert row(dp, videos["animals/a.mp4"])[0:3] == ("A", inventory["A"], "folder")
 
@@ -167,10 +174,8 @@ def test_folder_preview_rejects_new_files_but_video_selection_does_not_include_t
 
 def test_cross_project_targets_and_changed_selection_rejected_atomically(managed):
     dp, project, root, videos, inventory = managed
-    other = dp.create_project_with_deployments(
-        "Other", str(root), csv_data=b"deployment_id\nOther\n"
-    )
-    foreign = dp.get_project_deployments(other.id)[0]["id"]
+    other = dp.create_project("Other", str(root))
+    foreign = dp.save_deployment(other.id, {"deployment_id": "Other"})
     with pytest.raises(DeploymentInputError, match="target"):
         dp.preview_deployment_assignment(project.id, [videos["animals/a.mp4"]], foreign)
     with pytest.raises(DeploymentInputError, match="selection"):
@@ -277,21 +282,6 @@ def test_missing_media_can_be_assigned_and_root_relocation_preserves_links(manag
     assert row(dp, videos["shared/ref.mp4"])[0:3] == ("A", inventory["A"], "manual")
 
 
-def test_normalized_collision_does_not_guess_and_no_substring_matching(tmp_db, mock_probe):
-    dp = LocalDataProvider()
-    root = tmp_db["video_dir"]
-    for directory in ("cam45", "cam453"):
-        (root / directory).mkdir()
-        (root / directory / "clip.mp4").touch()
-    project = dp.create_project_with_deployments(
-        "Collisions", str(root), csv_data=b"deployment_id\ncam45\nCAM45\n"
-    )
-    dp.sync_videos(active_project_id=project.id)
-    assert all(
-        v["deployment_id"] is None for v in dp.get_deployment_management(project.id)["videos"]
-    )
-
-
 def test_metadata_csv_restores_effective_identity_and_pins_it_on_rescan(managed):
     import pandas as pd
 
@@ -309,13 +299,12 @@ def test_metadata_reimport_preserves_frozen_identity_and_folder_provenance(tmp_d
     import pandas as pd
 
     root = tmp_db["video_dir"]
-    clip = root / "a" / "animal.mp4"
+    clip = root / "A" / "animal.mp4"
     clip.parent.mkdir()
     clip.touch()
     dp = LocalDataProvider()
-    project = dp.create_project_with_deployments(
-        "Metadata", str(root), csv_data=b"deployment_id,folder_path,name\nB,b,A\nA,a,\n"
-    )
+    project = dp.create_project("Metadata", str(root))
+    dp.save_deployment(project.id, {"deployment_id": "B", "name": "A"})
     dp.sync_videos(active_project_id=project.id)
     video = dp.get_deployment_management(project.id)["videos"][0]
     deployments = {d["deployment_id"]: d["id"] for d in dp.get_project_deployments(project.id)}

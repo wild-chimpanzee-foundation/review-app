@@ -28,7 +28,6 @@ class TestTranslationKeyParity:
                 "import_connection_interrupted",
                 "settings_tags_no_custom",
                 "distance_reference_tag_help",
-                "distance_reference_format",
                 "distance_clock_reset_warning",
                 "distance_review_species_title",
                 "distance_possible_omissions_help",

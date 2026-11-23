@@ -1,7 +1,13 @@
-"""Folder-by-folder correction dialog; assignments use the existing preview/apply seam."""
+"""Side-by-side footage comparison and confirmed folder assignment."""
 
-from nicegui import run, ui
+import asyncio
 
+from nicegui import background_tasks, run, ui
+
+from review_app.app.components.deployment_clip_preview import (
+    clip_placeholder,
+    render_deployment_clip,
+)
 from review_app.app.translations import t
 from review_app.app.utils import user_error_message
 from review_app.backend.deployment_review import rank_folder_deployments, summarize_folder_preview
@@ -65,31 +71,22 @@ async def review_deployment_folders(
     inventory,
     *,
     start_id=None,
-    on_changed,
+    on_close,
     edit_deployment,
-    inspect_video,
 ):
     if start_id:
         start = next((i for i, row in enumerate(folders) if row["id"] == start_id), 0)
         folders = folders[start:] + folders[:start]
-    review = _FolderReview(
-        dp, project_id, folders, inventory, on_changed, edit_deployment, inspect_video
-    )
+    review = _FolderReview(dp, project_id, folders, inventory, on_close, edit_deployment)
     await review.open()
 
 
 class _FolderReview:
-    def __init__(
-        self, dp, project_id, folders, inventory, on_changed, edit_deployment, inspect_video
-    ):
+    def __init__(self, dp, project_id, folders, inventory, on_close, edit_deployment):
         self.dp, self.project_id = dp, project_id
         self.folders = [dict(row) for row in folders]
         self.inventory = inventory
-        self.on_changed, self.edit_deployment, self.inspect_video = (
-            on_changed,
-            edit_deployment,
-            inspect_video,
-        )
+        self.on_close, self.edit_deployment = on_close, edit_deployment
         self.index = 0
         self.revision = 0
         self.preview = None
@@ -101,40 +98,37 @@ class _FolderReview:
         self.inputs = []
 
     async def open(self):
-        # Persistent prevents Escape/outside-click from hiding an in-flight write.
-        self.dialog = ui.dialog().props("persistent")
         with (
-            self.dialog,
-            ui.card()
-            .classes("q-pa-lg")
-            .style(
-                "width:1150px; max-width:96vw; height:94vh; overflow:hidden; display:flex; flex-direction:column"
-            ),
+            ui.column()
+            .classes("w-full gap-4")
+            .mark("deployment-review-workspace") as self.workspace
         ):
-            with ui.row().classes("w-full justify-between items-center"):
-                ui.label(t("deployment_review_folders")).classes("text-h5")
-                self.progress = ui.label().classes("text-subtitle2")
-            self.host = (
-                ui.column().classes("w-full").style("flex:1; min-height:0; overflow-y:auto")
-            )
-            self.error = ui.label().classes("text-negative break-all")
-            with ui.row().classes("w-full items-center gap-2"):
-                self.back = ui.button(
-                    t("deployment_review_back"), icon="arrow_back", on_click=self.previous
-                ).props("flat")
-                self.skip = ui.button(
-                    t("deployment_review_skip"), on_click=self.skip_folder
-                ).props("outline")
-                ui.space()
-                self.preview_button = ui.button(
-                    t("deployment_preview"), on_click=self.make_preview
-                ).props("outline")
-                self.apply_button = ui.button(
-                    t("deployment_review_apply_next"), icon="check", on_click=self.apply
-                )
-                self.close_button = ui.button(t("close"), on_click=self.close).props("flat")
-            ui.label(t("deployment_review_history")).classes("text-caption text-grey-6")
-        self.dialog.open()
+            with ui.row().classes("w-full justify-between items-center gap-3"):
+                with ui.column().classes("gap-0"):
+                    self.close_button = ui.button(
+                        t("deployment_manage"), icon="arrow_back", on_click=self.close
+                    ).props("flat dense no-caps")
+                    with ui.row().classes("items-baseline gap-3"):
+                        ui.label(t("deployment_review_folders")).classes("text-h5")
+                        self.progress = ui.label().classes("text-subtitle2 text-grey-6")
+                with ui.row().classes("items-center gap-2"):
+                    self.back = (
+                        ui.button(
+                            t("deployment_review_back"),
+                            icon="chevron_left",
+                            on_click=self.previous,
+                        )
+                        .props("flat no-caps")
+                        .tooltip(t("deployment_review_history"))
+                    )
+                    self.skip = ui.button(
+                        t("deployment_review_skip"), on_click=self.skip_folder
+                    ).props("outline no-caps")
+                    self.apply_button = ui.button(
+                        t("deployment_review_apply_next"), icon="check", on_click=self.apply
+                    ).props("unelevated no-caps")
+            self.error = ui.label().classes("text-negative break-all empty:hidden")
+            self.host = ui.column().classes("w-full")
         await self.show()
 
     def controls(self):
@@ -147,15 +141,6 @@ class _FolderReview:
             else t("deployment_review_skip")
         )
         self.close_button.set_enabled(not self.busy)
-        selected = not finished and self.picker is not None and self.picker.value is not None
-        valid_root = not finished and bool(self.folders[self.index]["root_id"])
-        self.preview_button.set_enabled(
-            not self.busy
-            and selected
-            and valid_root
-            and self.clips is not None
-            and bool(self.clips.rows)
-        )
         self.apply_button.set_text(
             t("deployment_review_apply_clips")
             if self.clips is not None and self.clips.selected
@@ -167,12 +152,7 @@ class _FolderReview:
         for widget in self.inputs:
             widget.set_enabled(not self.busy)
 
-    def invalidate(self, _=None):
-        self.revision += 1
-        self.preview = None
-        self.results.clear()
-        self.error.set_text("")
-        self.controls()
+    def show_selection(self):
         self.show_metadata()
         count = len(self.clips.selected)
         self.selection_status.set_text(
@@ -183,6 +163,9 @@ class _FolderReview:
 
     def show_metadata(self):
         self.metadata.clear()
+        reasons = self.suggestions.get(self.picker.value, {}).get("reasons", ())
+        self.target_reasons.set_text(" · ".join(t(reason) for reason in reasons))
+        self.target_reasons.set_visibility(bool(reasons))
         selected = next((row for row in self.inventory if row["id"] == self.picker.value), None)
         if selected:
             with self.metadata:
@@ -199,7 +182,7 @@ class _FolderReview:
                     if selected.get(field):
                         ui.label(f"{field}: {selected[field]}").classes("text-caption break-all")
 
-    async def show(self):
+    async def show(self, *, target_id=None, selected_ids=()):
         self.revision += 1
         revision = self.revision
         self.preview = None
@@ -229,130 +212,247 @@ class _FolderReview:
             t("deployment_review_position", current=self.index + 1, total=len(self.folders))
         )
         try:
-            current, videos = await run.io_bound(
+            current, videos, ordinary = await run.io_bound(
                 self.dp.get_deployment_folder,
                 self.project_id,
                 initial["root_id"],
                 initial["folder"],
             )
             folder = initial | current if current else initial
-            suggestions = await run.io_bound(rank_folder_deployments, folder, self.inventory)
+            suggestions = await run.io_bound(
+                rank_folder_deployments, folder, self.inventory, ordinary_deployments=ordinary
+            )
         except Exception as exc:
             self.error.set_text(_error(exc))
             self.busy = False
             self.controls()
             return
-        if revision != self.revision or self.dialog.is_deleted:
+        if revision != self.revision or self.workspace.is_deleted:
             return
+        self.folders[self.index] = folder
+        self.suggestions = {row["id"]: row for row in suggestions}
+        inventory = {row["id"]: row for row in self.inventory}
+        target_options = {}
+        for identifier in dict.fromkeys([*self.suggestions, *inventory]):
+            row = inventory[identifier]
+            label = row["deployment_id"]
+            if row.get("name") and row["name"] != label:
+                label = f"{label} · {row['name']}"
+            target_options[identifier] = (
+                t("deployment_review_suggested_target", target=label)
+                if identifier in self.suggestions
+                else label
+            )
+        target_options[""] = t("deployment_unresolved")
+        default_target = (
+            target_id if target_id in target_options else next(iter(self.suggestions), None)
+        )
+        self.source_clips = {row["video_id"]: row for row in videos}
+        default_source = next(
+            (row["video_id"] for row in videos if not row["missing"]),
+            next(iter(self.source_clips), None),
+        )
         with self.host:
-            ui.label(folder["folder"]).classes("text-subtitle1 font-mono break-all")
-            if folder.get("root_path"):
-                ui.label(folder["root_path"]).classes("text-caption text-grey-6 break-all")
-            if current:
-                ui.label(t("deployment_folder_counts", **folder)).classes("text-body2")
-            else:
-                ui.label(t("deployment_review_no_clips")).classes("text-warning")
+            with ui.element("div").classes(
+                "w-full grid grid-cols-1 lg:grid-cols-2 gap-4 items-start"
+            ):
+                with ui.card().classes("w-full min-w-0 gap-2"):
+                    ui.label(t("deployment_review_folder_footage")).classes("text-subtitle1")
+                    self.source_picker = (
+                        ui.select(
+                            {row["video_id"]: row["filename"] for row in videos},
+                            value=default_source,
+                            label=t("deployment_file"),
+                            on_change=self.load_source,
+                        )
+                        .props("outlined dense options-dense")
+                        .classes("w-full")
+                        .mark("deployment-review-source")
+                    )
+                    self.source_picker.set_enabled(len(videos) > 1)
+                    self.source_panel = (
+                        ui.column().classes("w-full gap-1").mark("deployment-review-source-player")
+                    )
+                    ui.label(folder["folder"]).classes("text-caption font-mono break-all")
+                with ui.card().classes("w-full min-w-0 gap-2"):
+                    ui.label(t("deployment_review_target_footage")).classes("text-subtitle1")
+                    self.picker = (
+                        ui.select(
+                            target_options,
+                            label=t("deployment_target"),
+                            value=default_target,
+                            with_input=True,
+                        )
+                        .props("outlined dense options-dense")
+                        .classes("w-full")
+                        .mark("deployment-review-target")
+                    )
+                    self.inputs.append(self.picker)
+                    self.target_panel = (
+                        ui.column().classes("w-full gap-1").mark("deployment-review-target-player")
+                    )
+                    self.target_reasons = ui.label().classes("text-caption text-grey-6")
+
             if folder["unmatched_references"]:
                 ui.label(
                     t("deployment_review_unmatched", count=folder["unmatched_references"])
                 ).classes("text-warning")
+            if not suggestions:
+                ui.label(t("deployment_review_no_suggestions")).classes("text-caption text-grey-6")
+            elif folder["unmatched_references"] and all(
+                {
+                    "deployment_reason_other_camera",
+                    "deployment_reason_other_transect",
+                }.intersection(suggestion["reasons"])
+                for suggestion in suggestions
+            ):
+                ui.label(t("deployment_review_reference_mismatch")).classes("text-warning")
             if folder["id"] in self.applied:
                 ui.label(t("deployment_review_done")).classes("text-positive")
-            current = ", ".join(
-                f"{row['deployment'] or t('deployment_unresolved')}: {row['count']}"
-                for row in folder["assignments"]
-            )
-            ui.label(f"{t('deployment_folder_assignments')}: {current}").classes("text-caption")
-            link = folder.get("link")
-            ui.label(
-                t(
-                    "deployment_review_current_link",
-                    deployment=(link["deployment"] or t("deployment_unresolved"))
-                    if link
-                    else t("deployment_review_no_link"),
-                )
-            ).classes("text-caption")
             if not folder["root_id"]:
                 ui.label(t("deployment_error_membership")).classes("text-negative")
-            with ui.expansion(
-                t("deployment_footage"), icon="movie", value=bool(videos and len(videos) <= 20)
-            ).classes("w-full"):
-                self.clips = ui.table(
-                    columns=[
-                        {"name": field, "field": field, "label": t(label), "align": "left"}
-                        for field, label in (
-                            ("filename", "deployment_file"),
-                            ("status", "deployment_current"),
-                            ("kind", "deployment_reference"),
-                            ("availability", "deployment_status"),
-                        )
-                    ],
-                    rows=[
-                        row
-                        | {
-                            "status": row["deployment"] or t("deployment_unresolved"),
-                            "kind": t("deployment_reference") if row["reference"] else "",
-                            "availability": t("deployment_missing_media")
-                            if row["missing"]
-                            else "",
-                        }
-                        for row in videos
-                    ],
-                    row_key="video_id",
-                    selection="multiple",
-                    pagination=10,
-                ).classes("w-full")
-                inspect = ui.button(
-                    t("deployment_inspect"),
-                    icon="play_arrow",
-                    on_click=self.inspect_selected,
-                ).props("outline")
-                self.inputs.append(inspect)
-            ui.label(t("deployment_review_advisory")).classes("text-caption text-warning")
-            options = {"": t("deployment_unresolved")} | {
-                row["id"]: row["deployment_id"] + (f" — {row['name']}" if row.get("name") else "")
-                for row in self.inventory
-            }
-            self.picker = ui.select(
-                options, label=t("deployment_target"), with_input=True
-            ).classes("w-full")
-            self.inputs.append(self.picker)
-            if not suggestions:
-                ui.label(t("deployment_review_no_suggestions")).classes("text-grey-6")
-            for suggestion in suggestions:
-                with ui.card().classes("w-full q-pa-sm"):
-                    with ui.row().classes("w-full items-center justify-between"):
-                        button = ui.button(
-                            suggestion["deployment_id"],
-                            on_click=lambda tid=suggestion["id"]: self.picker.set_value(tid),
-                        ).props("flat no-caps")
-                        self.inputs.append(button)
-                    ui.label(" · ".join(t(reason) for reason in suggestion["reasons"])).classes(
-                        "text-caption"
-                    )
-            with ui.row():
-                add = ui.button(
-                    t("deployment_add"), icon="add", on_click=lambda: self.edit(False)
-                ).props("outline")
-                edit = ui.button(
-                    t("deployment_edit"), icon="edit", on_click=lambda: self.edit(True)
-                ).props("outline")
-                self.inputs.extend([add, edit])
-            self.metadata = ui.column().classes("w-full gap-0")
-            self.selection_status = ui.label(t("deployment_review_preview_help")).classes(
-                "text-caption"
-            )
+            self.selection_status = ui.label().classes("text-caption")
             self.results = ui.column().classes("w-full")
-        self.picker.on_value_change(self.invalidate)
-        self.clips.on_select(self.invalidate)
+
+            with ui.expansion(t("deployment_review_select_clips"), icon="checklist").classes(
+                "w-full"
+            ):
+                self.clips = (
+                    ui.table(
+                        columns=[
+                            {"name": field, "field": field, "label": t(label), "align": "left"}
+                            for field, label in (
+                                ("filename", "deployment_file"),
+                                ("status", "deployment_current"),
+                                ("kind", "deployment_reference"),
+                                ("availability", "deployment_status"),
+                            )
+                        ],
+                        rows=[
+                            row
+                            | {
+                                "status": row["deployment"] or t("deployment_unresolved"),
+                                "kind": t("deployment_reference") if row["reference"] else "",
+                                "availability": t("deployment_missing_media")
+                                if row["missing"]
+                                else "",
+                            }
+                            for row in videos
+                        ],
+                        row_key="video_id",
+                        selection="multiple",
+                        pagination=10,
+                    )
+                    .classes("w-full")
+                    .mark("deployment-review-clips")
+                )
+                self.clips.selected = [
+                    row for row in self.clips.rows if row["video_id"] in selected_ids
+                ]
+            with ui.expansion(t("deployment_review_folder_details"), icon="info_outline").classes(
+                "w-full"
+            ):
+                if folder.get("root_path"):
+                    ui.label(folder["root_path"]).classes("text-caption break-all")
+                ui.label(t("deployment_folder_counts", **folder)).classes("text-body2")
+                assignments = ", ".join(
+                    f"{row['deployment'] or t('deployment_unresolved')}: {row['count']}"
+                    for row in folder["assignments"]
+                )
+                ui.label(f"{t('deployment_folder_assignments')}: {assignments}").classes(
+                    "text-caption"
+                )
+                link = folder.get("link")
+                ui.label(
+                    t(
+                        "deployment_review_current_link",
+                        deployment=link["deployment"] or t("deployment_unresolved"),
+                    )
+                    if link
+                    else t("deployment_review_no_link")
+                ).classes("text-caption")
+                self.metadata = ui.column().classes("w-full gap-0")
+                with ui.row():
+                    add = ui.button(
+                        t("deployment_add"), icon="add", on_click=lambda: self.edit(False)
+                    ).props("flat no-caps")
+                    edit = ui.button(
+                        t("deployment_edit"), icon="edit", on_click=lambda: self.edit(True)
+                    ).props("flat no-caps")
+                    self.inputs.extend([add, edit])
+        self.picker.on_value_change(self.target_changed)
+        self.clips.on_select(self.update_preview)
         self.busy = False
         self.controls()
+        self.show_selection()
+        background_tasks.create(self.load_source(), name="load folder footage")
+        background_tasks.create(self.target_changed(), name="load comparison deployment")
 
-    async def inspect_selected(self):
-        if len(self.clips.selected) != 1:
-            ui.notify(t("deployment_inspect_one"), type="warning")
+    async def load_source(self, event=None):
+        if (
+            self.workspace.is_deleted
+            or self.source_panel.is_deleted
+            or (event is not None and event.sender is not self.source_picker)
+        ):
             return
-        await self.inspect_video(self.clips.selected[0])
+        self.source_panel.clear()
+        with self.source_panel:
+            clip = self.source_clips.get(self.source_picker.value)
+            if clip is None:
+                clip_placeholder(t("deployment_review_no_clips"))
+                return
+            request = ui.column().classes("w-full")
+            with request:
+                clip_placeholder(loading=True)
+        folder = self.folders[self.index]
+        await render_deployment_clip(
+            self.dp, clip["video_id"], clip, folder.get("root_path"), request
+        )
+
+    async def load_target(self):
+        if self.workspace.is_deleted or self.target_panel.is_deleted:
+            return
+        target = self.picker.value
+        self.target_panel.clear()
+        with self.target_panel:
+            if not target:
+                clip_placeholder(t("deployment_review_choose_comparison"))
+                return
+            request = ui.column().classes("w-full gap-1")
+            with request:
+                clip_placeholder(loading=True)
+        try:
+            clip = await run.io_bound(
+                self.dp.get_deployment_comparison_clip, self.project_id, target
+            )
+        except Exception as exc:
+            if not request.is_deleted:
+                request.clear()
+                with request:
+                    clip_placeholder(_error(exc))
+            return
+        if request.is_deleted:
+            return
+        if clip is None:
+            request.clear()
+            with request:
+                clip_placeholder(t("deployment_review_no_comparison_clip"))
+            return
+        request.clear()
+        with request:
+            media = ui.column().classes("w-full")
+            with media:
+                clip_placeholder(loading=True)
+            ui.label(clip["filename"]).classes("text-caption break-all")
+        await render_deployment_clip(self.dp, clip["video_id"], clip, clip["root_path"], media)
+
+    async def target_changed(self, event=None):
+        if (
+            not self.busy
+            and not self.workspace.is_deleted
+            and (event is None or event.sender is self.picker)
+        ):
+            await asyncio.gather(self.load_target(), self.update_preview())
 
     async def edit(self, existing):
         if self.busy:
@@ -365,59 +465,103 @@ class _FolderReview:
         if existing and selected is None:
             self.error.set_text(t("deployment_error_target"))
             return
-        self.invalidate()
 
         async def saved(identifier):
             self.dirty = True
+            selected_ids = {row["video_id"] for row in self.clips.selected}
             self.inventory = await run.io_bound(self.dp.get_project_deployments, self.project_id)
-            await self.show()
-            self.picker.set_value(identifier)
+            await self.show(target_id=identifier, selected_ids=selected_ids)
 
         await self.edit_deployment(selected, on_saved=saved)
 
-    async def make_preview(self):
-        if self.busy or self.picker is None or self.picker.value is None:
+    async def update_preview(self, event=None, *, notice=""):
+        if (
+            self.busy
+            or self.picker is None
+            or self.workspace.is_deleted
+            or (event is not None and event.sender is not self.clips)
+        ):
             return
-        self.invalidate()
+        self.revision += 1
         revision = self.revision
-        folder = self.folders[self.index]
-        selected = [row["video_id"] for row in self.clips.selected]
-        self.busy = True
+        self.preview = None
+        self.results.clear()
+        self.error.set_text(notice)
         self.controls()
+        self.show_selection()
+        folder = self.folders[self.index]
+        target = self.picker.value
+        if target is None or not folder["root_id"] or not self.clips.rows:
+            return
+        selected = [row["video_id"] for row in self.clips.selected]
+        with self.results:
+            ui.label(t("deployment_review_preparing_preview")).classes("text-caption")
         try:
             preview = await run.io_bound(
                 self.dp.preview_deployment_assignment,
                 self.project_id,
                 selected,
-                target_id=self.picker.value or None,
+                target_id=target or None,
                 action="assign" if selected else "folder",
                 folder=None
                 if selected
                 else {"root_id": folder["root_id"], "path": folder["folder"]},
             )
-            if revision != self.revision or self.dialog.is_deleted:
-                return
-            self.preview = preview
-            with self.results:
-                render_assignment_preview(preview, grouped=not selected)
         except Exception as exc:
-            self.error.set_text(_error(exc))
-        finally:
-            self.busy = False
-            self.controls()
+            if revision == self.revision and not self.workspace.is_deleted:
+                self.results.clear()
+                self.error.set_text(_error(exc))
+            return
+        if revision != self.revision or self.workspace.is_deleted:
+            return
+        already_linked = preview["action"] == "folder" and preview["link"] == (
+            preview["target_id"],
+            "manual",
+        )
+        leaves_unmatched = (
+            folder["unmatched_references"]
+            and preview["target_id"] is not None
+            and all(row["before"] == preview["target_id"] for row in preview["rows"])
+        )
+        no_changes = not preview["changed"] and (already_linked or leaves_unmatched)
+        if not no_changes:
+            self.preview = preview
+        self.results.clear()
+        with self.results:
+            if no_changes:
+                ui.label(t("deployment_review_no_change")).classes("text-warning")
+            render_assignment_preview(preview, grouped=not selected)
+        self.controls()
 
     async def apply(self):
-        if self.busy or self.preview is None or self.preview["blocked"]:
+        preview = self.preview
+        if self.busy or preview is None or preview["blocked"]:
+            return
+        selected = {row["video_id"] for row in self.clips.selected}
+        previewed = (
+            {row["video_id"] for row in preview["rows"]}
+            if preview["action"] == "assign"
+            else set()
+        )
+        if (
+            self.picker.value is None
+            or preview["target_id"] != (self.picker.value or None)
+            or selected != previewed
+        ):
             return
         self.busy = True
         self.controls()
-        advance = self.preview["action"] == "folder"
+        advance = preview["action"] == "folder"
         try:
-            counts = await run.io_bound(self.dp.apply_deployment_assignment, self.preview)
+            counts = await run.io_bound(self.dp.apply_deployment_assignment, preview)
         except Exception as exc:
             self.preview = None
-            self.error.set_text(_error(exc))
             self.busy = False
+            self.results.clear()
+            if isinstance(exc, DeploymentInputError) and exc.key == "deployment_error_stale":
+                await self.update_preview(notice=t("deployment_review_preview_changed"))
+                return
+            self.error.set_text(_error(exc))
             self.controls()
             return
         folder = self.folders[self.index]
@@ -447,8 +591,7 @@ class _FolderReview:
     async def close(self):
         if self.busy:
             return
+        self.revision += 1
         self.busy = True
         self.controls()
-        self.dialog.close()
-        if self.dirty:
-            await self.on_changed()
+        await self.on_close(self.dirty)

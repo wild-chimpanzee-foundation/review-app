@@ -114,10 +114,11 @@ def _plan(session, project_id, package):
         if not math.isfinite(precise) or precise >= 2**63 - 1:
             errors.append("Reference time_s exceeds the supported playback range")
             continue
-        key = video.video_id, row["known_distance_m"]
+        offset_ms = math.floor(precise + 0.5)
+        key = video.video_id, row["known_distance_m"], offset_ms
         if key in keys:
             errors.append(
-                f"Multiple reference IDs identify the same video/distance: {row['reference_id']}"
+                f"Multiple reference IDs identify the same video/distance/timestamp: {row['reference_id']}"
             )
         keys.add(key)
         source = (
@@ -131,7 +132,11 @@ def _plan(session, project_id, package):
             errors.append(f"Reference camera mismatch; refresh references: {row['video_path']}")
         frame = (
             session.query(ReferenceFrame)
-            .filter_by(reference_video_id=source.id, distance_m=row["known_distance_m"])
+            .filter_by(
+                reference_video_id=source.id,
+                distance_m=row["known_distance_m"],
+                offset_ms=offset_ms,
+            )
             .one_or_none()
             if source
             else None
@@ -142,9 +147,7 @@ def _plan(session, project_id, package):
                 if frame.playback_offset_ms is not None
                 else frame.offset_ms
             )
-            if frame.distance_m != row["known_distance_m"] or not math.isclose(
-                position, precise, rel_tol=0, abs_tol=0.000001
-            ):
+            if not math.isclose(position, precise, rel_tol=0, abs_tol=0.000001):
                 samples = (
                     session.query(
                         DistanceSample.id,

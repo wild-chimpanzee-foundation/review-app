@@ -12,12 +12,14 @@ in the matching section.
 
 import logging
 from typing import Any
+from uuid import uuid4
 
 from review_app.backend.utils import DEFAULT_REVIEW_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
 _data_provider = None
+_annotator_session = uuid4().hex
 
 GLOBAL_DEFAULTS: dict[str, Any] = {
     "blank_threshold": DEFAULT_REVIEW_THRESHOLD,
@@ -150,9 +152,6 @@ def load_session_defaults(dp=None) -> None:
             else:
                 storage[key] = raw if raw is not None else default
 
-    if "active_project_id" not in storage:
-        storage["active_project_id"] = dp.get_setting("active_project_id") if dp else None
-
 
 def save_user_prefs_to_db(dp) -> None:
     """No-op: prefs now live in app.storage.user, not the DB."""
@@ -250,13 +249,18 @@ def set_distance_queue_state(project_id: str, **values) -> None:
 def get_annotator_name() -> str:
     from nicegui import app
 
-    return app.storage.user.get("annotator_name", "")
+    storage = app.storage.user
+    if storage.get("annotator_session") != _annotator_session:
+        return ""
+    return storage.get("annotator_name", "")
 
 
 def set_annotator_name(name: str) -> None:
     from nicegui import app
 
-    app.storage.user["annotator_name"] = name
+    storage = app.storage.user
+    storage["annotator_name"] = name
+    storage["annotator_session"] = _annotator_session
 
 
 def get_blank_threshold() -> float:

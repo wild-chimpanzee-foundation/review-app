@@ -88,7 +88,9 @@ async def test_failed_save_keeps_number_and_playback_offset(user: User, preparat
         number.set_value(5)
     seek.reset_mock()
     user.find("Save current frame").click()
-    await user.should_see("A reference frame is already saved for this distance.")
+    await user.should_see(
+        "A reference frame is already saved for this distance at this timestamp."
+    )
     assert number.value == 5 and number.enabled
     seek.assert_not_called()
     assert len(data["dp"].list_reference_frames(data["reference"]["id"])) == 1
@@ -250,7 +252,7 @@ async def test_delete_reference_clears_saved_sample_and_current_selection(
     await user.should_see("Delete the 5 m reference mapping?")
     await user.should_see("Saved animal samples to clear: 1")
     user.find("Delete mapping and clear affected annotations").click()
-    await user.should_not_see("Delete the 5 m reference mapping?")
+    await user.should_not_see("Delete the 5 m reference mapping?", retries=30)
     await user.should_not_see("Prepared reference frames")
     await user.should_see("Save current frame")
     assert next(iter(user.find(ui.number).elements)).enabled
@@ -273,3 +275,20 @@ async def test_failed_reference_deletion_preserves_mapping_for_retry(
     await user.should_see("Could not delete the reference mapping. Please try again.")
     assert data["dp"].list_reference_frames(data["reference"]["id"]) == [data["frame"]]
     await user.should_see("Delete the 5 m reference mapping?")
+
+
+async def test_prepare_existing_distance_at_another_timestamp(user: User, preparation_page):
+    _, data, capture, _, _ = preparation_page
+    capture.return_value = 5000
+    await user.open("/reference-preparation-test")
+    number = next(iter(user.find(ui.number).elements))
+    with user:
+        number.set_value(5)
+    user.find("Save current frame").click()
+    await user.should_see("5 m · 00:05.000")
+    frames = data["dp"].list_reference_frames(data["reference"]["id"])
+    assert [(frame["distance_m"], frame["offset_ms"]) for frame in frames] == [
+        (5, 3500),
+        (5, 5000),
+    ]
+    assert frames[0]["id"] == data["frame"]["id"]

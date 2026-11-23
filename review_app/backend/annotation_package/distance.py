@@ -303,7 +303,9 @@ def canonical(unit, frames, references, imports=()):
     ref_videos = {r["id"]: r["video_id"] for r in references}
     mapping.update(
         {
-            f["id"]: json.dumps([ref_videos[f["reference_video_id"]], f["distance_m"]])
+            f["id"]: json.dumps(
+                [ref_videos[f["reference_video_id"]], f["distance_m"], f["offset_ms"]]
+            )
             for f in frames
         }
     )
@@ -438,18 +440,18 @@ def validate(manifest, context, work):
         },
         "id",
     )
-    pairs = set()
+    positions = set()
     for r in frames.values():
-        pair = r["reference_video_id"], r["distance_m"]
+        position = r["reference_video_id"], r["distance_m"], r["offset_ms"]
         if (
             r["reference_video_id"] not in refs
-            or pair in pairs
+            or position in positions
             or r["offset_ms"] < 0
             or r["distance_m"] <= 0
             or (r["playback_offset_ms"] is not None and r["playback_offset_ms"] < 0)
         ):
-            raise ValueError("Invalid or duplicate reference video/distance")
-        pairs.add(pair)
+            raise ValueError("Invalid or duplicate reference video/distance/timestamp")
+        positions.add(position)
     if len(frames) != len(deps["frames"]):
         raise ValueError("Duplicate reference ID")
     for frame in frames.values():
@@ -786,7 +788,39 @@ def restore_work(session, project_id, video_id, unit, vocab, identities, mapping
     session.flush()
 
 
-def restore_dependencies(session, project_id, context, identities, videos, roots, work):
+def match_reference_frames(incoming, current, mapped_ids):
+    """Match exact calibration positions and preserve established frame identities."""
+    by_id = {frame["id"]: frame for frame in current}
+    by_position = {
+        (frame["reference_video_id"], frame["distance_m"], frame["offset_ms"]): frame
+        for frame in current
+    }
+    matches = {}
+    for frame in incoming:
+        found = by_position.get(
+            (frame["reference_video_id"], frame["distance_m"], frame["offset_ms"])
+        )
+        if found:
+            matches[frame["id"]] = found
+    claimed = {frame["id"] for frame in matches.values()}
+    for frame in incoming:
+        if frame["id"] in matches:
+            continue
+        found = by_id.get(mapped_ids.get(frame["id"]))
+        if (
+            found
+            and found["id"] not in claimed
+            and found["reference_video_id"] == frame["reference_video_id"]
+            and found["distance_m"] == frame["distance_m"]
+        ):
+            matches[frame["id"]] = found
+            claimed.add(found["id"])
+    return matches
+
+
+def restore_dependencies(
+    session, project_id, context, identities, videos, roots, work, *, approved_substitutions=()
+):
     deps = context["distance"]
     mapping = dict(videos)
     for kind, rows in (
@@ -811,19 +845,28 @@ def restore_dependencies(session, project_id, context, identities, videos, roots
             session.add(local)
             session.flush()
         mapping[ref["id"]] = local.id
-    for frame in deps["frames"]:
-        local = (
-            session.query(ReferenceFrame)
-            .filter_by(
-                reference_video_id=mapping[frame["reference_video_id"]],
-                distance_m=frame["distance_m"],
+    incoming = [
+        {**frame, "reference_video_id": mapping[frame["reference_video_id"]]}
+        for frame in deps["frames"]
+    ]
+    current = [
+        species.fields(frame, FRAME)
+        for frame in session.query(ReferenceFrame).filter(
+            ReferenceFrame.reference_video_id.in_(
+                id_selection(frame["reference_video_id"] for frame in incoming)
             )
-            .first()
         )
-        local_id = local.id if local else identities.local("distance_frame", frame["id"])
+    ]
+    mapped_ids = {
+        row["returned_frame_id"]: videos.get(row["existing_frame_id"], row["existing_frame_id"])
+        for row in approved_substitutions
+    }
+    matches = match_reference_frames(incoming, current, mapped_ids)
+    for frame in deps["frames"]:
+        local = matches.get(frame["id"])
+        local_id = local["id"] if local else identities.local("distance_frame", frame["id"])
         if local is None and session.get(ReferenceFrame, local_id) is not None:
-            # Editing a returned distance must add calibration, never mutate the
-            # admin frame already bound to this historical portable handle.
+            # The previously bound calibration still occupies a different position.
             import uuid
 
             local_id = str(uuid.uuid4())

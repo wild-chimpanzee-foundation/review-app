@@ -53,7 +53,6 @@ class SetupWizard:
         adding_to_existing = db_path.exists() and _db_has_projects(db_path)
 
         continue_btn_holder: list = [None]
-        project_btn_holder: list = [None]
         collection_select_holder: list = [None]
         bundle_bytes: list = [None]
         bundle_btn_holder: list = [None]
@@ -70,20 +69,13 @@ class SetupWizard:
             if btn is not None:
                 btn.set_enabled(self.video_tools_ok)
 
-        def update_project_button():
-            btn = project_btn_holder[0]
-            if btn is not None:
-                btn.set_enabled(
+        def update_project_buttons():
+            if deployment_setup is not None:
+                deployment_setup.enable_creation(
                     self.video_tools_ok
                     and not project_submitting
-                    and deployment_setup is not None
                     and deployment_setup.ready
-                    and bool(
-                        self.inputs.get("video_dir")
-                        and self.inputs["video_dir"].value.strip()
-                        and self.inputs.get("project_name")
-                        and self.inputs["project_name"].value.strip()
-                    )
+                    and bool(self.inputs["project_name"].value.strip())
                 )
 
         def update_bundle_button():
@@ -97,7 +89,7 @@ class SetupWizard:
                 btn.set_enabled(self.video_tools_ok and has_bundle and has_dir)
 
         async def on_video_dir_change(e):
-            update_project_button()
+            update_project_buttons()
             if not self.inputs["project_name"].value.strip():
                 path = e.value.strip()
                 if path:
@@ -135,7 +127,7 @@ class SetupWizard:
                     status_label.classes("text-negative", remove="text-positive text-grey-6")
                     warning.show(status.missing)
                 update_continue_button()
-                update_project_button()
+                update_project_buttons()
                 update_bundle_button()
 
             ui.timer(0, do_check, once=True)
@@ -181,16 +173,19 @@ class SetupWizard:
                         str(exc) if isinstance(exc, ValueError) else user_error_message(exc)
                     )
 
-        async def submit_project():
+        async def submit_project(*, review_references=False):
             nonlocal project_submitting
             if project_submitting:
                 return
             if deployment_setup is None or not deployment_setup.ready:
                 ui.notify(t("deployment_error_required"), type="warning")
                 return
-            inventory_kwargs = deployment_setup.creation_kwargs()
+            deployment_preview = deployment_setup.preview
+            needs_reference_review = any(
+                row.unmatched_reference for row in deployment_preview.folders
+            )
             project_submitting = True
-            project_btn_holder[0].set_enabled(False)
+            update_project_buttons()
 
             video_dir = self.inputs["video_dir"].value.strip()
             project_name = (
@@ -200,7 +195,7 @@ class SetupWizard:
             if not video_dir:
                 ui.notify(t("enter_video_dir"), type="warning")
                 project_submitting = False
-                update_project_button()
+                update_project_buttons()
                 return
             video_dir = Path(video_dir).expanduser().resolve().as_posix()
             dir_error = await run.io_bound(validate_video_dir, video_dir)
@@ -208,7 +203,7 @@ class SetupWizard:
                 key, kwargs = dir_error
                 ui.notify(t(key, **kwargs), type="negative", timeout=6000)
                 project_submitting = False
-                update_project_button()
+                update_project_buttons()
                 return
 
             from review_app.app.state import (
@@ -229,7 +224,7 @@ class SetupWizard:
 
             try:
                 project = await run.io_bound(
-                    dp.create_project_with_deployments, project_name, video_dir, **inventory_kwargs
+                    dp.create_project, project_name, video_dir, expected_preview=deployment_preview
                 )
             except Exception as exc:
                 from review_app.backend.deployments import DeploymentInputError
@@ -242,12 +237,9 @@ class SetupWizard:
                     timeout=6000,
                 )
                 project_submitting = False
-                if (
-                    isinstance(exc, DeploymentInputError)
-                    and exc.key == "deployment_error_setup_stale"
-                ):
+                if isinstance(exc, DeploymentInputError):
                     await deployment_setup.refresh()
-                update_project_button()
+                update_project_buttons()
                 return
             collection_id = (
                 collection_select_holder[0].value if collection_select_holder[0] else None
@@ -256,58 +248,80 @@ class SetupWizard:
                 await run.io_bound(dp.set_project_collection, project.id, collection_id)
             switch_project(dp, project.id)
 
-            has_videos = await run.io_bound(dp.has_videos_in_db, get_active_project_id())
+            dialog = ui.dialog().props("persistent")
+            syncing = False
 
-            if not has_videos:
-                project_btn_holder[0].visible = False
+            async def sync_project():
+                nonlocal syncing
+                if syncing:
+                    return
+                syncing = True
+                retry_actions.set_visibility(False)
+                progress.value = 0
+                progress.props("indeterminate")
+                status.text = t("starting")
+                try:
+                    stats = await sync_with_progress(
+                        dp,
+                        progress=progress,
+                        status=status,
+                        video_dir=video_dir,
+                        active_project_id=project.id,
+                    )
+                except Exception as exc:
+                    progress.props(remove="indeterminate")
+                    status.text = t("deployment_setup_sync_failed", error=user_error_message(exc))
+                    retry_actions.set_visibility(True)
+                    return
+                finally:
+                    syncing = False
 
-                dialog = ui.dialog().props("persistent")
-                with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
-                    ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
-                    progress = ui.linear_progress(value=0, show_value=False).props("color=primary")
-                    status = ui.label(t("starting")).classes("text-caption text-grey-6 q-mt-sm")
-                    post_sync = ui.column().classes("w-full q-mt-md gap-sm")
-                    post_sync.visible = False
-                    with post_sync:
-                        ui.separator()
-                        ui.label(t("wizard_import_suggestion")).classes("text-body2 q-mt-xs")
-                        ui.button(
-                            t("wizard_go_to_import_btn"),
-                            icon="upload_file",
-                            color="primary",
-                            on_click=lambda: (
-                                dialog.close(),
-                                ui.navigate.to("/data-assignments?area=add"),
-                            ),
-                        ).props("size=lg").classes("full-width")
-                        ui.button(
-                            t("go_to_overview_btn"),
-                            icon="play_arrow",
-                            on_click=lambda: (dialog.close(), self.on_complete_callback()),
-                        ).props("size=lg flat").classes("full-width")
+                if needs_reference_review:
+                    dialog.close()
+                    if review_references and get_active_project_id() == project.id:
+                        ui.navigate.to("/deployments?review=references")
+                    else:
+                        self.on_complete_callback()
+                    return
 
-                dialog.open()
-                stats = await sync_with_progress(
-                    dp,
-                    progress=progress,
-                    status=status,
-                    video_dir=video_dir,
-                    active_project_id=get_active_project_id(),
-                )
-                status.text = t("sync_complete")
-                if stats:
-                    ui.label(t("sync_stat_scanned", n=stats["scanned"])).classes(
-                        "text-caption text-grey-6"
-                    )
-                    ui.label(t("sync_stat_added", n=stats["added"])).classes(
-                        "text-caption text-positive"
-                    )
-                    ui.label(t("sync_stat_updated", n=stats["updated"])).classes(
-                        "text-caption text-grey-6"
-                    )
-                post_sync.visible = True
-            else:
-                self.on_complete_callback()
+                with post_sync:
+                    if stats:
+                        ui.label(t("sync_stat_scanned", n=stats["scanned"]))
+                        ui.label(t("sync_stat_added", n=stats["added"]))
+                        ui.label(t("sync_stat_updated", n=stats["updated"]))
+                post_sync.set_visibility(True)
+
+            with dialog, ui.card().classes("q-pa-lg").style("min-width: 400px"):
+                ui.label(t("syncing_videos_label")).classes("text-h6 q-mb-md")
+                progress = ui.linear_progress(value=0, show_value=False)
+                status = ui.label(t("starting")).classes("text-caption text-grey-6 q-mt-sm")
+                with ui.row().classes("w-full items-center gap-2") as retry_actions:
+                    ui.button(t("handoff_retry_sync"), on_click=sync_project)
+                    ui.button(
+                        t("go_to_overview_btn"),
+                        on_click=lambda: (dialog.close(), self.on_complete_callback()),
+                    ).props("flat")
+                retry_actions.set_visibility(False)
+                with ui.column().classes("w-full q-mt-md gap-sm") as post_sync:
+                    ui.separator()
+                    ui.label(t("wizard_import_suggestion")).classes("text-body2 q-mt-xs")
+                    ui.button(
+                        t("wizard_go_to_import_btn"),
+                        icon="upload_file",
+                        on_click=lambda: (
+                            dialog.close(),
+                            ui.navigate.to("/data-assignments?area=add"),
+                        ),
+                    ).props("size=lg").classes("full-width")
+                    ui.button(
+                        t("go_to_overview_btn"),
+                        icon="play_arrow",
+                        on_click=lambda: (dialog.close(), self.on_complete_callback()),
+                    ).props("size=lg flat").classes("full-width")
+                post_sync.set_visibility(False)
+
+            dialog.open()
+            await sync_project()
 
         async def submit_bundle_project():
             if not bundle_bytes[0]:
@@ -509,7 +523,7 @@ class SetupWizard:
                             placeholder=t("project_name_placeholder"),
                         ).props("outlined dense class=w-full")
                         self.inputs["project_name"].on_value_change(
-                            lambda _: update_project_button()
+                            lambda _: update_project_buttons()
                         )
 
                     with ui.card().classes("full-width q-mb-md"):
@@ -537,29 +551,24 @@ class SetupWizard:
                             "text-subtitle1 font-weight-medium q-mb-xs"
                         )
                         ui.label(t("video_dir_desc")).classes("text-caption text-grey-6 q-mb-md")
-                        self.inputs["video_dir"] = ui.input(
-                            placeholder=t("video_dir_placeholder"),
-                        ).props("outlined dense class=w-full debounce=500")
+                        self.inputs["video_dir"] = (
+                            ui.input(
+                                placeholder=t("video_dir_placeholder"),
+                            )
+                            .props("outlined dense class=w-full debounce=500")
+                            .mark("project-footage-folder")
+                        )
                         self.inputs["video_dir"].on_value_change(on_video_dir_change)
 
                     from review_app.app.components.deployment_inventory import DeploymentSetup
 
                     deployment_setup = DeploymentSetup(
-                        lambda: self.inputs["video_dir"].value.strip(), update_project_button
+                        lambda: self.inputs["video_dir"].value.strip(), update_project_buttons
                     )
-                    deployment_setup.render()
-
-                    project_btn_holder[0] = (
-                        ui.button(
-                            t("sync_videos_title"),
-                            on_click=submit_project,
-                            icon="play_arrow",
-                            color="primary",
-                        )
-                        .props("size=lg")
-                        .classes("full-width")
+                    deployment_setup.render(
+                        lambda: submit_project(),
+                        lambda: submit_project(review_references=True),
                     )
-                    project_btn_holder[0].set_enabled(False)
 
         def render_package_form():
             from review_app.app.components.assignment_handoff import (
@@ -768,10 +777,7 @@ class SetupWizard:
                             set_data_provider(dp)
                             load_settings_from_db(dp)
                             load_session_defaults(dp)
-                            proj = dp.get_most_recent_project()
-                            if proj:
-                                set_active_project(proj.id)
-                                dp.touch_project(proj.id)
+                            set_active_project(None)
                             all_dirs = [
                                 Path(normalize_path_str(d.path))
                                 for _p in dp.list_projects()

@@ -733,20 +733,48 @@ def test_ai_import_matches_distance_when_multiple_frames_share_timestamp(
     )
 
 
-def test_ai_import_rejects_duplicate_video_distance_before_writing(distance_data, ai_package):
+def test_ai_import_rejects_duplicate_video_distance_timestamp_before_writing(
+    distance_data, ai_package
+):
     dp, project_id = distance_data["dp"], distance_data["project"].id
     ai_package["reference_frames.csv"].append(
-        {**ai_package["reference_frames.csv"][0], "reference_id": "ref-2", "time_s": "4.5"}
+        {**ai_package["reference_frames.csv"][0], "reference_id": "ref-2", "time_s": "2.125375"}
     )
     data = package_zip(ai_package)
     before = snapshot(dp)
     assert any(
-        "same video/distance" in error
+        "same video/distance/timestamp" in error
         for error in dp.preview_distance_ai_package(project_id, data)["errors"]
     )
-    with pytest.raises(ValueError, match="same video/distance"):
+    with pytest.raises(ValueError, match="same video/distance/timestamp"):
         dp.import_distance_ai_package(project_id, data)
     assert snapshot(dp) == before
+
+
+def test_ai_import_keeps_same_distance_at_distinct_timestamps(distance_data, ai_package):
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    reference = dp.register_reference_video(
+        project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
+    )
+    original = dp.add_reference_frame(reference["id"], 2125, 3.5, playback_offset_ms=2125.125)
+    ai_package["reference_frames.csv"].append(
+        {**ai_package["reference_frames.csv"][0], "reference_id": "ref-2", "time_s": "4.5"}
+    )
+    ai_package["predictions.csv"][1]["suggested_reference_id"] = "ref-2"
+    data = package_zip(ai_package)
+    preview = dp.preview_distance_ai_package(project_id, data)
+    assert preview["reference_conflicts"] == []
+    dp.import_distance_ai_package(project_id, data)
+    first, second = dp.list_reference_frames(reference["id"])
+    assert first["id"] == original["id"]
+    assert second["offset_ms"] == 4500 and second["distance_m"] == first["distance_m"]
+    with dp.Session() as session:
+        samples = session.query(DistanceSample).all()
+        assert {
+            row.ai_original["reference_frame_id"]
+            for row in samples
+            if row.ai_original and row.ai_original.get("reference_frame_id")
+        } == {first["id"], second["id"]}
 
 
 @pytest.mark.parametrize(
@@ -812,7 +840,7 @@ def test_reference_overwrite_requires_consent_and_clears_affected_measurements(
     reference = dp.register_reference_video(
         project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
     )
-    frame = dp.add_reference_frame(reference["id"], 3125, 3.5, playback_offset_ms=3125.125)
+    frame = dp.add_reference_frame(reference["id"], 2125, 3.5, playback_offset_ms=2125.375)
     individual = distance_data["individual"]
     dp.verify_distance_recording_time(distance_data["videos"][1], datetime(2024, 1, 1), "alice")
     dp.save_distance_sample(
@@ -826,7 +854,7 @@ def test_reference_overwrite_requires_consent_and_clears_affected_measurements(
     before = snapshot(dp)
     preview = dp.preview_distance_ai_package(project_id, data)
     assert preview["reference_conflicts"][0]["affected_samples"] == 1
-    assert preview["reference_conflicts"][0]["existing_time_s"] == 3.125125
+    assert preview["reference_conflicts"][0]["existing_time_s"] == 2.125375
     assert snapshot(dp) == before
     with pytest.raises(ValueError, match="Conflicting prepared reference"):
         dp.import_distance_ai_package(project_id, data)
@@ -851,7 +879,7 @@ def test_reference_overwrite_rejects_new_measurements_after_confirmation(
     reference = dp.register_reference_video(
         project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
     )
-    frame = dp.add_reference_frame(reference["id"], 3125, 3.5)
+    frame = dp.add_reference_frame(reference["id"], 2125, 3.5)
     data = package_zip(ai_package)
     preview = dp.preview_distance_ai_package(project_id, data)
     assert preview["reference_conflicts"][0]["affected_samples"] == 0
@@ -879,7 +907,7 @@ def test_reference_overwrite_requires_new_confirmation_after_review_completion(
     reference = dp.register_reference_video(
         project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
     )
-    frame = dp.add_reference_frame(reference["id"], 3125, 3.5)
+    frame = dp.add_reference_frame(reference["id"], 2125, 3.5)
     dp.verify_distance_recording_time(video_id, datetime(2024, 1, 1), "alice")
     dp.set_distance_individual_attributes(individual_id, age="Adult", sex="Female", tag_ids=[])
     offsets = dp.get_distance_review_state(video_id, "alice")["offsets"]
@@ -918,7 +946,7 @@ def test_failed_reference_overwrite_rolls_back(distance_data, ai_package):
     reference = dp.register_reference_video(
         project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
     )
-    frame = dp.add_reference_frame(reference["id"], 3125, 3.5)
+    frame = dp.add_reference_frame(reference["id"], 2125, 3.5)
     dp.verify_distance_recording_time(distance_data["videos"][1], datetime(2024, 1, 1), "alice")
     dp.save_distance_sample(
         distance_data["individual"]["id"], 2000, reference_frame_id=frame["id"], labeled_by="alice"
@@ -983,7 +1011,7 @@ async def test_ui_reference_overwrite_requires_confirmation(user: User, distance
     reference = dp.register_reference_video(
         project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x/patrol.mp4")
     )
-    frame = dp.add_reference_frame(reference["id"], 3125, 3.5)
+    frame = dp.add_reference_frame(reference["id"], 2125, 3.5)
 
     @ui.page("/test-ai-overwrite")
     async def page():
@@ -1000,7 +1028,7 @@ async def test_ui_reference_overwrite_requires_confirmation(user: User, distance
     assert all(not e.enabled for e in user.find(t("distance_ai_import"), kind=ui.button).elements)
     user.find(t("distance_ai_overwrite_confirm"), kind=ui.checkbox).click()
     await wait_for_enabled_import(user)
-    dp.update_reference_frame_position(frame["id"], 3500)
+    dp.update_reference_frame_position(frame["id"], 2125, playback_offset_ms=2125.25)
     user.find(t("distance_ai_import"), kind=ui.button).click()
     await user.should_see(
         t(
@@ -1014,7 +1042,7 @@ async def test_ui_reference_overwrite_requires_confirmation(user: User, distance
             "distance_ai_reference_conflict",
             video_path="cam_x/patrol.mp4",
             distance_m=3.5,
-            existing_time_s=3.5,
+            existing_time_s=2.12525,
             imported_time_s=2.125125,
             affected_samples=0,
         ),
@@ -1034,7 +1062,7 @@ def test_import_revalidates_calibration_after_preview(distance_data, ai_package)
     reference = dp.register_reference_video(
         project_id, "cam_x", str(Path(distance_data["directory"].path) / "cam_x" / "patrol.mp4")
     )
-    dp.add_reference_frame(reference["id"], 3125, 3.5, playback_offset_ms=3125.125)
+    dp.add_reference_frame(reference["id"], 2125, 3.5, playback_offset_ms=2125.375)
     before = snapshot(dp)
     with pytest.raises(ValueError, match="Conflicting prepared reference"):
         dp.import_distance_ai_package(project_id, data)

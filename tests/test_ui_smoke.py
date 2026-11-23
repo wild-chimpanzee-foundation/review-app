@@ -13,7 +13,7 @@ import pytest
 from nicegui import app, ui
 from nicegui.testing import User
 from review_app.app.entry_point import GUI
-from review_app.app.state import get_filters, set_data_provider
+from review_app.app.state import get_filters, set_annotator_name, set_data_provider
 from review_app.app.translations import t
 
 pytest_plugins = ["nicegui.testing.user_plugin"]
@@ -47,7 +47,7 @@ def smoke_app(provider_with_project):
 
     @ui.page("/test-login")
     def _test_login():
-        app.storage.user["annotator_name"] = "tester"
+        set_annotator_name("tester")
         app.storage.user["active_project_id"] = project.id
 
     yield

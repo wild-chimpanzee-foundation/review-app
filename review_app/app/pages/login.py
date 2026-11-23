@@ -1,16 +1,21 @@
-from nicegui import app, run, ui
+from nicegui import run, ui
 
-from review_app.app.state import get_language, set_language
+from review_app.app.state import get_annotator_name, get_language, set_language
 from review_app.app.translations import t
 
 
 async def setup_login():
-    if app.storage.user.get("annotator_name"):
+    if get_annotator_name():
         ui.navigate.to("/")
         return
 
     from review_app.app.entry_point import shared_header
-    from review_app.app.state import get_data_provider, load_session_defaults
+    from review_app.app.state import (
+        clear_session,
+        get_data_provider,
+        load_session_defaults,
+        set_annotator_name,
+    )
     from review_app.app.utils import get_or_create_data_provider
 
     shared_header()
@@ -88,7 +93,8 @@ async def setup_login():
                 if dp:
                     await run.io_bound(dp.add_annotator, name)
 
-                app.storage.user["annotator_name"] = name
+                clear_session()
+                set_annotator_name(name)
                 load_session_defaults(get_data_provider())
                 ui.navigate.to("/")
 

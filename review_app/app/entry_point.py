@@ -19,6 +19,7 @@ from review_app.app.state import (
     get_language,
     is_dark_mode,
     load_settings_from_db,
+    set_active_project,
     set_dark_mode,
     set_data_provider,
     set_language,
@@ -103,6 +104,7 @@ def shared_header(
     *,
     distance_shortcuts: bool = False,
     review_layout: "ReviewLayout | None" = None,
+    show_project_picker: bool = False,
 ):
     from nicegui import ui
 
@@ -217,16 +219,14 @@ def shared_header(
                     "flat round color=white"
                 ).tooltip(t("filters_label"))
             _active_pid = get_active_project_id()
-            if _active_pid:
-                _header_dp = get_data_provider()
-                _active_proj_name = (
-                    p.name
-                    if (_header_dp and (p := _header_dp.get_project(_active_pid)))
-                    else _active_pid
-                )
+            _header_dp = get_data_provider()
+            if _header_dp and get_annotator_name():
+                project = _header_dp.get_project(_active_pid) if _active_pid else None
                 project_dialog, refresh_projects = build_project_picker()
+                if show_project_picker:
+                    project_dialog.open()
                 ui.button(
-                    _active_proj_name,
+                    project.name if project else t("switch_project"),
                     icon="folder_special",
                     on_click=lambda: (refresh_projects(), project_dialog.open()),
                 ).props("outline color=white dense icon-right=arrow_drop_down").classes(
@@ -373,14 +373,22 @@ class GUI:
         self._startup_error: Exception | None = None
 
     def main_page(self):
-        from nicegui import app, ui
+        from nicegui import ui
 
         if self._startup_error:
             ui.navigate.to("/db-error")
-        elif not app.storage.user.get("annotator_name"):
+            return
+        if not get_annotator_name():
             ui.navigate.to("/login")
-        elif get_active_project_id():
+            return
+        dp = get_data_provider()
+        project_id = get_active_project_id()
+        if dp and project_id and dp.get_project(project_id):
             ui.navigate.to("/overview")
+            return
+        set_active_project(None)
+        if dp and dp.list_projects():
+            shared_header(show_project_picker=True)
         else:
             ui.navigate.to("/setup")
 
@@ -450,25 +458,25 @@ class GUI:
     async def overview_page(self):
         from review_app.app.utils import require_login
 
-        if not require_login():
+        if not require_login(require_project=True):
             return
         from review_app.app.pages.overview import setup_overview
 
         await setup_overview()
 
-    async def deployments_page(self):
+    async def deployments_page(self, review: str = ""):
         from review_app.app.utils import require_login
 
-        if not require_login():
+        if not require_login(require_project=True):
             return
         from review_app.app.pages.deployments import setup_deployments
 
-        await setup_deployments()
+        await setup_deployments(review_references=review == "references")
 
     async def review_page(self):
         from review_app.app.utils import require_login
 
-        if not require_login():
+        if not require_login(require_project=True):
             return
         from review_app.app.pages.review import setup_review
 
@@ -477,7 +485,7 @@ class GUI:
     async def data_assignments_page(self, area: str = "assignments"):
         from review_app.app.utils import require_login
 
-        if not require_login():
+        if not require_login(require_project=True):
             return
         from review_app.app.pages.data_assignments import setup_data_assignments
 
@@ -489,14 +497,14 @@ class GUI:
 
         from review_app.app.utils import require_login
 
-        if not require_login():
+        if not require_login(require_project=True):
             return
         ui.navigate.to("/data-assignments?area=add")
 
     async def distance_review_page(self):
         from review_app.app.utils import require_login
 
-        if not require_login():
+        if not require_login(require_project=True):
             return
         from review_app.app.pages.distance_review import setup_distance_review
 
@@ -517,7 +525,7 @@ class GUI:
 
         from review_app.app.utils import require_login
 
-        if not require_login():
+        if not require_login(require_project=True):
             return
         ui.navigate.to("/data-assignments?area=assignments")
 
@@ -531,7 +539,7 @@ class GUI:
         shared_header()
 
         def on_setup_complete():
-            ui.navigate.to("/overview")
+            ui.navigate.to("/")
 
         setup_wizard(on_complete_callback=on_setup_complete)
 
@@ -627,18 +635,6 @@ class GUI:
                 set_data_provider(dp)
                 self.dp = dp
                 load_settings_from_db(dp)
-
-                # Determine and persist the global default project in the DB.
-                # Per-user active project is loaded at login via load_session_defaults().
-                _default_pid = dp.get_setting("active_project_id")
-                if not (_default_pid and dp.get_project(_default_pid)):
-                    proj = dp.get_most_recent_project()
-                    if proj:
-                        dp.set_setting("active_project_id", proj.id)
-                        dp.touch_project(proj.id)
-                        _default_pid = proj.id
-
-                logger.info("Default project: %s", _default_pid or "none")
 
                 # Load media dirs from all projects so any user can serve their videos.
                 all_dirs = [

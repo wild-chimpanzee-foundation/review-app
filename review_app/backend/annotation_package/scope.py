@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from review_app.backend.db.models import (
@@ -17,6 +15,7 @@ from review_app.backend.db.models import (
     Video,
 )
 from review_app.backend.path_matching import normalize_path_str
+from review_app.backend.utils import sqlite_values as id_selection
 
 
 @dataclass(frozen=True)
@@ -107,11 +106,6 @@ def portable_path(path: str, roots: list[ProjectDir]) -> tuple[str, str]:
         if path.is_relative_to(base):
             return root.id, safe_relative(path.relative_to(base).as_posix())
     raise ValueError("Assigned media must be inside a registered project folder")
-
-
-def id_selection(ids):
-    """Keep large selections below SQLite's bound-variable limit."""
-    return select(func.json_each(json.dumps(list(ids))).table_valued("value").c.value)
 
 
 def distance_selection(session, project_id, target_species, start_time=None, end_time=None):

@@ -703,14 +703,15 @@ async def test_automatic_stop_suppresses_delayed_pause_then_reports_user_pause(m
         .replace("__WATCHDOG__", "1000")
     )
     result = run_javascript(
-        "const handlers = new Map(), emitted = []; let time = 0;"
+        "const handlers = new Map(), emitted = [], replaying = []; let time = 0;"
         + "global.document={body:{}}; global.MutationObserver=class {observe() {} disconnect() {}};"
         + "const video = {isConnected:true, paused:true, seeking:false, readyState:2, duration:2, playbackRate:1,"
         + "addEventListener(name, handler) {if (!handlers.has(name)) handlers.set(name, new Set()); handlers.get(name).add(handler);},"
         + "removeEventListener(name, handler) {handlers.get(name)?.delete(handler);},"
         + "pause() {if (this.paused) return; this.paused = true; setImmediate(() => "
         + "{for (const handler of handlers.get('pause') || []) handler();});},"
-        + "play() {this.paused = false; return Promise.resolve();},"
+        + "play() {replaying.push(this._distanceIntervalPlayback === this._distancePlayback); "
+        + "this.paused = false; return Promise.resolve();},"
         + "get currentTime() {return time;}, set currentTime(value) {time=value; this.seeking=true;"
         + "setImmediate(() => {this.seeking=false; for (const handler of handlers.get('seeked') || []) handler();});}};"
         + "global.emitEvent = (name, args) => emitted.push([name, args.offset_ms]);"
@@ -721,11 +722,12 @@ async def test_automatic_stop_suppresses_delayed_pause_then_reports_user_pause(m
         + json.dumps("return (async()=>{" + script + "})();")
         + ")( () => ({$el:video}), callback => setImmediate(() => {if (!video.paused) time += .2; callback();}), clearImmediate)"
         + ".then(completed => setImmediate(() => {const afterAuto=emitted.length; video.play(); video.pause();"
-        + "setImmediate(() => console.log(JSON.stringify({completed, time, afterAuto, emitted})));}));"
+        + "setImmediate(() => console.log(JSON.stringify({completed, time, afterAuto, emitted, replaying})));}));"
     )
     assert result["completed"]
     assert result["time"] == pytest.approx(0.1)
     assert result["afterAuto"] == 0
+    assert result["replaying"] == [True, False]
     assert result["emitted"] == [["distance_manual_pause_12", 100]]
 
 

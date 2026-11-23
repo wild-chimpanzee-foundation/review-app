@@ -32,9 +32,12 @@ class AnchorDialogContext:
     is_current: Callable[[ui.dialog], bool]
     create_individual: Callable[..., object]
     save_anchor: Callable[[dict[str, float]], object]
+    replay_from_ms: int | float | None = None
 
 
-def _fixed_preview(context: AnchorDialogContext, dialog, draft, on_anchor) -> None:
+def _fixed_preview(
+    context: AnchorDialogContext, dialog, draft, on_anchor, *, on_replay_change=None
+) -> None:
     render_fixed_frame_anchor_preview(
         FixedFrameAnchorContext(
             player_source=context.player_source,
@@ -43,6 +46,8 @@ def _fixed_preview(context: AnchorDialogContext, dialog, draft, on_anchor) -> No
             guard=context.guard,
             is_current=lambda: context.is_current(dialog),
             on_anchor=on_anchor,
+            replay_from_ms=context.replay_from_ms,
+            on_replay_change=on_replay_change,
         ),
         dialog,
         draft,
@@ -102,6 +107,7 @@ async def open_create_individual_dialog(context: AnchorDialogContext) -> None:
     row = context.row
     offset_ms = row["first_seen_offset_ms"]
     anchor = None
+    replaying = False
     with ui.dialog() as dialog, keyboard_dialog_card().classes("distance-dialog distance-player"):
         ui.label(t("distance_add_individual")).classes("text-h6")
         species = (
@@ -165,11 +171,16 @@ async def open_create_individual_dialog(context: AnchorDialogContext) -> None:
             anchor = geometry
             create_button.set_enabled(True)
 
-        _fixed_preview(context, dialog, row, on_anchor)
+        def on_replay_change(active: bool):
+            nonlocal replaying
+            replaying = active
+            create_button.set_enabled(anchor is not None and not replaying)
+
+        _fixed_preview(context, dialog, row, on_anchor, on_replay_change=on_replay_change)
 
         @context.guard
         async def create():
-            if not context.is_current(dialog):
+            if replaying or not context.is_current(dialog):
                 return
             if not species.value:
                 ui.notify(t("distance_choose_species"), type="warning")

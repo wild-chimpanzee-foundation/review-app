@@ -45,6 +45,8 @@ def test_needs_browser_transcode(tmp_path):
 
     # web_safe is False
     assert needs_browser_transcode({"is_web_safe": False, "video_path": "test.mp4"}) is True
+    assert needs_browser_transcode({"is_web_safe": 0, "video_path": "test.mp4"}) is True
+    assert needs_browser_transcode({"is_web_safe": 1, "video_path": "test.avi"}) is False
 
     # web_safe is None, extension is safe
     assert needs_browser_transcode({"is_web_safe": None, "video_path": "test.mp4"}) is False

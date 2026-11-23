@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pandas as pd
+from sqlalchemy import func, select
 
 from review_app.backend.transcoding import inspect_transcoded_cache
 from review_app.backend.video_tools import find_video_tool, video_tool_env
@@ -33,6 +34,11 @@ def bind_id_list(params: dict, key: str, values: list) -> str:
     """
     params[key] = json.dumps(values)
     return f"(SELECT value FROM json_each(:{key}))"
+
+
+def sqlite_values(values):
+    """Select a list of values from a single SQLite parameter."""
+    return select(func.json_each(json.dumps(list(values))).table_valued("value").c.value)
 
 
 def get_video_mime(url: str) -> str:
@@ -117,10 +123,8 @@ def needs_browser_transcode(video_row: dict) -> bool:
     if cache_status.exists:
         return not cache_status.current
     ws = video_row.get("is_web_safe")
-    if ws is True:
-        return False
-    if ws is False:
-        return True
+    if pd.notna(ws):
+        return not bool(ws)
     # ws is None (not yet probed): use extension as heuristic
     ext = Path(video_row.get("video_path", "")).suffix.lower()
     return ext in _BROWSER_UNSAFE_EXTS

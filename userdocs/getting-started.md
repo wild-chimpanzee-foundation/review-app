@@ -51,6 +51,9 @@ Pick your name from the dropdown if it's already there, or type a new one and pr
 !!! note
     This name identifies you as an *annotator*; it isn't a password-protected account. On a shared machine, each person simply selects their own name. You can switch names later from the account menu in the top-right of the header.
 
+Each time the app starts, choose your annotator name. If you already have projects,
+the project picker opens next. Use the project name in the header to switch later.
+
 ### 2. Welcome & system check
 
 Next, the setup wizard opens. The first step confirms your language and checks that ffmpeg is available.
@@ -79,18 +82,24 @@ Choosing **Start Fresh** brings you to project creation. A **project** is a name
 1. **Project name** — a short label, e.g. `PSS 2024`.
 2. **Species Collection** *(optional)* — pre-populate the project's species list from a saved collection. Leave as *No collection* if you're unsure; you can set up species later.
 3. **Video Directory** — the full path to the folder containing your videos. The app scans it recursively.
-4. **Deployment inventory** — download the CSV template, populate it, and upload it. Only `deployment_id` is required. Optional columns are `folder_path`, `name`, `camera_id`, `installation_date`, `retrieval_date`, `transect_id`, `habitat`, and `notes`. Use UTF-8 and comma or semicolon separators. Dates use `YYYY-MM-DD`. Review the proposed footage matches by folder before creating the project. The preview lists unresolved clips, competing deployment IDs, empty deployments, and warnings about ignored columns or missing directories. Alternatively, explicitly choose **Advanced options → Infer deployment inventory from folders instead of CSV**.
-5. Click **Sync your videos to get started**. The app saves the project and inventory together, then scans the folder, registers every video it finds, and reads basic metadata (duration, and timestamp/GPS where available).
+4. **Deployment inventory** — setup lists the reference folders that need review. Expand **Footage groups by folder** to see all inferred groups.
+5. Click **Create project**. If there are reference folders to review, choose **Create project and review reference folders** to open the review as soon as footage syncs, or **Create project and review later** to go to Overview. The app registers the footage and reads its basic metadata during sync.
 
-Open **Overview → Manage deployments** to review folders, add deployments, edit metadata, and inspect footage. The main table has one row per directly media-containing folder, with footage counts, unresolved videos, references without ordinary footage, and individual exceptions. Disable **Needs attention only** to see all folders. Assignment changes have a preview and confirmation step; moves that would invalidate saved Distance work, calibrated references or frozen assignments are blocked without partial changes.
+Use **Review reference folders** on Overview to open the unmatched reference queue. **Manage deployments** also lets you review other folders, add deployments, edit metadata, and inspect footage. The main table has one row per directly media-containing folder, with footage counts, unresolved videos, references without ordinary footage, and individual exceptions. Disable **Needs attention only** to see all folders. Assignment changes have a preview and confirmation step; moves that would invalidate saved Distance work, calibrated references or frozen assignments are blocked without partial changes.
 
-Choose **Review folders…** to open the first matching folder, or select a row to start there. Check the suggested deployment against your field records. Common hints include matching transect or camera numbers, leading zeros, and shortened reference folder names. You can search the inventory, add a deployment, or edit metadata from the dialog.
+Choose **Review folders…** to open the first matching folder, or select a row to start there. The comparison opens the folder’s first clip on the left and the first ordinary clip from the top suggestion on the right. Use the deployment dropdown to compare other camera views. Check suggestions against your field records. Open **Folder and deployment details** to add a deployment or edit metadata.
 
-For a whole-folder correction, choose a deployment with no clips selected. Click **Preview changes**, then **Apply folder link & next**. For a shared reference folder, select a clip to inspect it. Select the clips that belong together, choose a deployment, and click **Preview changes**, then **Apply clip assignments**. Repeat for each group, then click **Next folder**. **Back** revisits the previous folder and confirmed changes are retained.
+For a whole-folder correction, choose a deployment with no clips selected. Review the automatic preview and click **Apply folder link & next**. For a shared reference folder, use the left dropdown to compare other clips and open **Assign individual clips** to select those that belong together. Choose their deployment and click **Apply clip assignments** after checking the preview. Repeat for each group, then click **Next folder**.
 
-Each optional `folder_path` becomes an initial folder link. A link applies to files directly in that folder, including files discovered later, but not to subfolders. Individual video assignments take precedence and survive rescans; **Use folder assignment** removes the individual exception. Missing folders are retained with a warning. Without a link, deployment IDs match folder names exactly or as a prefix followed by a separator, ignoring case and normalizing spaces, dashes and underscores. For example, `48_cam086` matches `48_Cam086_814419_1116757_20260221`, but `cam45` does not match `cam453`. Automatic matches are recalculated on rescan. Competing matches stay unresolved until you assign them. Footage in separate roots requires an explicit assignment to share a deployment. Ordinary footage and its reference clips must share a deployment for Distance review.
+The app recognizes these folder layouts:
 
-Location/CRS input is not included. Existing projects and opened packages do not require a deployment CSV; their historical assignments are retained. Existing v1 assignment packages remain supported, but exporting one deployment explicitly linked across multiple import roots is rejected because that format cannot preserve the shared identity.
+| Ordinary footage | Reference footage |
+| --- | --- |
+| `videos/cam_a/clip.mp4` | `ref/cam_a/calibration.mp4` |
+| `cam_a/clip.mp4` or `cam_a/videos/clip.mp4` | `cam_a/ref/calibration.mp4` |
+| `cam_a/clip.mp4` | `cam_a_VR/calibration.mp4` |
+
+Paired categories also recognize `video`, `reference`, and `references`. An explicit folder link applies to files directly in that folder, including files discovered later. Subfolders keep their own grouping. Individual video assignments take precedence and survive rescans. **Use folder assignment** removes an individual exception. Footage in separate roots requires an explicit assignment to share a deployment. Ordinary footage and its reference clips must share a deployment for Distance review.
 
 **Open package** — if a colleague prepared an assignment or legacy setup bundle for you:
 

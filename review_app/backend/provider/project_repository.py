@@ -15,7 +15,11 @@ from review_app.backend.db.models import (
     ReferenceVideo,
     Video,
 )
-from review_app.backend.deployments import DeploymentSetupPreview
+from review_app.backend.deployments import (
+    DeploymentInputError,
+    DeploymentSetupPreview,
+    preview_deployment_setup,
+)
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
 
@@ -35,52 +39,44 @@ class ProjectMixin(ProviderBase):
             i += 1
         return f"{base} ({i})"
 
-    def create_project(self, name: str, video_dir: str) -> Project:
-        """Legacy/package creation: preserve existing callers without requiring a CSV."""
-        return self._create_project_with_inventory(name, video_dir, ())
-
-    def create_project_with_deployments(
+    def create_project(
         self,
         name: str,
         video_dir: str,
         *,
-        csv_data: bytes | None = None,
-        infer_from_folders: bool = False,
         expected_preview: DeploymentSetupPreview | None = None,
     ) -> Project:
-        """Validate before writing; project, root and complete inventory commit together.
-
-        Explicit folder paths are installed before the initial footage scan.
-        """
-        from review_app.backend.deployments import (
-            DeploymentInputError,
-            infer_deployment_inventory,
-            parse_deployment_csv,
-            preview_deployment_setup,
-        )
-
-        root = Path(normalize_path_str(video_dir)).expanduser().resolve()
-        if not video_dir.strip() or not root.is_dir():
-            raise DeploymentInputError("deployment_error_root")
-        video_dir = root.as_posix()
+        """Create a project and its previewed folder groups in one transaction."""
+        deployments = ()
         if expected_preview is not None:
-            confirmed = preview_deployment_setup(
-                video_dir, csv_data=csv_data, infer_from_folders=infer_from_folders
-            )
+            confirmed = preview_deployment_setup(video_dir)
             if confirmed != expected_preview:
                 raise DeploymentInputError("deployment_error_setup_stale")
-            preview = confirmed.inventory
-        elif infer_from_folders:
-            if csv_data is not None:
-                raise DeploymentInputError("deployment_error_mode")
-            preview = infer_deployment_inventory(video_dir)
-        else:
-            if csv_data is None:
-                raise DeploymentInputError("deployment_error_required")
-            preview = parse_deployment_csv(csv_data, video_dir)
-        return self._create_project_with_inventory(
-            name, video_dir, preview.rows, mode="inferred" if infer_from_folders else "csv"
-        )
+            video_dir = confirmed.root
+            deployments = confirmed.deployments
+
+        name = self._unique_project_name(name)
+        project_id = str(uuid.uuid4())
+        project = Project(id=project_id, name=name)
+        with self.Session() as session:
+            session.add(project)
+            session.flush()
+            if video_dir:
+                session.add(
+                    ProjectDir(
+                        project_id=project.id,
+                        path=normalize_path_str(str(video_dir)),
+                        sort_order=0,
+                    )
+                )
+            session.add_all(
+                Deployment(project_id=project.id, deployment_id=label, name=label)
+                for label in deployments
+            )
+            session.commit()
+            session.refresh(project)
+        logger.info("Created project %r (id=%s, dir=%s)", name, project.id, video_dir or "none")
+        return project
 
     def get_project_deployments(self, project_id: str) -> list[dict]:
         from review_app.backend.provider.deployments import ensure_project_initialized
@@ -103,33 +99,6 @@ class ProjectMixin(ProviderBase):
                 .filter_by(project_id=project_id)
                 .order_by(Deployment.deployment_id)
             ]
-
-    def _create_project_with_inventory(
-        self, name: str, video_dir: str, deployment_rows, *, mode="legacy"
-    ) -> Project:
-        name = self._unique_project_name(name)
-        project = Project(id=str(uuid.uuid4()), name=name, deployment_mode=mode)
-        with self.Session() as s:
-            s.add(project)
-            s.flush()
-            if video_dir:
-                s.add(
-                    ProjectDir(
-                        id=str(uuid.uuid4()),
-                        project_id=project.id,
-                        path=normalize_path_str(str(video_dir)),
-                        sort_order=0,
-                    )
-                )
-            s.add_all(Deployment(project_id=project.id, **row) for row in deployment_rows)
-            s.flush()
-            from review_app.backend.provider.deployments import initialize_project
-
-            initialize_project(s, project.id)
-            s.commit()
-            s.refresh(project)
-        logger.info("Created project %r (id=%s, dir=%s)", name, project.id, video_dir or "none")
-        return project
 
     def list_projects(self) -> list[Project]:
         with self.Session() as s:

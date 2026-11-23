@@ -9,10 +9,8 @@ from nicegui import run, ui
 from review_app.app.config import DEFAULT_DB_FILENAME, get_user_data_dir
 from review_app.app.media import set_media_dirs
 from review_app.app.state import (
-    get_active_project_id,
     load_settings_from_db,
     reset_app_state,
-    set_active_project,
     set_data_provider,
 )
 from review_app.app.translations import t
@@ -143,16 +141,6 @@ def render_database_section(
                     set_data_provider(new_dp)
                     load_settings_from_db(new_dp)
 
-                    active_pid = get_active_project_id()
-                    if active_pid and new_dp.get_project(active_pid):
-                        new_dp.touch_project(active_pid)
-                    else:
-                        proj = new_dp.get_most_recent_project()
-                        if proj:
-                            set_active_project(proj.id)
-                            new_dp.touch_project(proj.id)
-                        else:
-                            set_active_project(None)
                     all_dirs = [
                         Path(normalize_path_str(d.path))
                         for _p in new_dp.list_projects()
@@ -163,7 +151,7 @@ def render_database_section(
                     with ignore_deleted_client():
                         ui.notify(t("restore_success"), type="positive")
                         await asyncio.sleep(0.5)
-                        ui.navigate.to("/overview")
+                        ui.navigate.to("/")
             finally:
                 with ignore_deleted_client():
                     loading_dialog.close()

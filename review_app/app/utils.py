@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from sqlalchemy.exc import DBAPIError
+
 from review_app.app.translations import t
 
 logger = logging.getLogger(__name__)
@@ -87,11 +89,16 @@ async def backup_before_update_with_progress() -> bool:
         return False
 
 
-def require_login() -> bool:
-    from nicegui import app, ui
+def require_login(*, require_project: bool = False) -> bool:
+    from nicegui import ui
 
-    if not app.storage.user.get("annotator_name"):
+    from review_app.app.state import get_active_project_id, get_annotator_name
+
+    if not get_annotator_name():
         ui.navigate.to("/login")
+        return False
+    if require_project and not get_active_project_id():
+        ui.navigate.to("/")
         return False
     return True
 
@@ -111,6 +118,8 @@ def user_error_message(exc: Exception) -> str:
         kwargs = {k: v for k, v in vars(exc).items() if k not in ("detail", "user_message_key")}
         return t(exc.user_message_key, **kwargs)
     logger.exception("Unexpected error: %s", exc)
+    if isinstance(exc, DBAPIError):
+        return str(exc.orig)
     return str(exc)
 
 

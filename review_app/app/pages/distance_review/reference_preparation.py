@@ -313,7 +313,9 @@ async def open_reference_preparation(context: ReferencePreparationContext) -> No
                 return
             ui.label(t("distance_prepared_frames")).classes("text-caption text-weight-medium")
             with ui.row().classes("w-full gap-xs").style("max-height:120px;overflow-y:auto"):
-                for frame in sorted(prepared_frames, key=lambda row: row["offset_ms"]):
+                for frame in sorted(
+                    prepared_frames, key=lambda row: (row["distance_m"], row["offset_ms"])
+                ):
                     with ui.row().classes("items-center gap-0 no-wrap"):
                         ui.button(
                             f"{frame['distance_m']:g} m · {frame_time(frame['offset_ms'])}",

@@ -6,19 +6,73 @@ from pathlib import Path
 
 from review_app.backend.path_matching import normalize_path_str
 
+_VIDEO_CATEGORIES = {"video", "videos"}
+_REFERENCE_CATEGORIES = {"ref", "reference", "references"}
 
-def _paired_layout(path: Path, scan_dir: Path) -> tuple[Path, str] | None:
-    # Support both cam_a/{videos,references}/clip and {videos,references}/cam_a/clip.
-    for category in (path.parent, path.parent.parent):
-        deployment = category.parent
+
+def _children(folder: Path, cache: dict[Path, list[Path]]) -> list[Path]:
+    if folder not in cache:
+        cache[folder] = (
+            [child for child in folder.iterdir() if child.is_dir()] if folder.is_dir() else []
+        )
+    return cache[folder]
+
+
+def _has_direct_footage(folder: Path) -> bool:
+    from review_app.app.config import VIDEO_EXTENSIONS
+
+    return folder.is_dir() and any(
+        not child.name.startswith(".")
+        and child.suffix.lower() in VIDEO_EXTENSIONS
+        and child.is_file()
+        for child in folder.iterdir()
+    )
+
+
+def _paired_layout(
+    path: Path, scan_dir: Path, directory_cache: dict[Path, list[Path]]
+) -> tuple[Path, str] | None:
+    for category in path.parents:
+        parent = category.parent
+        if not parent.is_relative_to(scan_dir):
+            break
+        name = category.name.casefold()
+        if name not in _VIDEO_CATEGORIES | _REFERENCE_CATEGORIES:
+            continue
+        reference = name in _REFERENCE_CATEGORIES
+        siblings = _children(parent, directory_cache)
+        ordinary = [child for child in siblings if child.name.casefold() in _VIDEO_CATEGORIES]
+        references = [
+            child for child in siblings if child.name.casefold() in _REFERENCE_CATEGORIES
+        ]
+        relative = path.parent.relative_to(category)
+        if len(ordinary) == len(references) == 1 and category in (ordinary[0], references[0]):
+            # A nested category contains one deployment per matching child name.
+            # A reference-only child keeps its own scope.
+            if relative.parts:
+                camera = relative.parts[0]
+                if reference and not (ordinary[0] / camera).is_dir():
+                    return category / camera, "references"
+                return parent / camera, "references" if reference else "videos"
+            return parent, "references" if reference else "videos"
         if (
-            category.name in {"videos", "references"}
-            and deployment.is_relative_to(scan_dir)
-            and (deployment / "videos").is_dir()
-            and (deployment / "references").is_dir()
+            reference
+            and not relative.parts
+            and len(references) == 1
+            and _has_direct_footage(parent)
         ):
-            camera = deployment / path.parent.relative_to(category)
-            return camera, category.name
+            return parent, "references"
+        if name == "ref" and category in references:
+            return category / Path(*relative.parts[:1]), "references"
+    if (
+        path.parent == scan_dir
+        and path.is_file()
+        and any(
+            child.name.casefold() in _REFERENCE_CATEGORIES
+            for child in _children(scan_dir, directory_cache)
+        )
+    ):
+        return scan_dir, "videos"
     return None
 
 
@@ -56,11 +110,7 @@ def _marked_layout(
     for name in folders:
         folder = parent / name
         reference_name = _reference_deployment_name(name)
-        if parent not in directory_cache:
-            directory_cache[parent] = (
-                [child for child in parent.iterdir() if child.is_dir()] if parent.is_dir() else []
-            )
-        siblings = directory_cache[parent]
+        siblings = _children(parent, directory_cache)
         ordinary = [child for child in siblings if _reference_deployment_name(child.name) is None]
         if reference_name is not None:
             # Standalone V_R/Video categories use the same enclosing deployment.
@@ -116,14 +166,13 @@ def video_layout_for_path(
     """Shared camera/role inference; optional directory cache lives for one scan only."""
     # Explicit reference markers also apply inside a legacy videos/references layout.
     # A lone folder called "videos" or "references" can be an ordinary camera.
-    layout = _marked_layout(
-        path, scan_dir, directory_cache if directory_cache is not None else {}
-    ) or _paired_layout(path, scan_dir)
+    cache = directory_cache if directory_cache is not None else {}
+    layout = _marked_layout(path, scan_dir, cache) or _paired_layout(path, scan_dir, cache)
     parent = layout[0] if layout else path.parent
     relative = parent.relative_to(scan_dir)
     if relative != Path("."):
         camera_id = normalize_path_str(str(relative))
-    elif layout or ((scan_dir / "videos").is_dir() and (scan_dir / "references").is_dir()):
+    elif layout:
         camera_id = scan_dir.name
     else:
         camera_id = "default"

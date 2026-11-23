@@ -11,6 +11,7 @@ from review_app.app.pages.distance_review.player import (
     configure_anchor,
     frame_tolerance_ms,
     install_anchor_editor,
+    play_to_sample,
     seek_paused,
     stop_player,
 )
@@ -27,6 +28,8 @@ class FixedFrameAnchorContext:
     guard: Callable
     is_current: Callable[[], bool]
     on_anchor: Callable[[dict[str, float]], None]
+    replay_from_ms: int | float | None = None
+    on_replay_change: Callable[[bool], None] | None = None
 
 
 def render_fixed_frame_anchor_preview(
@@ -50,18 +53,53 @@ def render_fixed_frame_anchor_preview(
     )
     seek_paused(preview, offset_ms)
     preview.on("loadedmetadata", lambda: seek_paused(preview, offset_ms))
-    ui.button(
-        t("distance_mark_box"),
-        icon="crop_free",
-        on_click=lambda: anchor_mode(preview, "box"),
-    )
+    replaying = False
+    start_ms = context.replay_from_ms
+
+    @context.guard
+    async def replay():
+        nonlocal replaying
+        if start_ms is None or replaying or not context.is_current():
+            return
+        replaying = True
+        if context.on_replay_change:
+            context.on_replay_change(True)
+        replay_button.set_enabled(False)
+        draw_button.set_enabled(False)
+        anchor_mode(preview, None)
+        try:
+            await play_to_sample(preview, start_ms, offset_ms)
+        except (ValueError, TimeoutError):
+            if context.is_current():
+                seek_paused(preview, offset_ms)
+                ui.notify(t("distance_playback_interrupted"), type="warning")
+        finally:
+            replaying = False
+            if context.is_current():
+                if context.on_replay_change:
+                    context.on_replay_change(False)
+                anchor_mode(preview, None if draft.get("anchor_width") else "box")
+                replay_button.set_enabled(True)
+                draw_button.set_enabled(True)
+
+    with ui.row().classes("items-center gap-2"):
+        if start_ms is not None and start_ms < offset_ms:
+            replay_button = ui.button(
+                t("distance_play_to_first_seen"), icon="replay", on_click=replay
+            ).props("flat dense")
+        draw_button = ui.button(
+            t("distance_mark_box"),
+            icon="crop_free",
+            on_click=lambda: anchor_mode(preview, "box"),
+        )
     dialog.on("hide", lambda: stop_player(preview))
 
     @context.guard
     async def draw(event):
         payload = event.args
         if (
-            not context.is_current()
+            replaying
+            or not context.is_current()
             or payload.get("individual_id") != draft["id"]
             or abs(payload.get("offset_ms", -1) - offset_ms)
             >= frame_tolerance_ms(context.frame_rate)

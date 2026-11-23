@@ -29,6 +29,7 @@ from review_app.backend.transcoding import (
     transcoded_cache_filename,
     validate_transcoded_video,
 )
+from review_app.backend.utils import sqlite_values
 from review_app.backend.video_tools import find_video_tool, video_tool_env
 
 logger = logging.getLogger(__name__)
@@ -361,7 +362,9 @@ class VideoMixin(ProviderBase):
                     .scalars()
                     .all()
                 )
-                existing_query = existing_query.where(Video.video_id.in_(listed_ids))
+                existing_query = existing_query.where(
+                    Video.video_id.in_(sqlite_values(listed_ids))
+                )
             existing = {row[0]: row for row in session.execute(existing_query).fetchall()}
 
             new_rows = scanned[~scanned["video_path"].isin(existing)]
@@ -458,7 +461,7 @@ class VideoMixin(ProviderBase):
                         .join(Tag, Tag.key == "reference_video")
                         .where(
                             Video.project_id == active_project_id,
-                            Video.video_path.in_(reference_paths),
+                            Video.video_path.in_(sqlite_values(reference_paths)),
                         ),
                     )
                     .on_conflict_do_nothing(index_elements=["video_id", "tag_id"])
