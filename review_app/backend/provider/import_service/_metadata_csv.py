@@ -10,7 +10,7 @@ from pyproj import Transformer
 from sqlalchemy import text
 
 from review_app.backend.errors import DataImportError
-from review_app.backend.path_matching import normalize_path_str, resolve_video_path
+from review_app.backend.path_matching import resolve_video_path
 from review_app.backend.provider.import_service._shared import ImportSharedMixin
 
 logger = logging.getLogger(__name__)
@@ -105,11 +105,6 @@ class MetadataCsvMixin(ImportSharedMixin):
                 for a in all_annotators:
                     self.add_annotator(a)
 
-        path_to_id = {
-            normalize_path_str(v).lower(): k
-            for k, v in self._known_video_map(active_project_id).items()
-        }
-
         updated = 0
         deployment_assignments = {}
         skipped: list[str] = []
@@ -120,7 +115,7 @@ class MetadataCsvMixin(ImportSharedMixin):
                 conn.exec_driver_sql("BEGIN IMMEDIATE")
             for _, row in df.iterrows():
                 raw_path = self._meta_resolve_path(row, folder_col, file_col)
-                video_id, _ = resolve_video_path(raw_path, lookup, extra_suffix_map=path_to_id)
+                video_id, _ = resolve_video_path(raw_path, lookup)
                 if video_id is None:
                     skipped.append(raw_path)
                     continue

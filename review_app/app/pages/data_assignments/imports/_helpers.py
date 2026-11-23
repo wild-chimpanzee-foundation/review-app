@@ -11,6 +11,16 @@ def col_val(state: dict, key: str) -> str:
     return state.get(key) or ""
 
 
+def render_ambiguous_paths(paths: list[str]) -> None:
+    if paths:
+        with ui.expansion(t("csv_ambiguous_paths", count=len(paths)), icon="warning").classes(
+            "q-mt-xs full-width"
+        ):
+            ui.label(t("csv_ambiguous_paths_help")).classes("text-caption")
+            for path in paths[:50]:
+                ui.label(path).classes("text-caption break-all")
+
+
 def read_upload_file(content: bytes) -> pd.DataFrame:
     for encoding in ("utf-8-sig", "latin-1"):
         for quoting in (csv.QUOTE_MINIMAL, csv.QUOTE_NONE):

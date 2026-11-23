@@ -30,7 +30,7 @@ class HistoricCsvMixin(ImportSharedMixin):
         data_type_col: str,
         data_type_val: str = "",
         path_col: str = "",
-    ) -> tuple[pd.DataFrame, int, dict[str, list[dict]], list[str]]:
+    ) -> tuple[pd.DataFrame, int, dict[str, list[dict]], list[str], list[str]]:
         """Filter rows by data_type_col == data_type_val (when both are set), build path lookup, group matched rows by video_id.
 
         When path_col is set, use it as the full video path directly instead of constructing it
@@ -48,6 +48,7 @@ class HistoricCsvMixin(ImportSharedMixin):
         lookup = self._build_video_path_lookup(active_project_id)
         groups: dict[str, list[dict]] = {}
         skipped: list[str] = []
+        ambiguous_paths: dict[str, None] = {}
 
         use_single_path = bool(path_col) and path_col in video_df.columns
 
@@ -62,13 +63,15 @@ class HistoricCsvMixin(ImportSharedMixin):
                     str(row.get(video_col, "")).strip() if video_col in video_df.columns else ""
                 )
                 synthetic = f"{folder}/{video}" if folder else video
-            video_id, _ = resolve_video_path(synthetic, lookup)
+            video_id, tier = resolve_video_path(synthetic, lookup)
             if video_id is None:
                 skipped.append(synthetic)
+                if tier == "ambiguous":
+                    ambiguous_paths[synthetic] = None
             else:
                 groups.setdefault(video_id, []).append(dict(row))
 
-        return video_df, skipped_installation, groups, skipped
+        return video_df, skipped_installation, groups, skipped, list(ambiguous_paths)
 
     def validate_historic_csv(
         self,
@@ -85,14 +88,16 @@ class HistoricCsvMixin(ImportSharedMixin):
         path_col: str = "",
     ) -> dict[str, Any]:
         species_mappings = species_mappings or {}
-        video_df, skipped_installation, groups, skipped = self._filter_and_group_historic(
-            df,
-            active_project_id,
-            folder_col,
-            video_col,
-            data_type_col,
-            data_type_val,
-            path_col=path_col,
+        video_df, skipped_installation, groups, skipped, ambiguous_paths = (
+            self._filter_and_group_historic(
+                df,
+                active_project_id,
+                folder_col,
+                video_col,
+                data_type_col,
+                data_type_val,
+                path_col=path_col,
+            )
         )
         valid_for_project = set(self.get_valid_species(active_project_id))
         variant_map = {
@@ -149,6 +154,7 @@ class HistoricCsvMixin(ImportSharedMixin):
             "matched": len(groups),
             "unmatched": len(seen_unmatched),
             "unmatched_paths": unmatched_paths,
+            "ambiguous_paths": ambiguous_paths,
             "unknown_species": sorted(unknown_species),
             "species_to_add": sorted(species_to_add),
         }
@@ -175,7 +181,7 @@ class HistoricCsvMixin(ImportSharedMixin):
         self._safety_backup()
         species_mappings = species_mappings or {}
         tag_cols = tag_cols or []
-        _, _, groups, skipped = self._filter_and_group_historic(
+        _, _, groups, skipped, ambiguous_paths = self._filter_and_group_historic(
             df,
             active_project_id,
             folder_col,
@@ -356,5 +362,6 @@ class HistoricCsvMixin(ImportSharedMixin):
         return {
             "imported": imported,
             "skipped": list(dict.fromkeys(skipped)),
+            "ambiguous_paths": ambiguous_paths,
             "skipped_observations": skipped_observations,
         }

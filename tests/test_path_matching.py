@@ -72,8 +72,8 @@ def test_build_by_suffix_parent_name(tmp_path):
     vid1 = "vid-001"
     row = (vid1, str(tmp_path / "cam_a" / "v1.mp4"), "cam_a")
     lookup = _make_lookup([row])
-    assert lookup.by_suffix.get("cam_a/v1.mp4") == vid1
-    assert lookup.by_suffix.get("cam_a/v1") == vid1
+    assert lookup.by_suffix.get("cam_a/v1.mp4") == {vid1}
+    assert lookup.by_suffix.get("cam_a/v1") == {vid1}
 
 
 def test_build_by_suffix_relative_path(tmp_path):
@@ -83,7 +83,7 @@ def test_build_by_suffix_relative_path(tmp_path):
     abs_path = scan / "cam_a" / "v1.mp4"
     row = (vid1, str(abs_path), "cam_a")
     lookup = _make_lookup([row], [scan])
-    assert lookup.by_suffix.get("cam_a/v1.mp4") == vid1
+    assert lookup.by_suffix.get("cam_a/v1.mp4") == {vid1}
 
 
 def test_build_by_cam_stem_populated():
@@ -182,6 +182,7 @@ def test_resolve_cam_stem_ambiguous_both_cameras_match():
     # "Cam001" is a token in both DB camera IDs → ambiguous
     vid, tier = resolve_video_path("Cam001/clip.mp4", lookup)
     assert vid is None
+    assert tier == "ambiguous"
 
 
 def test_resolve_suffix_beats_cam_stem():
@@ -201,13 +202,17 @@ def test_resolve_empty_csv_cam_no_cam_stem_match():
     assert vid is None
 
 
-def test_resolve_extra_suffix_map():
-    rows = [("vid-001", "/root/cam_a/v1.mp4", "cam_a")]
-    lookup = _simple_lookup(rows)
-    extra = {"/absolute/path/to/v1.mp4": "vid-001"}
-    vid, tier = resolve_video_path("/absolute/path/to/v1.mp4", lookup, extra_suffix_map=extra)
-    assert vid == "vid-001"
-    assert tier == "suffix"
+def test_exact_path_resolves_a_suffix_shared_by_two_roots():
+    rows = [
+        ("vid-001", "/first/cam_a/v1.mp4", "cam_a"),
+        ("vid-002", "/second/cam_a/v1.mp4", "cam_a"),
+    ]
+    lookup = _make_lookup(rows, [Path("/first"), Path("/second"), Path("/")])
+    assert lookup.by_suffix["cam_a/v1.mp4"] == {"vid-001", "vid-002"}
+    assert resolve_video_path("/old/cam_a/v1.mp4", lookup) == (None, "ambiguous")
+    assert resolve_video_path("cam_a/v1", lookup) == (None, "ambiguous")
+    assert resolve_video_path("/first/cam_a/v1.mp4", lookup) == ("vid-001", "suffix")
+    assert resolve_video_path("/second/cam_a/v1.mp4", lookup) == ("vid-002", "suffix")
 
 
 def test_resolve_no_match():

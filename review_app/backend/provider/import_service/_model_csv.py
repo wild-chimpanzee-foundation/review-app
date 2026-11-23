@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 from review_app.app.config import CSV_TEMPLATES
 from review_app.backend.errors import DataImportError
-from review_app.backend.path_matching import normalize_path_str, resolve_video_path
+from review_app.backend.path_matching import resolve_video_path
 from review_app.backend.provider.import_service._shared import (
     BLANK_SENTINEL,
     IGNORE_SENTINEL,
@@ -106,6 +106,7 @@ class ModelCsvMixin(ImportSharedMixin):
         matched_cam_stem = 0
         matched_filename = 0
         unmatched_paths: list[str] = []
+        ambiguous_paths: dict[str, None] = {}
 
         for _, src_row in df.iterrows():
             raw_path = str(src_row.get(path_col, "")).strip()
@@ -123,6 +124,8 @@ class ModelCsvMixin(ImportSharedMixin):
 
             if video_id is None:
                 unmatched_paths.append(raw_path)
+                if tier == "ambiguous":
+                    ambiguous_paths[raw_path] = None
                 continue
 
             for m in ann_mappings:
@@ -184,6 +187,7 @@ class ModelCsvMixin(ImportSharedMixin):
             "matched_by_filename": matched_filename,
             "unmatched": len(unmatched_paths),
             "unmatched_sample": unmatched_paths[:10],
+            "ambiguous_paths": list(ambiguous_paths),
         }
         logger.info(
             "Normalized %d rows to %d in %.1fs: %d matched, %d unmatched",
@@ -248,12 +252,13 @@ class ModelCsvMixin(ImportSharedMixin):
 
         video_map = self._known_video_map(active_project_id)
         known_videos = set(video_map.keys())
-        path_to_id = {normalize_path_str(v).lower(): k for k, v in video_map.items()}
-
         lookup = self._build_video_path_lookup(active_project_id)
+        ambiguous_paths: set[str] = set()
 
         def _resolve_path(raw: str) -> str:
-            vid, _ = resolve_video_path(raw, lookup, known_videos, path_to_id)
+            vid, tier = resolve_video_path(raw, lookup, known_videos)
+            if tier == "ambiguous":
+                ambiguous_paths.add(raw)
             return vid or raw
 
         src["video_path"] = src["video_path"].astype(str).str.strip().map(_resolve_path)
@@ -290,7 +295,11 @@ class ModelCsvMixin(ImportSharedMixin):
                         "_pos": pos,
                         "row_number": row_num,
                         "video_path": video_path,
-                        "error": "error_unknown_path",
+                        "error": (
+                            "error_ambiguous_video_path"
+                            if video_id in ambiguous_paths
+                            else "error_unknown_path"
+                        ),
                     }
                 )
                 continue

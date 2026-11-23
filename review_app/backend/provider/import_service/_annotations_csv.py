@@ -159,7 +159,9 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             mode,
             time.monotonic() - _t0,
         )
-        df, has_path, known_ids = self._resolve_annotation_video_ids(df, active_project_id)
+        df, has_path, known_ids, ambiguous_paths = self._resolve_annotation_video_ids(
+            df, active_project_id
+        )
         df = prepare_observation_csv(df, known_ids)
         map_species = self._build_annotation_species_mapper(
             df, active_project_id, species_mappings
@@ -182,8 +184,9 @@ class AnnotationsCsvMixin(ImportSharedMixin):
 
         for video_id, group in df.groupby("video_id", sort=False, dropna=False):
             if pd.isna(video_id) or video_id not in known_ids:
-                label = group["video_path"].iloc[0] if has_path else str(video_id)
-                skipped.append(str(label))
+                skipped.extend(
+                    group["video_path"].astype(str).unique() if has_path else [str(video_id)]
+                )
                 continue
 
             first = group.iloc[0]
@@ -343,6 +346,7 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         return {
             "imported": imported,
             "skipped": skipped,
+            "ambiguous_paths": ambiguous_paths,
             "skipped_observations": skipped_observations,
             "by_annotator": dict(observations_by_annotator),
             "custom_tags": len(all_custom_keys),
@@ -420,7 +424,9 @@ class AnnotationsCsvMixin(ImportSharedMixin):
     ) -> dict[str, Any]:
         """Dry-run of import_annotations_csv: resolves paths and diffs observations without writing."""
         _t0 = time.monotonic()
-        df, has_path, known_ids = self._resolve_annotation_video_ids(df, active_project_id)
+        df, has_path, known_ids, ambiguous_paths = self._resolve_annotation_video_ids(
+            df, active_project_id
+        )
         df = prepare_observation_csv(df, known_ids)
         mappings = species_mappings or {}
 
@@ -495,8 +501,9 @@ class AnnotationsCsvMixin(ImportSharedMixin):
 
         for video_id, group in df.groupby("video_id", sort=False, dropna=False):
             if pd.isna(video_id) or video_id not in known_ids:
-                label = group["video_path"].iloc[0] if has_path else str(video_id)
-                skipped.append(str(label))
+                skipped.extend(
+                    group["video_path"].astype(str).unique() if has_path else [str(video_id)]
+                )
                 continue
 
             matched += 1
@@ -588,8 +595,13 @@ class AnnotationsCsvMixin(ImportSharedMixin):
         return {
             "matched": matched,
             "skipped": skipped,
+            "ambiguous_paths": ambiguous_paths,
             "blanks_to_set": blanks_to_set,
             "blanks_already_set": blanks_already_set,
+            "blanks_to_clear": blanks_to_clear,
+            "blanks_blocked_by_observations": blanks_blocked_by_observations,
+            "clips_without_species_review": clips_without_species_review,
+            "obs_behavior_changes": obs_behavior_changes,
             "obs_to_insert": obs_to_insert,
             "obs_to_change": obs_to_change,
             "obs_unchanged": obs_unchanged,

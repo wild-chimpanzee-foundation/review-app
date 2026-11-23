@@ -15,6 +15,7 @@ from ._helpers import (
     col_val,
     make_col_selects,
     read_upload_file,
+    render_ambiguous_paths,
 )
 from ._species_mapping import (
     ANNOTATIONS_APP_FORMAT,
@@ -235,6 +236,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                     ui.label(t("app_csv_matched", count=matched)).classes(
                         f"text-subtitle2 {color} q-mb-xs"
                     )
+                    render_ambiguous_paths(validation.get("ambiguous_paths") or [])
                     if skipped:
                         with ui.expansion(
                             t("app_csv_skipped", count=len(skipped)), icon="warning"
@@ -384,6 +386,7 @@ def setup_annotations_tab(dp, loading_dialog) -> None:
                 ui.label(t("historic_matched_videos", count=matched)).classes(
                     f"text-subtitle2 {color} q-mb-xs"
                 )
+                render_ambiguous_paths(validation.get("ambiguous_paths") or [])
                 if unmatched:
                     ui.label(t("historic_unmatched_videos", count=unmatched)).classes(
                         "text-body2 text-warning q-mb-xs"

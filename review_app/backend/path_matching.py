@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 from typing import NamedTuple
 
@@ -15,12 +16,12 @@ def normalize_path_str(path: str) -> str:
 
 
 class VideoPathLookup(NamedTuple):
-    by_suffix: dict[str, str]
+    by_path: dict[str, set[str]]
+    by_suffix: dict[str, set[str]]
     # stem -> [(video_id, camera_id_lower)] — all videos sharing that stem
     by_cam_stem: dict[str, list[tuple[str, str]]]
     cam_by_id: dict[str, str]  # video_id -> camera_id_lower
-    # filename (basename only) -> video_id — only populated for unambiguous filenames
-    by_filename: dict[str, str]
+    by_filename: dict[str, set[str]]
 
 
 def _cameras_share_token(csv_cam: str, db_cam: str) -> bool:
@@ -45,58 +46,41 @@ def build_video_path_lookup(
     video_rows: [(video_id, video_path, camera_id), ...]
     scan_dirs: project scan root directories for computing relative paths
     """
-    by_suffix: dict[str, str] = {}
-    cam_stem_to_id: dict[str, str] = {}
-    cam_stem_count: dict[str, int] = {}
+    by_path: dict[str, set[str]] = defaultdict(set)
+    by_suffix: dict[str, set[str]] = defaultdict(set)
+    by_camera_prefix: dict[str, set[str]] = defaultdict(set)
     by_cam_stem: dict[str, list[tuple[str, str]]] = {}
     cam_by_id: dict[str, str] = {}
-    by_filename_lists: dict[str, list[str]] = {}
-
-    legacy_suffix_lists: dict[str, list[str]] = {}
+    by_filename: dict[str, set[str]] = defaultdict(set)
+    roots = set(scan_dirs)
 
     for vid, video_path, camera_id in video_rows:
         p = Path(normalize_path_str(video_path))
         cam_lower = (camera_id or "").lower()
         cam_by_id[vid] = cam_lower
-        by_filename_lists.setdefault(p.name.lower(), []).append(vid)
-        by_filename_lists.setdefault(p.stem.lower(), []).append(vid)
+        stem = p.stem.lower()
+        by_path[str(p).lower()].add(vid)
+        by_filename[p.name.lower()].add(vid)
+        by_filename[stem].add(vid)
 
         # Full relative path from each project scan dir
-        for scan_dir in scan_dirs:
-            try:
-                rel = p.relative_to(scan_dir)
-                by_suffix[str(rel).lower()] = vid
-                by_suffix[str(rel.with_suffix("")).lower()] = vid
-                # Short cam-ID prefix (first _-segment of top-level folder) → by_suffix
-                if rel.parts:
-                    cam_prefix = rel.parts[0].split("_")[0].lower()
-                    key = f"{cam_prefix}/{p.stem.lower()}"
-                    cam_stem_to_id[key] = vid
-                    cam_stem_count[key] = cam_stem_count.get(key, 0) + 1
-            except ValueError:
-                continue
+        for scan_dir in roots.intersection(p.parents):
+            rel = p.relative_to(scan_dir)
+            by_suffix[str(rel).lower()].add(vid)
+            by_suffix[str(rel.with_suffix("")).lower()].add(vid)
+            cam_prefix = rel.parts[0].split("_")[0].lower()
+            by_camera_prefix[f"{cam_prefix}/{stem}"].add(vid)
 
-        # Legacy parent_dir/name fallback — collect first, add only if unambiguous
-        legacy_suffix_lists.setdefault(f"{p.parent.name}/{p.name}".lower(), []).append(vid)
-        legacy_suffix_lists.setdefault(f"{p.parent.name}/{p.stem}".lower(), []).append(vid)
-
-        # Camera-aware stem lookup (replaces the old by_stem)
-        stem = p.stem.lower()
+        # Legacy parent/name suffixes can collide with paths relative to another root.
+        by_suffix[f"{p.parent.name}/{p.name}".lower()].add(vid)
+        by_suffix[f"{p.parent.name}/{stem}".lower()].add(vid)
         by_cam_stem.setdefault(stem, []).append((vid, cam_lower))
 
-    # Merge unambiguous cam-prefix entries into by_suffix
-    for key, vid in cam_stem_to_id.items():
-        if cam_stem_count[key] == 1:
-            by_suffix.setdefault(key, vid)
-
-    # Only add legacy parent/name entries when they're unambiguous across all DB videos
-    for key, vids in legacy_suffix_lists.items():
-        if len(vids) == 1:
-            by_suffix.setdefault(key, vids[0])
-
-    by_filename = {k: v[0] for k, v in by_filename_lists.items() if len(v) == 1}
+    for key, candidates in by_camera_prefix.items():
+        by_suffix.setdefault(key, candidates)
 
     return VideoPathLookup(
+        by_path=by_path,
         by_suffix=by_suffix,
         by_cam_stem=by_cam_stem,
         cam_by_id=cam_by_id,
@@ -108,53 +92,54 @@ def resolve_video_path(
     raw_path: str,
     lookup: VideoPathLookup,
     known_video_ids: set[str] | None = None,
-    extra_suffix_map: dict[str, str] | None = None,
     use_filename_match: bool = False,
 ) -> tuple[str | None, str]:
     """Resolve a CSV path string to a video_id.
 
     Returns (video_id | None, tier) where tier is one of:
       "exact_id"  – raw_path was already a known video_id
-      "suffix"    – matched via by_suffix or extra_suffix_map
+      "suffix"    – matched via an exact path or suffix
       "cam_stem"  – matched via camera-aware stem fallback
       "filename"  – matched via filename-only lookup (use_filename_match=True)
+      "ambiguous" – multiple videos match at the most specific available tier
       ""          – no match
     """
     if known_video_ids and raw_path in known_video_ids:
         return raw_path, "exact_id"
 
-    raw_path = normalize_path_str(raw_path)
-    p = Path(raw_path)
-    raw_lower = raw_path.lower()
+    p = Path(normalize_path_str(raw_path))
 
-    if extra_suffix_map:
-        vid = extra_suffix_map.get(raw_lower)
-        if vid:
-            return vid, "suffix"
+    if candidates := lookup.by_path.get(str(p).lower()):
+        return _resolve_candidates(candidates, "suffix")
 
-    # Try full path first, then progressively shorter suffixes (longest = most specific first).
-    # This ensures e.g. "CamA/DCIM/100EK113/file.mp4" is preferred over the ambiguous
-    # short fallback "100EK113/file.mp4" when two cameras share the same sub-folder structure.
-    parts = p.parts
-    for i in range(len(parts)):
-        suffix_str = str(Path(*parts[i:])).lower() if i > 0 else raw_lower
-        vid = lookup.by_suffix.get(suffix_str) or lookup.by_suffix.get(
-            str(Path(*parts[i:]).with_suffix("")).lower()
-        )
-        if vid:
-            return vid, "suffix"
+    # An ambiguous match at the longest matching suffix must not fall through
+    # to a shorter suffix or a stem guess.
+    if p.name:
+        for i in range(len(p.parts)):
+            suffix = Path(*p.parts[i:])
+            candidates = lookup.by_suffix.get(str(suffix).lower()) or lookup.by_suffix.get(
+                str(suffix.with_suffix("")).lower()
+            )
+            if candidates:
+                return _resolve_candidates(candidates, "suffix")
 
     # Camera-aware stem fallback: require camera folder substring match
     stem = p.stem.lower()
     csv_cam = p.parent.name.lower()
     candidates = lookup.by_cam_stem.get(stem, [])
-    matching = [(v, c) for v, c in candidates if _cameras_share_token(csv_cam, c)]
-    if len(matching) == 1:
-        return matching[0][0], "cam_stem"
+    matching = {v for v, c in candidates if _cameras_share_token(csv_cam, c)}
+    if matching:
+        return _resolve_candidates(matching, "cam_stem")
 
     if use_filename_match:
-        vid = lookup.by_filename.get(p.name.lower()) or lookup.by_filename.get(p.stem.lower())
-        if vid:
-            return vid, "filename"
+        candidates = lookup.by_filename.get(p.name.lower()) or lookup.by_filename.get(stem)
+        if candidates:
+            return _resolve_candidates(candidates, "filename")
 
     return None, ""
+
+
+def _resolve_candidates(candidates: set[str], tier: str) -> tuple[str | None, str]:
+    if len(candidates) == 1:
+        return next(iter(candidates)), tier
+    return None, "ambiguous"

@@ -11,6 +11,74 @@ from conftest import seed_builtin_tags
 from review_app.backend.errors import DataImportError
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 
+
+@pytest.mark.parametrize("csv_format", ["app", "historic", "model_long", "model_wide"])
+def test_csv_import_skips_ambiguous_paths_and_keeps_exact_matches(
+    csv_format, provider_with_project, tmp_db
+):
+    dp, project, _ = provider_with_project
+    second_root = tmp_db["root"] / "second"
+    duplicate = second_root / "cam_x" / "a.mp4"
+    duplicate.parent.mkdir(parents=True)
+    duplicate.touch()
+    dp.add_project_dir(project.id, str(second_root))
+    dp.sync_videos(progress_callback=None, active_project_id=project.id)
+
+    ambiguous = "/other-machine/cam_x/a.mp4"
+    exact = str(tmp_db["video_dir"] / "cam_x" / "a.mp4")
+    paths = [ambiguous, exact]
+    if csv_format == "app":
+        df = pd.DataFrame({"video_path": paths, "species": ["fox", "deer"], "is_blank": 0})
+        assert dp.validate_annotations_csv(df, project.id)["ambiguous_paths"] == [ambiguous]
+        result = dp.import_annotations_csv(df, project.id)
+        assert result["ambiguous_paths"] == [ambiguous]
+    elif csv_format == "historic":
+        df = pd.DataFrame({"Path": paths, "Species": ["fox", "deer"]})
+        assert dp.validate_historic_csv(df, project.id, path_col="Path")["ambiguous_paths"] == [
+            ambiguous
+        ]
+        result = dp.import_historic_csv(df, project.id, path_col="Path")
+        assert result["ambiguous_paths"] == [ambiguous]
+    else:
+        df = pd.DataFrame(
+            {
+                "video_path": paths,
+                "annotation_type": "species",
+                "model_name": "example",
+                "value_text": ["fox", "deer"],
+            }
+        )
+        if csv_format == "model_wide":
+            df, stats = dp.normalize_model_csv_with_mapping(
+                df,
+                "video_path",
+                [
+                    {
+                        "model_name": "example",
+                        "annotation_type": "species",
+                        "value_col": "value_text",
+                    }
+                ],
+                project.id,
+            )
+            assert stats["ambiguous_paths"] == [ambiguous]
+        cleaned, errors, _, _ = dp.validate_model_csv(df, active_project_id=project.id)
+        if csv_format == "model_long":
+            assert errors[["video_path", "error"]].to_dict("records") == [
+                {"video_path": ambiguous, "error": "error_ambiguous_video_path"}
+            ]
+        result = dp.import_model_csv(cleaned, project.id)
+        assert cleaned[["video_path", "value_text"]].to_dict("records") == [
+            {"video_path": exact, "value_text": "deer"}
+        ]
+    assert result["imported"] == 1
+    if csv_format in {"historic", "app"}:
+        exported = dp.export_annotations_csv(project.id).dropna(subset=["species"])
+        assert exported[["video_path", "species"]].to_dict("records") == [
+            {"video_path": exact, "species": "deer"}
+        ]
+
+
 # ---------------------------------------------------------------------------
 # delete_project
 # ---------------------------------------------------------------------------

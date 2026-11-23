@@ -16,6 +16,7 @@ from ._helpers import (
     auto_suggest_path_col,
     is_long_format,
     read_upload_file,
+    render_ambiguous_paths,
 )
 from ._species_mapping import MODEL_IMPORT, pending_species, render_species_mappings
 
@@ -577,6 +578,7 @@ def _render_preview_result(preview: dict) -> None:
     ui.label(t("match_preview_result", matched=matched, total=total)).classes(
         f"text-body2 {color}"
     )
+    render_ambiguous_paths(preview.get("ambiguous_paths") or [])
     if unmatched and preview.get("unmatched_sample"):
         with ui.expansion(t("wide_format_unmatched", count=unmatched), icon="warning").classes(
             "q-mt-xs"
@@ -698,6 +700,7 @@ def _render_match_stats(match_stats: dict | None) -> None:
         ui.label(t("match_preview_result", matched=matched, total=total)).classes(
             f"text-body2 {color}"
         )
+        render_ambiguous_paths(match_stats.get("ambiguous_paths") or [])
         if match_stats.get("matched_by_cam_stem", 0) > 0:
             ui.label(
                 t("wide_format_stem_fallback", count=match_stats["matched_by_cam_stem"])
@@ -755,6 +758,8 @@ def _render_error_details(errors_df, error_counts: dict | None = None) -> None:
         ui.label(t("error_summary")).classes("text-body2 q-mt-sm")
         for err, count in summary.items():
             ui.label(t("error_summary_item", err=t(err), count=count)).classes("text-body2")
+        if summary.get("error_ambiguous_video_path"):
+            ui.label(t("csv_ambiguous_paths_help")).classes("text-caption")
 
     shown = len(errors_df)
     if shown < total:

@@ -100,13 +100,14 @@ class ImportSharedMixin(ProviderBase):
                 ),
                 {"pid": active_project_id} if active_project_id else {},
             ).fetchall()
-            scan_dirs: list[Path] = []
-            if active_project_id:
-                dir_rows = conn.execute(
-                    text("SELECT path FROM project_dirs WHERE project_id = :pid"),
-                    {"pid": active_project_id},
-                ).fetchall()
-                scan_dirs = [Path(normalize_path_str(r[0])) for r in dir_rows]
+            dir_rows = conn.execute(
+                text(
+                    "SELECT DISTINCT path FROM project_dirs"
+                    + (" WHERE project_id = :pid" if active_project_id else "")
+                ),
+                {"pid": active_project_id} if active_project_id else {},
+            ).scalars()
+            scan_dirs = [Path(normalize_path_str(path)) for path in dir_rows]
 
         return build_video_path_lookup(
             [(str(r[0]), str(r[1]), r[2]) for r in rows],
@@ -126,11 +127,11 @@ class ImportSharedMixin(ProviderBase):
 
     def _resolve_annotation_video_ids(
         self, df: pd.DataFrame, active_project_id: str | None
-    ) -> tuple[pd.DataFrame, bool, set[str]]:
+    ) -> tuple[pd.DataFrame, bool, set[str], list[str]]:
         """Validate the annotation-CSV columns and resolve video_path → video_id.
 
         Exact path match first, then fuzzy suffix fallback for cross-machine sharing.
-        Returns (df with a video_id column, has_path, known video_ids)."""
+        Returns the resolved frame, whether it has paths, known IDs, and ambiguous paths."""
         has_path = "video_path" in df.columns
         has_id = "video_id" in df.columns
         if not has_path and not has_id:
@@ -145,17 +146,19 @@ class ImportSharedMixin(ProviderBase):
             )
 
         known_ids = self._known_video_ids(active_project_id)
+        ambiguous_paths: list[str] = []
         if has_path and not has_id:
-            path_to_id = {
-                normalize_path_str(v).lower(): k
-                for k, v in self._known_video_map(active_project_id).items()
-            }
             lookup = self._build_video_path_lookup(active_project_id)
             df = df.copy()
-            df["video_id"] = df["video_path"].map(
-                lambda p: resolve_video_path(p, lookup, extra_suffix_map=path_to_id)[0]
-            )
-        return df, has_path, known_ids
+            paths = df["video_path"].fillna("").astype(str).str.strip()
+            ids: dict[str, str | None] = {}
+            for path in paths.unique():
+                vid, tier = resolve_video_path(path, lookup)
+                if tier == "ambiguous":
+                    ambiguous_paths.append(path)
+                ids[path] = vid
+            df["video_id"] = paths.map(ids)
+        return df, has_path, known_ids, ambiguous_paths
 
     @staticmethod
     def _camera_video_sql_filter(
