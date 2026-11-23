@@ -4,20 +4,19 @@ import logging
 
 from nicegui import run, ui
 
+from review_app.app.components.backup_picker import backup_option, is_backup_compatible
 from review_app.app.translations import t
-from review_app.backend.db.backup import BackupError, list_backups, restore_backup
-from review_app.backend.db.migrations import MIGRATIONS
+from review_app.backend.db.backup import BackupError, list_backups
+from review_app.backend.provider.local_data_provider import restore_local_database
 
 logger = logging.getLogger(__name__)
 
 
-def is_backup_compatible(backup: dict) -> bool:
-    # Legacy filenames omit the version; restore_backup checks the actual database.
-    version = backup["schema_version"]
-    return version is None or version <= len(MIGRATIONS)
-
-
 def build_backup_recovery() -> None:
+    def restore_and_verify(path):
+        provider = restore_local_database(path)
+        provider.engine.dispose()
+
     with ui.column().classes("w-full gap-sm").style("max-width: 700px"):
         ui.label("Restore a backup").classes("text-subtitle1")
         ui.label(
@@ -38,7 +37,7 @@ def build_backup_recovery() -> None:
                 button.disable()
             status.set_text("Restoring backup…")
             try:
-                await run.io_bound(restore_backup, backup["path"], len(MIGRATIONS))
+                await run.io_bound(restore_and_verify, backup["path"])
             except BackupError as exc:
                 status.set_text(f"Restore failed: {t(exc.user_message_key)}")
             except Exception:
@@ -80,26 +79,11 @@ def build_backup_recovery() -> None:
                 if not backups:
                     ui.label("No backups found.").classes("text-grey-7")
                 for backup in backups:
-                    compatible = is_backup_compatible(backup)
-                    version = backup["schema_version"]
-                    label = f"{backup['name']} ({backup['size_mb']} MB)"
-                    if not compatible:
-                        label += (
-                            f" — requires schema v{version}; this app supports v{len(MIGRATIONS)}"
-                        )
-                    button = (
-                        ui.button(
-                            label,
-                            icon="restore",
-                            on_click=lambda _event, b=backup: confirm_restore(b),
-                        )
-                        .props("flat align-left")
-                        .classes("w-full")
+                    button = backup_option(
+                        backup, on_click=lambda _event, b=backup: confirm_restore(b)
                     )
-                    if compatible:
+                    if is_backup_compatible(backup):
                         buttons.append(button)
-                    else:
-                        button.disable()
 
         backup_list = (
             ui.column().classes("w-full gap-xs").style("max-height: 300px; overflow-y: auto")

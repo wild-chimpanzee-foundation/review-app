@@ -3,11 +3,16 @@ from pathlib import Path
 
 from nicegui import app, run, ui
 
+from review_app.app.components.backup_picker import (
+    BACKUP_UPLOAD_ACCEPT,
+    backup_option,
+    restore_uploaded_backup,
+)
 from review_app.app.components.video_tools import VideoToolsWarning
 from review_app.app.config import get_default_db_path
 from review_app.app.state import get_language, set_language
 from review_app.app.translations import t
-from review_app.app.utils import format_utc_timestamp, sync_with_progress, user_error_message
+from review_app.app.utils import sync_with_progress, user_error_message
 from review_app.backend.video_tools import (
     check_video_tools,
 )
@@ -735,20 +740,25 @@ class SetupWizard:
 
                     restore_list_col = ui.column().classes("w-full gap-xs q-mb-md")
                     restore_status_label: list = [None]
+                    restore_started = False
 
                     async def do_wizard_restore(backup_path: Path):
+                        nonlocal restore_started
+                        if restore_started:
+                            return
+                        restore_started = True
                         from review_app.app.media import set_media_dirs
                         from review_app.app.state import (
+                            get_data_provider,
                             load_session_defaults,
                             load_settings_from_db,
                             set_active_project,
                             set_data_provider,
                         )
-                        from review_app.backend.db.backup import BackupError, restore_backup
-                        from review_app.backend.db.migrations import MIGRATIONS
+                        from review_app.backend.db.backup import BackupError
                         from review_app.backend.path_matching import normalize_path_str
                         from review_app.backend.provider.local_data_provider import (
-                            LocalDataProvider,
+                            restore_local_database,
                         )
 
                         lbl = restore_status_label[0]
@@ -757,14 +767,22 @@ class SetupWizard:
                             lbl.visible = True
 
                         try:
-                            await run.io_bound(restore_backup, backup_path, len(MIGRATIONS))
+                            current_provider = get_data_provider()
+                            restore = (
+                                current_provider.restore_from_backup
+                                if current_provider is not None
+                                else restore_local_database
+                            )
+                            dp = await run.io_bound(restore, backup_path)
                         except BackupError as exc:
+                            restore_started = False
                             msg = t("restore_failed", error=t(exc.user_message_key))
                             if lbl:
                                 lbl.set_text(msg)
                             ui.notify(msg, type="negative", timeout=8000)
                             return
                         except Exception as exc:
+                            restore_started = False
                             if lbl:
                                 lbl.set_text(t("restore_failed", error=user_error_message(exc)))
                             ui.notify(
@@ -773,7 +791,6 @@ class SetupWizard:
                             return
 
                         try:
-                            dp = LocalDataProvider()
                             set_data_provider(dp)
                             load_settings_from_db(dp)
                             load_session_defaults(dp)
@@ -797,16 +814,7 @@ class SetupWizard:
                         self.on_complete_callback()
 
                     async def _handle_backup_upload(e):
-                        import tempfile
-
-                        content = await e.file.read()
-                        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-                            f.write(content)
-                            tmp_path = Path(f.name)
-                        try:
-                            await do_wizard_restore(tmp_path)
-                        finally:
-                            tmp_path.unlink(missing_ok=True)
+                        await restore_uploaded_backup(e.file, do_wizard_restore)
 
                     async def populate_restore_list():
                         from review_app.backend.db.backup import list_backups
@@ -821,21 +829,12 @@ class SetupWizard:
                                     .classes("w-full gap-xs")
                                     .style("max-height: 260px; overflow-y: auto")
                                 ):
-                                    for b in backups:
-                                        ts = format_utc_timestamp(b["timestamp"].isoformat())
-                                        label = f"{ts}  ({b['size_mb']} MB)"
+                                    for backup in backups:
 
-                                        def _make_restore(p):
-                                            async def _do():
-                                                await do_wizard_restore(p)
+                                        async def restore_selected(_event, path=backup["path"]):
+                                            await do_wizard_restore(path)
 
-                                            return _do
-
-                                        ui.button(
-                                            label,
-                                            icon="restore",
-                                            on_click=_make_restore(b["path"]),
-                                        ).props("flat dense align-left").classes("w-full")
+                                        backup_option(backup, on_click=restore_selected)
 
                                 with ui.row().classes("w-full gap-sm items-center q-mt-md"):
                                     ui.separator().classes("col")
@@ -846,7 +845,7 @@ class SetupWizard:
 
                             backup_uploader = (
                                 ui.upload(on_upload=_handle_backup_upload, auto_upload=True)
-                                .props("accept=.db")
+                                .props(BACKUP_UPLOAD_ACCEPT)
                                 .style("display: none")
                             )
                             ui.button(

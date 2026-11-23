@@ -75,10 +75,8 @@ identifiers and precise timestamps are under **Technical details**.
    during preparation. Rows are prepared individually: successful rows stay saved
    if another fails, and retrying skips successful rows. Allocation edits before
    preparation remain a draft; later redistribution does not change saved ZIPs.
-3. Select a prepared assignment and **Save delivery folder**. Choose a folder on
-   the computer running the app, outside the project footage folders. Use **Browse…**
-   for the system folder picker, or enter the path manually. Linux requires Zenity
-   or KDialog for the picker. The new
+3. Select a prepared assignment and **Save delivery folder**. Enter a folder path
+   on the computer running the app, outside the project footage folders. The new
    folder contains **assignment.zip**. Optionally enable **Include footage** to
    copy assigned and required reference videos alongside it, in separate media-root
    subfolders. Leave footage off if the recipient can access the original folders.

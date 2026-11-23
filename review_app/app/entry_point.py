@@ -629,11 +629,12 @@ class GUI:
         thumbnails_dir.mkdir(parents=True, exist_ok=True)
         app.add_static_files("/thumbnails", str(thumbnails_dir))
 
-        if get_default_db_path().exists():
-            try:
+        from review_app.backend.db.backup import recover_interrupted_restore
+
+        try:
+            recover_interrupted_restore()
+            if get_default_db_path().exists():
                 dp = LocalDataProvider()
-                set_data_provider(dp)
-                self.dp = dp
                 load_settings_from_db(dp)
 
                 # Load media dirs from all projects so any user can serve their videos.
@@ -643,11 +644,13 @@ class GUI:
                     for d in dp.get_project_dirs(proj.id)
                 ]
                 set_media_dirs(all_dirs)
-            except Exception as e:
-                logger.exception("Could not initialize data provider at startup")
-                self._startup_error = e
-        else:
-            logger.info("No existing database found — fresh install, launching setup wizard")
+                set_data_provider(dp)
+                self.dp = dp
+            else:
+                logger.info("No existing database found — fresh install, launching setup wizard")
+        except Exception as e:
+            logger.exception("Could not initialize data provider at startup")
+            self._startup_error = e
 
         setup_media_route()
 

@@ -1,5 +1,5 @@
 import pytest
-from review_app.app.components.database_recovery import is_backup_compatible
+from review_app.app.components.backup_picker import is_backup_compatible
 from review_app.backend.db.migrations import MIGRATIONS
 
 

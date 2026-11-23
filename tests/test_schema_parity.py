@@ -19,8 +19,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from review_app.backend.db.migrations import run_migrations
-from review_app.backend.db.models import Base
+from review_app.backend.db.migrations import initialize_database, upgrade_database
 from sqlalchemy import create_engine, inspect
 
 SNAPSHOT = Path(__file__).parent / "fixtures" / "schema_snapshot.sql"
@@ -106,8 +105,7 @@ def _schema(db_path: Path) -> dict:
 
 def _build_fresh(db_path: Path) -> None:
     engine = create_engine(f"sqlite:///{db_path}")
-    Base.metadata.create_all(engine)
-    run_migrations(engine)
+    initialize_database(engine)
     engine.dispose()
 
 
@@ -118,7 +116,7 @@ def _build_from_snapshot(db_path: Path) -> None:
     finally:
         con.close()
     engine = create_engine(f"sqlite:///{db_path}")
-    run_migrations(engine)
+    upgrade_database(engine)
     engine.dispose()
 
 

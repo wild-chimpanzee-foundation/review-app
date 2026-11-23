@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from review_app.backend.db.backup import RestoreCopyError, create_backup
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 
@@ -50,6 +51,28 @@ def test_provider_initialization(temp_workspace):
     assert "deer" in dp.get_valid_species()
     assert "fox" in dp.get_valid_species()
     assert dp.has_videos_in_db(active_project_id=None) is False
+
+
+def test_failed_restore_reopens_original_provider(temp_workspace, monkeypatch):
+    dp = LocalDataProvider()
+    monkeypatch.setattr("review_app.backend.db.backup.get_user_data_dir", lambda: dp.db_dir)
+    dp.set_setting("restore_test", "backup")
+    candidate = create_backup(reason="test")
+    dp.set_setting("restore_test", "original")
+
+    def fail_reopen():
+        with pytest.raises(RestoreCopyError, match="paused for restore"):
+            dp.engine.connect()
+        raise RuntimeError("reopen failed")
+
+    monkeypatch.setattr(
+        "review_app.backend.provider.local_data_provider.LocalDataProvider", fail_reopen
+    )
+    with pytest.raises(RuntimeError, match="reopen failed"):
+        dp.restore_from_backup(candidate)
+
+    assert dp.get_setting("restore_test") == "original"
+    dp.engine.dispose()
 
 
 def test_get_behaviors(temp_workspace):

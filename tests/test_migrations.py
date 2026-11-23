@@ -97,6 +97,24 @@ def test_newer_database_is_rejected_without_mutation(tmp_db, entry_point):
         engine.dispose()
 
 
+def test_provider_rejects_unrelated_sqlite_without_creating_tables(tmp_db):
+    from review_app.backend.provider.local_data_provider import LocalDataProvider
+
+    path = tmp_db["root"] / "db" / "review_data.db"
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql("CREATE TABLE unrelated (value TEXT)")
+        conn.exec_driver_sql("INSERT INTO unrelated VALUES ('keep me')")
+    engine.dispose()
+    original = path.read_bytes()
+
+    with pytest.raises(ValueError, match="supported Review App schema"):
+        LocalDataProvider()
+
+    assert path.read_bytes() == original
+    assert not path.with_name(path.name + "-wal").exists()
+
+
 def test_individual_tag_eligibility_migration_and_fresh_schema(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'tag-eligibility.db'}")
     with engine.begin() as conn:

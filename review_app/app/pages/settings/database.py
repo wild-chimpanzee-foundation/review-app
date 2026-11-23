@@ -1,12 +1,14 @@
 import asyncio
 import logging
-import shutil
-import tempfile
 from pathlib import Path
 
 from nicegui import run, ui
 
-from review_app.app.config import DEFAULT_DB_FILENAME, get_user_data_dir
+from review_app.app.components.backup_picker import (
+    BACKUP_UPLOAD_ACCEPT,
+    backup_option,
+    restore_uploaded_backup,
+)
 from review_app.app.media import set_media_dirs
 from review_app.app.state import (
     load_settings_from_db,
@@ -15,7 +17,6 @@ from review_app.app.state import (
 )
 from review_app.app.translations import t
 from review_app.app.utils import (
-    format_utc_timestamp,
     ignore_deleted_client,
     run_backup_with_progress,
     user_error_message,
@@ -25,10 +26,8 @@ from review_app.backend.db.backup import (
     create_backup,
     list_backups,
     remove_db_sidecars,
-    restore_backup,
 )
 from review_app.backend.path_matching import normalize_path_str
-from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 logger = logging.getLogger(__name__)
 
@@ -90,54 +89,21 @@ def render_database_section(
             loading_dialog.open()
             try:
                 async with _db_op_lock:
-                    db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
                     dp = _get_dp()
-                    dp.engine.dispose()
-
                     try:
-                        pre_restore_path = await run.io_bound(restore_backup, selected_backup_path)
-                    except BackupError as exc:
-                        with ignore_deleted_client():
-                            ui.notify(
-                                t("restore_failed", error=t(exc.user_message_key)), type="negative"
-                            )
-                        return
+                        new_dp = await run.io_bound(dp.restore_from_backup, selected_backup_path)
                     except Exception as exc:
+                        logger.exception("Database restore failed")
+                        message = (
+                            t(exc.user_message_key)
+                            if isinstance(exc, BackupError)
+                            else user_error_message(exc)
+                        )
                         with ignore_deleted_client():
-                            ui.notify(
-                                t("restore_failed", error=user_error_message(exc)), type="negative"
-                            )
+                            ui.notify(t("restore_failed", error=message), type="negative")
                         return
 
                     reset_app_state()
-                    try:
-                        new_dp = LocalDataProvider()
-                    except Exception as exc:
-                        logger.exception("Restored DB failed to open; rolling back")
-                        if pre_restore_path is None:
-                            with ignore_deleted_client():
-                                ui.notify(
-                                    t("restore_failed", error=user_error_message(exc)),
-                                    type="negative",
-                                )
-                            return
-                        try:
-                            await run.io_bound(remove_db_sidecars, db_path)
-                            await run.io_bound(shutil.copy2, pre_restore_path, db_path)
-                            new_dp = LocalDataProvider()
-                            set_data_provider(new_dp)
-                            load_settings_from_db(new_dp)
-                            with ignore_deleted_client():
-                                ui.notify(
-                                    t("restore_failed", error=user_error_message(exc)),
-                                    type="negative",
-                                )
-                        except Exception:
-                            logger.exception("Rollback after restore failure also failed")
-                            with ignore_deleted_client():
-                                ui.notify(t("restore_rollback_failed"), type="negative")
-                        return
-
                     set_data_provider(new_dp)
                     load_settings_from_db(new_dp)
 
@@ -157,7 +123,7 @@ def render_database_section(
                     loading_dialog.close()
 
         async def open_restore_dialog():
-            backups = list_backups()
+            backups = await run.io_bound(list_backups)
             restore_dialog.clear()
             with restore_dialog, ui.card().classes("q-pa-lg").style("min-width: 420px"):
                 if not backups:
@@ -169,38 +135,23 @@ def render_database_section(
                         .classes("w-full gap-xs q-mb-lg")
                         .style("max-height: 300px; overflow-y: auto")
                     ):
-                        for b in backups:
-                            ts = format_utc_timestamp(b["timestamp"].isoformat())
-                            label = f"{ts}  ({b['size_mb']} MB)"
+                        for backup in backups:
 
-                            def _make_restore(p):
-                                async def _do():
-                                    await do_restore(p)
+                            async def restore_selected(_event, path=backup["path"]):
+                                await do_restore(path)
 
-                                return _do
-
-                            ui.button(
-                                label, icon="restore", on_click=_make_restore(b["path"])
-                            ).props("flat dense align-left").classes("w-full")
+                            backup_option(backup, on_click=restore_selected)
                 with ui.row().classes("w-full gap-sm items-center q-mt-md"):
                     ui.separator().classes("col")
                     ui.label(t("upload_backup")).classes("text-caption text-grey-6")
                     ui.separator().classes("col")
 
                 async def _handle_backup_upload(e):
-                    content = await e.file.read()
-                    suffix = ".db.gz" if content[:2] == b"\x1f\x8b" else ".db"
-                    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-                        f.write(content)
-                        tmp_path = Path(f.name)
-                    try:
-                        await do_restore(tmp_path)
-                    finally:
-                        tmp_path.unlink(missing_ok=True)
+                    await restore_uploaded_backup(e.file, do_restore)
 
                 backup_uploader = (
                     ui.upload(on_upload=_handle_backup_upload, auto_upload=True)
-                    .props("accept=.db,.db.gz")
+                    .props(BACKUP_UPLOAD_ACCEPT)
                     .style("display: none")
                 )
                 ui.button(

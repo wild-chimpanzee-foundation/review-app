@@ -3,7 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
+from sqlalchemy.engine import Connection, Engine
+
+from review_app.backend.db.models import Base
 
 logger = logging.getLogger(__name__)
 
@@ -1219,29 +1222,101 @@ def _migration_v30(conn) -> None:
     conn.exec_driver_sql("ALTER TABLE reference_frames_v30 RENAME TO reference_frames")
 
 
-def check_schema_version(conn) -> None:
-    """Reject newer databases without writing anything, including startup DDL."""
+class SchemaVersionError(ValueError):
+    pass
+
+
+class UnsupportedSchemaError(ValueError):
+    pass
+
+
+def check_schema_version(conn: Connection, maximum: int | None = None) -> int | None:
+    """Read the version stamp and reject unsupported versions without writing."""
     if not conn.exec_driver_sql(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='_schema_version'"
     ).first():
-        return
-    row = conn.exec_driver_sql("SELECT version FROM _schema_version").first()
-    if row and row[0] > len(MIGRATIONS):
-        raise ValueError(
-            f"Database schema v{row[0]} is newer than this application's v{len(MIGRATIONS)}. "
+        return None
+    if "version" not in _columns(conn, "_schema_version"):
+        raise UnsupportedSchemaError("Invalid Review App schema version table")
+    rows = conn.exec_driver_sql("SELECT version FROM _schema_version LIMIT 2").all()
+    if not rows:
+        return None
+    if len(rows) != 1 or type(rows[0][0]) is not int or rows[0][0] < 0:
+        raise UnsupportedSchemaError("Invalid Review App schema version stamp")
+    version = rows[0][0]
+    limit = len(MIGRATIONS) if maximum is None else min(maximum, len(MIGRATIONS))
+    if version > limit:
+        raise SchemaVersionError(
+            f"Database schema v{version} is newer than this application's v{limit}. "
             "Open it with a compatible application version."
         )
+    return version
 
 
-def _apply_migrations(conn) -> bool:
-    check_schema_version(conn)
+def _table_info(conn: Connection, table: str):
+    # Table names here come from the app schema, never from the candidate database.
+    return conn.exec_driver_sql(f'PRAGMA table_info("{table}")').all()
+
+
+def _columns(conn: Connection, table: str) -> set[str]:
+    return {row[1] for row in _table_info(conn, table)}
+
+
+def _has_current_schema(conn: Connection) -> bool:
+    tables = set(inspect(conn).get_table_names())
+    for table in Base.metadata.tables.values():
+        if table.name not in tables:
+            return False
+        fields = {row[1]: row[5] for row in _table_info(conn, table.name)}
+        if not set(table.columns.keys()) <= fields.keys():
+            return False
+        if {name for name, pk in fields.items() if pk} != set(table.primary_key.columns.keys()):
+            return False
+    return True
+
+
+def _existing_version(conn: Connection, stamped: int | None) -> int:
+    core = {
+        "projects": {"id", "name"},
+        "project_dirs": {"project_id", "path"},
+        "videos": {"video_id", "video_path", "project_id"},
+        "video_labels": {"video_id", "is_blank"},
+        "individual_observations": {"video_id", "id", "project_id", "start_sec"},
+        "model_annotations": {"video_id", "id", "model_name", "annotation_type"},
+        "species": {"scientific_name", "name_en"},
+    }
+    if not all(columns <= _columns(conn, table) for table, columns in core.items()):
+        raise UnsupportedSchemaError("Database does not have a supported Review App schema")
+    if stamped is not None:
+        return stamped
+    if _has_current_schema(conn):
+        return len(MIGRATIONS)
+
+    # The project-based schema in v1.0.0-beta6 predates surrogate species and
+    # behavior IDs. Its full upgrade starts at migration 4.
+    legacy_tables = {*core, "app_settings", "species_behavior"}
+    tables = set(inspect(conn).get_table_names()) - {"_schema_version"}
+    observations = _columns(conn, "individual_observations")
+    if (
+        tables == legacy_tables
+        and {"species", "behavior"} <= observations
+        and "id" not in _columns(conn, "species")
+        and "review_later" in _columns(conn, "video_labels")
+    ):
+        return 3
+    raise UnsupportedSchemaError("Unrecognized Review App schema without a version stamp")
+
+
+def _apply_migrations(conn: Connection, *, assumed_version: int | None = None) -> bool:
+    stamped = check_schema_version(conn)
+    current = stamped if stamped is not None else assumed_version
+    if stamped == len(MIGRATIONS):
+        return False
     conn.execute(text("CREATE TABLE IF NOT EXISTS _schema_version (version INTEGER)"))
-    row = conn.execute(text("SELECT version FROM _schema_version")).fetchone()
-    if row is None:
+    if current is None:
         logger.info("Fresh database — stamping schema version %d", len(MIGRATIONS))
         conn.execute(text("INSERT INTO _schema_version VALUES (:v)"), {"v": len(MIGRATIONS)})
         return False
-    current = row[0]
     pending = [v for v, _ in MIGRATIONS if v > current]
     if pending:
         logger.info("Running %d migration(s): v%d → v%d", len(pending), current, len(MIGRATIONS))
@@ -1263,7 +1338,9 @@ def _apply_migrations(conn) -> bool:
     return bool(pending)
 
 
-def run_migrations(engine) -> None:
+def _run_migration_transaction(
+    engine: Engine, apply: Callable[[Connection], bool], *, validate_foreign_keys: bool = False
+) -> bool:
     with engine.connect() as conn:
         # Rebuilding a referenced SQLite table with foreign keys enabled would
         # cascade-delete its children. Disable enforcement before the transaction,
@@ -1277,10 +1354,68 @@ def run_migrations(engine) -> None:
                 # sqlite3's legacy transaction mode does not begin on DDL.
                 # Explicitly begin so table rebuilds roll back as a whole.
                 conn.exec_driver_sql("BEGIN")
-                if _apply_migrations(conn) and foreign_keys:
+                changed = apply(conn)
+                if changed and (foreign_keys or validate_foreign_keys):
                     violations = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
                     if violations:
                         raise ValueError("Database migration would leave invalid foreign keys")
         finally:
             conn.exec_driver_sql(f"PRAGMA foreign_keys={int(foreign_keys)}")
             conn.commit()
+        return changed
+
+
+def run_migrations(engine: Engine) -> None:
+    """Run migrations on a database whose initial schema has already been selected."""
+    _run_migration_transaction(engine, _apply_migrations)
+
+
+def initialize_database(engine: Engine) -> None:
+    """Create and version a new database in a single transaction."""
+
+    def initialize(conn: Connection) -> bool:
+        if inspect(conn).get_table_names():
+            raise UnsupportedSchemaError("Cannot initialize a database that already has tables")
+        Base.metadata.create_all(conn)
+        return _apply_migrations(conn)
+
+    _run_migration_transaction(engine, initialize)
+
+
+def upgrade_database(engine: Engine, *, maximum_version: int | None = None) -> bool:
+    """Recognize an existing database and upgrade it without creating unrelated tables."""
+
+    def upgrade(conn: Connection) -> bool:
+        stamped = check_schema_version(conn, maximum_version)
+        version = _existing_version(conn, stamped)
+        project_species = []
+        if version < 4:
+            # These tables were previously installed by startup create_all()
+            # before v4. Retain that prerequisite for old project databases.
+            for name in ("behaviors", "project_species"):
+                Base.metadata.tables[name].create(conn, checkfirst=True)
+            if "project_id" in _columns(conn, "species"):
+                project_species = conn.exec_driver_sql("""
+                    SELECT project_id, scientific_name FROM species WHERE project_id IS NOT NULL
+                """).all()
+            if "behavior" in _columns(conn, "individual_observations"):
+                conn.exec_driver_sql("""
+                    INSERT OR IGNORE INTO behaviors (id, key, name_en, is_custom)
+                    SELECT lower(hex(randomblob(16))), behavior, behavior, 1
+                    FROM (SELECT DISTINCT behavior FROM individual_observations
+                          WHERE behavior IS NOT NULL AND trim(behavior) <> '')
+                """)
+        _apply_migrations(conn, assumed_version=version)
+        if project_species:
+            conn.exec_driver_sql(
+                """
+                INSERT OR IGNORE INTO project_species (project_id, species_id)
+                SELECT ?, id FROM species WHERE scientific_name = ?
+                """,
+                [tuple(row) for row in project_species],
+            )
+        if not _has_current_schema(conn):
+            raise UnsupportedSchemaError("Review App schema is incomplete after migration")
+        return stamped != len(MIGRATIONS)
+
+    return _run_migration_transaction(engine, upgrade, validate_foreign_keys=True)

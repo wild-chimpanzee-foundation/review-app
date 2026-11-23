@@ -9,12 +9,22 @@ import sqlite3
 import tempfile
 import threading
 import time
-from contextlib import contextmanager
+import zlib
+from collections.abc import Callable
+from contextlib import closing, contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
+from sqlalchemy.exc import SQLAlchemyError
+
 from review_app.app.config import DEFAULT_DB_FILENAME, get_user_data_dir
+from review_app.backend.db.migrations import (
+    SchemaVersionError,
+    upgrade_database,
+)
 from review_app.backend.errors import AppError
 
 logger = logging.getLogger(__name__)
@@ -63,6 +73,10 @@ class RestoreRemoveError(BackupError):
 
 class RestoreCopyError(BackupError):
     user_message_key: str = "restore_error_copy_failed"
+
+
+class RestoreRecoveryError(RestoreCopyError):
+    user_message_key: str = "restore_rollback_failed"
 
 
 class RestoreSchemaVersionError(BackupError):
@@ -128,6 +142,9 @@ def _validate_restore_source(path: Path) -> None:
         raise RestoreFileNotFoundError(f"invalid backup path: {path!r}")
 
 
+_restore_lock = threading.Lock()
+
+
 SIDE_CAR_EXTS: tuple[str, ...] = ("-wal", "-shm", "-journal")
 
 
@@ -142,28 +159,26 @@ def remove_db_sidecars(db_path: Path) -> None:
                 logger.warning("Failed to remove sidecar %s", p)
 
 
-def _compress_backup(raw_db: Path, backup_path: Path, auto_prune: bool, atomic: bool) -> Path:
-    """gzip raw_db into backup_path and remove the raw file. Returns the final path.
-
-    atomic=True writes to a .tmp file first and renames — required in the background
-    thread so list_backups/restore never see a half-written .gz. On compression
-    failure the raw .db is kept — it is already a valid backup (list_backups and
-    restore handle both .db and .db.gz)."""
-    target = Path(str(backup_path) + ".tmp") if atomic else backup_path
+def _compress_backup(raw_db: Path, backup_path: Path, auto_prune: bool) -> Path:
+    """Publish completed gzip output and keep the raw snapshot if compression fails."""
+    target = backup_path.with_suffix(".gz.tmp")
     try:
         with (
-            open(raw_db, "rb") as f_in,
+            raw_db.open("rb") as f_in,
             gzip.open(target, "wb", compresslevel=BACKUP_GZIP_LEVEL) as f_out,
         ):
             shutil.copyfileobj(f_in, f_out)
-        if atomic:
-            os.replace(target, backup_path)
-        raw_db.unlink(missing_ok=True)
-        result = backup_path
+        os.replace(target, backup_path)
     except Exception:
         logger.exception("Backup compression failed; keeping uncompressed backup %s", raw_db)
         target.unlink(missing_ok=True)
         result = raw_db
+    else:
+        try:
+            raw_db.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove uncompressed copy of %s", backup_path)
+        result = backup_path
     if auto_prune:
         try:
             prune_backups()
@@ -184,47 +199,41 @@ def create_backup(
                      .db stays behind as a valid backup.
     """
     _t0 = time.monotonic()
-    db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
-    if not db_path.exists():
-        raise BackupDBNotFoundError(str(db_path))
+    with _restore_lock:
+        db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
+        if not db_path.exists():
+            raise BackupDBNotFoundError(str(db_path))
 
-    schema_version = read_schema_version(db_path) or 0
-    timestamp = datetime.now(timezone.utc).strftime(BACKUP_TIMESTAMP_FORMAT)
-    backup_dir = get_backup_dir()
+        schema_version = read_schema_version(db_path) or 0
+        timestamp = datetime.now(timezone.utc).strftime(BACKUP_TIMESTAMP_FORMAT)
+        backup_dir = get_backup_dir()
 
-    # Clear leftovers from a compression thread killed by a previous shutdown
-    for stale in backup_dir.glob("review_backup_*.tmp"):
-        stale.unlink(missing_ok=True)
+        base_name = f"review_backup_{timestamp}_v{schema_version}"
+        backup_path = backup_dir / f"{base_name}.db.gz"
+        sequence = 0
+        while backup_path.exists() or backup_path.with_suffix("").exists():
+            sequence += 1
+            backup_path = backup_dir / f"{base_name}_{sequence}.db.gz"
 
-    backup_path = backup_dir / f"review_backup_{timestamp}_v{schema_version}.db.gz"
-    if backup_path.exists() or backup_path.with_suffix("").exists():
-        i = 1
-        while (backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db.gz").exists():
-            i += 1
-        backup_path = backup_dir / f"review_backup_{timestamp}_v{schema_version}_{i}.db.gz"
-
-    _validate_backup_path(backup_path)
-    raw_db = backup_path.with_suffix("")  # .db.gz → .db for VACUUM INTO
-    escaped = str(raw_db).replace("'", "''")
-
-    con = None
-    try:
-        con = sqlite3.connect(str(db_path))
-        con.execute(f"VACUUM INTO '{escaped}'")
-    except Exception as exc:
-        logger.exception("VACUUM INTO failed")
-        raw_db.unlink(missing_ok=True)
-        raise BackupVacuumError(str(exc)) from exc
-    finally:
-        if con is not None:
-            con.close()
+        _validate_backup_path(backup_path)
+        raw_db = backup_path.with_suffix("")
+        snapshot = raw_db.with_suffix(".db.snapshot.tmp")
+        try:
+            snapshot.unlink(missing_ok=True)
+            with closing(sqlite3.connect(str(db_path))) as con:
+                con.execute("VACUUM INTO ?", (str(snapshot),))
+            os.replace(snapshot, raw_db)
+        except Exception as exc:
+            logger.exception("VACUUM INTO failed")
+            snapshot.unlink(missing_ok=True)
+            raise BackupVacuumError(str(exc)) from exc
 
     vacuum_secs = time.monotonic() - _t0
 
     if compress == "background":
         threading.Thread(
             target=_compress_backup,
-            args=(raw_db, backup_path, auto_prune, True),
+            args=(raw_db, backup_path, auto_prune),
             name="backup-compress",
             daemon=True,
         ).start()
@@ -236,7 +245,7 @@ def create_backup(
         )
         return raw_db
 
-    result = _compress_backup(raw_db, backup_path, auto_prune, atomic=False)
+    result = _compress_backup(raw_db, backup_path, auto_prune)
     if result != backup_path:
         raise BackupVacuumError(f"compression failed, uncompressed backup kept at {result}")
     logger.info(
@@ -262,12 +271,11 @@ def _parse_backup_meta(name: str) -> tuple[datetime, int | None] | None:
     return dt, version
 
 
-def list_backups() -> list[dict[str, Any]]:
+def _list_backup_files() -> list[dict[str, Any]]:
     backup_dir = get_backup_dir()
     backups = []
     all_files = sorted(
-        list(backup_dir.glob("review_backup_*.db.gz"))
-        + list(backup_dir.glob("review_backup_*.db")),
+        backup_dir.glob("review_backup_*.db*"),
         key=lambda p: p.name,
         reverse=True,
     )
@@ -292,10 +300,28 @@ def list_backups() -> list[dict[str, Any]]:
     return backups
 
 
+def _snapshot_path(path: Path) -> Path:
+    return path.with_suffix("") if path.suffix == ".gz" else path
+
+
+def _preferred_backups(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    snapshots = {}
+    for backup in files:
+        # The reverse filename sort puts the gzip artifact first within each pair.
+        snapshots.setdefault(_snapshot_path(backup["path"]), backup)
+    return list(snapshots.values())
+
+
+def list_backups() -> list[dict[str, Any]]:
+    """List one entry per snapshot, preferring its compressed copy if available."""
+    return _preferred_backups(_list_backup_files())
+
+
 def prune_backups() -> int:
     """GFS retention: N most recent + 1/day for D days + 1/week for W weeks + 1/month for M months.
     Each tier picks the newest backup in its bucket; tiers overlap rather than partition."""
-    backups = list_backups()
+    files = _list_backup_files()
+    backups = _preferred_backups(files)
 
     keep: set[Path] = set()
     daily_seen: set[str] = set()
@@ -303,7 +329,7 @@ def prune_backups() -> int:
     monthly_seen: set[str] = set()
 
     for b in backups[:RECENT_KEEP_COUNT]:
-        keep.add(b["path"])
+        keep.add(_snapshot_path(b["path"]))
 
     now = datetime.now(timezone.utc)
     for b in backups:
@@ -314,22 +340,22 @@ def prune_backups() -> int:
             day_key = ts.strftime("%Y-%m-%d")
             if day_key not in daily_seen:
                 daily_seen.add(day_key)
-                keep.add(b["path"])
+                keep.add(_snapshot_path(b["path"]))
 
         if age_days <= WEEKLY_RETENTION_WEEKS * 7:
             iso = ts.isocalendar()
             week_key = f"{iso[0]}-W{iso[1]:02d}"
             if week_key not in weekly_seen:
                 weekly_seen.add(week_key)
-                keep.add(b["path"])
+                keep.add(_snapshot_path(b["path"]))
 
         if age_days <= MONTHLY_RETENTION_MONTHS * 31:
             month_key = ts.strftime("%Y-%m")
             if month_key not in monthly_seen:
                 monthly_seen.add(month_key)
-                keep.add(b["path"])
+                keep.add(_snapshot_path(b["path"]))
 
-    to_delete = [b for b in backups if b["path"] not in keep]
+    to_delete = [b for b in files if _snapshot_path(b["path"]) not in keep]
     count = 0
     for b in to_delete:
         try:
@@ -369,104 +395,212 @@ def backup_if_stale(
         return False
 
 
-def _check_restore_schema_version(backup_path: Path, current_version: int | None) -> None:
-    """Raise RestoreSchemaVersionError if the backup is from a newer schema.
-    Skips the check if current_version is None (current schema unknown)."""
-    if current_version is None:
-        return
-    backup_version = read_schema_version(backup_path)
-    if backup_version is not None and backup_version > current_version:
-        raise RestoreSchemaVersionError(
-            f"backup schema v{backup_version} > app schema v{current_version}"
-        )
-
-
-def _check_restore_integrity(backup_path: Path) -> None:
+def _check_restore_integrity(staging: Path) -> None:
     try:
-        with _as_db_file(backup_path) as p:
-            con = sqlite3.connect(str(p))
-            try:
-                result = con.execute("PRAGMA integrity_check").fetchone()
-            finally:
-                con.close()
-        if result and result[0] != "ok":
-            raise RestoreCorruptError(f"integrity_check: {result[0]}")
-    except RestoreCorruptError:
-        raise
-    except Exception as exc:
+        with staging.open("rb") as source:
+            if source.read(16) != b"SQLite format 3\0":
+                raise RestoreCorruptError("Invalid SQLite header")
+        with closing(
+            sqlite3.connect(f"{staging.resolve().as_uri()}?immutable=1", uri=True)
+        ) as con:
+            result = con.execute("PRAGMA integrity_check").fetchone()
+            if result != ("ok",):
+                raise RestoreCorruptError(f"integrity_check: {result}")
+            violation = con.execute("PRAGMA foreign_key_check").fetchone()
+            if violation is not None:
+                raise RestoreCorruptError(f"foreign_key_check: {violation}")
+    except (sqlite3.Error, OSError) as exc:
         raise RestoreCorruptError(str(exc)) from exc
 
 
-def _emergency_rollback(pre_restore_path: Path | None, db_path: Path) -> bool:
-    """Best-effort restore of db_path from pre_restore_path. Cleans sidecars first.
-    Returns True on success. No-op if pre_restore_path is None."""
-    if pre_restore_path is None:
-        return False
+def _prepare_restore(staging: Path, maximum_version: int | None) -> None:
+    _check_restore_integrity(staging)
+    engine = create_engine(URL.create("sqlite", database=str(staging)))
     try:
-        if pre_restore_path.exists():
-            remove_db_sidecars(db_path)
-            if pre_restore_path.suffix == ".gz":
-                with gzip.open(pre_restore_path, "rb") as f_in, open(db_path, "wb") as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            else:
-                shutil.copy2(pre_restore_path, db_path)
-            logger.warning("Emergency rollback restored db from %s", pre_restore_path)
-            return True
-    except Exception:
-        logger.exception("Emergency rollback failed")
-    return False
+        upgraded = upgrade_database(engine, maximum_version=maximum_version)
+    except SchemaVersionError as exc:
+        raise RestoreSchemaVersionError(str(exc)) from exc
+    except (ValueError, SQLAlchemyError) as exc:
+        raise RestoreCorruptError(str(exc)) from exc
+    finally:
+        engine.dispose()
+
+    if upgraded:
+        _check_restore_integrity(staging)
+        try:
+            with staging.open("rb+") as candidate:
+                os.fsync(candidate.fileno())
+        except OSError as exc:
+            raise RestoreCopyError(str(exc)) from exc
 
 
-def restore_backup(backup_path: Path, app_schema_version: int | None = None) -> Path | None:
-    """Restore a backup over the live DB atomically (write-to-staging + os.replace).
-    The caller MUST dispose any open SQLAlchemy engine on the live DB first.
-
-    If app_schema_version is provided, it caps the allowed backup schema version (use this
-    when there is no live DB to read from, e.g. setup wizard). Otherwise the live DB's
-    schema version is used.
-
-    Returns the pre-restore safety backup path, or None if no live DB existed."""
-    db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
-    if not backup_path.exists():
-        raise RestoreFileNotFoundError(str(backup_path))
-
-    _validate_restore_source(backup_path)
-    _check_restore_integrity(backup_path)
-
-    max_version = app_schema_version
-    if max_version is None and db_path.exists():
-        max_version = read_schema_version(db_path)
-    _check_restore_schema_version(backup_path, max_version)
-
-    pre_restore_path: Path | None = None
-    if db_path.exists():
-        pre_restore_path = create_backup(reason="pre_restore", auto_prune=False)
-
-    staging = Path(str(db_path) + ".restoring")
+def _open_restore_source(path: Path):
     try:
-        if backup_path.suffix == ".gz":
-            with gzip.open(backup_path, "rb") as f_in, open(staging, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-        else:
-            shutil.copy2(backup_path, staging)
-    except OSError as exc:
-        logger.exception("Failed to stage backup at %s", staging)
-        staging.unlink(missing_ok=True)
-        _emergency_rollback(pre_restore_path, db_path)
-        raise RestoreCopyError(f"{backup_path} -> {staging}") from exc
+        return path.open("rb")
+    except FileNotFoundError as exc:
+        # A listed raw snapshot may finish compressing before the user selects it.
+        managed_dir = get_user_data_dir() / "backups"
+        if (
+            path.suffix == ".db"
+            and _parse_backup_meta(path.name) is not None
+            and path.parent.resolve() == managed_dir.resolve()
+        ):
+            try:
+                return path.with_suffix(".db.gz").open("rb")
+            except FileNotFoundError:
+                pass
+        raise RestoreFileNotFoundError(str(path)) from exc
 
-    remove_db_sidecars(db_path)
 
+@contextmanager
+def _staged_restore(source: Path, db_path: Path):
+    _validate_restore_source(source)
+    staging = None
     try:
+        try:
+            with (
+                _open_restore_source(source) as original,
+                tempfile.NamedTemporaryFile(
+                    dir=db_path.parent,
+                    prefix=f".{db_path.name}.",
+                    suffix=".restoring",
+                    delete=False,
+                ) as target,
+            ):
+                staging = Path(target.name)
+                compressed = original.read(2) == b"\x1f\x8b"
+                original.seek(0)
+                stream = gzip.GzipFile(fileobj=original) if compressed else nullcontext(original)
+                with stream as contents:
+                    shutil.copyfileobj(contents, target)
+                target.flush()
+                os.fsync(target.fileno())
+        except (gzip.BadGzipFile, EOFError, zlib.error) as exc:
+            raise RestoreCorruptError(str(exc)) from exc
+        except OSError as exc:
+            raise RestoreCopyError(str(exc)) from exc
+        yield staging
+    finally:
+        if staging is not None:
+            remove_db_sidecars(staging)
+            staging.unlink(missing_ok=True)
+
+
+def _sync_directory(directory: Path) -> None:
+    if os.name == "nt":
+        return
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _install_staged_db(staging: Path, db_path: Path) -> None:
+    try:
+        for ext in SIDE_CAR_EXTS:
+            Path(str(db_path) + ext).unlink(missing_ok=True)
         os.replace(staging, db_path)
+        _sync_directory(db_path.parent)
     except OSError as exc:
-        logger.exception("Failed to swap staging file into %s", db_path)
-        staging.unlink(missing_ok=True)
-        _emergency_rollback(pre_restore_path, db_path)
         raise RestoreCopyError(str(exc)) from exc
 
-    logger.info("Database restored from backup: %s", backup_path)
-    return pre_restore_path
+
+def _rollback_path(db_path: Path) -> Path:
+    return db_path.with_suffix(".db.rollback")
+
+
+def recover_interrupted_restore() -> None:
+    """Restore the original database before opening any app connections."""
+    db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
+    rollback = _rollback_path(db_path)
+    if rollback.exists():
+        _install_staged_db(rollback, db_path)
+        logger.warning("Reinstated the database after an incomplete restore")
+
+
+def _preserve_live_database(db_path: Path, rollback: Path) -> None:
+    try:
+        if any(Path(str(db_path) + ext).exists() for ext in ("-wal", "-journal")):
+            with closing(sqlite3.connect(str(db_path))) as con:
+                con.execute("SELECT count(*) FROM sqlite_schema").fetchone()
+                busy, _, _ = con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                if busy:
+                    raise RestoreCopyError("Live database WAL is busy")
+        with _staged_restore(db_path, db_path) as snapshot:
+            os.replace(snapshot, rollback)
+            _sync_directory(db_path.parent)
+    except (OSError, sqlite3.Error) as exc:
+        raise RestoreCopyError(str(exc)) from exc
+
+
+def restore_backup[T](
+    backup_path: Path,
+    app_schema_version: int | None,
+    *,
+    reopen: Callable[[], T],
+    close: Callable[[T], None] | None = None,
+) -> T:
+    """Validate, install and reopen a backup with the live connections closed."""
+    with _restore_lock:
+        db_path = get_user_data_dir() / DEFAULT_DB_FILENAME
+        rollback = _rollback_path(db_path)
+        if rollback.exists():
+            raise RestoreRecoveryError("An interrupted restore must be recovered before retrying")
+
+        with _staged_restore(backup_path, db_path) as staging:
+            _prepare_restore(staging, app_schema_version)
+            live_exists = db_path.exists()
+            live_version = read_schema_version(db_path) if live_exists else None
+
+            archive = None
+            if live_exists:
+                try:
+                    timestamp = datetime.now(timezone.utc).strftime(BACKUP_TIMESTAMP_FORMAT)
+                    archive = get_backup_dir() / (
+                        f"review_backup_{timestamp}_v{live_version or 0}_{time.time_ns()}.db"
+                    )
+                except OSError as exc:
+                    raise RestoreCopyError(str(exc)) from exc
+
+            try:
+                if live_exists:
+                    _preserve_live_database(db_path, rollback)
+                _install_staged_db(staging, db_path)
+                reopened = reopen()
+            except Exception:
+                try:
+                    recover_interrupted_restore()
+                    if not live_exists:
+                        for ext in SIDE_CAR_EXTS:
+                            Path(str(db_path) + ext).unlink(missing_ok=True)
+                        db_path.unlink(missing_ok=True)
+                        _sync_directory(db_path.parent)
+                except (BackupError, OSError) as exc:
+                    logger.exception("Could not roll back the failed restore")
+                    raise RestoreRecoveryError(str(exc)) from exc
+                raise
+
+            if archive is not None:
+                try:
+                    os.replace(rollback, archive)
+                except OSError as exc:
+                    try:
+                        if close is not None:
+                            close(reopened)
+                        recover_interrupted_restore()
+                    except Exception as recovery_error:
+                        logger.exception("Could not roll back the unfinalized restore")
+                        raise RestoreRecoveryError(str(recovery_error)) from recovery_error
+                    raise RestoreCopyError(str(exc)) from exc
+                try:
+                    _sync_directory(archive.parent)
+                    _sync_directory(db_path.parent)
+                except OSError:
+                    logger.exception("Could not sync the archived restore safety copy")
+
+        logger.info("Database restored from backup: %s", backup_path)
+        return reopened
 
 
 def quarantine_broken_db() -> Path | None:

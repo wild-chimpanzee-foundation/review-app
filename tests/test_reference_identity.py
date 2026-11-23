@@ -1,10 +1,13 @@
 """Reference identity on fresh databases and SQLite upgrades."""
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
+from review_app.app.config import DEFAULT_DB_FILENAME
 from review_app.backend.db import migrations
+from review_app.backend.db.backup import restore_backup
 from review_app.backend.db.models import Base
 from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
@@ -50,6 +53,47 @@ def v25_references(tmp_path, monkeypatch):
         yield engine
     finally:
         engine.dispose()
+
+
+def test_restore_upgrades_v25_without_changing_reference_or_assignment_records(
+    v25_references, tmp_path, monkeypatch
+):
+    with v25_references.begin() as conn:
+        conn.exec_driver_sql("""
+            INSERT INTO handoff_assignments
+                (id, assignment_id, project_id, role, source_project_id, recipient,
+                 stage, created_at, scope, setup_archive)
+            VALUES ('h', 'assignment', 'p', 'origin', 'p', 'alice',
+                    'species', '2026-01-01', '{}', X'504B')
+        """)
+        conn.exec_driver_sql(
+            "INSERT INTO handoff_identity_maps VALUES ('h', 'reference_frame', 'portable', 'z')"
+        )
+
+    db_dir = tmp_path / "restore"
+    db_dir.mkdir()
+    monkeypatch.setattr("review_app.backend.db.backup.get_user_data_dir", lambda: db_dir)
+    candidate = tmp_path / "v25.db"
+    original = candidate.read_bytes()
+
+    def check_reopened():
+        with closing(sqlite3.connect(db_dir / DEFAULT_DB_FILENAME)) as conn:
+            assert conn.execute("""
+                SELECT s.id, f.id, f.offset_ms FROM distance_samples s
+                JOIN reference_frames f ON f.id = s.reference_frame_id ORDER BY s.id
+            """).fetchall() == [
+                ("sample-a", "a", 2000),
+                ("sample-b", "b", 3000),
+                ("sample-z", "z", 1000),
+            ]
+            assert conn.execute("""
+                SELECT a.assignment_id, a.setup_archive, m.portable_id, m.local_id
+                FROM handoff_assignments a JOIN handoff_identity_maps m ON m.handoff_id = a.id
+            """).fetchone() == ("assignment", b"PK", "portable", "z")
+
+    restore_backup(candidate, len(migrations.MIGRATIONS), reopen=check_reopened)
+
+    assert candidate.read_bytes() == original
 
 
 @pytest.mark.parametrize("upgraded", [False, True])

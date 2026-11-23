@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
+import time
 from collections.abc import Callable
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -9,10 +11,11 @@ from typing import Any
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import QueuePool
 
 from review_app.app.config import DEFAULT_DB_FILENAME, get_user_data_dir
-from review_app.backend.db.migrations import check_schema_version, run_migrations
-from review_app.backend.db.models import Base
+from review_app.backend.db.backup import RestoreCopyError, RestoreRecoveryError, restore_backup
+from review_app.backend.db.migrations import MIGRATIONS, initialize_database, upgrade_database
 from review_app.backend.provider.annotation_repository import AnnotationMixin
 from review_app.backend.provider.assignment_handoff import AssignmentHandoffMixin
 from review_app.backend.provider.assignment_service import AssignmentMixin
@@ -32,6 +35,16 @@ logger = logging.getLogger(__name__)
 # Python 3.12 deprecated the built-in sqlite3 datetime adapters; register explicit replacements.
 sqlite3.register_adapter(datetime, lambda val: val.isoformat())
 sqlite3.register_adapter(date, lambda val: val.isoformat())
+
+
+def restore_local_database(backup_path: Path) -> LocalDataProvider:
+    """Restore with no live provider connections and return the verified provider."""
+    return restore_backup(
+        backup_path,
+        len(MIGRATIONS),
+        reopen=LocalDataProvider,
+        close=lambda provider: provider.engine.dispose(),
+    )
 
 
 class LocalDataProvider(
@@ -59,6 +72,7 @@ class LocalDataProvider(
 
         self._db_path = self.db_dir / DEFAULT_DB_FILENAME
 
+        fresh = not self._db_path.exists()
         self.engine = create_engine(
             f"sqlite:///{self._db_path}",
             connect_args={"check_same_thread": False},
@@ -66,13 +80,22 @@ class LocalDataProvider(
             max_overflow=0,
         )
 
-        # Check before changing journal mode, creating tables, or seeding data.
-        # Discard this connection so normal connections receive all pragmas below.
+        # Validate before applying the provider's persistent SQLite pragmas.
         try:
-            with self.engine.connect() as conn:
-                check_schema_version(conn)
+            if fresh:
+                initialize_database(self.engine)
+            else:
+                upgrade_database(self.engine)
         finally:
             self.engine.dispose()
+
+        self._restore_paused = threading.Event()
+
+        @event.listens_for(self.engine, "connect")
+        @event.listens_for(self.engine, "checkout")
+        def reject_checkout_during_restore(*_):
+            if self._restore_paused.is_set():
+                raise RestoreCopyError("Database connections are paused for restore")
 
         @event.listens_for(self.engine, "connect")
         def set_sqlite_pragma(conn, _):
@@ -85,13 +108,35 @@ class LocalDataProvider(
             conn.execute("PRAGMA mmap_size=268435456")
 
         logger.info("Opening database at %s", self._db_path)
-        Base.metadata.create_all(self.engine)
-        run_migrations(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
+        try:
+            self.Session = sessionmaker(bind=self.engine)
 
-        self._load_species_data()
-        self._load_species_behaviors()
-        self._ensure_reference_video_tag()
+            self._load_species_data()
+            self._load_species_behaviors()
+            self._ensure_reference_video_tag()
+        except Exception:
+            self.engine.dispose()
+            raise
+
+    def restore_from_backup(self, backup_path: Path) -> LocalDataProvider:
+        """Stop new checkouts and drain active requests before swapping the database."""
+        self._restore_paused.set()
+        try:
+            pool = self.engine.pool
+            assert isinstance(pool, QueuePool)
+            deadline = time.monotonic() + 5
+            while pool.checkedout():
+                if time.monotonic() >= deadline:
+                    raise RestoreCopyError("Active database connections did not drain")
+                time.sleep(0.05)
+            self.engine.dispose()
+            return restore_local_database(backup_path)
+        except RestoreRecoveryError:
+            # Keep the provider offline until startup can recover the pending copy.
+            raise
+        except Exception:
+            self._restore_paused.clear()
+            raise
 
     # ── Shared helpers ────────────────────────────────────────────────────────
 
