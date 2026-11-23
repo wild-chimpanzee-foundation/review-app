@@ -331,3 +331,31 @@ class AssignmentHandoffMixin(ProviderBase):
         """Download exactly the original prepared bytes, without querying live scope."""
         with self.Session() as session:
             return handoff.export(session, assignment_id)
+
+    def save_assignment_packages(self, project_id, assignment_ids, output_dir):
+        """Write every frozen setup archive to one folder; never overwrite existing files."""
+        import re
+
+        if not isinstance(output_dir, (str, Path)) or not str(output_dir).strip():
+            raise ValueError("Choose an output folder")
+        destination = Path(output_dir).expanduser().resolve()
+        destination.mkdir(parents=True, exist_ok=True)
+        rows = []
+        with self.Session() as session:
+            for assignment_id in assignment_ids:
+                row = session.get(HandoffAssignment, assignment_id)
+                if row is None or row.project_id != project_id:
+                    raise ValueError("Assignment not found in this project")
+                if row.removed_at is not None:
+                    raise ValueError("Assignment was removed; choose a different assignment")
+                rows.append(row)
+        saved = []
+        for row in rows:
+            safe = re.sub(r"[^\w.-]+", "_", row.recipient).strip("._")[:80] or "recipient"
+            filename = f"setup-{safe}-{row.assignment_id}.zip"
+            target = destination / filename
+            if target.exists():
+                raise ValueError(f"File already exists: {target}")
+            target.write_bytes(row.setup_archive)
+            saved.append(target)
+        return saved

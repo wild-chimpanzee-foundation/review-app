@@ -298,16 +298,15 @@ async def test_new_recipient_can_be_added_without_leaving_creation(user: User, h
     await user.should_see(t("assign_hours", hours="1.00"))
     await user.should_see(t("assign_unknown_durations", count=1))
     user.find(t("assign_prepare"), kind=ui.button).click()
-    await user.should_see(t("assign_save_delivery"))
+    await user.should_see(marker="download-packages", kind=ui.button)
     await user.should_see(t("assign_camera_count", count=2))
     await user.should_see(t("assign_hours", hours="1.00"))
     await user.should_see(t("assign_unknown_durations", count=1))
     assert len(dp.get_assigned_video_ids(project.id, "Élodie")) == 2
     saved = dp.list_assignments(project.id)[0]
     await user.should_not_see(saved["assignment_id"], kind=ui.label)
-    table = next(iter(user.find(ui.table).elements))
-    assert saved["assignment_id"] not in str(table.rows)
-    assert saved["created_at"] not in str(table.rows)
+    user.find(t("assign_view"), kind=ui.button).click()
+    await user.should_see(t("assign_saved_scope"), kind=ui.expansion)
     with user:
         next(iter(user.find(t("assign_saved_scope"), kind=ui.expansion).elements)).set_value(True)
     await user.should_see(marker="assignment-media")

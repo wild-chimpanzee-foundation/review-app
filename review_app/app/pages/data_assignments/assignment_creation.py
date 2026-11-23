@@ -183,6 +183,12 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
                 t("assign_back") if not prepared else t("close"),
                 on_click=back if not prepared else on_cancel,
             ).props("flat").set_enabled(not busy)
+            if prepared:
+                ui.button(
+                    t("assign_download_packages"),
+                    on_click=packages_dialog.open,
+                    icon="download",
+                ).mark("download-packages")
             ui.button(t("assign_prepare"), on_click=prepare, icon="inventory_2").set_enabled(
                 not busy and len(prepared) < len(requests)
             )
@@ -227,7 +233,49 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
             render_review.refresh()
         if len(requests) == 1 and prepared:
             ui.notify(outcomes[0], type="warning" if prepared[0].missing_video_ids else "positive")
-            on_prepared(prepared[0].id)
+
+    with ui.dialog().props("persistent") as packages_dialog, ui.card().classes(
+        "w-full max-w-xl gap-3"
+    ):
+        ui.label(t("assign_download_packages")).classes("text-h6")
+        ui.label(t("assign_download_help")).classes("text-body2 text-grey-7")
+        output = ui.input(t("handoff_copy_output")).classes("w-full")
+        download_status = ui.label("").classes("text-body2 whitespace-pre-wrap")
+
+        async def download_packages():
+            save_packages_button.disable()
+            close_packages_button.disable()
+            output.disable()
+            try:
+                require_project()
+                saved = await run.io_bound(
+                    dp.save_assignment_packages,
+                    project_id,
+                    [prepared[index].id for index in sorted(prepared)],
+                    output.value,
+                )
+                require_project()
+                download_status.set_text(
+                    t("assign_download_saved", count=len(saved), path=output.value)
+                )
+                ui.notify(
+                    t("assign_download_saved", count=len(saved), path=output.value),
+                    type="positive",
+                )
+            except Exception as exc:
+                download_status.set_text(_error_message(exc))
+            finally:
+                save_packages_button.enable()
+                close_packages_button.enable()
+                output.enable()
+
+        with ui.row().classes("w-full justify-end gap-2"):
+            close_packages_button = ui.button(
+                t("close"), on_click=packages_dialog.close
+            ).props("flat")
+            save_packages_button = ui.button(
+                t("assign_download_packages"), on_click=download_packages, icon="download"
+            ).mark("save-packages")
 
     with review:
         render_review()
