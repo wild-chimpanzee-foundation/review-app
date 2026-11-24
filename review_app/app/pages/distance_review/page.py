@@ -764,7 +764,7 @@ class DistanceReviewPage:
 
     def render_filters(self) -> None:
         def update(name, event):
-            if self.busy or (name == "species_filter" and event.value not in self.species_options):
+            if self.busy:
                 event.sender.set_value(getattr(self, name))
                 return
             setattr(self, name, event.value)
@@ -773,16 +773,7 @@ class DistanceReviewPage:
 
         with ui.card().classes("full-width q-mb-md"):
             ui.label(t("filter_section_general")).classes("text-caption q-mt-xs")
-            ui.select(
-                self.species_options,
-                label=t("distance_target_species"),
-                value=self.species_filter,
-                clearable=False,
-                with_input=True,
-                on_change=lambda e: update("species_filter", e),
-            ).props("dense outlined required data-testid=distance-target-species").classes(
-                "w-full"
-            )
+            self.render_species_selector(self.update_species_filter)
             ui.select(
                 self.camera_options,
                 label=t("camera_filter"),
@@ -801,6 +792,24 @@ class DistanceReviewPage:
                 clearable=True,
                 on_change=lambda e: update("status_filter", e),
             ).props("dense outlined").classes("w-full")
+
+    def update_species_filter(self, event):
+        if self.busy or event.value not in self.species_options:
+            event.sender.set_value(self.species_filter)
+            return
+        self.species_filter = event.value
+        self.update_filter_count()
+        return self.change_queue()
+
+    def render_species_selector(self, on_change, *, test_id="distance-target-species") -> None:
+        ui.select(
+            self.species_options,
+            label=t("distance_target_species"),
+            value=self.species_filter,
+            clearable=False,
+            with_input=True,
+            on_change=on_change,
+        ).props(f"dense outlined required data-testid={test_id}").classes("w-full")
 
     @ui.refreshable
     def render_sidebar(self) -> None:
@@ -839,6 +848,12 @@ class DistanceReviewPage:
                         else "distance_no_videos"
                     )
                 )
+                if not self.species_filter:
+                    with ui.column().classes("w-full max-w-md"):
+                        self.render_species_selector(
+                            self.update_species_filter,
+                            test_id="distance-target-species-empty",
+                        )
             return
         with ui.column().classes("distance-queue"):
             with ui.element("div").classes("distance-queue-header"):
@@ -1534,7 +1549,9 @@ class DistanceReviewPage:
         """Show sample timing and replay directly below the animal player."""
         if not self.review or self.sample_offset not in self.offsets:
             return
-        with ui.row().classes("distance-animal-timing items-center w-full gap-xs"):
+        with ui.row().classes("distance-animal-timing items-center w-full gap-2").style(
+            "min-width: 0; gap: 8px"
+        ):
             recorded_time = sample_camera_time(self.review, self.sample_offset)
             label = (
                 t("distance_sample_time", time=recorded_time.isoformat(sep=" "))
@@ -1556,10 +1573,23 @@ class DistanceReviewPage:
                 ui.label(label).classes("text-caption text-info")
             if not self.individual:
                 ui.label(t("distance_sample_browse_only")).classes("text-caption text-grey-6")
+            position = self.offsets.index(self.sample_offset)
+            previous_sample = ui.button(
+                t("distance_previous_sample"),
+                icon="chevron_left",
+                on_click=lambda: self.move_sample(-1),
+            ).props('flat dense data-distance-action="previous-sample"')
+            previous_sample.set_enabled(not self.busy and position > 0)
+            next_sample = ui.button(
+                t("distance_next_sample"),
+                icon="chevron_right",
+                on_click=lambda: self.move_sample(1),
+            ).props('flat dense icon-right data-distance-action="next-sample"')
+            next_sample.set_enabled(not self.busy and position + 1 < len(self.offsets))
             if self.sample_seek_offset(self.sample_offset) > 0 and self.animal_player:
                 with ui.button(
                     t("distance_play_interval"), icon="replay", on_click=self.replay_interval
-                ).props('flat dense data-distance-action="replay"') as replay:
+                ).props('flat dense data-distance-action="replay"').classes("ml-auto") as replay:
                     _shortcut_badge("R")
                 replay.set_enabled(not self.busy)
 
@@ -2395,6 +2425,13 @@ class DistanceReviewPage:
     @stable_client
     async def add_reference_distance_dialog(self) -> None:
         if self.busy or self.distance_locked or not self.reference or not self.reference_player:
+            return
+        selected_frame = next(
+            (frame for frame in self.frames if frame["id"] == self.selected_frame_id),
+            None,
+        )
+        if selected_frame is not None:
+            await self.configure_reference_distance(selected_frame["distance_m"])
             return
         reference, player = self.reference, self.reference_player
         suggested = (
