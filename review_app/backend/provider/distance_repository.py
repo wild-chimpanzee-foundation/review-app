@@ -16,7 +16,6 @@ from review_app.backend.db.models import (
     Video,
 )
 from review_app.backend.provider.base import ProviderBase
-from review_app.backend.provider.distance_camera_layout import repair_distance_camera_layout
 from review_app.backend.provider.distance_identities import (
     create_distance_individual,
     delete_distance_individual,
@@ -57,11 +56,6 @@ def _offset(value: int) -> None:
 
 
 class DistanceMixin(ProviderBase):
-    def repair_distance_camera_layout(self, project_id: str) -> None:
-        """Repair legacy category-folder camera IDs for one project's videos."""
-        with self.Session.begin() as session:
-            repair_distance_camera_layout(session, project_id)
-
     def _reconcile_distance_video_completion(self, session, video_id: str) -> None:
         """Refresh completion after a video duration change in its transaction."""
         reconcile_video_completion(session, video_id)

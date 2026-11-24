@@ -830,9 +830,9 @@ async def setup_review():
         set_state_val("has_ai_annotations", has_ai)
     show_tour_if_needed(t)
 
-    ui.add_body_html(
+    # The project-opening dialog may have already sent the initial HTML.
+    ui.run_javascript(
         """
-        <script>
             if (!window.__videoManagerInitialized) {
                 window.__videoManagerInitialized = true;
 
@@ -907,9 +907,7 @@ async def setup_review():
                         window.__clearAnnotationSelection();
                 });
             }
-        </script>
-    """,
-        shared=True,
+        """
     )
 
     # Keyboard handler is registered via ui.run_javascript (not shared HTML) so it is

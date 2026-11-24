@@ -456,18 +456,18 @@ class GUI:
                 ).props("color=negative")
 
     async def overview_page(self):
-        from review_app.app.utils import require_login
+        from review_app.app.utils import require_open_project
 
-        if not require_login(require_project=True):
+        if not await require_open_project():
             return
         from review_app.app.pages.overview import setup_overview
 
         await setup_overview()
 
     async def deployments_page(self, review: str = "", deployment: str = "", view: str = ""):
-        from review_app.app.utils import require_login
+        from review_app.app.utils import require_open_project
 
-        if not require_login(require_project=True):
+        if not await require_open_project():
             return
         from review_app.app.pages.deployments import setup_deployments
 
@@ -476,18 +476,18 @@ class GUI:
         )
 
     async def review_page(self):
-        from review_app.app.utils import require_login
+        from review_app.app.utils import require_open_project
 
-        if not require_login(require_project=True):
+        if not await require_open_project():
             return
         from review_app.app.pages.review import setup_review
 
         await setup_review()
 
     async def data_assignments_page(self, area: str = "assignments"):
-        from review_app.app.utils import require_login
+        from review_app.app.utils import require_open_project
 
-        if not require_login(require_project=True):
+        if not await require_open_project():
             return
         from review_app.app.pages.data_assignments import setup_data_assignments
 
@@ -497,16 +497,16 @@ class GUI:
         """Keep old bookmarks working without retaining a separate page package."""
         from nicegui import ui
 
-        from review_app.app.utils import require_login
+        from review_app.app.utils import require_open_project
 
-        if not require_login(require_project=True):
+        if not await require_open_project():
             return
         ui.navigate.to("/data-assignments?area=add")
 
     async def distance_review_page(self):
-        from review_app.app.utils import require_login
+        from review_app.app.utils import require_open_project
 
-        if not require_login(require_project=True):
+        if not await require_open_project():
             return
         from review_app.app.pages.distance_review import setup_distance_review
 
@@ -525,9 +525,9 @@ class GUI:
         """Redirect the former allocation page into the assignment workspace."""
         from nicegui import ui
 
-        from review_app.app.utils import require_login
+        from review_app.app.utils import require_open_project
 
-        if not require_login(require_project=True):
+        if not await require_open_project():
             return
         ui.navigate.to("/data-assignments?area=assignments")
 

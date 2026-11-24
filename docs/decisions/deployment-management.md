@@ -10,6 +10,10 @@ later** goes to Overview, where **Review reference folders** opens that same
 queue. The app rechecks the preview before saving the project and its inferred
 groups.
 
+The first time a legacy project opens, the app creates deployments from its
+historical camera labels. Clips without labels stay unresolved. Use the folder
+review or clip assignment tools to link reference footage to a deployment.
+
 A deployment is a particular camera placement and recording period. Use the
 folder grouping for the placement even when the same physical camera appears
 under several recording periods. The app records project-scoped deployment

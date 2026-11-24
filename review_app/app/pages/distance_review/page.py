@@ -2750,7 +2750,6 @@ class DistanceReviewPage:
             return
         self.busy = True
         try:
-            await run.io_bound(self.dp.repair_distance_camera_layout, self.project_id)
             self.references = await run.io_bound(
                 self.dp.get_distance_reference_videos, self.video["video_id"]
             )
@@ -2809,7 +2808,6 @@ async def setup_distance_review() -> None:
         ui.label(t("distance_choose_project")).classes("text-grey-6 q-pa-lg")
         ui.button(t("go_to_overview_btn"), on_click=lambda: ui.navigate.to("/overview"))
         return
-    await run.io_bound(dp.repair_distance_camera_layout, project_id)
     all_videos = await run.io_bound(dp.get_distance_video_queue, project_id)
     species_options = await run.io_bound(
         dp.get_distance_target_species_options, project_id, get_language()

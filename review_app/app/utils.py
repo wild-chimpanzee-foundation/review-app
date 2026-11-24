@@ -103,6 +103,54 @@ def require_login(*, require_project: bool = False) -> bool:
     return True
 
 
+async def require_open_project() -> bool:
+    """Initialize a legacy project's deployments before serving its pages."""
+    from nicegui import run, ui
+
+    from review_app.app.state import get_active_project_id, set_active_project
+
+    if not require_login(require_project=True):
+        return False
+    project_id = get_active_project_id()
+    dp = await get_or_create_data_provider()
+    if dp is None:
+        return True
+
+    initialization = asyncio.create_task(
+        run.io_bound(dp.initialize_project_deployments, project_id)
+    )
+    dialog = None
+    try:
+        done, _ = await asyncio.wait({initialization}, timeout=0.5)
+        if not done:
+            with ui.dialog().props("persistent") as dialog:
+                with ui.card().classes("q-pa-lg row items-center gap-md no-wrap"):
+                    ui.spinner(size="md")
+                    ui.label(t("deployment_initialization_progress")).props('role="status"')
+            dialog.open()
+            # Release the initial page response so the dialog can render while work continues.
+            await ui.context.client.connected()
+        initialized = await initialization
+    except Exception as exc:
+        with ignore_deleted_client("show deployment initialization failure"):
+            ui.label(t("deployment_initialization_failed", error=user_error_message(exc))).props(
+                'role="alert"'
+            ).classes("text-negative q-pa-md")
+        return False
+    finally:
+        if not initialization.done():
+            initialization.cancel()
+        if dialog is not None:
+            with ignore_deleted_client("close deployment initialization dialog"):
+                dialog.close()
+
+    if initialized is False:
+        if get_active_project_id() == project_id:
+            set_active_project(None)
+        ui.navigate.to("/")
+    return initialized is True
+
+
 def localize_inat_url(url: str | None) -> str | None:
     """Append the current app language as iNaturalist's locale query parameter."""
     if not url:

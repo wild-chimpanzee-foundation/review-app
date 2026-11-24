@@ -634,6 +634,15 @@ def _apply_folder_reviews(folders, reviews, inventory, available):
 
 
 class DeploymentMixin(ProviderBase):
+    def initialize_project_deployments(self, project_id: str) -> bool:
+        """Prepare saved deployment assignments when entering a project."""
+        with self.Session.begin() as session:
+            project = session.get(Project, project_id)
+            if project is None:
+                return False
+            ensure_project_initialized(session, project_id)
+            return True
+
     def get_deployment_summary(self, project_id):
         with self.Session.begin() as session:
             ensure_project_initialized(session, project_id)

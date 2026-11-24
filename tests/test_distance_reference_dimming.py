@@ -392,7 +392,6 @@ async def test_empty_reference_refresh_and_first_player_keep_header_actions_live
     page.references = []
     page.reference = page.reference_player = None
     page.frames = []
-    page.dp.repair_distance_camera_layout = Mock()
     page.dp.get_distance_reference_videos = Mock(return_value=reference_page["references"])
     page.render_references.refresh()
     refresh = next(
@@ -404,10 +403,10 @@ async def test_empty_reference_refresh_and_first_player_keep_header_actions_live
     refresh.mark("reference-refresh")
     user.find(marker="reference-refresh").click()
     for _ in range(100):
-        if page.dp.repair_distance_camera_layout.called and not page.busy:
+        if page.dp.get_distance_reference_videos.called and not page.busy:
             break
         await asyncio.sleep(0.01)
-    page.dp.repair_distance_camera_layout.assert_called_once_with("project")
+    page.dp.get_distance_reference_videos.assert_called_once_with(page.video["video_id"])
     await user.should_see("first.mp4")
     await page.open_reference(reference_page["references"][0])
     await user.should_see("5 m")

@@ -76,43 +76,34 @@ def test_reference_lookup_is_scoped_to_deployment_and_has_no_limit(distance_data
     assert all(row["is_tagged"] for row in references)
 
 
-@pytest.mark.parametrize("load_queue_first", [False, True, "already_synced"])
-def test_refresh_repairs_legacy_category_ids_and_preserves_prepared_evidence(
-    distance_data, tmp_path, load_queue_first
+def test_initializing_legacy_deployments_preserves_camera_labels_and_prepared_evidence(
+    distance_data, tmp_path
 ):
     data, dp = distance_data, distance_data["dp"]
-    root = tmp_path / "deployments"
-    for camera in ("cam_a", "cam_b"):
-        for role in ("videos", "references"):
-            (root / camera / role).mkdir(parents=True)
-        (root / camera / "videos" / "animal.MOV").touch()
-        (root / camera / "references" / "ref.MOV").touch()
-    project = dp.create_project("Paired folders", str(root))
-    animals, sources = {}, {}
-    for camera in ("cam_a", "cam_b"):
-        animal_id = str(uuid.uuid4())
-        with dp.Session.begin() as session:
-            session.add(
-                Video(
-                    video_id=animal_id,
-                    project_id=project.id,
-                    camera_id=f"{camera}/videos",
-                    video_path=str(root / camera / "videos" / "animal.MOV"),
-                    duration_sec=10,
-                )
+    root = tmp_path / "legacy"
+    clip = root / "cam_a/videos/animal.MOV"
+    calibration = root / "cam_a/references/ref.MOV"
+    for path in (clip, calibration):
+        path.parent.mkdir(parents=True)
+        path.touch()
+    project = dp.create_project("Legacy calibration", str(root))
+    label = "cam_a/videos"
+    with dp.Session.begin() as session:
+        session.add(
+            Video(
+                video_id="animal",
+                project_id=project.id,
+                camera_id=label,
+                video_path=str(clip),
+                duration_sec=10,
             )
-        animals[camera] = animal_id
-        sources[camera] = tagged_reference(
-            dp, project.id, f"{camera}/references", str(root / camera / "references" / "ref.MOV")
         )
-    prepared = dp.register_reference_video(
-        project.id, "cam_a/references", str(root / "cam_a" / "references" / "ref.MOV")
-    )
+    source = tagged_reference(dp, project.id, label, str(calibration))
+    prepared = dp.register_reference_video(project.id, label, str(calibration))
     frame = dp.add_reference_frame(prepared["id"], 0, 5)
-    for animal_id in animals.values():
-        dp.update_manual_review(animal_id, [{"species": "deer"}], is_blank=False)
+    dp.update_manual_review("animal", [{"species": "deer"}], is_blank=False)
     individual = dp.create_distance_individual(
-        animals["cam_a"], data["species_id"], 0, anchor=data["anchor"]
+        "animal", data["species_id"], 0, anchor=data["anchor"]
     )
     with dp.Session.begin() as session:
         session.add(
@@ -124,24 +115,16 @@ def test_refresh_repairs_legacy_category_ids_and_preserves_prepared_evidence(
                 distance_m=5.0,
             )
         )
-    if load_queue_first == "already_synced":
-        # Folder sync can repair Video rows before reference discovery runs.
-        with dp.Session.begin() as session:
-            for camera in animals:
-                session.get(Video, animals[camera]).camera_id = camera
-                session.get(Video, sources[camera]).camera_id = camera
-    elif load_queue_first:
-        queue = dp.get_distance_video_queue(project.id)
-        assert {row["camera_id"] for row in queue} == {"cam_a/videos", "cam_b/videos"}
-    dp.repair_distance_camera_layout(project.id)
-    found = dp.get_distance_reference_videos(animals["cam_a"])
-    assert len(found) == 1
-    assert found[0]["id"] == prepared["id"]
-    assert found[0]["camera_id"] == "cam_a"
-    assert found[0]["source_video_id"] == sources["cam_a"]
+    assert dp.initialize_project_deployments(project.id)
+    (deployment,) = dp.get_project_deployments(project.id)
+    assert dp.initialize_project_deployments(project.id)
+    assert dp.get_project_deployments(project.id) == [deployment]
+    (found,) = dp.get_distance_reference_videos("animal")
+    assert found["id"] == prepared["id"]
+    assert found["camera_id"] == deployment["deployment_id"] == label
+    assert found["deployment_id"] == deployment["id"]
+    assert found["source_video_id"] == source
     assert dp.list_reference_frames(prepared["id"]) == [frame]
-    assert dp.get_distance_reference_videos(animals["cam_a"]) == found
-    assert dp.get_distance_reference_videos(animals["cam_b"])[0]["camera_id"] == "cam_b"
     with dp.Session() as session:
         assert (
             session.query(DistanceSample)
@@ -150,22 +133,6 @@ def test_refresh_repairs_legacy_category_ids_and_preserves_prepared_evidence(
             .reference_frame_id
             == frame["id"]
         )
-    # Subsequent folder sync must keep the repaired grouping.
-    assert set(dp._scan_videos(root)["camera_id"]) == {"cam_a", "cam_b"}
-
-
-def test_layout_repair_preserves_explicit_camera_assignments(distance_data, tmp_path):
-    dp = distance_data["dp"]
-    root = tmp_path / "deployment"
-    (root / "videos").mkdir(parents=True)
-    (root / "references").mkdir()
-    project = dp.create_project("Explicit camera", str(root))
-    source = tagged_reference(
-        dp, project.id, "custom-camera", str(root / "references" / "ref.mp4")
-    )
-    dp.repair_distance_camera_layout(project.id)
-    with dp.Session() as session:
-        assert session.get(Video, source).camera_id == "custom-camera"
 
 
 def test_reference_tag_is_available_on_fresh_databases_and_provider_reopen(distance_data):

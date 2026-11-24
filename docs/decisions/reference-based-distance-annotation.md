@@ -350,24 +350,17 @@ folders, and administrators resolve unmatched footage. Declared deployments may
 span import roots through explicit links; matching labels alone never establish
 such a link. Deployment-dependent Distance operations require resolved assignments.
 
-An initial CSV/folder-derived inventory and read-only Overview inventory page are
-implemented, without location support. Inventory records and stored folder paths do
-not yet change video assignments: sync still owns the stored folder-derived label.
-The remaining assignment migration and compatibility gates must be completed before
-changing discovery/write scope. The planned admin editor remains separate from
-Species Review and does not relax reference inference or permit silently changing
-saved Distance evidence.
-
 Paired `references/` and `videos/` folders support both
 `cam_a/{videos,references}/clip.mp4` and `{videos,references}/cam_a/clip.mp4`.
 In either layout, the category folder is omitted from the camera label, so both
 clips have camera ID `cam_a`. Category folders must be paired inside the import
 root; importing only `references/` does not infer reference roles from its name.
 At an imported deployment root with clips directly in the category folders, use
-the root's name; below it, use relative folder paths. Legacy folder-derived labels
-are repaired explicitly during Distance setup or **Refresh references**, not as a
-side effect of queue queries. Repair only old
-inferred labels, preserving explicit assignments, identities, and saved evidence.
+the root's name. Below it, use relative folder paths. Opening a legacy project
+initializes saved deployments from its historical camera labels and retains
+existing calibration identities and evidence. Use Deployment Management to link
+reference clips or folders. Distance Review and **Refresh references** read
+those saved assignments.
 
 Discovery reuses durable reference records by project and normalized path,
 including previously registered files. Removing/reapplying a tag does not recreate

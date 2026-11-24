@@ -1443,7 +1443,6 @@ async def test_reference_refresh_preserves_player_until_reference_is_removed(
     page.reference = reference
     original_player = page.reference_player = object()
     calls = Mock()
-    page.dp.repair_distance_camera_layout = calls.repair
     page.dp.get_distance_reference_videos = calls.references
     page.dp.list_reference_frames = calls.frames
     calls.frames.return_value = list(page.frames)
@@ -1454,7 +1453,6 @@ async def test_reference_refresh_preserves_player_until_reference_is_removed(
     monkeypatch.setattr(page_module, "stop_player", stop)
     await page.refresh_references()
     assert calls.method_calls == [
-        ("repair", (page.project_id,), {}),
         ("references", ("current",), {}),
     ] + ([("frames", (reference["id"],), {})] if present else [])
     if present:
