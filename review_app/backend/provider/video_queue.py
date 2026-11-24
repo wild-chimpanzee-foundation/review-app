@@ -5,6 +5,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 
+from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL
 from review_app.backend.provider.base import ProviderBase
 from review_app.backend.utils import DEFAULT_REVIEW_THRESHOLD
 
@@ -39,8 +40,14 @@ class QueueMixin(ProviderBase):
         with self.engine.connect() as conn:
             df = pd.read_sql(
                 text(f"""
-                    SELECT 'camera' AS source, camera_id AS val FROM videos
-                    WHERE camera_id IS NOT NULL {vid_filter} GROUP BY camera_id
+                    SELECT 'camera' AS source, val FROM (
+                        SELECT d.deployment_id AS val FROM deployments d
+                        WHERE EXISTS (SELECT 1 FROM videos v WHERE v.deployment_id = d.id)
+                        {vid_filter}
+                        UNION
+                        SELECT folder_camera_label FROM videos
+                        WHERE project_id IS NULL AND folder_camera_label IS NOT NULL {vid_filter}
+                    )
                     UNION ALL
                     SELECT 'species', s.scientific_name FROM individual_observations io
                     JOIN species s ON s.id = io.species_id
@@ -176,7 +183,11 @@ class QueueMixin(ProviderBase):
 
         # Scope model_annotations CTEs to the active project: the table spans all
         # projects, and aggregating the others' rows multiplies queue latency.
-        ma_project_filter = "AND project_id = :pid" if active_project_id else ""
+        ma_project_filter = (
+            "AND video_id IN (SELECT video_id FROM videos WHERE project_id = :pid)"
+            if active_project_id
+            else ""
+        )
         v_project_filter = "WHERE v.project_id = :pid" if active_project_id else ""
 
         need_needs_review_filter = selected_needs_review != "All"
@@ -249,7 +260,15 @@ class QueueMixin(ProviderBase):
 
         if selected_camera != "All":
             params["camera"] = selected_camera
-            where.append("v.camera_id = :camera")
+            if active_project_id:
+                where.append("""
+                    v.deployment_id = (
+                        SELECT id FROM deployments WHERE project_id = :pid AND deployment_id = :camera
+                    )""")
+            else:
+                where.append("""
+                    (v.deployment_id IN (SELECT id FROM deployments WHERE deployment_id = :camera)
+                    OR (v.project_id IS NULL AND v.folder_camera_label = :camera))""")
 
         if selected_deployment == "unresolved":
             where.append("v.deployment_id IS NULL")
@@ -413,7 +432,10 @@ class QueueMixin(ProviderBase):
                 )""")
 
         if selected_sort == "camera":
-            order_by = f"ORDER BY v.camera_id {sort_dir}, v.created_at ASC NULLS LAST"
+            camera_order = (
+                f"{VIDEO_CAMERA_LABEL_SQL} {sort_dir}, " if selected_camera == "All" else ""
+            )
+            order_by = f"ORDER BY {camera_order}v.created_at ASC NULLS LAST"
         elif selected_sort == "unreviewed_first":
             order_by = f"""ORDER BY
                 CASE WHEN EXISTS (

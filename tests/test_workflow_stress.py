@@ -53,7 +53,7 @@ def test_distance_only_materializes_missing_tasks(
                         video_id=video_id,
                         project_id=project.id,
                         video_path=str(tmp_db["video_dir"] / f"{video_id}.mp4"),
-                        camera_id="cam_a",
+                        folder_camera_label="cam_a",
                         duration_sec=10,
                     )
                     for video_id in video_ids
@@ -64,7 +64,6 @@ def test_distance_only_materializes_missing_tasks(
                 [
                     dict(
                         video_id=video_id,
-                        project_id=project.id,
                         id=1,
                         species_id=species_id,
                         count=2,
@@ -79,6 +78,8 @@ def test_distance_only_materializes_missing_tasks(
                     for video_id in video_ids[:preexisting]
                 ],
             )
+
+        dp.initialize_project_deployments(project.id)
 
         task_inserts = insert_calls = selects = 0
 
@@ -303,7 +304,9 @@ def test_concurrent_overlapping_returns_commit_only_one_preview(footage_project,
                 IndividualObservation.video_id,
                 IndividualObservation.count,
                 IndividualObservation.labeled_by,
-            ).where(IndividualObservation.project_id == project.id)
+            )
+            .join(Video, Video.video_id == IndividualObservation.video_id)
+            .where(Video.project_id == project.id)
         ).all()
     assert {tuple(row) for row in saved} == {
         (video_id, count, recipient) for video_id in winning_ids

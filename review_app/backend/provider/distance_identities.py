@@ -27,7 +27,11 @@ SEXES = {"Male", "Female", "Unknown"}
 
 
 def _record(row) -> dict:
-    return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+    return {
+        **{column.name: getattr(row, column.name) for column in row.__table__.columns},
+        "video_id": row.task.video_id,
+        "species_id": row.task.species_id,
+    }
 
 
 def _offset(value: int) -> None:
@@ -97,7 +101,7 @@ def create_distance_individual(
     video = session.get(Video, video_id)
     if video is None:
         raise ValueError("Video not found")
-    if not video.project_id or not video.camera_id or not video.camera_id.strip():
+    if not video.deployment_id:
         raise ValueError("Resolve the video's project and camera before distance review")
     _first_seen(video, first_seen_offset_ms)
     if session.get(Species, species_id) is None:
@@ -109,9 +113,7 @@ def create_distance_individual(
     )
     now = utcnow()
     row = DistanceIndividual(
-        video_id=video_id,
         task_id=review.id,
-        species_id=species_id,
         individual_number=(last_number or 0) + 1,
         first_seen_offset_ms=first_seen_offset_ms,
         age=age,
@@ -259,7 +261,7 @@ def set_distance_individual_attributes(
     if species_id is not None and session.get(Species, species_id) is None:
         raise ValueError("Species not found")
     now = utcnow()
-    if species_id is not None and species_id != row.species_id:
+    if species_id is not None and species_id != row.task.species_id:
         raise ValueError("Individual species must match the task's target species")
     row.age, row.sex = age, sex
     row.labeled_by, row.labeled_at, row.updated_at = labeled_by, now, now
@@ -296,7 +298,7 @@ def set_distance_individual_anchor(
     row = session.get(DistanceIndividual, individual_id)
     if row is None:
         raise ValueError("Distance individual not found")
-    _first_seen(session.get(Video, row.video_id), first_seen_offset_ms)
+    _first_seen(session.get(Video, row.task.video_id), first_seen_offset_ms)
     if row.first_seen_offset_ms != first_seen_offset_ms:
         row.first_seen_playback_ms = None
     row.first_seen_offset_ms = first_seen_offset_ms

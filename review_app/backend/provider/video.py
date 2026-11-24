@@ -267,7 +267,7 @@ class VideoMixin(ProviderBase):
                     scope = json.loads(binding.scope)
                     listed = session.execute(
                         text(
-                            "SELECT v.video_path, v.camera_id FROM handoff_identity_maps m "
+                            "SELECT v.video_path, v.folder_camera_label AS camera_id FROM handoff_identity_maps m "
                             "JOIN videos v ON v.video_id=m.local_id "
                             "WHERE m.handoff_id=:hid AND m.kind='video' "
                             "AND m.portable_id IN (SELECT value FROM json_each(:keys)) "
@@ -409,8 +409,7 @@ class VideoMixin(ProviderBase):
                             "video_id": str(uuid.uuid4()),
                             "project_id": active_project_id,
                             "video_path": row["video_path"],
-                            "camera_id": row["camera_id"] if active_project_id is None else None,
-                            "inferred_camera_id": row["camera_id"],
+                            "folder_camera_label": row["camera_id"],
                             "deployment_assignment": "legacy"
                             if active_project_id is None
                             else "unresolved",
@@ -430,8 +429,7 @@ class VideoMixin(ProviderBase):
                 session.execute(
                     text("""
                         UPDATE videos
-                        SET inferred_camera_id = :camera_id,
-                            camera_id = CASE WHEN :project_id IS NULL THEN :camera_id ELSE camera_id END,
+                        SET folder_camera_label = :camera_id,
                             last_seen_at = :last_seen_at,
                             is_missing   = 0
                         WHERE video_path = :video_path

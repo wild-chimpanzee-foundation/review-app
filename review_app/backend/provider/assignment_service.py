@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 
+from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
 from review_app.backend.utils import bind_id_list
@@ -156,12 +157,12 @@ class AssignmentMixin(ProviderBase):
         """Return per-camera video count and total hours for the project."""
         with self.engine.connect() as conn:
             rows = conn.execute(
-                text("""
+                text(f"""
                     SELECT
-                        camera_id,
+                        {VIDEO_CAMERA_LABEL_SQL} AS camera_id,
                         COUNT(*) AS video_count,
                         COALESCE(SUM(duration_sec), 0) / 3600.0 AS hours
-                    FROM videos
+                    FROM videos v
                     WHERE project_id = :pid AND camera_id IS NOT NULL
                     GROUP BY camera_id
                     ORDER BY video_count DESC
@@ -199,11 +200,11 @@ class AssignmentMixin(ProviderBase):
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text(f"""
-                    SELECT v.video_id, v.camera_id, COALESCE(v.duration_sec, 0) AS dur
+                    SELECT v.video_id, {VIDEO_CAMERA_LABEL_SQL} AS camera_id, COALESCE(v.duration_sec, 0) AS dur
                     FROM videos v
-                    WHERE v.project_id = :pid AND v.camera_id IS NOT NULL
+                    WHERE v.project_id = :pid AND v.deployment_id IS NOT NULL
                     {unlabeled_filter}
-                    ORDER BY v.camera_id, v.video_path
+                    ORDER BY camera_id, v.video_path
                 """),
                 {"pid": project_id},
             ).fetchall()
@@ -474,8 +475,8 @@ class AssignmentMixin(ProviderBase):
                     text(f"""
                         DELETE FROM video_assignments
                         WHERE video_id IN (
-                            SELECT video_id FROM videos
-                            WHERE project_id = :pid AND camera_id IN {cam_list}
+                            SELECT video_id FROM videos v
+                            WHERE project_id = :pid AND {VIDEO_CAMERA_LABEL_SQL} IN {cam_list}
                         )
                     """),
                     params,
@@ -489,8 +490,8 @@ class AssignmentMixin(ProviderBase):
                     text(f"""
                         INSERT OR REPLACE INTO video_assignments (video_id, assigned_to, assigned_at)
                         SELECT video_id, :annotator, :now
-                        FROM videos
-                        WHERE project_id = :pid AND camera_id IN {cam_list}
+                        FROM videos v
+                        WHERE project_id = :pid AND {VIDEO_CAMERA_LABEL_SQL} IN {cam_list}
                     """),
                     params,
                 )
@@ -506,7 +507,7 @@ class AssignmentMixin(ProviderBase):
                 text("""
                     SELECT
                         va.assigned_to,
-                        COUNT(DISTINCT v.camera_id) AS cameras,
+                        COUNT(DISTINCT v.deployment_id) AS cameras,
                         COUNT(*) AS video_count,
                         ROUND(COALESCE(SUM(v.duration_sec), 0) / 3600.0, 2) AS hours,
                         COUNT(DISTINCT CASE WHEN vl.video_id IS NOT NULL THEN v.video_id END) AS labeled,
@@ -565,11 +566,11 @@ class AssignmentMixin(ProviderBase):
         cameras = {c["camera_id"]: None for c in self.get_camera_stats(project_id)}
         with self.engine.connect() as conn:
             rows = conn.execute(
-                text("""
-                    SELECT DISTINCT v.camera_id, va.assigned_to
+                text(f"""
+                    SELECT DISTINCT {VIDEO_CAMERA_LABEL_SQL} AS camera_id, va.assigned_to
                     FROM video_assignments va
                     JOIN videos v ON v.video_id = va.video_id
-                    WHERE v.project_id = :pid AND v.camera_id IS NOT NULL
+                    WHERE v.project_id = :pid AND v.deployment_id IS NOT NULL
                 """),
                 {"pid": project_id},
             ).fetchall()

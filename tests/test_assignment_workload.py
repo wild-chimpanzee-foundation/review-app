@@ -1,7 +1,7 @@
 """Assigned-footage workload summaries use only known, frozen metadata."""
 
 from review_app.backend.annotation_package.scope import AssignmentRequest
-from review_app.backend.db.models import Video
+from review_app.backend.db.models import Deployment, Video
 from review_app.backend.provider.assignment_handoff import summarize_workload
 
 
@@ -26,14 +26,20 @@ def test_saved_workload_stays_frozen_after_redistribution(provider_with_project)
     dp, project, _ = provider_with_project
     video_ids = dp.get_assignment_video_ids(project.id)
     with dp.Session.begin() as session:
+        cameras = [
+            Deployment(project_id=project.id, deployment_id=label)
+            for label in ("camera-a", "camera-b")
+        ]
+        session.add_all(cameras)
+        session.flush()
         first, second = (session.get(Video, video_id) for video_id in video_ids)
-        first.camera_id, first.duration_sec = "camera-a", 3600
-        second.camera_id, second.duration_sec = "camera-b", None
+        first.deployment_id, first.duration_sec = cameras[0].id, 3600
+        second.deployment_id, second.duration_sec = cameras[1].id, None
     assignment = dp.prepare_assignment(project.id, AssignmentRequest("alice", tuple(video_ids)))
 
     with dp.Session.begin() as session:
         first = session.get(Video, video_ids[0])
-        first.camera_id, first.duration_sec = "changed", 7200
+        first.deployment_id, first.duration_sec = None, 7200
     dp.add_annotator("bob")
     dp.apply_chunk_assignment(
         project.id,

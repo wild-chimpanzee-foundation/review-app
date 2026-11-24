@@ -12,6 +12,7 @@ import pytest
 from review_app.backend.db.migrations import MIGRATIONS, run_migrations
 from review_app.backend.db.models import (
     Base,
+    Deployment,
     DistanceIndividual,
     DistanceIndividualTag,
     DistanceReviewTask,
@@ -47,12 +48,25 @@ def tagged_reference(dp, project_id, camera_id, path, *, missing=False):
             Video(
                 video_id=video_id,
                 project_id=project_id,
-                camera_id=camera_id,
+                folder_camera_label=camera_id,
                 video_path=path,
                 duration_sec=10,
                 is_missing=missing,
             )
         )
+        if project_id and camera_id:
+            deployment = (
+                session.query(Deployment)
+                .filter_by(project_id=project_id, deployment_id=camera_id)
+                .one_or_none()
+            )
+            if deployment is None:
+                deployment = Deployment(project_id=project_id, deployment_id=camera_id)
+                session.add(deployment)
+                session.flush()
+            source = session.get(Video, video_id)
+            source.deployment_id = deployment.id
+            source.deployment_assignment = "manual"
     dp.set_video_tags(video_id, ["reference_video"])
     return video_id
 
@@ -93,7 +107,7 @@ def test_initializing_legacy_deployments_preserves_camera_labels_and_prepared_ev
             Video(
                 video_id="animal",
                 project_id=project.id,
-                camera_id=label,
+                folder_camera_label=label,
                 video_path=str(clip),
                 duration_sec=10,
             )
@@ -102,6 +116,7 @@ def test_initializing_legacy_deployments_preserves_camera_labels_and_prepared_ev
     prepared = dp.register_reference_video(project.id, label, str(calibration))
     frame = dp.add_reference_frame(prepared["id"], 0, 5)
     dp.update_manual_review("animal", [{"species": "deer"}], is_blank=False)
+    dp.initialize_project_deployments(project.id)
     individual = dp.create_distance_individual(
         "animal", data["species_id"], 0, anchor=data["anchor"]
     )
@@ -240,11 +255,12 @@ def test_tag_discovery_does_not_change_existing_reference_deployment(distance_da
     tagged_reference(dp, data["project"].id, "another-camera", data["reference"]["video_path"])
     with dp.Session.begin() as session:
         video = session.get(Video, data["videos"][1])
-        video.camera_id = "another-camera"
-        # Simulate a pre-inventory label, not an inconsistent overwrite of the
-        # compatibility projection while retaining the old durable identity.
-        video.deployment_id = None
-        video.deployment_assignment = "legacy"
+        video.deployment_id = (
+            session.query(Deployment)
+            .filter_by(project_id=data["project"].id, deployment_id="another-camera")
+            .one()
+            .id
+        )
     assert dp.get_distance_reference_videos(data["videos"][1]) == []
     assert dp.list_reference_videos(data["project"].id, "cam_x") == [data["reference"]]
 
@@ -320,8 +336,10 @@ def test_missing_deployment_metadata_blocks_reference_lookup_and_individuals(dis
     data = distance_data
     dp, video_id = data["dp"], data["videos"][1]
     with dp.engine.begin() as conn:
-        conn.execute(text("UPDATE videos SET camera_id=NULL WHERE video_id=:id"), {"id": video_id})
-    with pytest.raises(ValueError, match="project and camera"):
+        conn.execute(
+            text("UPDATE videos SET deployment_id=NULL WHERE video_id=:id"), {"id": video_id}
+        )
+    with pytest.raises(ValueError, match="project and deployment"):
         dp.get_distance_reference_videos(video_id)
     with pytest.raises(ValueError, match="project and camera"):
         dp.create_distance_individual(video_id, data["species_id"], 0, anchor=data["anchor"])
@@ -1130,7 +1148,10 @@ def test_distance_queue_filters_use_distance_completion_and_camera(distance_data
     dp, project = data["dp"], data["project"]
     first, second = data["videos"][:2]
     with dp.Session.begin() as session:
-        session.get(Video, second).camera_id = "cam_other"
+        deployment = Deployment(project_id=project.id, deployment_id="cam_other")
+        session.add(deployment)
+        session.flush()
+        session.get(Video, second).deployment_id = deployment.id
     # Ordinary review has no effect on Distance's not-started filter.
     dp.update_manual_review(first, [], is_blank=True)
     assert first in {

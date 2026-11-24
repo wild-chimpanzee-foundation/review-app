@@ -73,6 +73,7 @@ def export_return(session, binding):
     context["predictions"] = []
     context["project_species"] = []
     context["distance"]["species_work"] = []
+    distance.validate_reference_membership(context, work, original)
     return encode_archive(manifest, context, work)
 
 
@@ -142,6 +143,7 @@ def scoped_context(context, work):
 
 
 def plan(session, binding, manifest, context, work, data, policy, original):
+    distance.validate_reference_membership(context, work, original)
     current_context, current_work = portable_collection(session, binding)
     current = {u["video_id"]: u for u in current_work}
     videos = bound_videos(session, binding)
@@ -325,6 +327,13 @@ def accept(session, binding, context, selected, approved_substitutions):
         for name, key in (("species", "scientific_name"), ("behaviors", "key"), ("tags", "key"))
     }
     vocab = species.vocabulary(session, definitions)
+    _, original, _ = decode_archive(binding.setup_archive)
+    snapshot = original.get("deployments")
+    frozen_deployments = (
+        {row["video_id"]: row["deployment_id"] for row in snapshot["media"]}
+        if snapshot is not None
+        else None
+    )
     mapping = distance.restore_dependencies(
         session,
         binding.project_id,
@@ -334,6 +343,7 @@ def accept(session, binding, context, selected, approved_substitutions):
         media_paths,
         work,
         approved_substitutions=approved_substitutions,
+        frozen_reference_deployments=frozen_deployments,
     )
     for video_id, unit in selected:
         distance.restore_work(

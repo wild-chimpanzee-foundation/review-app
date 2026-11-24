@@ -20,7 +20,7 @@ from review_app.app.translations import t
 from review_app.backend.annotation_package.delivery import CopyResult
 from review_app.backend.annotation_package.detection import inspect_legacy_package
 from review_app.backend.annotation_package.scope import AssignmentRequest
-from review_app.backend.db.models import Video
+from review_app.backend.db.models import Deployment, Video
 
 pytest_plugins = ["nicegui.testing.user_plugin"]
 
@@ -272,8 +272,12 @@ async def test_new_recipient_can_be_added_without_leaving_creation(user: User, h
     ids = dp.get_assignment_video_ids(project.id)
     with dp.Session.begin() as session:
         first, second = (session.get(Video, video_id) for video_id in ids)
-        first.camera_id, first.duration_sec = "camera-a", 3600
-        second.camera_id, second.duration_sec = "camera-b", None
+        camera_a = Deployment(project_id=project.id, deployment_id="camera-a")
+        camera_b = Deployment(project_id=project.id, deployment_id="camera-b")
+        session.add_all([camera_a, camera_b])
+        session.flush()
+        first.deployment_id, first.duration_sec = camera_a.id, 3600
+        second.deployment_id, second.duration_sec = camera_b.id, None
     await user.open("/handoff-admin")
     user.find(t("assign_title"), kind=ui.button).click()
     await user.should_see(t("distribution_add_annotator"))

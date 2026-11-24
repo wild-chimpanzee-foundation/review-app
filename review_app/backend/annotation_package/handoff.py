@@ -205,7 +205,7 @@ def open_setup(
         row = {
             key: value
             for key, value in source.items()
-            if key not in {"video_id", "video_path", "root_id", "is_missing"}
+            if key not in {"video_id", "video_path", "root_id", "is_missing", "camera_id"}
         }
         row["created_at"] = timestamp(row["created_at"])
         session.add(
@@ -214,6 +214,7 @@ def open_setup(
                 project_id=project.id,
                 video_path=paths[source["video_id"]][0],
                 is_missing=paths[source["video_id"]][1],
+                folder_camera_label=source["camera_id"],
                 **row,
             )
         )
@@ -230,7 +231,6 @@ def open_setup(
             ModelAnnotation(
                 id=identities.local("prediction", source["id"]),
                 video_id=videos[source["video_id"]],
-                project_id=project.id,
                 **row,
             )
         )

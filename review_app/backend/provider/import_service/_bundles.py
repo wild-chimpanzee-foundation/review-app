@@ -13,6 +13,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from review_app.backend.annotation_package.detection import legacy_contents
+from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL
 from review_app.backend.provider.import_service._shared import ImportSharedMixin
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ class BundleMixin(ImportSharedMixin):
                 text(f"""
                     SELECT
                         v.video_path,
-                        v.camera_id,
+                        {VIDEO_CAMERA_LABEL_SQL} AS camera_id,
                         v.created_at,
                         v.latitude,
                         v.longitude,
@@ -54,7 +55,7 @@ class BundleMixin(ImportSharedMixin):
                     FROM videos v
                     LEFT JOIN video_assignments va ON va.video_id = v.video_id
                     WHERE v.project_id = :pid AND v.is_missing = 0 {cam_filter}
-                    ORDER BY v.camera_id, v.video_path
+                    ORDER BY camera_id, v.video_path
                 """),
                 conn,
                 params=params,

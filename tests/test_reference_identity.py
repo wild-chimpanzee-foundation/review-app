@@ -34,12 +34,12 @@ def upgraded_references(tmp_path):
             "INSERT INTO species (id, scientific_name, is_custom) VALUES ('s', 'deer', 0)",
             "INSERT INTO behaviors (id, key, name_en, is_custom) VALUES ('behavior', 'walking', 'Walking', 0)",
             "INSERT INTO distance_imports (id, project_id, content_hash, manifest, payload, imported_at) VALUES ('i', 'p', 'hash', '{}', '{}', '2026-01-01')",
-            "INSERT INTO reference_videos (id, project_id, camera_id, video_path) VALUES ('r', 'p', 'camera', 'reference.mp4')",
+            "INSERT INTO reference_videos (id, project_id, unresolved_camera_label, video_path) VALUES ('r', 'p', 'camera', 'reference.mp4')",
             "INSERT INTO reference_frames (id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id) VALUES ('z', 'r', 1000, 1000.25, 5, '{\"old\":true}', 'i')",
             "INSERT INTO reference_frames (id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id) VALUES ('a', 'r', 2000, 2000.25, 5, '{\"keep\":true}', 'i')",
             "INSERT INTO reference_frames (id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id) VALUES ('b', 'r', 3000, NULL, 8, NULL, NULL)",
             "INSERT INTO distance_review_tasks (id, video_id, species_id, source_count, completion_history, rejected_ai, alignment_mode) VALUES ('task', 'v', 's', 1, '[]', '[]', 'exact')",
-            "INSERT INTO distance_individuals (id, task_id, video_id, species_id, individual_number, first_seen_offset_ms, updated_at) VALUES ('animal', 'task', 'v', 's', 1, 0, '2026-01-01')",
+            "INSERT INTO distance_individuals (id, task_id, individual_number, first_seen_offset_ms, updated_at) VALUES ('animal', 'task', 1, 0, '2026-01-01')",
             "INSERT INTO distance_samples (id, individual_id, offset_ms, status, reference_frame_id, distance_m, labeled_by, labeled_at, updated_at) VALUES ('sample-z', 'animal', 1000, 'annotated', 'z', 5, 'alice', '2026-01-01', '2026-01-01')",
             "INSERT INTO distance_samples (id, individual_id, offset_ms, status, reference_frame_id, distance_m, labeled_by, labeled_at, updated_at) VALUES ('sample-a', 'animal', 2000, 'annotated', 'a', 5, 'alice', '2026-01-01', '2026-01-01')",
             "INSERT INTO distance_samples (id, individual_id, offset_ms, status, reference_frame_id, distance_m, updated_at) VALUES ('sample-b', 'animal', 3000, 'annotated', 'b', 8, '2026-01-01')",
@@ -108,7 +108,7 @@ def test_reference_identity_includes_distance_and_timestamp(
                 "INSERT INTO projects (id, name, created_at) VALUES ('p', 'Fresh', '2026-01-01')"
             )
             conn.exec_driver_sql(
-                "INSERT INTO reference_videos (id, project_id, camera_id, video_path) VALUES ('r', 'p', 'camera', 'reference.mp4')"
+                "INSERT INTO reference_videos (id, project_id, unresolved_camera_label, video_path) VALUES ('r', 'p', 'camera', 'reference.mp4')"
             )
             conn.exec_driver_sql(
                 "INSERT INTO reference_frames (id, reference_video_id, offset_ms, distance_m) VALUES ('a', 'r', 2000, 5)"

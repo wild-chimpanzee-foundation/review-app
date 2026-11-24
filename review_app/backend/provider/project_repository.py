@@ -197,15 +197,18 @@ class ProjectMixin(ProviderBase):
                     # Keep references in step with the next sync; leave explicit IDs
                     # and nested deployments alone.
                     if paired_root and old_root.name != new_root.name:
+                        label_field = (
+                            "folder_camera_label" if model is Video else "unresolved_camera_label"
+                        )
                         for row in s.query(model).filter_by(
-                            project_id=d.project_id, camera_id=old_root.name
+                            project_id=d.project_id, **{label_field: old_root.name}
                         ):
                             parent = Path(normalize_path_str(row.video_path)).parent
                             if (
                                 parent in (new_root / "videos", new_root / "references")
                                 and row.deployment_id is None
                             ):
-                                row.camera_id = new_root.name
+                                setattr(row, label_field, new_root.name)
             d.path = normalize_path_str(str(new_path))
             s.commit()
             s.refresh(d)

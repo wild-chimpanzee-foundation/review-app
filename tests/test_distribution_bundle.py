@@ -118,7 +118,7 @@ def test_get_assigned_annotators(two_camera_provider):
             r[0]
             for r in conn.execute(
                 text(
-                    "SELECT video_id FROM videos WHERE camera_id = 'cam_a' AND project_id = :pid"
+                    "SELECT v.video_id FROM videos v JOIN deployments d ON d.id=v.deployment_id WHERE d.deployment_id = 'cam_a' AND v.project_id = :pid"
                 ),
                 {"pid": project.id},
             ).fetchall()
@@ -156,7 +156,7 @@ def test_chunk_assignment_survives_more_videos_than_sqlite_variable_limit(two_ca
     with dp.engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO videos (video_id, project_id, video_path, camera_id, last_seen_at) "
+                "INSERT INTO videos (video_id, project_id, video_path, folder_camera_label, last_seen_at) "
                 "VALUES (:vid, :pid, :vid, 'cam_bulk', CURRENT_TIMESTAMP)"
             ),
             [{"vid": v, "pid": project.id} for v in video_ids],

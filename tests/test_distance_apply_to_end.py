@@ -477,9 +477,8 @@ def test_invalid_deployment_or_reference_distance_is_atomic(apply_data, mismatch
                 session.get(ReferenceFrame, reference).distance_m = math.inf
             else:
                 video = session.get(Video, data["videos"][0])
-                if mismatch == "missing_camera":
-                    video.camera_id = None
-                else:
+                video.deployment_id = None
+                if mismatch != "missing_camera":
                     video.project_id = None
     before = snapshot(data)
     with pytest.raises(ValueError):

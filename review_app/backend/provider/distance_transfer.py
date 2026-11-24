@@ -141,10 +141,12 @@ def _tables(session, project_id, task_ids):
             "tags",
         )
     }
+    task_deployments = {}
     for task, ai_individual, ai_sample in tasks:
         if error := _manual_format_error(task, ai_individual, ai_sample):
             raise ValueError(error)
         video = session.get(Video, task.video_id)
+        task_deployments[task.id] = video.deployment_id
         if (
             not session.query(Video)
             .filter(
@@ -180,7 +182,7 @@ def _tables(session, project_id, task_ids):
         ]
         tables["individuals"].append(
             {
-                **_record(individual, ("video_id", "species_id", "import_id", "ai_original")),
+                **_record(individual, ("import_id", "ai_original")),
                 "tags": tags,
             }
         )
@@ -199,6 +201,13 @@ def _tables(session, project_id, task_ids):
             .order_by(Behavior.key)
         ]
         tables["samples"].append({**_record(sample, ("ai_original",)), "behaviors": behaviors})
+    individual_tasks = {row.id: row.task_id for row in individuals}
+    evidence_deployments = {}
+    for sample in samples:
+        if sample.reference_frame_id:
+            evidence_deployments.setdefault(sample.reference_frame_id, set()).add(
+                task_deployments[individual_tasks[sample.individual_id]]
+            )
     for frame in (
         session.query(ReferenceFrame)
         .filter(
@@ -209,8 +218,12 @@ def _tables(session, project_id, task_ids):
         .order_by(ReferenceFrame.id)
     ):
         reference = session.get(ReferenceVideo, frame.reference_video_id)
-        if reference.project_id != project_id:
-            raise ValueError("Reference frame belongs to a different project")
+        if (
+            reference.project_id != project_id
+            or not reference.deployment_id
+            or evidence_deployments[frame.id] != {reference.deployment_id}
+        ):
+            raise ValueError("Reference frame belongs to a different deployment")
         if frame.import_id:
             raise ValueError(
                 "AI-linked references are not supported by the manual Distance format"
@@ -272,14 +285,14 @@ def _required(rows, model, excluded=()):
                 raise ValueError(f"Missing required {model.__tablename__}.{col.name}")
 
 
-def _validate_tables(tables):
+def _validate_tables(tables, *, require_same_reference_root=True):
     """Validate the complete graph before any database writes (also used on export)."""
     for name, model, excluded in (
         ("tasks", DistanceReviewTask, ("video_id", "species_id", "import_id")),
         (
             "individuals",
             DistanceIndividual,
-            ("video_id", "species_id", "import_id", "ai_original"),
+            ("import_id", "ai_original"),
         ),
         ("samples", DistanceSample, ("ai_original",)),
         ("references", ReferenceFrame, ("import_id", "retired")),
@@ -426,7 +439,10 @@ def _validate_tables(tables):
                 or sample["distance_m"] != frame["distance_m"]
             ):
                 raise ValueError("Measured sample must retain its calibrated reference distance")
-            if (frame["root_id"], frame["camera_id"]) != (task["root_id"], task["camera_id"]):
+            if require_same_reference_root and (frame["root_id"], frame["camera_id"]) != (
+                task["root_id"],
+                task["camera_id"],
+            ):
                 raise ValueError("Reference must belong to the task's deployment")
         if sample["carried_by_individual_id"]:
             _carrier(individual, individuals.get(sample["carried_by_individual_id"]))
@@ -549,7 +565,7 @@ class DistanceTransferMixin(ProviderBase):
         with self.Session() as session:
             session.connection().exec_driver_sql("BEGIN")
             tables, _ = _tables(session, project_id, task_ids)
-            _validate_tables(tables)
+            _validate_tables(tables, require_same_reference_root=False)
         tasks = {row["id"]: row for row in tables["tasks"]}
         individuals = {row["id"]: row for row in tables["individuals"]}
         rows = []

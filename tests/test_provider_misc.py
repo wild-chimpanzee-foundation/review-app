@@ -334,7 +334,6 @@ def test_queue_sort_blank_prob(populated_provider):
             ModelAnnotation(
                 id=str(uuid.uuid4()),
                 video_id=ids["v3"],
-                project_id=None,
                 annotation_type="blank_non_blank",
                 model_name="model_b",
                 value_text="blank",

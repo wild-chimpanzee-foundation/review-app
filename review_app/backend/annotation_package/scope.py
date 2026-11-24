@@ -140,7 +140,7 @@ def distance_selection(session, project_id, target_species, start_time=None, end
     )
     selected, unknown, without_camera = [], [], []
     for task, video in rows:
-        if video.camera_id is None:
+        if video.deployment_id is None:
             without_camera.append(video)
             continue
         if window:
@@ -185,7 +185,7 @@ def select_videos(session: Session, project_id: str, request: AssignmentRequest)
     if len(videos) != len(request.video_ids):
         raise ValueError("Every selected video must belong to the source project")
     if request.stage == "distance":
-        if any(video.camera_id is None for video in videos):
+        if any(video.deployment_id is None for video in videos):
             raise ValueError("Distance preparation requires a camera or deployment for each clip")
         rows, _, _ = distance_selection(
             session, project_id, request.target_species, request.start_time, request.end_time

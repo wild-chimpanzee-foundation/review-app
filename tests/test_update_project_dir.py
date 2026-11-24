@@ -93,7 +93,8 @@ def test_relocation_preserves_reference_identity_frames_and_samples(distance_dat
             Video(
                 video_id=source_id,
                 project_id=project.id,
-                camera_id="cam_x",
+                folder_camera_label="cam_x",
+                deployment_id=session.get(Video, data["videos"][0]).deployment_id,
                 video_path=old_path,
                 duration_sec=10,
                 is_missing=False,
@@ -130,7 +131,7 @@ def test_relocation_updates_only_root_derived_deployment_ids(distance_data, tmp_
     with dp.Session.begin() as session:
         video = session.get(Video, data["videos"][0])
         video.video_path = str(old_root / "videos" / "animal.mp4")
-        video.camera_id = old_root.name
+        video.folder_camera_label = old_root.name
         # Simulate a pre-inventory, root-derived row for this legacy repair case.
         video.deployment_id = None
         video.deployment_assignment = "legacy"
@@ -142,7 +143,7 @@ def test_relocation_updates_only_root_derived_deployment_ids(distance_data, tmp_
     )
     dp.update_project_dir(directory.id, str(new_root))
     with dp.Session() as session:
-        assert session.get(Video, data["videos"][0]).camera_id == new_root.name
+        assert session.get(Video, data["videos"][0]).folder_camera_label == new_root.name
     assert dp.list_reference_videos(project.id, new_root.name)[0]["id"] == reference["id"]
     assert dp.list_reference_videos(project.id, "explicit-camera")[0]["id"] == explicit["id"]
 

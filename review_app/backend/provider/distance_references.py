@@ -7,13 +7,14 @@ import uuid
 
 from sqlalchemy import func, or_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import contains_eager
 
 from review_app.backend.db.models import (
+    Deployment,
     DistanceIndividual,
     DistanceReviewTask,
     DistanceSample,
     Project,
-    ProjectDir,
     ReferenceFrame,
     ReferenceVideo,
     Species,
@@ -22,17 +23,24 @@ from review_app.backend.db.models import (
     VideoTag,
 )
 from review_app.backend.path_matching import normalize_path_str
-from review_app.backend.provider.deployments import resolved_scope
+from review_app.backend.provider.deployments import (
+    assign_reference_deployment,
+    resolve_reference_deployment,
+    video_deployment_for_label,
+)
 from review_app.backend.provider.distance_review import reopen_individual_review
 from review_app.backend.provider.distance_tasks import ensure_tasks
 
 
 def _record(row) -> dict:
-    return {
+    record = {
         column.name: getattr(row, column.name)
         for column in row.__table__.columns
-        if column.name != "retired"
+        if column.name not in {"retired", "unresolved_camera_label"}
     }
+    if isinstance(row, (Video, ReferenceVideo)):
+        record["camera_id"] = row.camera_id
+    return record
 
 
 def _offset(value: int) -> None:
@@ -61,15 +69,17 @@ def get_distance_video_queue(
     query = (
         session.query(Video, DistanceReviewTask)
         .join(DistanceReviewTask, DistanceReviewTask.video_id == Video.video_id)
+        .join(Deployment, Deployment.id == Video.deployment_id)
+        .options(contains_eager(Video.deployment))
         .filter(
             Video.project_id == project_id,
             Video.is_missing.is_(False),
-            Video.camera_id.is_not(None),
+            Video.deployment_id.is_not(None),
             ~reference_tagged(session),
         )
     )
     if camera_id:
-        query = query.filter(Video.camera_id == camera_id)
+        query = query.filter(Deployment.deployment_id == camera_id)
     if species_id:
         if session.get(Species, species_id) is None:
             raise ValueError("Species not found")
@@ -97,7 +107,7 @@ def get_distance_video_queue(
             "completion_outcome": task.completion_outcome,
         }
         for video, task in query.order_by(
-            Video.camera_id, Video.video_path, DistanceReviewTask.species_id
+            Deployment.deployment_id, Video.video_path, DistanceReviewTask.species_id
         )
     ]
 
@@ -109,10 +119,13 @@ def register_reference_video(session, project_id: str, camera_id: str, video_pat
         raise ValueError("Reference videos require a video path")
     if session.get(Project, project_id) is None:
         raise ValueError("Project not found")
+    label, path = camera_id.strip(), normalize_path_str(video_path)
+    deployment_id = resolve_reference_deployment(session, project_id, path, label)
     row = ReferenceVideo(
         project_id=project_id,
-        camera_id=camera_id.strip(),
-        video_path=normalize_path_str(video_path),
+        unresolved_camera_label=label if deployment_id is None else None,
+        deployment_id=deployment_id,
+        video_path=path,
     )
     session.add(row)
     session.flush()
@@ -125,33 +138,31 @@ def list_reference_videos(session, project_id: str, camera_id: str) -> list[dict
     return [
         _record(row)
         for row in session.query(ReferenceVideo)
-        .filter_by(project_id=project_id, camera_id=camera_id.strip())
+        .filter(
+            ReferenceVideo.project_id == project_id, ReferenceVideo.camera_id == camera_id.strip()
+        )
         .order_by(ReferenceVideo.video_path, ReferenceVideo.id)
     ]
 
 
-def get_distance_reference_videos(session, video_id: str) -> list[dict]:
+def get_distance_reference_videos(session, task_or_video_id: str) -> list[dict]:
     """Discover tagged clips while retaining references for saved sample evidence."""
-    video = session.get(Video, video_id)
+    task = session.get(DistanceReviewTask, task_or_video_id)
+    video = session.get(Video, task.video_id if task else task_or_video_id)
     if video is None:
         raise ValueError("Video not found")
-    project_id, camera_id = video.project_id, video.camera_id
-    if not project_id or not camera_id or not camera_id.strip():
-        raise ValueError("Resolve the animal video's project and camera before distance review")
-    roots = [
-        (row.id, row.path) for row in session.query(ProjectDir).filter_by(project_id=project_id)
-    ]
-    scope = resolved_scope(session, video, roots)
-    if scope is None:
-        raise ValueError("Resolve the video's import root before matching references")
+    project_id, deployment_id = video.project_id, video.deployment_id
+    if not deployment_id:
+        raise ValueError(
+            "Resolve the animal video's project and deployment before distance review"
+        )
     sources = {
         normalize_path_str(source.video_path): source
         for source in session.query(Video).filter(
-            Video.project_id == project_id,
+            Video.deployment_id == deployment_id,
             Video.is_missing.is_(False),
             reference_tagged(session),
         )
-        if resolved_scope(session, source, roots) == scope
     }
     if sources:
         session.execute(
@@ -160,9 +171,8 @@ def get_distance_reference_videos(session, video_id: str) -> list[dict]:
                 [
                     {
                         "project_id": project_id,
-                        "camera_id": camera_id.strip(),
                         "video_path": path,
-                        "deployment_id": sources[path].deployment_id,
+                        "deployment_id": deployment_id,
                     }
                     for path in sources
                 ]
@@ -173,7 +183,12 @@ def get_distance_reference_videos(session, video_id: str) -> list[dict]:
         session.query(ReferenceFrame.reference_video_id)
         .join(DistanceSample, DistanceSample.reference_frame_id == ReferenceFrame.id)
         .join(DistanceIndividual, DistanceSample.individual_id == DistanceIndividual.id)
-        .filter(DistanceIndividual.video_id == video_id)
+        .join(DistanceIndividual.task)
+        .filter(
+            DistanceReviewTask.id == task.id
+            if task
+            else DistanceReviewTask.video_id == video.video_id
+        )
     )
     rows = (
         session.query(ReferenceVideo)
@@ -188,7 +203,13 @@ def get_distance_reference_videos(session, video_id: str) -> list[dict]:
     )
     result = []
     for row in rows:
-        if resolved_scope(session, row, roots) != scope:
+        if row.deployment_id is None and row.video_path in sources:
+            candidate = video_deployment_for_label(
+                sources[row.video_path], row.unresolved_camera_label
+            )
+            if candidate == deployment_id:
+                assign_reference_deployment(row, candidate)
+        if row.deployment_id != deployment_id:
             continue
         source = sources.get(row.video_path)
         is_tagged = source is not None

@@ -5,6 +5,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 
+from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL
 from review_app.backend.provider.base import ProviderBase
 
 
@@ -15,7 +16,11 @@ class StatsMixin(ProviderBase):
         p = {"pid": active_project_id} if active_project_id else {}
         pf = "WHERE project_id = :pid" if active_project_id else ""
         vf = "WHERE v.project_id = :pid" if active_project_id else ""
-        af = "AND project_id = :pid" if active_project_id else ""
+        model_scope = (
+            "AND video_id IN (SELECT video_id FROM videos WHERE project_id = :pid)"
+            if active_project_id
+            else ""
+        )
 
         with self.engine.connect() as conn:
             stats = {}
@@ -28,9 +33,9 @@ class StatsMixin(ProviderBase):
                     SUM(CASE WHEN is_valid = 1  THEN 1 ELSE 0 END)    AS valid,
                     SUM(CASE WHEN is_valid = 0  THEN 1 ELSE 0 END)    AS invalid,
                     SUM(CASE WHEN is_valid IS NULL THEN 1 ELSE 0 END)  AS unprobed,
-                    COUNT(DISTINCT camera_id)                          AS cameras,
+                    COUNT(DISTINCT {VIDEO_CAMERA_LABEL_SQL})                          AS cameras,
                     ROUND(SUM(COALESCE(duration_sec, 0)) / 3600.0, 2) AS total_hours
-                FROM videos {pf}
+                FROM videos v {pf}
             """),
                     conn,
                     params=p,
@@ -41,7 +46,7 @@ class StatsMixin(ProviderBase):
 
             stats["failed_videos"] = pd.read_sql(
                 text(
-                    f"SELECT * FROM videos WHERE is_valid = 0 {'AND project_id = :pid' if active_project_id else ''}"
+                    f"SELECT v.*, {VIDEO_CAMERA_LABEL_SQL} AS camera_id FROM videos v WHERE is_valid = 0 {'AND project_id = :pid' if active_project_id else ''}"
                 ),
                 conn,
                 params=p,
@@ -49,7 +54,7 @@ class StatsMixin(ProviderBase):
 
             stats["missing_videos"] = pd.read_sql(
                 text(
-                    f"SELECT video_path, camera_id FROM videos WHERE is_missing = 1 {'AND project_id = :pid' if active_project_id else ''} ORDER BY video_path"
+                    f"SELECT video_path, {VIDEO_CAMERA_LABEL_SQL} AS camera_id FROM videos v WHERE is_missing = 1 {'AND project_id = :pid' if active_project_id else ''} ORDER BY video_path"
                 ),
                 conn,
                 params=p,
@@ -85,7 +90,8 @@ class StatsMixin(ProviderBase):
                     COUNT(DISTINCT io.video_id) AS videos
                 FROM individual_observations io
                 JOIN species s ON s.id = io.species_id
-                {pf.replace("project_id", "io.project_id") if pf else ""}
+                JOIN videos v ON v.video_id = io.video_id
+                {vf}
                 GROUP BY s.scientific_name
                 ORDER BY observations DESC
             """),
@@ -102,7 +108,8 @@ class StatsMixin(ProviderBase):
                 FROM observation_tags ot
                 JOIN behaviors b ON b.id = ot.behavior_id
                 JOIN individual_observations io ON io.video_id = ot.video_id AND io.id = ot.observation_id
-                {pf.replace("project_id", "io.project_id") if pf else ""}
+                JOIN videos v ON v.video_id = io.video_id
+                {vf}
                 GROUP BY b.key
                 ORDER BY observations DESC
             """),
@@ -120,7 +127,7 @@ class StatsMixin(ProviderBase):
                     ROUND(MIN(probability), 3)            AS min_probability,
                     ROUND(MAX(probability), 3)            AS max_probability
                 FROM model_annotations
-                {pf}
+                WHERE 1=1 {model_scope}
                 GROUP BY model_name, annotation_type
                 ORDER BY model_name, annotation_type
             """),
@@ -138,7 +145,7 @@ class StatsMixin(ProviderBase):
                 FROM model_annotations
                 WHERE annotation_type IN ('species', 'object_detection')
                 AND value_text IS NOT NULL
-                {af}
+                {model_scope}
                 GROUP BY model_name, value_text
                 ORDER BY model_name, predictions DESC
             """),
@@ -194,9 +201,9 @@ class StatsMixin(ProviderBase):
                 SELECT
                     ROUND(AVG(latitude), 6)  AS latitude,
                     ROUND(AVG(longitude), 6) AS longitude,
-                    camera_id,
+                    {VIDEO_CAMERA_LABEL_SQL} AS camera_id,
                     COUNT(*)                 AS video_count
-                FROM videos
+                FROM videos v
                 {pf}
                 GROUP BY camera_id
                 ORDER BY video_count DESC

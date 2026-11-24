@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 
 from review_app.app.config import CSV_TEMPLATES
 from review_app.backend.errors import DataImportError
@@ -491,7 +491,7 @@ class ModelCsvMixin(ImportSharedMixin):
         )
 
     def _register_mapped_species(
-        self, cleaned_df: pd.DataFrame, active_project_id: str | None
+        self, conn: Connection, cleaned_df: pd.DataFrame, active_project_id: str | None
     ) -> None:
         """Create and attach any species value_text that the catalog does not have yet.
 
@@ -506,8 +506,9 @@ class ModelCsvMixin(ImportSharedMixin):
             for value in cleaned_df.loc[species_rows, "value_text"].dropna()
             if (name := str(value).strip())
         }
-        valid = set(self.get_valid_species(active_project_id))
-        self._attach_species_to_project(sorted(targets - valid), active_project_id)
+        if targets:
+            valid = set(self._get_valid_species(conn, active_project_id))
+            self._attach_import_species(conn, sorted(targets - valid), active_project_id)
 
     def import_model_csv(
         self, cleaned_df: pd.DataFrame, active_project_id: str | None
@@ -524,13 +525,11 @@ class ModelCsvMixin(ImportSharedMixin):
             active_project_id,
             time.monotonic() - _t0,
         )
-        self._register_mapped_species(cleaned_df, active_project_id)
 
         now = self._utcnow_dt()
         rows = [
             {
                 "id": str(uuid.uuid4()),
-                "project_id": active_project_id,
                 "video_id": row["video_id"],
                 "annotation_type": row["annotation_type"],
                 "model_name": row["model_name"],
@@ -545,13 +544,17 @@ class ModelCsvMixin(ImportSharedMixin):
         ]
 
         with self.engine.begin() as conn:
+            self._validate_video_scope(
+                conn, cleaned_df["video_id"].unique().tolist(), active_project_id
+            )
+            self._register_mapped_species(conn, cleaned_df, active_project_id)
             conn.execute(
                 text("""
                     INSERT INTO model_annotations
-                        (id, project_id, video_id, annotation_type, model_name,
+                        (id, video_id, annotation_type, model_name,
                          value_text, value_num, probability, t_start_sec, t_end_sec, updated_at)
                     VALUES
-                        (:id, :project_id, :video_id, :annotation_type, :model_name,
+                        (:id, :video_id, :annotation_type, :model_name,
                          :value_text, :value_num, :probability, :t_start_sec, :t_end_sec, :updated_at)
                     -- value_text is part of the conflict key, so it cannot be updated here.
                     -- To correct a misspelled value_text, delete the row first then re-import.

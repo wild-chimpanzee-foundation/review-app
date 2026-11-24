@@ -21,7 +21,7 @@ def legacy_inventory(tmp_db):
                     "video_id": f"v{i}",
                     "project_id": project.id,
                     "video_path": str(tmp_db["video_dir"] / f"cam{i % 6}" / f"clip{i}.mp4"),
-                    "camera_id": f"cam{i % 6}",
+                    "folder_camera_label": f"cam{i % 6}",
                     "deployment_assignment": "legacy",
                 }
                 for i in range(120)
@@ -45,6 +45,30 @@ def test_initial_inventory_materialization_uses_bounded_queries(legacy_inventory
     assert summary["deployments"] == 6
     assert summary["unresolved"] == 0
     assert len(statements) <= 150, f"{len(statements)} SQL calls for only 120 videos"
+
+
+def test_camera_filter_uses_deployment_index(legacy_inventory):
+    dp, project = legacy_inventory
+    dp.initialize_project_deployments(project.id)
+    with dp.engine.begin() as conn:
+        conn.exec_driver_sql("ANALYZE")
+    statements = []
+
+    def capture(conn, cursor, statement, params, context, executemany):
+        if "SELECT v.video_id" in statement:
+            statements.append((statement, params))
+
+    event.listen(dp.engine, "before_cursor_execute", capture)
+    try:
+        videos = dp.get_video_queue({"selected_camera": "cam1"}, project.id)
+    finally:
+        event.remove(dp.engine, "before_cursor_execute", capture)
+    assert set(videos) == {f"v{i}" for i in range(1, 120, 6)}
+
+    ((statement, params),) = statements
+    with dp.engine.connect() as conn:
+        plans = conn.exec_driver_sql(f"EXPLAIN QUERY PLAN {statement}", params).all()
+    assert any("ix_videos_deployment_id" in plan[3] for plan in plans), plans
 
 
 def test_management_reads_stored_paths_without_resolving_media(legacy_inventory, monkeypatch):

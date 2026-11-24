@@ -10,7 +10,6 @@ from sqlalchemy import or_
 from review_app.backend.db.models import (
     Behavior,
     DistanceIndividual,
-    DistanceReviewTask,
     IndividualObservation,
     Species,
     Video,
@@ -483,15 +482,15 @@ class DistanceMixin(ProviderBase):
             individual = session.get(DistanceIndividual, individual_id)
             if individual is None:
                 raise ValueError("Distance individual not found")
-            video = session.get(Video, individual.video_id)
-            review = session.get(DistanceReviewTask, individual.task_id)
+            review = individual.task
+            video = session.get(Video, review.video_id)
             if review is None or review.verified_at is None:
                 raise ValueError("Verify the camera recording time before annotating samples")
             schedule = review_offsets(review, video.duration_sec)
             if offset_ms not in schedule:
                 raise ValueError("Offset is not a scheduled even camera second")
             scheduled_context = (individual, video)
-            if not video.project_id or not video.camera_id or not video.camera_id.strip():
+            if not video.deployment_id:
                 raise ValueError("Resolve the video's project and camera before distance review")
             scheduled_offsets = set(schedule)
             affected_completion_ids: set[str] = set()

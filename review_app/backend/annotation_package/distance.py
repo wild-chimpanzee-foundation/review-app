@@ -32,7 +32,10 @@ from review_app.backend.db.models import (
     Species,
     Video,
 )
-from review_app.backend.provider.deployments import resolved_scope
+from review_app.backend.provider.deployments import (
+    assign_reference_deployment,
+    resolve_reference_deployment,
+)
 
 TASK = "id source_count completion_outcome completion_history rejected_ai recorded_start alignment_mode imported_sample_times_s import_id started_at clock_anchor_offset_ms clock_anchor_playback_ms opening_even_second verified_by verified_at completed_by completed_at"
 INDIVIDUAL = "id import_id task_id ai_original individual_number age sex first_seen_offset_ms first_seen_playback_ms initial_carrier_individual_id anchor_x anchor_y anchor_width anchor_height labeled_by labeled_at updated_at review_status completed_by completed_at"
@@ -134,13 +137,13 @@ def collect(session, project, videos, roots, target):
                 for row in session.query(DistanceReviewProgress).filter_by(task_id=task.id)
             ]
         work.append(unit)
-    root_pairs = [(row.id, row.path) for row in roots]
-    deployments = {resolved_scope(session, v, root_pairs) for v in videos}
+    deployments = {v.deployment_id for v in videos if v.deployment_id}
     # Include prepared and merely discoverable reference footage, even on untouched tasks.
     references = [
         row
-        for row in session.query(ReferenceVideo).filter_by(project_id=project.id)
-        if resolved_scope(session, row, root_pairs) in deployments - {None}
+        for row in session.query(ReferenceVideo).filter(
+            ReferenceVideo.project_id == project.id, ReferenceVideo.deployment_id.in_(deployments)
+        )
     ]
     needed_frames = {
         row["reference_frame_id"]
@@ -178,9 +181,10 @@ def collect(session, project, videos, roots, target):
     tagged = [
         v
         for v in session.query(Video).filter(
-            Video.project_id == project.id, reference_tagged(session)
+            Video.project_id == project.id,
+            Video.deployment_id.in_(deployments),
+            reference_tagged(session),
         )
-        if resolved_scope(session, v, root_pairs) in deployments - {None}
     ]
     media_videos = {v.video_id: v for v in videos + tagged}
     for ref in references:
@@ -195,7 +199,7 @@ def collect(session, project, videos, roots, target):
                 video_id="reference-media:" + ref.id,
                 project_id=project.id,
                 video_path=ref.video_path,
-                camera_id=ref.camera_id,
+                deployment=ref.deployment,
                 deployment_id=ref.deployment_id,
                 is_missing=not Path(ref.video_path).is_file(),
             )
@@ -488,12 +492,6 @@ def validate(manifest, context, work):
     global_ids = set(refs) | set(frames) | set(imports)
     if len(global_ids) != len(refs) + len(frames) + len(imports):
         raise ValueError("Ambiguous Distance dependency identity")
-    media_rows = {r["video_id"]: r for r in context["media"]}
-
-    def reference_scope(frame_id):
-        source = media_rows[refs[frames[frame_id]["reference_video_id"]]["video_id"]]
-        return source["root_id"], source["camera_id"]
-
     tags = {r["key"] for r in context["tags"]}
     behaviors = {r["key"] for r in context["behaviors"]}
     for unit in work:
@@ -618,16 +616,6 @@ def validate(manifest, context, work):
                 and row["ai_original"]["reference_frame_id"] not in frames
             ):
                 raise ValueError("Dangling AI suggestion")
-            suggested = (
-                row["ai_original"].get("reference_frame_id") if row["ai_original"] else None
-            )
-            source = media_rows[unit["video_id"]]
-            for frame_id in (row["reference_frame_id"], suggested):
-                if frame_id and reference_scope(frame_id) != (
-                    source["root_id"],
-                    source["camera_id"],
-                ):
-                    raise ValueError("Reference evidence belongs to another deployment")
             if row["status"] == "annotated":
                 valid = (
                     row["skip_reason"] is None
@@ -719,6 +707,25 @@ def validate(manifest, context, work):
         raise ValueError("Unknown target species")
 
 
+def validate_reference_membership(context, work, setup):
+    """Use the setup's deployment links, or its historical root/label pairs."""
+    deps = context["distance"]
+    reference_media = {row["id"]: row["video_id"] for row in deps["references"]}
+    frame_media = {row["id"]: reference_media[row["reference_video_id"]] for row in deps["frames"]}
+    deployment_snapshot = setup.get("deployments")
+    if deployment_snapshot is None:
+        media = {row["video_id"]: (row["root_id"], row["camera_id"]) for row in setup["media"]}
+    else:
+        media = {row["video_id"]: row["deployment_id"] for row in deployment_snapshot["media"]}
+    for unit in work:
+        scope = media.get(unit["video_id"])
+        for sample in unit["samples"]:
+            suggested = (sample["ai_original"] or {}).get("reference_frame_id")
+            for frame_id in (sample["reference_frame_id"], suggested):
+                if frame_id and (scope is None or media.get(frame_media[frame_id]) != scope):
+                    raise ValueError("Reference evidence belongs to another deployment")
+
+
 def restore_work(session, project_id, video_id, unit, vocab, identities, mapping, target):
     from review_app.backend.db.models import Annotator
 
@@ -779,7 +786,7 @@ def restore_work(session, project_id, video_id, unit, vocab, identities, mapping
     for row in unit["individuals"]:
         data = converted(row, DistanceIndividual, ("tags",))
         data["initial_carrier_individual_id"] = None
-        session.add(DistanceIndividual(video_id=video_id, species_id=species_id, **data))
+        session.add(DistanceIndividual(**data))
     session.flush()
     for row in unit["individuals"]:
         # Bulk update avoids ORM onupdate changing the saved timestamp.
@@ -856,6 +863,7 @@ def restore_dependencies(
     work,
     *,
     approved_substitutions=(),
+    frozen_reference_deployments=None,
 ):
     deps = context["distance"]
     mapping = dict(videos)
@@ -872,15 +880,28 @@ def restore_dependencies(
         local = (
             session.query(ReferenceVideo).filter_by(project_id=project_id, video_path=path).first()
         )
+        label = media_by_id[video_id]["camera_id"]
+        if frozen_reference_deployments is not None:
+            deployment_id = frozen_reference_deployments[video_id]
+        elif "deployments" in context:
+            # Setup restores the portable links after all reference records exist.
+            deployment_id = None
+        else:
+            deployment_id = resolve_reference_deployment(session, project_id, path, label)
         if local is None:
             local = ReferenceVideo(
                 id=identities.local("distance_reference", ref["id"]),
                 project_id=project_id,
                 video_path=path,
-                camera_id=media_by_id[video_id]["camera_id"],
+                unresolved_camera_label=label if deployment_id is None else None,
+                deployment_id=deployment_id,
             )
             session.add(local)
             session.flush()
+        elif deployment_id:
+            if local.deployment_id not in (None, deployment_id):
+                raise ValueError("Reference calibration belongs to another deployment")
+            assign_reference_deployment(local, deployment_id)
         mapping[ref["id"]] = local.id
     incoming = [
         {**frame, "reference_video_id": mapping[frame["reference_video_id"]]}

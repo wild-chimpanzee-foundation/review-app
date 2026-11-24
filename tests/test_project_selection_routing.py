@@ -88,7 +88,7 @@ async def test_opening_legacy_project_directly_in_distance_initializes_deploymen
                 Video(
                     video_id=clip_id,
                     project_id=project.id,
-                    camera_id=label,
+                    folder_camera_label=label,
                     video_path=str(root / "cam_a" / folder / f"{clip_id}.mp4"),
                 )
             )

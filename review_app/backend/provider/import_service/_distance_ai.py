@@ -26,7 +26,10 @@ from review_app.backend.distance_ai_package import mask_bounding_box, read_dista
 from review_app.backend.distance_timing import infer_imported_schedule
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
-from review_app.backend.provider.deployments import resolved_scope
+from review_app.backend.provider.deployments import (
+    assign_reference_deployment,
+    resolve_reference_deployment,
+)
 from review_app.backend.provider.distance_references import (
     clear_reference_frame_samples,
     reference_tagged,
@@ -107,7 +110,7 @@ def _plan(session, project_id, package):
             continue
         if video.video_id not in tagged:
             errors.append(f"Tag the reference clip as Reference Video: {row['video_path']}")
-        if not video.camera_id or not video.camera_id.strip():
+        if not video.deployment_id:
             errors.append(f"Resolve the reference clip's camera: {row['video_path']}")
         _check_time(errors, video, row)
         precise = row["time_s"] * 1000
@@ -126,8 +129,15 @@ def _plan(session, project_id, package):
             .filter_by(project_id=project_id, video_path=normalize_path_str(video.video_path))
             .first()
         )
-        if source and resolved_scope(session, source, roots) != resolved_scope(
-            session, video, roots
+        if (
+            source
+            and (
+                source.deployment_id
+                or resolve_reference_deployment(
+                    session, project_id, source.video_path, source.unresolved_camera_label
+                )
+            )
+            != video.deployment_id
         ):
             errors.append(f"Reference camera mismatch; refresh references: {row['video_path']}")
         frame = (
@@ -252,7 +262,7 @@ def _plan(session, project_id, package):
             schedules.setdefault((video.video_id, row["species"]), set())
             if video.video_id in tagged:
                 errors.append(f"Animal track points to a Reference Video: {row['video_path']}")
-            if resolved_scope(session, video, roots) is None:
+            if not video.deployment_id:
                 errors.append(f"Resolve the animal video's deployment: {row['video_path']}")
         if not any(p["individual_id"] == row["individual_id"] for p in package.predictions):
             errors.append(f"Individual {row['individual_id']} has no predictions.")
@@ -265,9 +275,7 @@ def _plan(session, project_id, package):
         schedules[(video.video_id, track["species"])].add(row["time_s"])
         reference = references.get(row["suggested_reference_id"])
         ref_video = videos.get(reference["video_path"]) if reference else None
-        if ref_video and resolved_scope(session, video, roots) != resolved_scope(
-            session, ref_video, roots
-        ):
+        if ref_video and video.deployment_id != ref_video.deployment_id:
             errors.append(
                 f"Suggested reference is from another deployment: {row['prediction_id']}"
             )
@@ -387,7 +395,6 @@ class DistanceAIImportMixin(ProviderBase):
                     label.labeled_at = labeled_at
                 session.add(
                     IndividualObservation(
-                        project_id=project_id,
                         video_id=video_id,
                         id=max((observation.id for observation in observations), default=0) + 1,
                         species_id=species[row["species"]],
@@ -447,8 +454,8 @@ class DistanceAIImportMixin(ProviderBase):
             refs = []
             for row in package.references:
                 frame = frames[row["reference_id"]]
+                video = videos[row["video_path"]]
                 if frame is None:
-                    video = videos[row["video_path"]]
                     source = (
                         session.query(ReferenceVideo)
                         .filter_by(
@@ -459,7 +466,7 @@ class DistanceAIImportMixin(ProviderBase):
                     if source is None:
                         source = ReferenceVideo(
                             project_id=project_id,
-                            camera_id=video.camera_id,
+                            deployment_id=video.deployment_id,
                             video_path=normalize_path_str(video.video_path),
                         )
                         session.add(source)
@@ -483,6 +490,9 @@ class DistanceAIImportMixin(ProviderBase):
                     frame.playback_offset_ms = row["time_s"] * 1000
                     frame.mask = row["mask"]
                     frame.import_id = imported.id
+                assign_reference_deployment(
+                    session.get(ReferenceVideo, frame.reference_video_id), video.deployment_id
+                )
                 frame.retired = False
                 refs.append({**row, "reference_frame_id": frame.id})
             species = {row.scientific_name: row.id for row in session.query(Species)}
@@ -525,10 +535,8 @@ class DistanceAIImportMixin(ProviderBase):
                 task = tasks[(video_id, species[row["species"]])]
                 number = session.query(DistanceIndividual).filter_by(task_id=task.id).count() + 1
                 individual = DistanceIndividual(
-                    video_id=video_id,
                     task_id=task.id,
                     individual_number=number,
-                    species_id=species[row["species"]],
                     import_id=imported.id,
                     ai_original=row,
                     # Proposed identifying position, NOT absence/first-sighting evidence.

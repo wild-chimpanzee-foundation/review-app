@@ -8,8 +8,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import Connection, text
 
-from review_app.backend.db.models import VideoLabel
-from review_app.backend.errors import VideoError
+from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL, VideoLabel
 from review_app.backend.provider.base import ProviderBase
 from review_app.backend.provider.manual_review import (
     normalize_manual_selections,
@@ -47,7 +46,7 @@ class AnnotationMixin(ProviderBase):
         with self.engine.connect() as conn:
             detail_df = pd.read_sql(
                 text(
-                    """
+                    f"""
                     WITH model_blank AS (
                         SELECT
                             ma.video_id,
@@ -144,7 +143,7 @@ class AnnotationMixin(ProviderBase):
                     SELECT
                         v.video_id,
                         v.video_path,
-                        v.camera_id,
+                        {VIDEO_CAMERA_LABEL_SQL} AS camera_id,
                         v.duration_sec,
                         v.created_at,
                         v.latitude,
@@ -361,7 +360,9 @@ class AnnotationMixin(ProviderBase):
             raise ValueError("project_id is required to delete model annotations")
         with self.engine.begin() as conn:
             result = conn.execute(
-                text("DELETE FROM model_annotations WHERE project_id = :pid"),
+                text(
+                    "DELETE FROM model_annotations WHERE video_id IN (SELECT video_id FROM videos WHERE project_id = :pid)"
+                ),
                 {"pid": project_id},
             )
         return result.rowcount
@@ -414,30 +415,6 @@ class AnnotationMixin(ProviderBase):
         )
         behavior_id_map = dict(conn.execute(text("SELECT key, id FROM behaviors")).tuples().all())
         return valid_species, species_id_map, behavior_id_map
-
-    @staticmethod
-    def _manual_review_projects(
-        conn: Connection, video_ids: list[str], active_project_id: str | None
-    ) -> dict[str, str | None]:
-        if not video_ids:
-            return {}
-        params: dict[str, Any] = {}
-        id_list = bind_id_list(params, "vids", video_ids)
-        projects = {
-            video_id: project_id
-            for video_id, project_id in conn.execute(
-                text(f"SELECT video_id, project_id FROM videos WHERE video_id IN {id_list}"),
-                params,
-            )
-        }
-        for video_id in video_ids:
-            if video_id not in projects:
-                raise VideoError(f"Video {video_id!r} does not exist")
-            if active_project_id is not None and projects[video_id] != active_project_id:
-                raise VideoError(
-                    f"Video {video_id!r} does not belong to project {active_project_id!r}"
-                )
-        return projects
 
     def apply_manual_reviews(
         self,
@@ -492,7 +469,7 @@ class AnnotationMixin(ProviderBase):
         review_ids = [str(r["video_id"]) for r in reviews]
         label_ids = list(dict.fromkeys(review_ids + list(review_later)))
 
-        projects = self._manual_review_projects(
+        self._validate_video_scope(
             conn,
             list(dict.fromkeys([*label_ids, *assignments, *video_tags])),
             active_project_id,
@@ -629,7 +606,6 @@ class AnnotationMixin(ProviderBase):
                             "vid": video_id,
                             "oid": new_id,
                             "observation_uuid": new_uuid,
-                            "pid": projects[video_id],
                             "species_id": row["species_id"],
                             "count": row["count"],
                             "start_sec": row["start_sec"],
@@ -688,9 +664,9 @@ class AnnotationMixin(ProviderBase):
         if obs_inserts:
             conn.execute(
                 text(
-                    "INSERT INTO individual_observations (video_id, id, observation_uuid, project_id,"
+                    "INSERT INTO individual_observations (video_id, id, observation_uuid,"
                     " species_id, count, start_sec, end_sec, labeled_by, labeled_at,"
-                    " updated_at) VALUES (:vid, :oid, :observation_uuid, :pid, :species_id, :count,"
+                    " updated_at) VALUES (:vid, :oid, :observation_uuid, :species_id, :count,"
                     " :start_sec, :end_sec, :labeled_by, :labeled_at, :updated_at)"
                 ),
                 obs_inserts,

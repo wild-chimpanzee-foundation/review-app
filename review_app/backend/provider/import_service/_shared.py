@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import Connection, text
 
+from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL
 from review_app.backend.errors import DataImportError
 from review_app.backend.path_matching import (
     VideoPathLookup,
@@ -109,7 +110,7 @@ class ImportSharedMixin(ProviderBase):
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text(
-                    "SELECT video_id, video_path, camera_id FROM videos"
+                    f"SELECT video_id, video_path, {VIDEO_CAMERA_LABEL_SQL} AS camera_id FROM videos v"
                     + (" WHERE project_id = :pid" if active_project_id else "")
                 ),
                 {"pid": active_project_id} if active_project_id else {},
@@ -192,4 +193,4 @@ class ImportSharedMixin(ProviderBase):
             return ""
         if not camera_ids:
             return "AND 1=0"
-        return f"AND v.camera_id IN {bind_id_list(params, 'filter_cams', camera_ids)}"
+        return f"AND {VIDEO_CAMERA_LABEL_SQL} IN {bind_id_list(params, 'filter_cams', camera_ids)}"

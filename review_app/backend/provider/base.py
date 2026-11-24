@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
-from sqlalchemy import Connection, Engine
+from sqlalchemy import Connection, Engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from review_app.backend.db.models import (
     DistanceIndividual,
+    DistanceReviewTask,
     DistanceSample,
     IndividualObservation,
     ModelAnnotation,
@@ -16,6 +18,8 @@ from review_app.backend.db.models import (
     VideoLabel,
     VideoTag,
 )
+from review_app.backend.errors import VideoError
+from review_app.backend.utils import bind_id_list
 
 # Tables that reference videos.video_id. The schema has no ON DELETE CASCADE, so these
 # must be cleared before the Video rows or SQLite (foreign_keys=ON) raises IntegrityError.
@@ -47,6 +51,29 @@ class ProviderBase:
         return datetime.now(timezone.utc)
 
     @staticmethod
+    def _validate_video_scope(
+        conn: Connection, video_ids: list[str], active_project_id: str | None
+    ) -> None:
+        if not video_ids:
+            return
+        params: dict[str, Any] = {}
+        id_list = bind_id_list(params, "vids", video_ids)
+        projects = {
+            video_id: project_id
+            for video_id, project_id in conn.execute(
+                text(f"SELECT video_id, project_id FROM videos WHERE video_id IN {id_list}"),
+                params,
+            )
+        }
+        for video_id in video_ids:
+            if video_id not in projects:
+                raise VideoError(f"Video {video_id!r} does not exist")
+            if active_project_id is not None and projects[video_id] != active_project_id:
+                raise VideoError(
+                    f"Video {video_id!r} does not belong to project {active_project_id!r}"
+                )
+
+    @staticmethod
     def _cascade_delete_videos(session: Session, video_filter) -> None:
         """Delete every Video matching *video_filter* and all rows referencing them.
 
@@ -55,16 +82,17 @@ class ProviderBase:
         observation_tags, and bulk ``.delete()`` triggers no cascade at all.
         """
         v_sub = session.query(Video.video_id).filter(video_filter).scalar_subquery()
+        tasks = select(DistanceReviewTask.id).where(DistanceReviewTask.video_id.in_(v_sub))
         individuals = (
             session.query(DistanceIndividual.id)
-            .filter(DistanceIndividual.video_id.in_(v_sub))
+            .filter(DistanceIndividual.task_id.in_(tasks))
             .scalar_subquery()
         )
         # Delete all samples first: an infant's sample can reference another individual.
         session.query(DistanceSample).filter(DistanceSample.individual_id.in_(individuals)).delete(
             synchronize_session=False
         )
-        session.query(DistanceIndividual).filter(DistanceIndividual.video_id.in_(v_sub)).delete(
+        session.query(DistanceIndividual).filter(DistanceIndividual.task_id.in_(tasks)).delete(
             synchronize_session=False
         )
         for model in _VIDEO_CHILD_MODELS:

@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 
+from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL
 from review_app.backend.provider.import_service._shared import (
     BLANK_SENTINEL,
     IGNORE_SENTINEL,
@@ -147,7 +148,7 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                         v.video_id,
                         p.name                    AS project_name,
                         v.video_path,
-                        v.camera_id,
+                        {VIDEO_CAMERA_LABEL_SQL} AS camera_id,
                         v.created_at              AS recorded_at,
                         v.latitude,
                         v.longitude,
@@ -177,7 +178,7 @@ class AnnotationsCsvMixin(ImportSharedMixin):
                     LEFT JOIN individual_observations io ON io.video_id = v.video_id
                     LEFT JOIN species s ON s.id = io.species_id
                     WHERE 1=1 {vid_pid}
-                    ORDER BY v.camera_id, v.video_path, v.created_at
+                    ORDER BY camera_id, v.video_path, v.created_at
                 """),
                 conn,
                 params=params,
@@ -403,7 +404,7 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             existing_obs_rows = conn.execute(
                 text(
                     "SELECT video_id, id, observation_uuid, species_id, count, start_sec, end_sec"
-                    " FROM individual_observations WHERE project_id = :pid"
+                    " FROM individual_observations WHERE video_id IN (SELECT video_id FROM videos WHERE project_id = :pid)"
                     if active_project_id
                     else "SELECT video_id, id, observation_uuid, species_id, count, start_sec, end_sec"
                     " FROM individual_observations"
@@ -419,7 +420,11 @@ class AnnotationsCsvMixin(ImportSharedMixin):
             )
             existing_behaviors: dict[tuple[str, int], set[str]] = {}
             params = {"pid": active_project_id} if active_project_id else {}
-            project_filter = "WHERE io.project_id = :pid" if active_project_id else ""
+            project_filter = (
+                "WHERE ot.video_id IN (SELECT video_id FROM videos WHERE project_id = :pid)"
+                if active_project_id
+                else ""
+            )
             for vid, oid, behavior_id in conn.execute(
                 text(f"""
                     SELECT ot.video_id, ot.observation_id, ot.behavior_id

@@ -170,7 +170,6 @@ def populated_provider(tmp_db, mock_probe):
                 ModelAnnotation(
                     id=str(uuid.uuid4()),
                     video_id=v1,
-                    project_id=None,
                     annotation_type="species",
                     model_name="model_a",
                     value_text="deer",
@@ -180,7 +179,6 @@ def populated_provider(tmp_db, mock_probe):
                 ModelAnnotation(
                     id=str(uuid.uuid4()),
                     video_id=v1,
-                    project_id=None,
                     annotation_type="blank_non_blank",
                     model_name="model_a",
                     value_text="non_blank",
@@ -190,7 +188,6 @@ def populated_provider(tmp_db, mock_probe):
                 ModelAnnotation(
                     id=str(uuid.uuid4()),
                     video_id=v2,
-                    project_id=None,
                     annotation_type="blank_non_blank",
                     model_name="model_a",
                     value_text="blank",
@@ -200,7 +197,6 @@ def populated_provider(tmp_db, mock_probe):
                 ModelAnnotation(
                     id=str(uuid.uuid4()),
                     video_id=v3,
-                    project_id=None,
                     annotation_type="species",
                     model_name="model_a",
                     value_text="fox",
@@ -267,7 +263,6 @@ def distance_data(provider_with_project):
             session.add(
                 IndividualObservation(
                     video_id=video_id,
-                    project_id=project.id,
                     id=1000,
                     species_id=species_id,
                     count=1,

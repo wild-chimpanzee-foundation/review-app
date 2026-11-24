@@ -60,7 +60,8 @@ def ai_package(distance_data):
             Video(
                 video_id="ai-reference-video",
                 project_id=project.id,
-                camera_id="cam_x",
+                folder_camera_label="cam_x",
+                deployment_id=animal.deployment_id,
                 video_path=str(root / "cam_x" / "patrol.mp4"),
                 duration_sec=10,
             )
@@ -1031,7 +1032,7 @@ def test_invalid_project_matches_cannot_partially_import(distance_data, ai_packa
         with dp.Session.begin() as session:
             video = session.get(Video, "ai-reference-video")
             if problem == "deployment":
-                video.camera_id = "other-camera"
+                video.deployment_id = None
             else:
                 video.is_missing = True
     before = snapshot(dp)

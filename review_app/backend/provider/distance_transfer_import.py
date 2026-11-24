@@ -23,7 +23,11 @@ from review_app.backend.db.models import (
     Video,
 )
 from review_app.backend.path_matching import normalize_path_str
-from review_app.backend.provider.deployments import resolved_scope
+from review_app.backend.provider.deployments import (
+    assign_reference_deployment,
+    resolve_reference_deployment,
+    video_deployment_for_label,
+)
 from review_app.backend.provider.distance_transfer import (
     _manual_ai_flags,
     _manual_format_error,
@@ -53,8 +57,6 @@ def _reference_plan(session, project_id, row, path):
     by_id = session.get(ReferenceVideo, row["reference_video_id"])
     if by_id is not None and by_id is not reference:
         raise ValueError("Reference video identity conflicts with existing media")
-    if reference is not None and reference.camera_id != row["camera_id"]:
-        raise ValueError("Reference camera conflicts with existing calibration context")
     frame = session.get(ReferenceFrame, row["id"])
     if frame is not None and (reference is None or frame.reference_video_id != reference.id):
         raise ValueError("Reference frame identity belongs to different media")
@@ -122,7 +124,7 @@ def plan_import(session, project_id, manifest, tables, root_map):
                 raise ValueError(
                     f"Import/sync the target video before restoring annotations: {task['video_path']}"
                 )
-            if video.camera_id != task["camera_id"]:
+            if not video_deployment_for_label(video, task["camera_id"]):
                 raise ValueError("Task camera does not match the target video's deployment")
             if video.duration_sec != task["duration_sec"]:
                 raise ValueError(
@@ -170,15 +172,22 @@ def plan_import(session, project_id, manifest, tables, root_map):
                     raise ValueError(
                         "Reference calibration conflicts: multiple frames at the same distance and timestamp"
                     )
-                scope_roots = [(root.id, root.path) for root in roots]
-                scope = resolved_scope(session, video, scope_roots)
                 reference_plan = _reference_plan(session, project_id, row, ref_path)
-                candidate = reference_plan["reference"] or ReferenceVideo(
-                    project_id=project_id, camera_id=row["camera_id"], video_path=ref_path
+                reference = reference_plan["reference"]
+                deployment_id = resolve_reference_deployment(
+                    session, project_id, ref_path, row["camera_id"]
                 )
-                if scope is None or scope != resolved_scope(session, candidate, scope_roots):
+                if deployment_id != video.deployment_id:
                     raise ValueError("Reference frame must match the target video's deployment")
-                reference_plan["deployment_id"] = scope[2] if scope[1] == "deployment" else None
+                if reference is not None:
+                    existing_deployment = reference.deployment_id or resolve_reference_deployment(
+                        session, project_id, ref_path, reference.unresolved_camera_label
+                    )
+                    if existing_deployment != deployment_id:
+                        raise ValueError(
+                            "Reference camera conflicts with existing calibration context"
+                        )
+                reference_plan["deployment_id"] = deployment_id
                 refs[frame_id] = reference_plan
             for tag in {tag["key"] for row in individuals for tag in row["tags"]}:
                 local = session.query(Tag).filter_by(key=tag).one_or_none()
@@ -251,12 +260,13 @@ def apply_task(session, project_id, plan, tables):
             reference = ReferenceVideo(
                 id=row["reference_video_id"],
                 project_id=project_id,
-                camera_id=row["camera_id"],
                 video_path=current["path"],
                 deployment_id=ref_plan["deployment_id"],
             )
             session.add(reference)
             session.flush()
+        else:
+            assign_reference_deployment(reference, ref_plan["deployment_id"])
         if frame is None:
             frame = ReferenceFrame(
                 **{
@@ -291,8 +301,6 @@ def apply_task(session, project_id, plan, tables):
                 for column in DistanceIndividual.__table__.columns
                 if column.name
                 not in {
-                    "video_id",
-                    "species_id",
                     "task_id",
                     "import_id",
                     "ai_original",
@@ -300,8 +308,6 @@ def apply_task(session, project_id, plan, tables):
                 }
             },
             task_id=task.id,
-            video_id=video.video_id,
-            species_id=species_id,
         )
         session.add(row)
     session.flush()

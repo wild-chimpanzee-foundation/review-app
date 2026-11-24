@@ -39,7 +39,7 @@ def test_planning_includes_labelled_missing_and_cameraless_media(provider_with_p
     )
     with dp.Session.begin() as session:
         session.get(Video, ids[0]).is_missing = True
-        session.get(Video, ids[1]).camera_id = None
+        session.get(Video, ids[1]).deployment_id = None
     groups = species_work_groups(dp, project.id)
     assert {vid for group in groups for vid in group.video_ids} == set(ids)
     assert species_requests(groups) == ()

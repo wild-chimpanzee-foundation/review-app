@@ -116,7 +116,6 @@ def restore_work(session, project_id, video_id, unit, vocab):
             IndividualObservation(
                 video_id=video_id,
                 id=number,
-                project_id=project_id,
                 species_id=vocab["species"].get(source["species"]),
                 **row,
             )
@@ -274,15 +273,8 @@ def collect(session: Session, project, videos, roots) -> tuple[dict, list[dict]]
             {"key": tag_keys[row.tag_id], **fields(row, "tagged_by tagged_at")}
         )
     media = []
-    deployment_roots = {}
     for video in videos:
         root_id, path = portable_path(video.video_path, roots)
-        if video.deployment_id:
-            deployment_roots.setdefault(video.deployment_id, set()).add(root_id)
-            if len(deployment_roots[video.deployment_id]) > 1:
-                raise ValueError(
-                    "The current package format cannot carry one deployment across multiple import roots"
-                )
         media.append(
             {
                 "video_id": video.video_id,

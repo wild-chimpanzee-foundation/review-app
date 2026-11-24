@@ -127,7 +127,6 @@ def test_append_updates_local_uuid_and_behavior_without_duplicate_and_keeps_loca
             video_id=ids[0],
             id=observation.id + 10,
             observation_uuid=local_uuid,
-            project_id=project.id,
             species_id=observation.species_id,
             count=77,
         )

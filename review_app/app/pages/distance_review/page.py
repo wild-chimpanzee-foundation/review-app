@@ -574,7 +574,7 @@ class DistanceReviewPage:
             await self.reload_review(resume=True)
             if self.video["camera_id"]:
                 self.references = await run.io_bound(
-                    self.dp.get_distance_reference_videos, self.video["video_id"]
+                    self.dp.get_distance_reference_videos, task_key(self.video)
                 )
             reference_sample = self.reference_sample
             if reference_sample and not reference_sample.get("reference_frame_id"):
@@ -1549,8 +1549,10 @@ class DistanceReviewPage:
         """Show sample timing and replay directly below the animal player."""
         if not self.review or self.sample_offset not in self.offsets:
             return
-        with ui.row().classes("distance-animal-timing items-center w-full gap-2").style(
-            "min-width: 0; gap: 8px"
+        with (
+            ui.row()
+            .classes("distance-animal-timing items-center w-full gap-2")
+            .style("min-width: 0; gap: 8px")
         ):
             recorded_time = sample_camera_time(self.review, self.sample_offset)
             label = (
@@ -1587,9 +1589,13 @@ class DistanceReviewPage:
             ).props('flat dense icon-right data-distance-action="next-sample"')
             next_sample.set_enabled(not self.busy and position + 1 < len(self.offsets))
             if self.sample_seek_offset(self.sample_offset) > 0 and self.animal_player:
-                with ui.button(
-                    t("distance_play_interval"), icon="replay", on_click=self.replay_interval
-                ).props('flat dense data-distance-action="replay"').classes("ml-auto") as replay:
+                with (
+                    ui.button(
+                        t("distance_play_interval"), icon="replay", on_click=self.replay_interval
+                    )
+                    .props('flat dense data-distance-action="replay"')
+                    .classes("ml-auto") as replay
+                ):
                     _shortcut_badge("R")
                 replay.set_enabled(not self.busy)
 
@@ -2805,7 +2811,7 @@ class DistanceReviewPage:
         self.busy = True
         try:
             self.references = await run.io_bound(
-                self.dp.get_distance_reference_videos, self.video["video_id"]
+                self.dp.get_distance_reference_videos, task_key(self.video)
             )
             updated = next(
                 (

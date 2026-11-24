@@ -1,9 +1,4 @@
-"""Deployment assignment: one session-aware write seam for scans and administration.
-
-Video.camera_id is the compatibility projection consumed by existing queues and
-exports. inferred_camera_id is only the folder baseline; deployment_id is the local
-identity. Legacy/package labels are retained when reconstructing historical scope.
-"""
+"""Deployment assignment for scans and administration."""
 
 from __future__ import annotations
 
@@ -113,13 +108,15 @@ class _AssignmentDependencies:
             )
         )
         individuals = (
-            session.query(DistanceIndividual.video_id)
-            .join(Video, Video.video_id == DistanceIndividual.video_id)
+            session.query(DistanceReviewTask.video_id)
+            .select_from(DistanceIndividual)
+            .join(DistanceIndividual.task)
+            .join(Video, Video.video_id == DistanceReviewTask.video_id)
             .filter(Video.project_id == project_id)
         )
         if video_ids is not None:
             tasks = tasks.filter(DistanceReviewTask.video_id.in_(video_ids))
-            individuals = individuals.filter(DistanceIndividual.video_id.in_(video_ids))
+            individuals = individuals.filter(DistanceReviewTask.video_id.in_(video_ids))
         self.distance = {vid for (vid,) in tasks.union(individuals)}
         calibrated = (
             session.query(ReferenceFrame.id)
@@ -178,47 +175,100 @@ def ensure_project_initialized(session, project_id):
     return project
 
 
-def resolved_scope(session, row, roots=None):
-    """Durable project identity, with conservative fallback for old/external records."""
-    scope = _recorded_scope(session, row, roots)
-    if scope is not None and isinstance(row, ReferenceVideo):
-        source = (
-            session.query(Video)
-            .filter(
-                Video.project_id == row.project_id,
-                func.replace(Video.video_path, "\\", "/") == normalize_path_str(row.video_path),
-            )
-            .first()
-        )
-        if source is not None and scope != _recorded_scope(session, source, roots):
-            return None
-    return scope
-
-
-def _recorded_scope(session, row, roots=None):
-    if row.deployment_id:
-        return row.project_id, "deployment", row.deployment_id
-    if isinstance(row, Video) and row.deployment_assignment != "legacy":
-        return None
-    roots = (
-        roots if roots is not None else [(r.id, r.path) for r in _roots(session, row.project_id)]
+def video_deployment_for_label(video, label):
+    """Match a known clip by its effective deployment or its historical folder label."""
+    return (
+        video.deployment_id
+        if label and label in (video.camera_id, video.folder_camera_label)
+        else None
     )
-    legacy = deployment_key(row.project_id, row.camera_id, row.video_path, roots)
-    if legacy is not None:
-        # Explicit external legacy references can follow a resolved ordinary deployment
-        # only within their established root scope, never by a cross-root label guess.
-        candidates = {
-            video.deployment_id
-            for video in session.query(Video).filter_by(
-                project_id=row.project_id, camera_id=row.camera_id
-            )
-            if video.deployment_id
-            and deployment_key(video.project_id, video.camera_id, video.video_path, roots)
-            == legacy
-        }
-        if len(candidates) == 1:
-            return row.project_id, "deployment", candidates.pop()
-    return legacy
+
+
+def _deployments_by_scope(project_id, label, roots, videos):
+    """Prefer an effective deployment identifier over a reused folder label."""
+    matches = defaultdict(lambda: (set(), set()))
+    for video in videos:
+        if not video.deployment_id:
+            continue
+        scope = deployment_key(project_id, label, video.video_path, roots)
+        if scope is not None:
+            exact, inferred = matches[scope]
+            (exact if video.camera_id == label else inferred).add(video.deployment_id)
+    return {
+        scope: next(iter(candidates))
+        for scope, (exact, inferred) in matches.items()
+        if len(candidates := exact or inferred) == 1
+    }
+
+
+def resolve_reference_deployment(session, project_id, video_path, label):
+    """Resolve a legacy label once, within its registered import root."""
+    if not label:
+        return None
+    path = normalize_path_str(video_path)
+    videos = session.query(Video).filter_by(project_id=project_id)
+    source = videos.filter_by(video_path=path).one_or_none()
+    if source is None:
+        source = videos.filter(func.replace(Video.video_path, "\\", "/") == path).first()
+    if source is not None:
+        return video_deployment_for_label(source, label)
+    roots = [(root.id, root.path) for root in _roots(session, project_id)]
+    scope = deployment_key(project_id, label, video_path, roots)
+    if scope is None:
+        return None
+    candidates = videos.filter(
+        Video.deployment_id.is_not(None),
+        or_(Video.camera_id == label, Video.folder_camera_label == label),
+    )
+    return _deployments_by_scope(project_id, label, roots, candidates).get(scope)
+
+
+def assign_reference_deployment(reference, deployment_id):
+    reference.deployment_id = deployment_id
+    if deployment_id is not None:
+        reference.unresolved_camera_label = None
+
+
+def _reconcile_pending_references(session, project_id, roots, videos=None):
+    """Resolve registrations that predate assignments, in the same transaction."""
+    pending = (
+        session.query(ReferenceVideo)
+        .filter(
+            ReferenceVideo.project_id == project_id,
+            ReferenceVideo.deployment_id.is_(None),
+            ReferenceVideo.unresolved_camera_label.is_not(None),
+        )
+        .all()
+    )
+    if not pending:
+        return
+    if videos is None:
+        videos = session.query(Video).filter_by(project_id=project_id)
+    labels = {row.unresolved_camera_label for row in pending}
+    by_path = {}
+    by_label = defaultdict(list)
+    for video in videos:
+        by_path[normalize_path_str(video.video_path)] = video
+        for label in {video.camera_id, video.folder_camera_label} & labels:
+            by_label[label].append(video)
+    root_paths = [(root.id, root.path) for root in roots]
+    matches = {}
+    for reference in pending:
+        label = reference.unresolved_camera_label
+        source = by_path.get(normalize_path_str(reference.video_path))
+        if source is not None:
+            candidate = video_deployment_for_label(source, label)
+        else:
+            scope = deployment_key(project_id, label, reference.video_path, root_paths)
+            if scope is None:
+                continue
+            if label not in matches:
+                matches[label] = _deployments_by_scope(
+                    project_id, label, root_paths, by_label[label]
+                )
+            candidate = matches[label].get(scope)
+        if candidate is not None:
+            assign_reference_deployment(reference, candidate)
 
 
 def _legacy_deployment(session, project_id, label, root, cache):
@@ -276,15 +326,12 @@ def _legacy_deployment(session, project_id, label, root, cache):
     return row
 
 
-def _set_assignment(video, target, source, *, references, preserve_label=False):
+def _set_assignment(video, target, source, *, references):
     video.deployment_id = target.id if target else None
-    if not preserve_label:
-        video.camera_id = target.deployment_id if target else None
+    video.deployment = target
     video.deployment_assignment = source
     for reference in references:
-        reference.deployment_id = video.deployment_id
-        if video.camera_id:
-            reference.camera_id = video.camera_id
+        assign_reference_deployment(reference, video.deployment_id)
 
 
 def initialize_project(session, project_id):
@@ -311,8 +358,7 @@ def initialize_project(session, project_id):
     # Assignment updates can be sent in batches while target/link creation stays atomic.
     with session.no_autoflush:
         for video in legacy:
-            video.inferred_camera_id = video.inferred_camera_id or video.camera_id
-            if not video.camera_id:
+            if not video.folder_camera_label:
                 video.deployment_assignment = "unresolved"
                 continue
             root, folder = locations.locate(video.video_path)
@@ -320,7 +366,9 @@ def initialize_project(session, project_id):
                 root = roots[0]
             reason = dependencies.block_reason(video)
             references = dependencies.references_for(video)
-            target = _legacy_deployment(session, project_id, video.camera_id, root, cache)
+            target = _legacy_deployment(
+                session, project_id, video.folder_camera_label, root, cache
+            )
             if root and folder is not None:
                 key = root.id, folder
                 if key not in links:
@@ -339,9 +387,15 @@ def initialize_project(session, project_id):
                 video,
                 target,
                 "manual" if reason else "folder",
-                preserve_label=True,
-                references=references,
+                references=[
+                    ref
+                    for ref in references
+                    if ref.deployment_id is None
+                    and ref.unresolved_camera_label
+                    in (video.folder_camera_label, target.deployment_id)
+                ],
             )
+    _reconcile_pending_references(session, project_id, roots)
     session.flush()
     return project
 
@@ -375,7 +429,7 @@ def _automatic_targets(session, project, roots, videos, *, scanned_paths=(), res
     targets = {}
     inferred = {}
     scanned_labels = {
-        (root_id, video.inferred_camera_id or video.camera_id)
+        (root_id, video.folder_camera_label)
         for (root_id, _), members in groups.items()
         for video in members
         if video.video_path in scanned_paths and video.deployment_assignment != "manual"
@@ -386,7 +440,7 @@ def _automatic_targets(session, project, roots, videos, *, scanned_paths=(), res
         if link and link.source == "manual":
             targets[key] = deployments.get(link.deployment_id)
             continue
-        labels = {v.inferred_camera_id or v.camera_id for v in members}
+        labels = {v.folder_camera_label for v in members}
         if len(labels) != 1 or None in labels:
             continue
         label = labels.pop()
@@ -417,17 +471,21 @@ def _automatic_targets(session, project, roots, videos, *, scanned_paths=(), res
 
 
 def _assignment_changes(video, target):
-    return video.deployment_id != (target.id if target else None) or video.camera_id != (
-        target.deployment_id if target else None
-    )
+    return video.deployment_id != (target.id if target else None)
 
 
 def reconcile_scanned(session, project_id, paths, new_paths):
     project = session.get(Project, project_id)
     roots = _roots(session, project_id)
     videos = session.query(Video).filter_by(project_id=project_id).all()
+    _reconcile_scanned_assignments(session, project, roots, videos, paths, new_paths)
+    _reconcile_pending_references(session, project_id, roots, videos)
+
+
+def _reconcile_scanned_assignments(session, project, roots, videos, paths, new_paths):
     if not any(v.video_path in paths and v.deployment_assignment != "manual" for v in videos):
         return
+    project_id = project.id
     targets = _automatic_targets(session, project, roots, videos, scanned_paths=paths)
     selected = [
         (video, targets.get(video.video_id))
@@ -463,18 +521,26 @@ def reconcile_scanned(session, project_id, paths, new_paths):
     if not selected:
         return
     dependencies = _AssignmentDependencies(session, project_id, [video for video, _ in selected])
-    root_pairs = [(root.id, root.path) for root in roots]
     for video, target in selected:
         references = dependencies.references_for(video)
         reason = dependencies.block_reason(video)
         if video.video_path in new_paths and reason == "deployment_block_reference":
-            # A prepared external clip already has a scope when it first appears in a scan.
-            scope = _recorded_scope(session, references[0], root_pairs)
-            if scope and scope[1] == "deployment":
-                prior_target = session.get(Deployment, scope[2])
-                if prior_target and prior_target.project_id == project_id:
-                    _set_assignment(video, prior_target, "manual", references=references)
-                    continue
+            # A calibrated external clip can appear in a later scan.
+            reference = references[0]
+            prior_target = (
+                session.get(Deployment, reference.deployment_id)
+                if reference.deployment_id
+                else None
+            )
+            if prior_target is not None:
+                _set_assignment(video, prior_target, "manual", references=references)
+                continue
+            if target and reference.unresolved_camera_label in (
+                video.folder_camera_label,
+                target.deployment_id,
+            ):
+                _set_assignment(video, target, "manual", references=references)
+                continue
         if not _assignment_changes(video, target):
             continue
         if reason:
@@ -569,7 +635,7 @@ def _management_video(video, reference, locations, deployments):
         "folder": folder,
         "deployment_id": video.deployment_id,
         "deployment": deployment.deployment_id if deployment else None,
-        "inferred": video.inferred_camera_id,
+        "inferred": video.folder_camera_label,
         "assignment": video.deployment_assignment,
         "reference": reference,
         "missing": bool(video.is_missing),
@@ -972,7 +1038,7 @@ class DeploymentMixin(ProviderBase):
                     "path": video.video_path,
                     "folder": relative,
                     "root_id": root.id if root else None,
-                    "baseline": video.inferred_camera_id,
+                    "baseline": video.folder_camera_label,
                     "before": video.deployment_id,
                     "before_label": video.camera_id,
                     "after": desired.id if desired else None,

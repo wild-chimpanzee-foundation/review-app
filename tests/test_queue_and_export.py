@@ -179,8 +179,7 @@ def test_queue_combined_camera_and_not_annotated(populated_provider):
 
 
 def test_queue_model_filters_scoped_to_active_project(tmp_db, mock_probe):
-    """Model-annotation CTEs must bind the active project's id (they filter the
-    model_annotations table by project_id to avoid scanning other projects)."""
+    """Model-annotation CTEs aggregate predictions for the active project's videos."""
     import uuid
     from datetime import datetime, timezone
 
@@ -199,7 +198,6 @@ def test_queue_model_filters_scoped_to_active_project(tmp_db, mock_probe):
             ModelAnnotation(
                 id=str(uuid.uuid4()),
                 video_id=vid,
-                project_id=project.id,
                 annotation_type="blank_non_blank",
                 model_name="m",
                 value_text="blank",
@@ -249,7 +247,6 @@ def test_queue_sorts_by_effective_blank_probability(populated_provider):
             ModelAnnotation(
                 id=str(uuid.uuid4()),
                 video_id=ids["v3"],
-                project_id=None,
                 annotation_type="blank_non_blank",
                 model_name="legacy_blank_model",
                 value_text=None,
@@ -473,3 +470,61 @@ def test_remove_project_dir_cascades_videos_out_of_queue(provider_with_project):
 def test_remove_nonexistent_dir_does_not_raise(tmp_db):
     dp = LocalDataProvider()
     dp.remove_project_dir("nonexistent-id-xyz")  # should not raise
+
+
+def test_species_and_prediction_writes_and_reads_follow_video_project(provider_with_project):
+    import pandas as pd
+    import pytest
+    from review_app.backend.errors import VideoError
+
+    dp, project, root = provider_with_project
+    other = dp.create_project("Another project with the same paths", root.path)
+    dp.sync_videos(active_project_id=other.id)
+    video = dp.get_video_queue({}, project.id)[0]
+    other_video = next(
+        vid
+        for vid in dp.get_video_queue({}, other.id)
+        if dp.get_video_detail(vid)["video_path"] == dp.get_video_detail(video)["video_path"]
+    )
+    prediction = pd.DataFrame(
+        [
+            {
+                "video_id": video,
+                "annotation_type": "species",
+                "model_name": "project-model",
+                "value_text": "deer",
+                "probability": 0.99,
+            },
+            {
+                "video_id": other_video,
+                "annotation_type": "species",
+                "model_name": "other-model",
+                "value_text": "fox",
+                "probability": 0.99,
+            },
+        ]
+    )
+    with pytest.raises(VideoError, match="does not belong"):
+        dp.import_model_csv(prediction, project.id)
+    assert dp.export_model_annotations_csv(None).empty
+    dp.import_model_csv(prediction.iloc[:1], project.id)
+    dp.import_model_csv(prediction.iloc[1:], other.id)
+    for project_id, video_id, species, model in (
+        (project.id, video, "deer", "project-model"),
+        (other.id, other_video, "fox", "other-model"),
+    ):
+        dp.update_manual_review(
+            video_id, [{"species": species, "tags": ["grazing"]}], active_project_id=project_id
+        )
+        assert queue(dp, {"selected_needs_review": "No Review"}, project_id) == {video_id}
+        assert dp.get_queue_filter_options(project_id)["possible_species_values"] == [species]
+        assert dp.export_annotations_csv(project_id)["species"].dropna().tolist() == [species]
+        assert dp.export_model_annotations_csv(project_id)["model_name"].tolist() == [model]
+        stats = dp.get_overview_stats(project_id)
+        assert [row["species"] for row in stats["species_counts"]] == [species]
+        assert [row["model_name"] for row in stats["model_coverage"]] == [model]
+    assert dp.delete_model_annotations(project.id) == 1
+    assert dp.export_model_annotations_csv(project.id).empty
+    assert dp.delete_project(project.id)["deleted"]
+    assert dp.export_model_annotations_csv(other.id)["model_name"].tolist() == ["other-model"]
+    assert dp.export_annotations_csv(other.id)["species"].dropna().tolist() == ["fox"]

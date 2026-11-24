@@ -62,7 +62,6 @@ def prepared(provider_with_project):
         session.add(
             ModelAnnotation(
                 video_id=ids[0],
-                project_id=project.id,
                 annotation_type="species",
                 model_name="model-a",
                 value_text="deer",

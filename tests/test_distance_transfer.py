@@ -441,7 +441,7 @@ def test_restore_into_fresh_database_maps_media_and_vocabulary(manual_data, tmp_
     )
     with target.Session() as session:
         restored = session.get(DistanceIndividual, parent["id"])
-        assert session.get(Species, restored.species_id).scientific_name == "deer"
+        assert session.get(Species, restored.task.species_id).scientific_name == "deer"
         assert session.query(IndividualObservation).count() == 0
         assert session.get(ReferenceFrame, frame["id"]).distance_m == 3.75
         assert session.query(Tag).filter_by(key="distinctive").one().individual_eligible

@@ -56,7 +56,10 @@ def distance_assignment(provider_with_project):
         ensure_tasks(session, project.id)
         target = session.query(Species).filter_by(scientific_name="deer").one()
         ref = ReferenceVideo(
-            id="ref", project_id=project.id, camera_id="cam_x", video_path=str(reference_path)
+            id="ref",
+            project_id=project.id,
+            deployment_id=session.get(Video, ids[0]).deployment_id,
+            video_path=str(reference_path),
         )
         session.add(ref)
         source = DistanceImport(
@@ -100,8 +103,6 @@ def distance_assignment(provider_with_project):
             session.add(
                 DistanceIndividual(
                     id=f"individual-{number}",
-                    video_id=ids[0],
-                    species_id=target.id,
                     task_id=task.id,
                     import_id=source.id,
                     individual_number=number,
@@ -192,6 +193,36 @@ def open_work(fixture):
     return dp.open_assignment(data, "Distance worker", {root.id: root.path})
 
 
+def test_return_keeps_calibration_from_footage_already_in_scope(distance_assignment):
+    dp, project, root, ids, _, package = distance_assignment
+    opened = dp.open_assignment(package, "Working copy", {root.id: root.path})
+    with dp.Session() as session:
+        animal, reference = (
+            session.get(HandoffIdentityMap, (opened.id, "video", video_id)).local_id
+            for video_id in ids
+        )
+        task = session.query(DistanceReviewTask).filter_by(video_id=animal).one().id
+
+    dp.set_video_tags(reference, ["reference_video"])
+    source = next(
+        row
+        for row in dp.get_distance_reference_videos(task)
+        if row["source_video_id"] == reference
+    )
+    frame = dp.add_reference_frame(source["id"], 1000, 20.0)
+    individual = dp.list_distance_individuals(task)[0]
+    dp.save_distance_sample(
+        individual["id"], 2000, reference_frame_id=frame["id"], labeled_by="alice"
+    )
+
+    returned = dp.export_assignment_return(opened.project_id)
+    preview = dp.preview_assignment_return(project.id, returned)
+    dp.accept_assignment_return(project.id, returned, "use_imported", preview.token)
+
+    samples = dp.get_distance_review_state(ids[0], "alice")["samples"]
+    assert any(row["offset_ms"] == 2000 and row["distance_m"] == 20 for row in samples)
+
+
 def test_complete_setup_same_frame_people_and_projected_ai_round_trip(distance_assignment):
     dp, project, root, ids, prepared, data = distance_assignment
     manifest, context, work = decode_archive(data)
@@ -226,7 +257,8 @@ def test_complete_setup_same_frame_people_and_projected_ai_round_trip(distance_a
         samples = (
             session.query(DistanceSample)
             .join(DistanceIndividual, DistanceSample.individual_id == DistanceIndividual.id)
-            .join(Video)
+            .join(DistanceIndividual.task)
+            .join(Video, Video.video_id == DistanceReviewTask.video_id)
             .filter(Video.project_id == first.project_id)
             .all()
         )
@@ -464,8 +496,6 @@ def test_first_manual_return_is_new_despite_pristine_task_scaffolding(distance_a
             DistanceIndividual(
                 id="manual-person",
                 task_id=task.id,
-                video_id=local,
-                species_id=task.species_id,
                 individual_number=1,
                 first_seen_offset_ms=0,
                 labeled_by="manual",
@@ -701,7 +731,6 @@ def test_distance_assignment_excludes_clips_without_camera(distance_assignment):
     dp, project, root, ids, _, _ = distance_assignment
     with dp.Session.begin() as session:
         video = session.get(Video, ids[0])
-        video.camera_id = None
         video.deployment_id = None
 
     preview = dp.preview_assignment_distance_selection(project.id, "deer")

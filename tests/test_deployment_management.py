@@ -54,7 +54,7 @@ def row(dp, video_id):
             video.camera_id,
             video.deployment_id,
             video.deployment_assignment,
-            video.inferred_camera_id,
+            video.folder_camera_label,
         )
 
 
@@ -91,8 +91,7 @@ def test_folder_links_and_inference_drive_grouping_and_unresolved_distance(manag
 def test_overview_footage_and_review_use_saved_deployment_ids(managed):
     dp, project, _, videos, inventory = managed
     with dp.Session.begin() as session:
-        # A camera can be reused in another deployment.
-        session.get(Video, videos["animals/a.mp4"]).camera_id = "B"
+        session.get(Video, videos["animals/a.mp4"]).folder_camera_label = "B"
 
     groups = {
         entry["deployment_id"]: entry
@@ -377,12 +376,14 @@ def test_explicit_cross_root_reference_link_uses_identity_not_root_or_label(mana
     assert [
         r["source_video_id"] for r in dp.get_distance_reference_videos(videos["animals/a.mp4"])
     ] == [source_id]
-    # The existing archive contract is root-scoped. Refuse unsupported output
-    # rather than flattening this explicit cross-root identity into a v1 label.
-    with pytest.raises(ValueError, match="multiple import roots"):
-        dp.prepare_assignment(
-            project.id, AssignmentRequest("alice", (videos["animals/a.mp4"], source_id))
-        )
+    from review_app.backend.annotation_package.archive import decode_archive
+
+    prepared = dp.prepare_assignment(
+        project.id, AssignmentRequest("alice", (videos["animals/a.mp4"], source_id))
+    )
+    manifest, context, _ = decode_archive(dp.export_assignment(prepared.id))
+    assert len(manifest["roots"]) == 2
+    assert {row["deployment_id"] for row in context["deployments"]["media"]} == {inventory["A"]}
 
 
 def test_late_calibration_invalidates_preview_without_partial_assignment(managed):

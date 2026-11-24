@@ -80,6 +80,10 @@ def validate_snapshot(manifest, context, work):
         version == VERSION and manifest["direction"] == "setup"
     ):
         raise ValueError("Assignment deployment context is missing")
+    if manifest["stage"] == "distance" and manifest["direction"] == "setup":
+        from review_app.backend.annotation_package.distance import validate_reference_membership
+
+        validate_reference_membership(base, work, context)
 
 
 def _validate_snapshot(manifest, context, work):

@@ -10,15 +10,16 @@ from review_app.backend.db.distance_behaviors import ensure_unidentified_behavio
 from review_app.backend.db.models import (
     Behavior,
     DistanceIndividual,
-    DistanceReviewTask,
     DistanceSample,
     DistanceSampleBehavior,
-    ProjectDir,
     ReferenceFrame,
     ReferenceVideo,
     Video,
 )
-from review_app.backend.provider.deployments import resolved_scope
+from review_app.backend.provider.deployments import (
+    assign_reference_deployment,
+    resolve_reference_deployment,
+)
 from review_app.backend.provider.distance_review import (
     reopen_individual_review,
     review_offsets,
@@ -39,10 +40,12 @@ def scheduled_sample(session, individual_id: str, offset_ms: int):
     individual = session.get(DistanceIndividual, individual_id)
     if individual is None:
         raise ValueError("Distance individual not found")
-    review = session.get(DistanceReviewTask, individual.task_id)
+    review = individual.task
     if review is None or review.verified_at is None:
         raise ValueError("Verify the camera recording time before annotating samples")
-    video = session.get(Video, individual.video_id)
+    video = session.get(Video, review.video_id)
+    if not video.deployment_id:
+        raise ValueError("Resolve the video's project and camera before distance review")
     if offset_ms not in review_offsets(review, video.duration_sec):
         raise ValueError("Offset is not a scheduled even camera second")
     return individual, video
@@ -104,15 +107,24 @@ def save_distance_sample(
         if frame is None:
             raise ValueError("Select a prepared reference frame")
         reference = session.get(ReferenceVideo, frame.reference_video_id)
-        roots = [
-            (row.id, row.path)
-            for row in session.query(ProjectDir).filter_by(project_id=video.project_id)
-        ]
-        scope = resolved_scope(session, video, roots)
         if not math.isfinite(frame.distance_m) or frame.distance_m <= 0:
             raise ValueError("Reference distance must be finite and positive")
-        if scope is None or resolved_scope(session, reference, roots) != scope:
+        deployment_id = reference.deployment_id
+        if deployment_id is None and reference.project_id == video.project_id:
+            deployment_id = resolve_reference_deployment(
+                session,
+                reference.project_id,
+                reference.video_path,
+                reference.unresolved_camera_label,
+            )
+        if (
+            not video.deployment_id
+            or reference.project_id != video.project_id
+            or deployment_id != video.deployment_id
+        ):
             raise ValueError("Reference frame must match the video's project and deployment")
+        if reference.deployment_id is None:
+            assign_reference_deployment(reference, deployment_id)
     behaviors = set(behavior_ids or [])
     if behaviors != {
         bid for (bid,) in session.query(Behavior.id).filter(Behavior.id.in_(behaviors))
@@ -129,8 +141,6 @@ def save_distance_sample(
             raise ValueError("Carried infant must be another individual in this task")
         if infant.age != "Infant":
             raise ValueError("Select an individual with age Infant")
-        if infant.species_id != individual.species_id:
-            raise ValueError("Carried infant must have the carrier's species")
     current = (
         session.query(DistanceSample)
         .filter_by(individual_id=individual_id, offset_ms=offset_ms)
@@ -168,10 +178,8 @@ def save_distance_sample(
             .scalar()
         )
         infant = DistanceIndividual(
-            video_id=video.video_id,
             task_id=individual.task_id,
             individual_number=last_number + 1,
-            species_id=individual.species_id,
             first_seen_offset_ms=individual.first_seen_offset_ms,
             first_seen_playback_ms=individual.first_seen_playback_ms,
             anchor_x=individual.anchor_x,
@@ -186,7 +194,7 @@ def save_distance_sample(
         )
         session.add(infant)
         session.flush()
-        review = session.get(DistanceReviewTask, individual.task_id)
+        review = individual.task
         if review:
             session.add_all(
                 DistanceSample(

@@ -79,20 +79,13 @@ def collect(session, project_id, context, work, roots):
     reference_media = {
         row["id"]: row["video_id"] for row in context.get("distance", {}).get("references", [])
     }
-    from review_app.backend.provider.deployments import resolved_scope
-
-    root_pairs = [(root.id, root.path) for root in roots]
-    references = {}
-    for row in session.query(ReferenceVideo).filter(
-        ReferenceVideo.project_id == project_id,
-        ReferenceVideo.id.in_(id_selection(reference_media)),
-    ):
-        deployment_id = row.deployment_id
-        if deployment_id is None:
-            scope = resolved_scope(session, row, root_pairs)
-            if scope and scope[1] == "deployment":
-                deployment_id = scope[2]
-        references[reference_media[row.id]] = deployment_id
+    references = {
+        reference_media[row.id]: row.deployment_id
+        for row in session.query(ReferenceVideo).filter(
+            ReferenceVideo.project_id == project_id,
+            ReferenceVideo.id.in_(id_selection(reference_media)),
+        )
+    }
     assignments = {
         key: videos[key].deployment_id if key in videos else references.get(key)
         for key in (row["video_id"] for row in media)
@@ -181,6 +174,8 @@ def validate(snapshot, context, work, *, include_reviews):
         row["video_id"] for row in context.get("distance", {}).get("references", [])
     }:
         raise ValueError("Deployment links must match packaged footage")
+    if any(row["deployment_id"] != media[key]["deployment_id"] for key, row in references.items()):
+        raise ValueError("Reference deployment links must match their footage")
     linked = {
         row["deployment_id"]
         for row in (*media.values(), *references.values())
@@ -253,8 +248,12 @@ def restore(session, project_id, snapshot, identities, videos, paths):
         row.video_path: row
         for row in session.query(ReferenceVideo).filter_by(project_id=project_id)
     }
+    from review_app.backend.provider.deployments import assign_reference_deployment
+
     for row in snapshot["references"]:
-        references[paths[row["video_id"]][0]].deployment_id = local[row["deployment_id"]]
+        assign_reference_deployment(
+            references[paths[row["video_id"]][0]], local[row["deployment_id"]]
+        )
     for row in snapshot["folders"]:
         session.add(
             DeploymentFolderLink(

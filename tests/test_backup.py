@@ -472,8 +472,9 @@ class TestRestoreBackup:
                     len(MIGRATIONS),
                 )
                 assert con.execute("""
-                    SELECT o.id, o.project_id, o.start_sec, s.scientific_name, b.key
+                    SELECT o.id, v.project_id, o.start_sec, s.scientific_name, b.key
                     FROM individual_observations o
+                    JOIN videos v ON v.video_id = o.video_id
                     JOIN species s ON s.id = o.species_id
                     JOIN observation_tags t ON (t.video_id, t.observation_id) = (o.video_id, o.id)
                     JOIN behaviors b ON b.id = t.behavior_id

@@ -11,14 +11,12 @@ from review_app.backend.db.models import (
     DistanceReviewTask,
     DistanceSample,
     DistanceSampleBehavior,
-    ProjectDir,
     ReferenceFrame,
     ReferenceVideo,
     Video,
 )
 from review_app.backend.distance_timing import sample_offsets
 from review_app.backend.path_matching import normalize_path_str
-from review_app.backend.provider.deployments import resolved_scope
 from review_app.backend.provider.distance_tasks import (
     clear_completion,
     complete_task,
@@ -52,8 +50,8 @@ def refresh_individual_completion(
     session, individual: DistanceIndividual, expected_offsets: set[int] | None = None
 ) -> None:
     """Derive individual completion from the verified schedule and saved samples."""
-    review = session.get(DistanceReviewTask, individual.task_id)
-    video = session.get(Video, individual.video_id)
+    review = individual.task
+    video = session.get(Video, review.video_id)
     expected = (
         expected_offsets
         if expected_offsets is not None
@@ -87,7 +85,7 @@ def refresh_individual_completion(
 def reopen_individual_review(session, individual: DistanceIndividual) -> None:
     mark_review_started(session, individual.task_id)
     refresh_individual_completion(session, individual)
-    review = session.get(DistanceReviewTask, individual.task_id)
+    review = individual.task
     if review:
         clear_completion(review)
 
@@ -99,7 +97,11 @@ def mark_review_started(session, task_id: str) -> None:
 
 
 def reconcile_video_completion(session, video_id: str) -> None:
-    for individual in session.query(DistanceIndividual).filter_by(video_id=video_id):
+    for individual in (
+        session.query(DistanceIndividual)
+        .join(DistanceIndividual.task)
+        .filter(DistanceReviewTask.video_id == video_id)
+    ):
         refresh_individual_completion(session, individual)
 
 
@@ -213,26 +215,22 @@ def _suggestion_frames(session, video):
     """Only currently available references in this deployment may be suggested."""
     from review_app.backend.provider.distance_references import reference_tagged
 
-    roots = [
-        (row.id, row.path)
-        for row in session.query(ProjectDir).filter_by(project_id=video.project_id)
-    ]
-    scope = resolved_scope(session, video, roots)
+    if not video.deployment_id:
+        return {}
     paths = {
         normalize_path_str(source.video_path)
         for source in session.query(Video).filter(
-            Video.project_id == video.project_id,
+            Video.deployment_id == video.deployment_id,
             Video.is_missing.is_(False),
             reference_tagged(session),
         )
-        if scope is not None and resolved_scope(session, source, roots) == scope
     }
     return {
         frame.id: frame
         for frame, source in session.query(ReferenceFrame, ReferenceVideo)
         .join(ReferenceVideo, ReferenceFrame.reference_video_id == ReferenceVideo.id)
         .filter(
-            ReferenceVideo.project_id == video.project_id,
+            ReferenceVideo.deployment_id == video.deployment_id,
             ReferenceFrame.retired.is_(False),
         )
         if normalize_path_str(source.video_path) in paths
@@ -245,7 +243,7 @@ def finish_individual(session, individual_id: str, annotator_name: str) -> None:
     individual = session.get(DistanceIndividual, individual_id)
     if individual is None:
         raise ValueError("Distance individual not found")
-    review = session.get(DistanceReviewTask, individual.task_id)
+    review = individual.task
     if review is None:
         raise ValueError("Verify the camera recording time first")
     refresh_individual_completion(session, individual)
@@ -342,7 +340,7 @@ def verify_recording_time(
     video = session.get(Video, review.video_id)
     if video is None:
         raise ValueError("Video not found")
-    if not video.camera_id:
+    if not video.deployment_id:
         raise ValueError("Resolve the video deployment before Distance review")
     offsets = sample_offsets(
         recorded_start,
