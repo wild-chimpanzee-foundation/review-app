@@ -21,8 +21,8 @@ def legacy_database(tmp_path):
         )
         conn.executescript("""
             INSERT INTO projects (id, name, created_at) VALUES ('project', 'Keep', '2024-01-01');
-            INSERT INTO videos (video_id, project_id, video_path, last_seen_at)
-                VALUES ('video', 'project', 'animal.mp4', '2024-01-01');
+            INSERT INTO videos (video_id, project_id, video_path, camera_id, last_seen_at)
+                VALUES ('video', 'project', 'animal.mp4', 'legacy-camera', '2024-01-01');
             INSERT INTO species (id, scientific_name, is_custom) VALUES ('species', 'deer', 0);
             INSERT INTO individual_observations
                 (video_id, id, observation_uuid, project_id, species_id, count,
@@ -56,8 +56,8 @@ def test_upgrade_preserves_ordinary_records_and_adds_final_schema(
         }
     if precreate_tables:
         Base.metadata.create_all(engine)
-    migrations.run_migrations(engine)
-    migrations.run_migrations(engine)
+    assert migrations.upgrade_database(engine)
+    assert not migrations.upgrade_database(engine)
     with engine.connect() as conn:
         for table, rows in before.items():
             after = conn.exec_driver_sql(f'SELECT * FROM "{table}"').mappings().all()
@@ -65,6 +65,10 @@ def test_upgrade_preserves_ordinary_records_and_adds_final_schema(
             assert [{key: row[key] for key in rows[0]} for row in after] == [
                 dict(row) for row in rows
             ]
+        assert conn.exec_driver_sql("""
+            SELECT inferred_camera_id, deployment_id, deployment_assignment
+            FROM videos
+        """).one() == ("legacy-camera", None, "legacy")
         assert conn.exec_driver_sql("SELECT individual_eligible FROM tags").scalar() == 1
         assert conn.exec_driver_sql("SELECT version FROM _schema_version").scalar() == len(
             migrations.MIGRATIONS
@@ -94,73 +98,6 @@ def test_failed_v23_upgrade_rolls_back_ddl_data_and_version(legacy_database, mon
         assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
         assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
     migrations.run_migrations(engine)
-
-
-def test_task_transition_discards_only_legacy_distance_evidence(legacy_database, monkeypatch):
-    engine = legacy_database
-    with monkeypatch.context() as patch:
-        patch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:23])
-        migrations.run_migrations(engine)
-    with engine.begin() as conn:
-        conn.exec_driver_sql("""
-            INSERT INTO distance_imports
-                (id, project_id, content_hash, manifest, payload, imported_at)
-            VALUES ('import', 'project', 'package-hash', '{"source_id":"pipeline"}',
-                    '{"references":[{"reference_frame_id":"frame"}]}', '2026-01-01')
-        """)
-        conn.exec_driver_sql("""
-            INSERT INTO reference_videos VALUES ('ref', 'project', 'camera', 'ref.mp4')
-        """)
-        conn.exec_driver_sql("""
-            INSERT INTO reference_frames
-                (id, reference_video_id, offset_ms, playback_offset_ms, distance_m, import_id)
-            VALUES ('frame', 'ref', 1000, 1000.5, 2.5, 'import')
-        """)
-        conn.exec_driver_sql("""
-            INSERT INTO distance_individuals
-                (id, video_id, import_id, individual_number, species_id,
-                 first_seen_offset_ms, updated_at)
-            VALUES ('legacy', 'video', 'import', 1, 'species', 0, '2026-01-01')
-        """)
-        import_before = conn.exec_driver_sql("""
-            SELECT id, project_id, manifest, payload, imported_at FROM distance_imports
-        """).all()
-        before = {
-            table: conn.exec_driver_sql(f'SELECT * FROM "{table}"').mappings().all()
-            for table in (
-                "reference_videos",
-                "reference_frames",
-                "individual_observations",
-                "video_tags",
-            )
-        }
-    Base.metadata.create_all(engine)
-    migrations.run_migrations(engine)
-    migrations.run_migrations(engine)
-    with engine.begin() as conn:
-        for table, rows in before.items():
-            after = conn.exec_driver_sql(f'SELECT * FROM "{table}"').mappings().all()
-            assert [{key: row[key] for key in rows[0]} for row in after] == [
-                dict(row) for row in rows
-            ]
-        assert conn.exec_driver_sql("SELECT count(*) FROM distance_individuals").scalar() == 0
-        assert (
-            conn.exec_driver_sql("""
-            SELECT id, project_id, manifest, payload, imported_at FROM distance_imports
-        """).all()
-            == import_before
-        )
-        assert conn.exec_driver_sql("SELECT content_hash FROM distance_imports").scalar() == (
-            "discarded-v24:import:package-hash"
-        )
-        # The normal importer can now claim the original hash again, without
-        # deleting the source record referenced by the retained calibration.
-        conn.exec_driver_sql("""
-            INSERT INTO distance_imports
-                (id, project_id, content_hash, manifest, payload, imported_at)
-            VALUES ('reimport', 'project', 'package-hash', '{}', '{}', '2026-01-02')
-        """)
-        assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
 
 
 def test_v22_upgrade_creates_final_distance_schema_directly(legacy_database):

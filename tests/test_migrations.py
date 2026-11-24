@@ -7,6 +7,8 @@ runner we create a real engine, build the current schema with create_all(),
 then wind the version stamp back to simulate an older database.
 """
 
+from pathlib import Path
+
 import pytest
 from review_app.backend.db.migrations import (
     MIGRATIONS,
@@ -126,7 +128,7 @@ def test_species_upgrade_repairs_ownership_and_behavior_links(provider_with_proj
         conn.exec_driver_sql("DROP TABLE saved_tags")
         conn.exec_driver_sql("UPDATE individual_observations SET project_id = ?", (other.id,))
         conn.exec_driver_sql("UPDATE video_labels SET is_blank = 1")
-    _set_version(dp.engine, 32)
+    _set_version(dp.engine, 22)
     dp.engine.dispose()
 
     dp = LocalDataProvider()
@@ -196,18 +198,15 @@ def test_provider_rejects_unrelated_sqlite_without_creating_tables(tmp_db):
 
 def test_individual_tag_eligibility_migration_and_fresh_schema(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'tag-eligibility.db'}")
+    snapshot = Path(__file__).with_name("fixtures") / "schema_snapshot.sql"
     with engine.begin() as conn:
-        conn.execute(
-            text("CREATE TABLE tags (id TEXT PRIMARY KEY, key TEXT, is_custom BOOLEAN NOT NULL)")
-        )
-        conn.execute(
-            text(
-                "INSERT INTO tags (id, key, is_custom) VALUES "
-                "('injury', 'injured', 0), ('disease', 'disease', 0), "
-                "('ref', 'reference_video', 0), ('old-custom', 'old_custom', 1), "
-                "('comments', 'comments', 1), ('imports', 'import_tags', 1)"
-            )
-        )
+        conn.connection.driver_connection.executescript(snapshot.read_text())
+        conn.exec_driver_sql("""
+            INSERT INTO tags (id, key, name_en, is_custom) VALUES
+                ('injury', 'injured', 'Injured', 0), ('disease', 'disease', 'Disease', 0),
+                ('ref', 'reference_video', 'Reference', 0), ('old-custom', 'old_custom', 'Custom', 1),
+                ('comments', 'comments', 'Comments', 1), ('imports', 'import_tags', 'Imports', 1)
+        """)
         _migration_v23(conn)
         values = dict(conn.execute(text("SELECT key, individual_eligible FROM tags")).all())
     assert values == {

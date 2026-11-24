@@ -608,10 +608,347 @@ def _migration_v22(conn) -> None:
         conn.execute(text(idx_sql))
 
 
+# Frozen DDL for tables introduced by v23. Future schema changes append a migration.
+SCHEMA_V23 = (
+    """
+    CREATE TABLE IF NOT EXISTS deployments (
+        id VARCHAR NOT NULL,
+        project_id VARCHAR NOT NULL,
+        deployment_id VARCHAR NOT NULL,
+        name VARCHAR,
+        camera_id VARCHAR,
+        installation_date DATE,
+        retrieval_date DATE,
+        transect_id VARCHAR,
+        habitat VARCHAR,
+        notes VARCHAR,
+        PRIMARY KEY (id),
+        CONSTRAINT uq_deployment_project_key UNIQUE (project_id, deployment_id),
+        CONSTRAINT ck_deployment_key CHECK (length(trim(deployment_id)) > 0),
+        FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_deployments_project_id ON deployments (project_id)",
+    """
+    CREATE TABLE IF NOT EXISTS handoff_assignments (
+        id VARCHAR NOT NULL,
+        assignment_id VARCHAR NOT NULL,
+        project_id VARCHAR NOT NULL,
+        role VARCHAR NOT NULL,
+        source_project_id VARCHAR NOT NULL,
+        recipient VARCHAR NOT NULL,
+        stage VARCHAR NOT NULL,
+        target_species VARCHAR,
+        created_at DATETIME NOT NULL,
+        scope JSON NOT NULL,
+        removed_at DATETIME,
+        setup_archive BLOB NOT NULL,
+        PRIMARY KEY (id),
+        CONSTRAINT uq_handoff_project_assignment UNIQUE (project_id, assignment_id),
+        CONSTRAINT ck_handoff_role CHECK (role IN ('origin', 'working')),
+        CONSTRAINT ck_handoff_recipient CHECK (length(trim(recipient)) > 0),
+        CONSTRAINT ck_handoff_stage CHECK ((stage = 'species' AND target_species IS NULL)
+            OR (stage = 'distance' AND target_species IS NOT NULL
+            AND length(trim(target_species)) > 0)),
+        CONSTRAINT ck_handoff_origin CHECK (role != 'origin' OR source_project_id = project_id),
+        FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_handoff_working_project ON handoff_assignments (project_id) WHERE role = 'working'",
+    "CREATE INDEX IF NOT EXISTS ix_handoff_assignments_project_id ON handoff_assignments (project_id)",
+    """
+    CREATE TABLE IF NOT EXISTS distance_imports (
+        id VARCHAR NOT NULL,
+        project_id VARCHAR NOT NULL,
+        content_hash VARCHAR NOT NULL,
+        manifest JSON NOT NULL,
+        payload JSON NOT NULL,
+        imported_at DATETIME NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE (project_id, content_hash),
+        FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_distance_imports_project_id ON distance_imports (project_id)",
+    """
+    CREATE TABLE IF NOT EXISTS deployment_folder_links (
+        id VARCHAR NOT NULL,
+        project_dir_id VARCHAR NOT NULL,
+        folder_path VARCHAR NOT NULL,
+        deployment_id VARCHAR,
+        source VARCHAR DEFAULT 'manual' NOT NULL,
+        PRIMARY KEY (id),
+        CONSTRAINT uq_deployment_folder UNIQUE (project_dir_id, folder_path),
+        FOREIGN KEY(project_dir_id) REFERENCES project_dirs (id) ON DELETE CASCADE,
+        FOREIGN KEY(deployment_id) REFERENCES deployments (id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_deployment_folder_links_project_dir_id ON deployment_folder_links (project_dir_id)",
+    """
+    CREATE TABLE IF NOT EXISTS deployment_folder_reviews (
+        project_dir_id VARCHAR NOT NULL,
+        folder_path VARCHAR NOT NULL,
+        note VARCHAR,
+        available_candidates JSON NOT NULL,
+        PRIMARY KEY (project_dir_id, folder_path),
+        FOREIGN KEY(project_dir_id) REFERENCES project_dirs (id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS handoff_identity_maps (
+        handoff_id VARCHAR NOT NULL,
+        kind VARCHAR NOT NULL,
+        portable_id VARCHAR NOT NULL,
+        local_id VARCHAR NOT NULL,
+        PRIMARY KEY (handoff_id, kind, portable_id),
+        CONSTRAINT uq_handoff_local_identity UNIQUE (handoff_id, kind, local_id),
+        CONSTRAINT ck_handoff_identity CHECK (length(trim(kind)) > 0
+            AND length(trim(portable_id)) > 0 AND length(trim(local_id)) > 0),
+        FOREIGN KEY(handoff_id) REFERENCES handoff_assignments (id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS reference_videos (
+        id VARCHAR NOT NULL,
+        project_id VARCHAR NOT NULL,
+        camera_id VARCHAR NOT NULL,
+        deployment_id VARCHAR,
+        video_path VARCHAR NOT NULL,
+        PRIMARY KEY (id),
+        CONSTRAINT uq_reference_video_path_project UNIQUE (project_id, video_path),
+        CONSTRAINT ck_reference_camera CHECK (length(trim(camera_id)) > 0),
+        CONSTRAINT ck_reference_path CHECK (length(trim(video_path)) > 0),
+        FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE,
+        FOREIGN KEY(deployment_id) REFERENCES deployments (id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_reference_videos_deployment_id ON reference_videos (deployment_id)",
+    "CREATE INDEX IF NOT EXISTS idx_reference_deployment ON reference_videos (project_id, camera_id)",
+    """
+    CREATE TABLE IF NOT EXISTS reference_frames (
+        id VARCHAR NOT NULL,
+        reference_video_id VARCHAR NOT NULL,
+        offset_ms INTEGER NOT NULL,
+        playback_offset_ms FLOAT,
+        distance_m FLOAT NOT NULL,
+        mask JSON,
+        import_id VARCHAR,
+        retired BOOLEAN DEFAULT '0' NOT NULL,
+        PRIMARY KEY (id),
+        CONSTRAINT uq_reference_frame_position UNIQUE (reference_video_id, distance_m, offset_ms),
+        CONSTRAINT ck_reference_frame_offset CHECK (offset_ms >= 0),
+        CONSTRAINT ck_reference_frame_playback CHECK (playback_offset_ms >= 0),
+        CONSTRAINT ck_reference_frame_distance CHECK (distance_m > 0),
+        FOREIGN KEY(reference_video_id) REFERENCES reference_videos (id) ON DELETE CASCADE,
+        FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS distance_review_tasks (
+        id VARCHAR NOT NULL,
+        video_id VARCHAR NOT NULL,
+        species_id VARCHAR NOT NULL,
+        source_count INTEGER NOT NULL,
+        completion_outcome VARCHAR,
+        completion_history JSON NOT NULL,
+        rejected_ai JSON NOT NULL,
+        recorded_start DATETIME,
+        alignment_mode VARCHAR DEFAULT 'exact' NOT NULL,
+        imported_sample_times_s JSON,
+        import_id VARCHAR,
+        started_at DATETIME,
+        clock_anchor_offset_ms INTEGER,
+        clock_anchor_playback_ms FLOAT,
+        opening_even_second BOOLEAN DEFAULT '0' NOT NULL,
+        verified_by VARCHAR,
+        verified_at DATETIME,
+        completed_by VARCHAR,
+        completed_at DATETIME,
+        PRIMARY KEY (id),
+        CONSTRAINT uq_distance_task UNIQUE (video_id, species_id),
+        FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE,
+        FOREIGN KEY(species_id) REFERENCES species (id),
+        FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_distance_review_tasks_video_id ON distance_review_tasks (video_id)",
+    """
+    CREATE TABLE IF NOT EXISTS distance_individuals (
+        id VARCHAR NOT NULL,
+        video_id VARCHAR NOT NULL,
+        import_id VARCHAR,
+        task_id VARCHAR NOT NULL,
+        ai_original JSON,
+        individual_number INTEGER NOT NULL,
+        species_id VARCHAR NOT NULL,
+        age VARCHAR,
+        sex VARCHAR,
+        first_seen_offset_ms INTEGER NOT NULL,
+        first_seen_playback_ms FLOAT,
+        initial_carrier_individual_id VARCHAR,
+        anchor_x FLOAT,
+        anchor_y FLOAT,
+        anchor_width FLOAT,
+        anchor_height FLOAT,
+        labeled_by VARCHAR,
+        labeled_at DATETIME,
+        updated_at DATETIME NOT NULL,
+        review_status VARCHAR DEFAULT 'not_started' NOT NULL,
+        completed_by VARCHAR,
+        completed_at DATETIME,
+        PRIMARY KEY (id),
+        CONSTRAINT uq_distance_individual_number UNIQUE (task_id, individual_number),
+        CONSTRAINT ck_distance_individual_number CHECK (individual_number > 0),
+        CONSTRAINT ck_distance_first_seen CHECK (first_seen_offset_ms >= 0),
+        CONSTRAINT ck_distance_age CHECK (age IS NULL OR age IN ('Adult', 'Adolescent', 'Juvenile', 'Infant', 'Unknown')),
+        CONSTRAINT ck_distance_sex CHECK (sex IS NULL OR sex IN ('Male', 'Female', 'Unknown')),
+        CONSTRAINT ck_distance_anchor CHECK ((anchor_x IS NULL AND anchor_y IS NULL
+            AND anchor_width IS NULL AND anchor_height IS NULL) OR (anchor_x IS NOT NULL
+            AND anchor_y IS NOT NULL AND anchor_x BETWEEN 0 AND 1 AND anchor_y BETWEEN 0 AND 1
+            AND anchor_width IS NOT NULL AND anchor_height IS NOT NULL AND anchor_width > 0
+            AND anchor_height > 0 AND anchor_x + anchor_width <= 1
+            AND anchor_y + anchor_height <= 1)),
+        FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE,
+        FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL,
+        FOREIGN KEY(task_id) REFERENCES distance_review_tasks (id) ON DELETE CASCADE,
+        FOREIGN KEY(species_id) REFERENCES species (id),
+        FOREIGN KEY(initial_carrier_individual_id) REFERENCES distance_individuals (id) ON DELETE SET NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_distance_individuals_task_id ON distance_individuals (task_id)",
+    """
+    CREATE TABLE IF NOT EXISTS distance_review_progress (
+        task_id VARCHAR NOT NULL,
+        annotator_name VARCHAR NOT NULL,
+        active_individual_id VARCHAR NOT NULL,
+        updated_at DATETIME NOT NULL,
+        PRIMARY KEY (task_id, annotator_name),
+        FOREIGN KEY(task_id) REFERENCES distance_review_tasks (id) ON DELETE CASCADE,
+        FOREIGN KEY(active_individual_id) REFERENCES distance_individuals (id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS distance_samples (
+        id VARCHAR NOT NULL,
+        individual_id VARCHAR NOT NULL,
+        offset_ms INTEGER NOT NULL,
+        ai_original JSON,
+        status VARCHAR NOT NULL,
+        skip_reason VARCHAR,
+        reference_frame_id VARCHAR,
+        distance_m FLOAT,
+        carried_by_individual_id VARCHAR,
+        labeled_by VARCHAR,
+        labeled_at DATETIME,
+        updated_at DATETIME NOT NULL,
+        PRIMARY KEY (id),
+        CONSTRAINT uq_distance_sample_offset UNIQUE (individual_id, offset_ms),
+        CONSTRAINT ck_distance_sample_offset CHECK (offset_ms >= 0),
+        CONSTRAINT ck_distance_sample_state CHECK ((status = 'pending'
+            AND reference_frame_id IS NULL AND distance_m IS NULL AND skip_reason IS NULL
+            AND labeled_at IS NULL AND labeled_by IS NULL AND carried_by_individual_id IS NULL)
+            OR (status = 'annotated' AND skip_reason IS NULL AND distance_m IS NOT NULL
+            AND ((distance_m = 0 AND reference_frame_id IS NULL) OR (distance_m > 0
+            AND reference_frame_id IS NOT NULL))) OR (status = 'skipped'
+            AND skip_reason IS NOT NULL
+            AND skip_reason IN ('individual absent', 'midpoint not visible')
+            AND reference_frame_id IS NULL AND distance_m IS NULL)),
+        CONSTRAINT ck_distance_carrier CHECK (carried_by_individual_id IS NULL OR carried_by_individual_id != individual_id),
+        FOREIGN KEY(individual_id) REFERENCES distance_individuals (id) ON DELETE CASCADE,
+        FOREIGN KEY(reference_frame_id) REFERENCES reference_frames (id),
+        FOREIGN KEY(carried_by_individual_id) REFERENCES distance_individuals (id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS distance_individual_tags (
+        individual_id VARCHAR NOT NULL,
+        tag_id VARCHAR NOT NULL,
+        tagged_by VARCHAR,
+        tagged_at DATETIME NOT NULL,
+        PRIMARY KEY (individual_id, tag_id),
+        FOREIGN KEY(individual_id) REFERENCES distance_individuals (id) ON DELETE CASCADE,
+        FOREIGN KEY(tag_id) REFERENCES tags (id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS distance_sample_behaviors (
+        sample_id VARCHAR NOT NULL,
+        behavior_id VARCHAR NOT NULL,
+        PRIMARY KEY (sample_id, behavior_id),
+        FOREIGN KEY(sample_id) REFERENCES distance_samples (id) ON DELETE CASCADE,
+        FOREIGN KEY(behavior_id) REFERENCES behaviors (id)
+    )
+    """,
+)
+
+
+def _repair_species_observations(conn: Connection) -> None:
+    """Reconcile Species records with their videos and enforce behavior links."""
+    ownership = conn.exec_driver_sql("""
+        UPDATE individual_observations AS io
+        SET project_id = (SELECT v.project_id FROM videos AS v WHERE v.video_id = io.video_id)
+        WHERE EXISTS (
+            SELECT 1 FROM videos AS v
+            WHERE v.video_id = io.video_id AND v.project_id IS NOT io.project_id
+        )
+    """).rowcount
+    labels = conn.exec_driver_sql("""
+        UPDATE video_labels AS vl SET is_blank = 0
+        WHERE vl.is_blank = 1 AND EXISTS (
+            SELECT 1 FROM individual_observations AS io WHERE io.video_id = vl.video_id
+        )
+    """).rowcount
+    orphans = conn.exec_driver_sql("""
+        DELETE FROM observation_tags AS ot
+        WHERE NOT EXISTS (
+            SELECT 1 FROM individual_observations AS io
+            WHERE io.video_id = ot.video_id AND io.id = ot.observation_id
+        )
+    """).rowcount
+    conn.exec_driver_sql("""
+        CREATE TABLE observation_tags_new (
+            video_id VARCHAR NOT NULL,
+            observation_id INTEGER NOT NULL,
+            behavior_id VARCHAR NOT NULL REFERENCES behaviors(id),
+            PRIMARY KEY (video_id, observation_id, behavior_id),
+            FOREIGN KEY (video_id, observation_id)
+                REFERENCES individual_observations(video_id, id) ON DELETE CASCADE
+        )
+    """)
+    conn.exec_driver_sql("""
+        INSERT INTO observation_tags_new (video_id, observation_id, behavior_id)
+        SELECT video_id, observation_id, behavior_id FROM observation_tags
+    """)
+    conn.exec_driver_sql("DROP TABLE observation_tags")
+    conn.exec_driver_sql("ALTER TABLE observation_tags_new RENAME TO observation_tags")
+    conn.exec_driver_sql("""
+        CREATE INDEX idx_observation_tags_video ON observation_tags (video_id, behavior_id)
+    """)
+    if ownership or labels or orphans:
+        logger.warning(
+            "Species upgrade reconciled %d observation projects, cleared %d blank labels,"
+            " and removed %d behavior links without an observation",
+            ownership,
+            labels,
+            orphans,
+        )
+
+
 def _migration_v23(conn) -> None:
     """Add the final Distance schema to a published v22 database."""
-    for sql in DISTANCE_SCHEMA_V23:
+    for sql in SCHEMA_V23:
         conn.execute(text(sql))
+    _add_column_if_missing(conn, "videos", "inferred_camera_id", "VARCHAR")
+    _add_column_if_missing(conn, "videos", "deployment_id", "VARCHAR REFERENCES deployments(id)")
+    _add_column_if_missing(
+        conn, "videos", "deployment_assignment", "VARCHAR NOT NULL DEFAULT 'legacy'"
+    )
+    conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_videos_deployment_id ON videos (deployment_id)"
+    )
+    conn.exec_driver_sql(
+        "UPDATE videos SET inferred_camera_id = camera_id WHERE inferred_camera_id IS NULL"
+    )
     _add_column_if_missing(conn, "tags", "individual_eligible", "BOOLEAN NOT NULL DEFAULT 0")
     conn.execute(
         text(
@@ -626,6 +963,7 @@ def _migration_v23(conn) -> None:
             "WHERE lower(trim(key)) IN ('comments', 'import_tags')"
         )
     )
+    _repair_species_observations(conn)
 
 
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
@@ -768,577 +1106,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     ),
     (22, _migration_v22),
     (23, _migration_v23),
-    (24, lambda conn: _migration_v24(conn)),
-    (25, lambda conn: _migration_v25(conn)),
-    (26, lambda conn: _migration_v26(conn)),
-    (
-        27,
-        lambda conn: _add_column_if_missing(conn, "handoff_assignments", "removed_at", "DATETIME"),
-    ),
-    (
-        28,
-        [
-            """
-            CREATE TABLE IF NOT EXISTS deployments (
-                id VARCHAR NOT NULL PRIMARY KEY,
-                project_id VARCHAR NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                deployment_id VARCHAR NOT NULL,
-                name VARCHAR,
-                camera_id VARCHAR,
-                installation_date DATE,
-                retrieval_date DATE,
-                transect_id VARCHAR,
-                habitat VARCHAR,
-                notes VARCHAR,
-                CONSTRAINT uq_deployment_project_key UNIQUE (project_id, deployment_id),
-                CONSTRAINT ck_deployment_key CHECK (length(trim(deployment_id)) > 0)
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS ix_deployments_project_id ON deployments (project_id)",
-        ],
-    ),
-    (29, lambda conn: _migration_v29(conn)),
-    (30, lambda conn: _migration_v30(conn)),
-    (
-        31,
-        """
-        CREATE TABLE IF NOT EXISTS deployment_folder_reviews (
-            project_dir_id VARCHAR NOT NULL REFERENCES project_dirs(id) ON DELETE CASCADE,
-            folder_path VARCHAR NOT NULL,
-            note VARCHAR,
-            available_candidates JSON NOT NULL,
-            PRIMARY KEY (project_dir_id, folder_path)
-        )
-        """,
-    ),
-    (
-        32,
-        lambda conn: _add_column_if_missing(
-            conn, "reference_frames", "retired", "BOOLEAN NOT NULL DEFAULT 0"
-        ),
-    ),
-    (33, lambda conn: _migration_v33(conn)),
-    (34, lambda conn: _migration_v34(conn)),
 ]
-
-
-def _migration_v29(conn) -> None:
-    """Keep legacy labels/evidence intact; assignment initialization is session-aware."""
-    _add_column_if_missing(conn, "videos", "inferred_camera_id", "VARCHAR")
-    _add_column_if_missing(conn, "videos", "deployment_id", "VARCHAR REFERENCES deployments(id)")
-    _add_column_if_missing(
-        conn, "videos", "deployment_assignment", "VARCHAR NOT NULL DEFAULT 'legacy'"
-    )
-    _add_column_if_missing(
-        conn, "reference_videos", "deployment_id", "VARCHAR REFERENCES deployments(id)"
-    )
-    conn.execute(
-        text("UPDATE videos SET inferred_camera_id = camera_id WHERE inferred_camera_id IS NULL")
-    )
-    conn.execute(
-        text("""
-        CREATE TABLE IF NOT EXISTS deployment_folder_links (
-            id VARCHAR NOT NULL PRIMARY KEY,
-            project_dir_id VARCHAR NOT NULL REFERENCES project_dirs(id) ON DELETE CASCADE,
-            folder_path VARCHAR NOT NULL,
-            deployment_id VARCHAR REFERENCES deployments(id),
-            source VARCHAR DEFAULT 'manual' NOT NULL,
-            CONSTRAINT uq_deployment_folder UNIQUE (project_dir_id, folder_path)
-        )
-    """)
-    )
-    for sql in (
-        "CREATE INDEX IF NOT EXISTS ix_deployment_folder_links_project_dir_id ON deployment_folder_links (project_dir_id)",
-        "CREATE INDEX IF NOT EXISTS ix_videos_deployment_id ON videos (deployment_id)",
-        "CREATE INDEX IF NOT EXISTS ix_reference_videos_deployment_id ON reference_videos (deployment_id)",
-    ):
-        conn.execute(text(sql))
-
-
-# Frozen upgrade DDL. Keep independent of evolving ORM metadata.
-DISTANCE_SCHEMA_V23 = [
-    """
-    CREATE TABLE IF NOT EXISTS distance_imports (
-        id VARCHAR NOT NULL,
-        project_id VARCHAR NOT NULL,
-        content_hash VARCHAR NOT NULL,
-        manifest JSON NOT NULL,
-        payload JSON NOT NULL,
-        imported_at DATETIME NOT NULL,
-        PRIMARY KEY (id),
-        UNIQUE (project_id, content_hash),
-        FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE
-    )
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS ix_distance_imports_project_id ON distance_imports (project_id)
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS reference_videos (
-        id VARCHAR NOT NULL,
-        project_id VARCHAR NOT NULL,
-        camera_id VARCHAR NOT NULL,
-        video_path VARCHAR NOT NULL,
-        PRIMARY KEY (id),
-        CONSTRAINT uq_reference_video_path_project UNIQUE (project_id, video_path),
-        CONSTRAINT ck_reference_camera CHECK (length(trim(camera_id)) > 0),
-        CONSTRAINT ck_reference_path CHECK (length(trim(video_path)) > 0),
-        FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE
-    )
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_reference_deployment ON reference_videos (project_id, camera_id)
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS distance_individuals (
-        id VARCHAR NOT NULL,
-        video_id VARCHAR NOT NULL,
-        import_id VARCHAR,
-        ai_original JSON,
-        individual_number INTEGER NOT NULL,
-        species_id VARCHAR NOT NULL,
-        age VARCHAR,
-        sex VARCHAR,
-        first_seen_offset_ms INTEGER NOT NULL,
-        first_seen_playback_ms FLOAT,
-        initial_carrier_individual_id VARCHAR,
-        anchor_x FLOAT,
-        anchor_y FLOAT,
-        anchor_width FLOAT,
-        anchor_height FLOAT,
-        labeled_by VARCHAR,
-        labeled_at DATETIME,
-        updated_at DATETIME NOT NULL,
-        review_status VARCHAR DEFAULT 'not_started' NOT NULL,
-        completed_by VARCHAR,
-        completed_at DATETIME,
-        PRIMARY KEY (id),
-        CONSTRAINT uq_distance_individual_number UNIQUE (video_id, individual_number),
-        CONSTRAINT ck_distance_individual_number CHECK (individual_number > 0),
-        CONSTRAINT ck_distance_first_seen CHECK (first_seen_offset_ms >= 0),
-        CONSTRAINT ck_distance_age CHECK (age IS NULL OR age IN ('Adult', 'Adolescent', 'Juvenile', 'Infant', 'Unknown')),
-        CONSTRAINT ck_distance_sex CHECK (sex IS NULL OR sex IN ('Male', 'Female', 'Unknown')),
-        CONSTRAINT ck_distance_anchor CHECK ((anchor_x IS NULL AND anchor_y IS NULL AND anchor_width IS NULL AND anchor_height IS NULL) OR (anchor_x IS NOT NULL AND anchor_y IS NOT NULL AND anchor_x BETWEEN 0 AND 1 AND anchor_y BETWEEN 0 AND 1 AND anchor_width IS NOT NULL AND anchor_height IS NOT NULL AND anchor_width > 0 AND anchor_height > 0 AND anchor_x + anchor_width <= 1 AND anchor_y + anchor_height <= 1)),
-        FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE,
-        FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL,
-        FOREIGN KEY(species_id) REFERENCES species (id),
-        FOREIGN KEY(initial_carrier_individual_id) REFERENCES distance_individuals (id) ON DELETE SET NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS distance_video_reviews (
-        video_id VARCHAR NOT NULL,
-        recorded_start DATETIME,
-        alignment_mode VARCHAR DEFAULT 'exact' NOT NULL,
-        imported_sample_times_s JSON,
-        import_id VARCHAR,
-        started_at DATETIME,
-        clock_anchor_offset_ms INTEGER,
-        clock_anchor_playback_ms FLOAT,
-        opening_even_second BOOLEAN DEFAULT '0' NOT NULL,
-        verified_by VARCHAR NOT NULL,
-        verified_at DATETIME NOT NULL,
-        completed_by VARCHAR,
-        completed_at DATETIME,
-        PRIMARY KEY (video_id),
-        FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE,
-        FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS reference_frames (
-        id VARCHAR NOT NULL,
-        reference_video_id VARCHAR NOT NULL,
-        offset_ms INTEGER NOT NULL,
-        playback_offset_ms FLOAT,
-        distance_m FLOAT NOT NULL,
-        mask JSON,
-        import_id VARCHAR,
-        PRIMARY KEY (id),
-        CONSTRAINT uq_reference_frame_offset UNIQUE (reference_video_id, offset_ms),
-        CONSTRAINT ck_reference_frame_offset CHECK (offset_ms >= 0),
-        CONSTRAINT ck_reference_frame_playback CHECK (playback_offset_ms >= 0),
-        CONSTRAINT ck_reference_frame_distance CHECK (distance_m > 0),
-        FOREIGN KEY(reference_video_id) REFERENCES reference_videos (id) ON DELETE CASCADE,
-        FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS distance_individual_tags (
-        individual_id VARCHAR NOT NULL,
-        tag_id VARCHAR NOT NULL,
-        tagged_by VARCHAR,
-        tagged_at DATETIME NOT NULL,
-        PRIMARY KEY (individual_id, tag_id),
-        FOREIGN KEY(individual_id) REFERENCES distance_individuals (id) ON DELETE CASCADE,
-        FOREIGN KEY(tag_id) REFERENCES tags (id) ON DELETE CASCADE
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS distance_review_progress (
-        video_id VARCHAR NOT NULL,
-        annotator_name VARCHAR NOT NULL,
-        active_individual_id VARCHAR NOT NULL,
-        updated_at DATETIME NOT NULL,
-        PRIMARY KEY (video_id, annotator_name),
-        FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE,
-        FOREIGN KEY(active_individual_id) REFERENCES distance_individuals (id) ON DELETE CASCADE
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS distance_samples (
-        id VARCHAR NOT NULL,
-        individual_id VARCHAR NOT NULL,
-        offset_ms INTEGER NOT NULL,
-        ai_original JSON,
-        status VARCHAR NOT NULL,
-        skip_reason VARCHAR,
-        reference_frame_id VARCHAR,
-        distance_m FLOAT,
-        carried_by_individual_id VARCHAR,
-        labeled_by VARCHAR,
-        labeled_at DATETIME,
-        updated_at DATETIME NOT NULL,
-        PRIMARY KEY (id),
-        CONSTRAINT uq_distance_sample_offset UNIQUE (individual_id, offset_ms),
-        CONSTRAINT ck_distance_sample_offset CHECK (offset_ms >= 0),
-        CONSTRAINT ck_distance_sample_state CHECK ((status = 'pending' AND reference_frame_id IS NULL AND distance_m IS NULL AND skip_reason IS NULL AND labeled_at IS NULL AND labeled_by IS NULL AND carried_by_individual_id IS NULL) OR (status = 'annotated' AND reference_frame_id IS NOT NULL AND distance_m IS NOT NULL AND distance_m > 0 AND skip_reason IS NULL) OR (status = 'skipped' AND skip_reason IS NOT NULL AND skip_reason IN ('individual absent', 'midpoint not visible') AND reference_frame_id IS NULL AND distance_m IS NULL)),
-        CONSTRAINT ck_distance_carrier CHECK (carried_by_individual_id IS NULL OR carried_by_individual_id != individual_id),
-        FOREIGN KEY(individual_id) REFERENCES distance_individuals (id) ON DELETE CASCADE,
-        FOREIGN KEY(reference_frame_id) REFERENCES reference_frames (id),
-        FOREIGN KEY(carried_by_individual_id) REFERENCES distance_individuals (id)
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS distance_sample_behaviors (
-        sample_id VARCHAR NOT NULL,
-        behavior_id VARCHAR NOT NULL,
-        PRIMARY KEY (sample_id, behavior_id),
-        FOREIGN KEY(sample_id) REFERENCES distance_samples (id) ON DELETE CASCADE,
-        FOREIGN KEY(behavior_id) REFERENCES behaviors (id)
-    )
-    """,
-]
-
-
-def _migration_v24(conn) -> None:
-    """Discard unreleased Distance evidence, preserving references and ordinary Review."""
-    for table in (
-        "distance_sample_behaviors",
-        "distance_individual_tags",
-        "distance_samples",
-        "distance_review_progress",
-        "distance_individuals",
-        "distance_video_reviews",
-    ):
-        conn.exec_driver_sql(f"DROP TABLE IF EXISTS {table}")
-    # Retain source packages for reference-frame provenance, but allow their
-    # discarded drafts to be imported again. Package hashes are SHA-256 hex, so
-    # this namespace cannot collide with a live package's deduplication key.
-    conn.exec_driver_sql("""
-        UPDATE distance_imports
-        SET content_hash = 'discarded-v24:' || id || ':' || content_hash
-    """)
-    # Frozen task schema; create_all may already have created this empty table.
-    conn.exec_driver_sql("""
-        CREATE TABLE IF NOT EXISTS distance_review_tasks (
-            id VARCHAR PRIMARY KEY NOT NULL,
-            video_id VARCHAR NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
-            species_id VARCHAR NOT NULL REFERENCES species(id),
-            source_count INTEGER NOT NULL,
-            completion_outcome VARCHAR,
-            completion_history JSON NOT NULL,
-            rejected_ai JSON NOT NULL,
-            recorded_start DATETIME,
-            alignment_mode VARCHAR DEFAULT 'exact' NOT NULL,
-            imported_sample_times_s JSON,
-            import_id VARCHAR REFERENCES distance_imports(id) ON DELETE SET NULL,
-            started_at DATETIME,
-            clock_anchor_offset_ms INTEGER,
-            clock_anchor_playback_ms FLOAT,
-            opening_even_second BOOLEAN DEFAULT '0' NOT NULL,
-            verified_by VARCHAR,
-            verified_at DATETIME,
-            completed_by VARCHAR,
-            completed_at DATETIME,
-            CONSTRAINT uq_distance_task UNIQUE (video_id, species_id)
-        )
-    """)
-    conn.exec_driver_sql(
-        "CREATE INDEX IF NOT EXISTS ix_distance_review_tasks_video_id ON distance_review_tasks(video_id)"
-    )
-    # Reuse only frozen v23 DDL, never evolving ORM metadata.
-    for ddl in DISTANCE_SCHEMA_V23:
-        if "CREATE TABLE IF NOT EXISTS distance_individuals (" in ddl:
-            ddl = ddl.replace(
-                "video_id VARCHAR NOT NULL,",
-                "video_id VARCHAR NOT NULL, task_id VARCHAR NOT NULL "
-                "REFERENCES distance_review_tasks(id) ON DELETE CASCADE,",
-            ).replace(
-                "UNIQUE (video_id, individual_number)", "UNIQUE (task_id, individual_number)"
-            )
-        elif "CREATE TABLE IF NOT EXISTS distance_review_progress (" in ddl:
-            ddl = ddl.replace(
-                "video_id VARCHAR NOT NULL,",
-                "task_id VARCHAR NOT NULL REFERENCES distance_review_tasks(id) ON DELETE CASCADE,",
-            ).replace(
-                "PRIMARY KEY (video_id, annotator_name)", "PRIMARY KEY (task_id, annotator_name)"
-            )
-            ddl = ddl.replace(
-                "FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE,",
-                "",
-            )
-        elif not any(
-            f"CREATE TABLE IF NOT EXISTS {table} (" in ddl
-            for table in (
-                "distance_samples",
-                "distance_individual_tags",
-                "distance_sample_behaviors",
-            )
-        ):
-            continue
-        conn.exec_driver_sql(ddl)
-    conn.exec_driver_sql(
-        "CREATE INDEX IF NOT EXISTS ix_distance_individuals_task_id ON distance_individuals(task_id)"
-    )
-
-
-def _migration_v25(conn) -> None:
-    """Frozen assignment handouts and per-handoff portable identity mappings."""
-    for ddl in (
-        """
-        CREATE TABLE IF NOT EXISTS handoff_assignments (
-            id VARCHAR NOT NULL PRIMARY KEY,
-            assignment_id VARCHAR NOT NULL,
-            project_id VARCHAR NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-            role VARCHAR NOT NULL,
-            source_project_id VARCHAR NOT NULL,
-            recipient VARCHAR NOT NULL,
-            stage VARCHAR NOT NULL,
-            target_species VARCHAR,
-            created_at DATETIME NOT NULL,
-            scope JSON NOT NULL,
-            setup_archive BLOB NOT NULL,
-            CONSTRAINT uq_handoff_project_assignment UNIQUE (project_id, assignment_id),
-            CONSTRAINT ck_handoff_role CHECK (role IN ('origin', 'working')),
-            CONSTRAINT ck_handoff_recipient CHECK (length(trim(recipient)) > 0),
-            CONSTRAINT ck_handoff_stage CHECK (
-                (stage = 'species' AND target_species IS NULL) OR
-                (stage = 'distance' AND target_species IS NOT NULL
-                 AND length(trim(target_species)) > 0)
-            ),
-            CONSTRAINT ck_handoff_origin CHECK (
-                role != 'origin' OR source_project_id = project_id
-            )
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS ix_handoff_assignments_project_id "
-        "ON handoff_assignments(project_id)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_handoff_working_project "
-        "ON handoff_assignments(project_id) WHERE role = 'working'",
-        """
-        CREATE TABLE IF NOT EXISTS handoff_identity_maps (
-            handoff_id VARCHAR NOT NULL REFERENCES handoff_assignments(id) ON DELETE CASCADE,
-            kind VARCHAR NOT NULL,
-            portable_id VARCHAR NOT NULL,
-            local_id VARCHAR NOT NULL,
-            PRIMARY KEY (handoff_id, kind, portable_id),
-            CONSTRAINT uq_handoff_local_identity UNIQUE (handoff_id, kind, local_id),
-            CONSTRAINT ck_handoff_identity CHECK (
-                length(trim(kind)) > 0 AND length(trim(portable_id)) > 0
-                AND length(trim(local_id)) > 0
-            )
-        )
-        """,
-    ):
-        conn.exec_driver_sql(ddl)
-
-
-def _migration_v26(conn) -> None:
-    """Identity is reference video/distance; retain evidence when merging duplicates.
-
-    run_migrations disables foreign keys around this atomic rebuild. The lexical
-    minimum frame ID is the deterministic keeper; samples retain their own saved
-    distance, timestamps, authors, and behavior links. Historical import payloads
-    remain untouched provenance, not live foreign keys.
-    """
-    conn.exec_driver_sql("""
-        CREATE TEMP TABLE reference_frame_map_v26 AS
-        SELECT frame.id AS old_id, keeper.id AS keeper_id
-        FROM reference_frames AS frame
-        JOIN (
-            SELECT reference_video_id, distance_m, MIN(id) AS id
-            FROM reference_frames GROUP BY reference_video_id, distance_m
-        ) AS keeper USING (reference_video_id, distance_m)
-    """)
-    conn.exec_driver_sql(
-        "CREATE UNIQUE INDEX reference_frame_map_v26_old ON reference_frame_map_v26(old_id)"
-    )
-    conn.exec_driver_sql("""
-        UPDATE distance_samples
-        SET reference_frame_id = (
-            SELECT keeper_id FROM reference_frame_map_v26
-            WHERE old_id = distance_samples.reference_frame_id
-        )
-        WHERE reference_frame_id IN (
-            SELECT old_id FROM reference_frame_map_v26 WHERE old_id != keeper_id
-        )
-    """)
-    conn.exec_driver_sql("""
-        CREATE TABLE reference_frames_v26 (
-            id VARCHAR NOT NULL PRIMARY KEY,
-            reference_video_id VARCHAR NOT NULL,
-            offset_ms INTEGER NOT NULL,
-            playback_offset_ms FLOAT,
-            distance_m FLOAT NOT NULL,
-            mask JSON,
-            import_id VARCHAR,
-            CONSTRAINT uq_reference_frame_distance UNIQUE (reference_video_id, distance_m),
-            CONSTRAINT ck_reference_frame_offset CHECK (offset_ms >= 0),
-            CONSTRAINT ck_reference_frame_playback CHECK (playback_offset_ms >= 0),
-            CONSTRAINT ck_reference_frame_distance CHECK (distance_m > 0),
-            FOREIGN KEY(reference_video_id) REFERENCES reference_videos (id) ON DELETE CASCADE,
-            FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL
-        )
-    """)
-    conn.exec_driver_sql("""
-        INSERT INTO reference_frames_v26
-            (id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id)
-        SELECT id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id
-        FROM reference_frames
-        WHERE id IN (SELECT keeper_id FROM reference_frame_map_v26)
-    """)
-    conn.exec_driver_sql("DROP TABLE reference_frames")
-    conn.exec_driver_sql("ALTER TABLE reference_frames_v26 RENAME TO reference_frames")
-    conn.exec_driver_sql("DROP TABLE reference_frame_map_v26")
-
-
-def _migration_v30(conn) -> None:
-    """Allow multiple timestamps at each distance while preserving frame IDs."""
-    conn.exec_driver_sql("""
-        CREATE TABLE reference_frames_v30 (
-            id VARCHAR NOT NULL PRIMARY KEY,
-            reference_video_id VARCHAR NOT NULL,
-            offset_ms INTEGER NOT NULL,
-            playback_offset_ms FLOAT,
-            distance_m FLOAT NOT NULL,
-            mask JSON,
-            import_id VARCHAR,
-            CONSTRAINT uq_reference_frame_position UNIQUE (reference_video_id, distance_m, offset_ms),
-            CONSTRAINT ck_reference_frame_offset CHECK (offset_ms >= 0),
-            CONSTRAINT ck_reference_frame_playback CHECK (playback_offset_ms >= 0),
-            CONSTRAINT ck_reference_frame_distance CHECK (distance_m > 0),
-            FOREIGN KEY(reference_video_id) REFERENCES reference_videos (id) ON DELETE CASCADE,
-            FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL
-        )
-    """)
-    conn.exec_driver_sql("""
-        INSERT INTO reference_frames_v30
-            (id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id)
-        SELECT id, reference_video_id, offset_ms, playback_offset_ms, distance_m, mask, import_id
-        FROM reference_frames
-    """)
-    conn.exec_driver_sql("DROP TABLE reference_frames")
-    conn.exec_driver_sql("ALTER TABLE reference_frames_v30 RENAME TO reference_frames")
-
-
-def _migration_v33(conn: Connection) -> None:
-    """Reconcile Species records with their videos and enforce behavior links."""
-    ownership = conn.exec_driver_sql("""
-        UPDATE individual_observations AS io
-        SET project_id = (SELECT v.project_id FROM videos AS v WHERE v.video_id = io.video_id)
-        WHERE EXISTS (
-            SELECT 1 FROM videos AS v
-            WHERE v.video_id = io.video_id AND v.project_id IS NOT io.project_id
-        )
-    """).rowcount
-    labels = conn.exec_driver_sql("""
-        UPDATE video_labels AS vl SET is_blank = 0
-        WHERE vl.is_blank = 1 AND EXISTS (
-            SELECT 1 FROM individual_observations AS io WHERE io.video_id = vl.video_id
-        )
-    """).rowcount
-    orphans = conn.exec_driver_sql("""
-        DELETE FROM observation_tags AS ot
-        WHERE NOT EXISTS (
-            SELECT 1 FROM individual_observations AS io
-            WHERE io.video_id = ot.video_id AND io.id = ot.observation_id
-        )
-    """).rowcount
-    conn.exec_driver_sql("""
-        CREATE TABLE observation_tags_v33 (
-            video_id VARCHAR NOT NULL,
-            observation_id INTEGER NOT NULL,
-            behavior_id VARCHAR NOT NULL REFERENCES behaviors(id),
-            PRIMARY KEY (video_id, observation_id, behavior_id),
-            FOREIGN KEY (video_id, observation_id)
-                REFERENCES individual_observations(video_id, id) ON DELETE CASCADE
-        )
-    """)
-    conn.exec_driver_sql("""
-        INSERT INTO observation_tags_v33 (video_id, observation_id, behavior_id)
-        SELECT video_id, observation_id, behavior_id FROM observation_tags
-    """)
-    conn.exec_driver_sql("DROP TABLE observation_tags")
-    conn.exec_driver_sql("ALTER TABLE observation_tags_v33 RENAME TO observation_tags")
-    conn.exec_driver_sql("""
-        CREATE INDEX idx_observation_tags_video ON observation_tags (video_id, behavior_id)
-    """)
-    if ownership or labels or orphans:
-        logger.warning(
-            "Species upgrade reconciled %d observation projects, cleared %d blank labels,"
-            " and removed %d behavior links without an observation",
-            ownership,
-            labels,
-            orphans,
-        )
-
-
-def _migration_v34(conn: Connection) -> None:
-    """Allow an annotated zero distance without a reference frame."""
-    conn.exec_driver_sql("""
-        CREATE TABLE distance_samples_v34 (
-            id VARCHAR NOT NULL PRIMARY KEY,
-            individual_id VARCHAR NOT NULL REFERENCES distance_individuals(id) ON DELETE CASCADE,
-            offset_ms INTEGER NOT NULL,
-            ai_original JSON,
-            status VARCHAR NOT NULL,
-            skip_reason VARCHAR,
-            reference_frame_id VARCHAR REFERENCES reference_frames(id),
-            distance_m FLOAT,
-            carried_by_individual_id VARCHAR REFERENCES distance_individuals(id),
-            labeled_by VARCHAR,
-            labeled_at DATETIME,
-            updated_at DATETIME NOT NULL,
-            CONSTRAINT uq_distance_sample_offset UNIQUE (individual_id, offset_ms),
-            CONSTRAINT ck_distance_sample_offset CHECK (offset_ms >= 0),
-            CONSTRAINT ck_distance_sample_state CHECK (
-                (status = 'pending' AND reference_frame_id IS NULL AND distance_m IS NULL
-                    AND skip_reason IS NULL AND labeled_at IS NULL AND labeled_by IS NULL
-                    AND carried_by_individual_id IS NULL) OR
-                (status = 'annotated' AND skip_reason IS NULL AND distance_m IS NOT NULL AND
-                    ((distance_m = 0 AND reference_frame_id IS NULL) OR
-                    (distance_m > 0 AND reference_frame_id IS NOT NULL))) OR
-                (status = 'skipped' AND skip_reason IS NOT NULL
-                    AND skip_reason IN ('individual absent', 'midpoint not visible')
-                    AND reference_frame_id IS NULL AND distance_m IS NULL)
-            ),
-            CONSTRAINT ck_distance_carrier CHECK (
-                carried_by_individual_id IS NULL OR carried_by_individual_id != individual_id
-            )
-        )
-    """)
-    conn.exec_driver_sql("""
-        INSERT INTO distance_samples_v34 (
-            id, individual_id, offset_ms, ai_original, status, skip_reason, reference_frame_id,
-            distance_m, carried_by_individual_id, labeled_by, labeled_at, updated_at
-        )
-        SELECT id, individual_id, offset_ms, ai_original, status, skip_reason, reference_frame_id,
-               distance_m, carried_by_individual_id, labeled_by, labeled_at, updated_at
-        FROM distance_samples
-    """)
-    conn.exec_driver_sql("DROP TABLE distance_samples")
-    conn.exec_driver_sql("ALTER TABLE distance_samples_v34 RENAME TO distance_samples")
 
 
 class SchemaVersionError(ValueError):
@@ -1441,10 +1209,6 @@ def _apply_migrations(conn: Connection, *, assumed_version: int | None = None) -
         logger.info("Running %d migration(s): v%d → v%d", len(pending), current, len(MIGRATIONS))
     for version, migration in MIGRATIONS:
         if version > current:
-            # v30 can rebuild directly from the older schema. Running v26 first
-            # would merge distinct timestamps and lose existing frame links.
-            if version == 26 and 30 in pending:
-                continue
             logger.debug("Applying migration v%d", version)
             if callable(migration):
                 migration(conn)

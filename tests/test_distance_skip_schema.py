@@ -218,26 +218,6 @@ def test_zero_annotation_on_fresh_and_upgraded_databases(distance_db):
         ).one() == ("annotated", 0, None)
 
 
-def test_zero_migration_preserves_existing_samples_and_behaviors(tmp_path, monkeypatch):
-    with monkeypatch.context() as patch:
-        patch.setattr(migrations, "MIGRATIONS", migrations.MIGRATIONS[:33])
-        engine = _make_database(tmp_path / "v33.db", "upgraded")
-    try:
-        with engine.connect() as conn:
-            before = _contents(conn)
-        assert migrations.upgrade_database(engine)
-        with engine.begin() as conn:
-            assert _contents(conn) == before
-            assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
-            _insert(
-                conn,
-                "distance_samples",
-                **_sample(status="annotated", skip_reason=None, distance_m=0),
-            )
-    finally:
-        engine.dispose()
-
-
 @pytest.mark.parametrize(
     "changes, constraint",
     [

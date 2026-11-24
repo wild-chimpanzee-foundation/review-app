@@ -562,16 +562,11 @@ def test_schema_enforces_binding_and_identity_invariants(handoff_engine):
     }
 
 
-def test_v25_upgrade_preserves_existing_species_work(tmp_path):
+def test_v22_upgrade_preserves_existing_species_work(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'upgrade.db'}")
     snapshot = Path(__file__).parent / "fixtures" / "schema_snapshot.sql"
     with engine.connect() as conn:
         conn.connection.driver_connection.executescript(snapshot.read_text())
-        # Build a genuine v24 schema from frozen migration definitions, not current ORM DDL.
-        for version, migration in MIGRATIONS:
-            if version in (23, 24):
-                migration(conn)
-        conn.execute(text("UPDATE _schema_version SET version=24"))
         conn.execute(
             text("INSERT INTO projects (id,name,created_at) VALUES ('p','Keep','2025-01-01')")
         )

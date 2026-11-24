@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 from review_app.backend.annotation_package.scope import AssignmentRequest
-from review_app.backend.db.migrations import run_migrations
 from review_app.backend.db.models import HandoffAssignment, Video
+from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 
 def test_remove_hides_delivery_but_accepts_repeated_returns(provider_with_project):
@@ -84,16 +84,14 @@ def test_delivery_reports_missing_footage_but_keeps_zip(provider_with_project, t
     assert (Path(result.path) / "assignment.zip").read_bytes() == dp.export_assignment(saved.id)
 
 
-def test_upgrade_adds_removal_state_without_changing_saved_snapshot(provider_with_project):
+def test_reopening_keeps_saved_snapshot_and_removal_state(provider_with_project):
     dp, project, _ = provider_with_project
     saved = dp.prepare_assignment(
         project.id, AssignmentRequest("alice", tuple(dp.get_assignment_video_ids(project.id)))
     )
     archive = dp.export_assignment(saved.id)
-    with dp.engine.begin() as conn:
-        conn.exec_driver_sql("ALTER TABLE handoff_assignments DROP COLUMN removed_at")
-        conn.exec_driver_sql("UPDATE _schema_version SET version = 26")
-    run_migrations(dp.engine)
+    dp.engine.dispose()
+    dp = LocalDataProvider()
     assert dp.export_assignment(saved.id) == archive
     assert dp.list_assignments(project.id)[0]["id"] == saved.id
     dp.remove_assignment(project.id, saved.id)
