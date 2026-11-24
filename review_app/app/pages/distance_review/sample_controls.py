@@ -154,6 +154,8 @@ def render_sample_controls(context: SampleControlsContext) -> None:
                 ui.label(t("distance_selected_reference", meters=frame["distance_m"])).classes(
                     "text-primary"
                 )
+            elif context.selection and context.selection.kind == "zero":
+                ui.label(t("distance_selected_choice", choice="0 m")).classes("text-primary")
             else:
                 ui.label(t("distance_select_reference")).classes("text-grey-6")
 
@@ -162,7 +164,12 @@ def render_sample_actions(context: SampleControlsContext) -> None:
     if not context.review_active or not context.individual or context.sample_offset is None:
         return
     frame = _selected_frame(context)
-    valid_choice = bool(context.carrier or frame or _selected_skip(context))
+    valid_choice = bool(
+        context.carrier
+        or frame
+        or _selected_skip(context)
+        or (context.selection and context.selection.kind == "zero")
+    )
     with ui.row().classes("distance-actions"):
         with (
             ui.button(on_click=context.on_confirm, color="warning")

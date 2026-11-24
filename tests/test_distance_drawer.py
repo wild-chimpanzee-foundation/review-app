@@ -1699,9 +1699,12 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
         f"getHtmlElement({refreshed_strip.id})" in call.args[0]
         for call in javascript.call_args_list
     )
-    # Both endpoints stay enabled: lowest distance -> Absent -> lowest distance.
+    # Zero is the lowest distance, immediately after Absent when wrapping.
     with user:
         page.move_distance(-1)
+        page.move_distance(-1)
+    await user.should_see("Selected: 0 m")
+    with user:
         page.move_distance(-1)
     await user.should_see("Selected: Absent")
     assert page.selected_skip_reason == "individual absent"
@@ -1710,6 +1713,9 @@ async def test_sample_details_and_skip_actions_render_with_reference_distances(
         for element in reference_area.descendants()
         if element.props.get("data-distance-action") in {"distance-down", "distance-up"}
     )
+    with user:
+        page.move_distance(1)
+    await user.should_see("Selected: 0 m")
     with user:
         page.move_distance(1)
     await user.should_see("Selected reference: 5 m")

@@ -630,10 +630,13 @@ def validate(manifest, context, work):
                     raise ValueError("Reference evidence belongs to another deployment")
             if row["status"] == "annotated":
                 valid = (
-                    row["reference_frame_id"]
+                    row["skip_reason"] is None
                     and row["distance_m"] is not None
-                    and row["distance_m"] > 0
-                    and row["skip_reason"] is None
+                    and (
+                        row["distance_m"] == 0
+                        if row["reference_frame_id"] is None
+                        else row["distance_m"] > 0
+                    )
                 )
             elif row["status"] == "pending":
                 valid = all(

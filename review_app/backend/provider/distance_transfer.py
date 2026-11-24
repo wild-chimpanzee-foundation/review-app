@@ -415,6 +415,9 @@ def _validate_tables(tables):
                 or sample["behaviors"]
             ):
                 raise ValueError("Invalid visibility skip")
+        elif sample["reference_frame_id"] is None and sample["distance_m"] == 0:
+            if sample["skip_reason"] is not None:
+                raise ValueError("A zero distance sample cannot have a skip reason")
         else:
             frame = references.get(sample["reference_frame_id"])
             if (

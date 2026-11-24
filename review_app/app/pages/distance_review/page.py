@@ -90,7 +90,11 @@ from review_app.app.pages.distance_review.sample_controls import (
 from review_app.app.pages.distance_review.sample_controls import (
     render_video_actions as render_video_actions_view,
 )
-from review_app.app.pages.distance_review.session import SampleSelection
+from review_app.app.pages.distance_review.session import (
+    ZERO_DISTANCE_CHOICE,
+    ZERO_DISTANCE_ID,
+    SampleSelection,
+)
 from review_app.app.pages.distance_review.tracks import track_height, track_options
 from review_app.app.pages.review.annotations import _shortcut_badge
 from review_app.app.pages.review.video_player import render_custom_video_player
@@ -299,6 +303,12 @@ class DistanceReviewPage:
         )
 
     @property
+    def has_selected_distance(self) -> bool:
+        return self.selected_frame_id == ZERO_DISTANCE_ID or any(
+            frame["id"] == self.selected_frame_id for frame in self.frames
+        )
+
+    @property
     def sample(self) -> dict | None:
         return next(
             (
@@ -323,12 +333,15 @@ class DistanceReviewPage:
             return None
         reason = self.selected_skip_reason
         frame = next((row for row in self.frames if row["id"] == self.selected_frame_id), None)
-        if reason is None and frame is None:
+        zero = self.selected_frame_id == ZERO_DISTANCE_ID
+        if reason is None and frame is None and not zero:
             return None
-        reference_id = None if reason else frame["id"]
+        reference_id = frame["id"] if frame else None
+        distance_m = frame["distance_m"] if frame else 0 if zero else None
         if self.sample and (
             self.sample.get("reference_frame_id") == reference_id
             and self.sample.get("skip_reason") == reason
+            and (not zero or self.sample.get("distance_m") == 0)
         ):
             return None
         return {
@@ -336,7 +349,7 @@ class DistanceReviewPage:
             "offset_ms": self.sample_offset,
             "reference_frame_id": reference_id,
             "skip_reason": reason,
-            "distance_m": None if reason else frame["distance_m"],
+            "distance_m": distance_m,
         }
 
     def reviewed_offsets(self) -> set[int]:
@@ -367,14 +380,9 @@ class DistanceReviewPage:
     @property
     def reference_sample(self) -> dict | None:
         """Saved evidence wins; otherwise use this frame's AI choice, then prior evidence."""
-        if self.sample and (
-            self.sample.get("reference_frame_id") or self.sample.get("skip_reason")
-        ):
-            return self.sample
-        if self.ai_prefill and (
-            self.ai_prefill.get("reference_frame_id") or self.ai_prefill.get("skip_reason")
-        ):
-            return self.ai_prefill
+        for sample in (self.sample, self.ai_prefill):
+            if sample and (sample.get("reference_frame_id") or self.reference_choice_id(sample)):
+                return sample
         return self.prior_sample
 
     @property
@@ -386,24 +394,25 @@ class DistanceReviewPage:
                 if row["individual_id"] == self.individual_id
                 and self.sample_offset is not None
                 and row["offset_ms"] < self.sample_offset
-                and (row.get("reference_frame_id") or row.get("skip_reason"))
+                and (row.get("reference_frame_id") or self.reference_choice_id(row))
             ),
             key=lambda row: row["offset_ms"],
             default=None,
         )
 
     def ensure_reference_selection(self) -> None:
-        if self.selected_skip_reason:
+        if self.selected_skip_reason or self.has_selected_distance:
             return
-        if not any(frame["id"] == self.selected_frame_id for frame in self.frames):
-            if self.reference_sample and "display_reference_frame_id" in self.reference_sample:
-                self.selected_frame_id = None
-                return
-            first = min(self.frames, key=lambda frame: frame["distance_m"], default=None)
-            self.selected_frame_id = first["id"] if first else None
+        if self.reference_sample and "display_reference_frame_id" in self.reference_sample:
+            self.selected_frame_id = None
+            return
+        first = min(self.frames, key=lambda frame: frame["distance_m"], default=None)
+        self.selected_frame_id = first["id"] if first else None
 
     @staticmethod
     def reference_choice_id(sample: dict) -> str | None:
+        if sample.get("distance_m") == 0:
+            return ZERO_DISTANCE_ID
         return sample.get("skip_reason") or sample.get(
             "display_reference_frame_id", sample.get("reference_frame_id")
         )
@@ -568,9 +577,9 @@ class DistanceReviewPage:
                     self.dp.get_distance_reference_videos, self.video["video_id"]
                 )
             reference_sample = self.reference_sample
-            if reference_sample and reference_sample.get("skip_reason"):
-                self.selected_frame_id = reference_sample["skip_reason"]
-            if reference_sample and reference_sample["reference_video_id"]:
+            if reference_sample and not reference_sample.get("reference_frame_id"):
+                self.selected_frame_id = self.reference_choice_id(reference_sample)
+            if reference_sample and reference_sample.get("reference_video_id"):
                 reference = next(
                     (
                         row
@@ -1674,13 +1683,13 @@ class DistanceReviewPage:
         if self.distance_locked:
             return None
         reason = self.selected_skip_reason
-        if reason is None and not any(
-            frame["id"] == self.selected_frame_id for frame in self.frames
-        ):
+        if reason is None and not self.has_selected_distance:
             return None
+        zero = self.selected_frame_id == ZERO_DISTANCE_ID
         values = self.sample_values
         return {
-            "reference_frame_id": None if reason else self.selected_frame_id,
+            "reference_frame_id": None if reason or zero else self.selected_frame_id,
+            "distance_m": 0 if zero else None,
             "skip_reason": reason,
             "behavior_ids": list(values["behavior_ids"]),
             "infant_id": values["infant_id"]
@@ -1701,9 +1710,10 @@ class DistanceReviewPage:
         offset_ms = self.sample_offset
         offsets = self.remaining_sample_offsets()
         frame = next((row for row in self.frames if row["id"] == self.selected_frame_id), None)
+        distance = frame["distance_m"] if frame else assignment["distance_m"]
         choice_label = (
-            f"{frame['distance_m']:g} m"
-            if frame
+            f"{distance:g} m"
+            if distance is not None
             else t(
                 "distance_absent"
                 if assignment["skip_reason"] == "individual absent"
@@ -1796,9 +1806,7 @@ class DistanceReviewPage:
         if self.selected_skip_reason or (self.distance_locked and self.sample.get("skip_reason")):
             await self.commit_sample()
             return
-        if not self.distance_locked and not any(
-            frame["id"] == self.selected_frame_id for frame in self.frames
-        ):
+        if not self.distance_locked and not self.has_selected_distance:
             return
 
         def current_state():
@@ -1872,13 +1880,13 @@ class DistanceReviewPage:
                 return
             reason = self.sample.get("skip_reason")
             reference_frame_id = self.sample.get("reference_frame_id")
+            zero = self.sample.get("distance_m") == 0
         else:
             reason = reason or self.selected_skip_reason
-            if reason is None and not any(
-                frame["id"] == self.selected_frame_id for frame in self.frames
-            ):
+            if reason is None and not self.has_selected_distance:
                 return
-            reference_frame_id = self.selected_frame_id
+            zero = reason is None and self.selected_frame_id == ZERO_DISTANCE_ID
+            reference_frame_id = None if zero else self.selected_frame_id
             if (
                 self.sample
                 and "display_reference_frame_id" in self.sample
@@ -1903,6 +1911,7 @@ class DistanceReviewPage:
                 individual_id,
                 offset_ms,
                 reference_frame_id=reference_frame_id if reason is None else None,
+                distance_m=0 if zero else None,
                 skip_reason=reason,
                 behavior_ids=list(values["behavior_ids"]),
                 infant_id=values["infant_id"]
@@ -1912,7 +1921,7 @@ class DistanceReviewPage:
                 creation_offset_ms=actual_offset,
                 labeled_by=get_annotator_name(),
             )
-            self.selected_frame_id = reason or reference_frame_id
+            self.selected_frame_id = ZERO_DISTANCE_ID if zero else reason or reference_frame_id
             # The originating confirm button is deleted by refresh. Async player
             # commands must continue in the page's stable client slot.
             with self.client:
@@ -1990,7 +1999,7 @@ class DistanceReviewPage:
         reference_sample = self.reference_sample
         self.selected_frame_id = None
         self.reset_sample_values()
-        if reference_sample and reference_sample["reference_video_id"]:
+        if reference_sample and reference_sample.get("reference_video_id"):
             if (
                 not self.reference
                 or self.reference["id"] != reference_sample["reference_video_id"]
@@ -2315,7 +2324,11 @@ class DistanceReviewPage:
 
     def distance_choices(self) -> list[dict]:
         choices = frames_by_distance(self.frames, self.selected_frame_id)
-        return [choices[meters] for meters in sorted(choices)] + list(SKIP_CHOICES)
+        return [
+            ZERO_DISTANCE_CHOICE,
+            *(choices[meters] for meters in sorted(choices)),
+            *SKIP_CHOICES,
+        ]
 
     def move_distance(self, delta: int) -> None:
         if self.busy or self.distance_locked:
@@ -2534,9 +2547,7 @@ class DistanceReviewPage:
         if not self.reference or self.reference["id"] != reference_id:
             return
         self.frames = frames
-        if not self.selected_skip_reason and not any(
-            frame["id"] == self.selected_frame_id for frame in frames
-        ):
+        if not self.selected_skip_reason and not self.has_selected_distance:
             self.selected_frame_id = None
         self._graph_preview_key = None
         if self.video:
@@ -2582,7 +2593,11 @@ class DistanceReviewPage:
         allow_conversion: bool = True,
     ) -> None:
         video = self.video
-        previous_skip = self.selected_skip_reason
+        previous_choice = (
+            ZERO_DISTANCE_ID
+            if self.selected_frame_id == ZERO_DISTANCE_ID
+            else self.selected_skip_reason
+        )
         previous_frame = next(
             (frame for frame in self.frames if frame["id"] == self.selected_frame_id), None
         )
@@ -2613,8 +2628,8 @@ class DistanceReviewPage:
         if self.video is not video:
             return
         if seek_animal:
-            if previous_skip:
-                selected_frame_id = previous_skip
+            if previous_choice:
+                selected_frame_id = previous_choice
             elif previous_frame and frames:
                 selected = min(
                     frames,
@@ -2632,6 +2647,7 @@ class DistanceReviewPage:
         if (
             selected is None
             and not restoring_retired
+            and selected_frame_id != ZERO_DISTANCE_ID
             and selected_frame_id not in {choice["id"] for choice in SKIP_CHOICES}
         ):
             selected = min(frames, key=lambda frame: frame["distance_m"], default=None)
@@ -2719,7 +2735,8 @@ class DistanceReviewPage:
         self.reference = None
         self.reference_duration = 0.0
         self.frames = []
-        self.selected_frame_id = None
+        if self.selected_frame_id != ZERO_DISTANCE_ID:
+            self.selected_frame_id = None
         self.render_references.refresh()
         self.refresh_sample_ui()
         if notify:
@@ -2766,7 +2783,8 @@ class DistanceReviewPage:
                 self.reference_player = None
                 self.reference = None
                 self.frames = []
-                self.selected_frame_id = None
+                if self.selected_frame_id != ZERO_DISTANCE_ID:
+                    self.selected_frame_id = None
                 self.render_references.refresh()
             else:
                 self.reference = updated

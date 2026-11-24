@@ -818,6 +818,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
         ),
     ),
     (33, lambda conn: _migration_v33(conn)),
+    (34, lambda conn: _migration_v34(conn)),
 ]
 
 
@@ -1291,6 +1292,53 @@ def _migration_v33(conn: Connection) -> None:
             labels,
             orphans,
         )
+
+
+def _migration_v34(conn: Connection) -> None:
+    """Allow an annotated zero distance without a reference frame."""
+    conn.exec_driver_sql("""
+        CREATE TABLE distance_samples_v34 (
+            id VARCHAR NOT NULL PRIMARY KEY,
+            individual_id VARCHAR NOT NULL REFERENCES distance_individuals(id) ON DELETE CASCADE,
+            offset_ms INTEGER NOT NULL,
+            ai_original JSON,
+            status VARCHAR NOT NULL,
+            skip_reason VARCHAR,
+            reference_frame_id VARCHAR REFERENCES reference_frames(id),
+            distance_m FLOAT,
+            carried_by_individual_id VARCHAR REFERENCES distance_individuals(id),
+            labeled_by VARCHAR,
+            labeled_at DATETIME,
+            updated_at DATETIME NOT NULL,
+            CONSTRAINT uq_distance_sample_offset UNIQUE (individual_id, offset_ms),
+            CONSTRAINT ck_distance_sample_offset CHECK (offset_ms >= 0),
+            CONSTRAINT ck_distance_sample_state CHECK (
+                (status = 'pending' AND reference_frame_id IS NULL AND distance_m IS NULL
+                    AND skip_reason IS NULL AND labeled_at IS NULL AND labeled_by IS NULL
+                    AND carried_by_individual_id IS NULL) OR
+                (status = 'annotated' AND skip_reason IS NULL AND distance_m IS NOT NULL AND
+                    ((distance_m = 0 AND reference_frame_id IS NULL) OR
+                    (distance_m > 0 AND reference_frame_id IS NOT NULL))) OR
+                (status = 'skipped' AND skip_reason IS NOT NULL
+                    AND skip_reason IN ('individual absent', 'midpoint not visible')
+                    AND reference_frame_id IS NULL AND distance_m IS NULL)
+            ),
+            CONSTRAINT ck_distance_carrier CHECK (
+                carried_by_individual_id IS NULL OR carried_by_individual_id != individual_id
+            )
+        )
+    """)
+    conn.exec_driver_sql("""
+        INSERT INTO distance_samples_v34 (
+            id, individual_id, offset_ms, ai_original, status, skip_reason, reference_frame_id,
+            distance_m, carried_by_individual_id, labeled_by, labeled_at, updated_at
+        )
+        SELECT id, individual_id, offset_ms, ai_original, status, skip_reason, reference_frame_id,
+               distance_m, carried_by_individual_id, labeled_by, labeled_at, updated_at
+        FROM distance_samples
+    """)
+    conn.exec_driver_sql("DROP TABLE distance_samples")
+    conn.exec_driver_sql("ALTER TABLE distance_samples_v34 RENAME TO distance_samples")
 
 
 class SchemaVersionError(ValueError):

@@ -146,6 +146,29 @@ def test_analysis_is_canonical_tsv_and_archive_has_no_absolute_paths(manual_data
     assert tables["tags"][0]["name_en"] == "Distinctive\tcoat\nmarking"
 
 
+def test_zero_distance_round_trips_without_reference_dependencies(manual_data):
+    dp, project, _, _, _, deer, _, parent, _ = manual_data
+    dp.apply_distance_to_end(
+        parent["id"], 500, distance_m=0, infant_id=parent["infant_id"], labeled_by="alice"
+    )
+    archive = dp.export_distance_annotations(project.id, [deer])
+    before = decode_archive(archive)[1]
+    assert before["references"] == []
+    assert before["samples"] and all(
+        (row["status"], row["distance_m"], row["reference_frame_id"]) == ("annotated", 0, None)
+        for row in before["samples"]
+    )
+    measurements = dp.export_distance_measurements(project.id, [deer]).decode()
+    rows = list(csv.DictReader(io.StringIO(measurements), delimiter="\t"))
+    assert {row["distance_m"] for row in rows} == {"0.0"}
+    assert {row["reference_frame_id"] for row in rows} == {""}
+    dp.align_distance_on_even_frame(deer, 800.75, "bob", reset_tracks=True)
+    assert dp.import_distance_annotations(project.id, archive, {deer: "replace"})["imported"] == [
+        deer
+    ]
+    assert export_state(dp, project.id, [deer]) == before
+
+
 def test_selection_uses_confirmed_labels_and_start_time_across_days(provider_with_project):
     dp, project, _ = provider_with_project
     videos = dp.get_video_queue({}, active_project_id=project.id)

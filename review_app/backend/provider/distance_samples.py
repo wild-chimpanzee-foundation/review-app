@@ -55,6 +55,7 @@ def save_distance_sample(
     offset_ms: int,
     *,
     reference_frame_id: str | None,
+    distance_m: float | None,
     skip_reason: str | None,
     behavior_ids: list[str] | None,
     infant_id: str | None,
@@ -71,6 +72,14 @@ def save_distance_sample(
     if create_infant and infant_id:
         raise ValueError("Select an existing infant or create one")
     skipping = skip_reason is not None
+    zero = distance_m is not None
+    if zero and (
+        type(distance_m) not in (int, float)
+        or distance_m != 0
+        or reference_frame_id is not None
+        or skipping
+    ):
+        raise ValueError("An explicit distance must be 0 m with no reference frame or skip reason")
     if skipping and (
         skip_reason not in {"individual absent", "midpoint not visible"} or reference_frame_id
     ):
@@ -90,7 +99,7 @@ def save_distance_sample(
     ):
         raise ValueError("Infant creation position is invalid")
     frame = None
-    if not skipping:
+    if not skipping and not zero:
         frame = session.get(ReferenceFrame, reference_frame_id) if reference_frame_id else None
         if frame is None:
             raise ValueError("Select a prepared reference frame")
@@ -129,6 +138,8 @@ def save_distance_sample(
     )
     if frame and frame.retired and (current is None or current.reference_frame_id != frame.id):
         raise ValueError("Select a prepared reference frame")
+    if frame:
+        distance_m = current.distance_m if frame.retired else frame.distance_m
     if infant_id or create_infant:
         if individual.age == "Infant" or (current and current.carried_by_individual_id):
             raise ValueError("A carried infant cannot also carry an infant")
@@ -227,9 +238,7 @@ def save_distance_sample(
         row.status = "skipped" if skipping else "annotated"
         row.skip_reason = skip_reason
         row.reference_frame_id = frame.id if frame else None
-        row.distance_m = (
-            (current.distance_m if frame.retired else frame.distance_m) if frame else None
-        )
+        row.distance_m = distance_m
         row.carried_by_individual_id = carrier_id
         row.labeled_by, row.labeled_at, row.updated_at = labeled_by, now, now
         session.flush()
@@ -258,6 +267,7 @@ def save_distance_sample(
             carrier_sample
             and carrier_sample.reference_frame_id == (frame.id if frame else None)
             and carrier_sample.skip_reason == skip_reason
+            and (frame is not None or carrier_sample.distance_m == distance_m)
         ):
             carrier_id = current.carried_by_individual_id
     row = write(individual, carrier_id, behaviors)

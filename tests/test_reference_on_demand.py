@@ -177,10 +177,12 @@ async def test_review_can_start_with_zero_reference_frames(user: User, on_demand
     await user.open("/reference-on-demand-test")
     page = on_demand_page["page"]
     assert page.selected_frame_id is None
-    assert (
-        len([e for e in user.find(ui.button).elements if "data-reference-distance" in e.props])
-        == 15
-    )
+    assert {
+        e.props["data-reference-distance"]
+        for e in user.find(ui.button).elements
+        if "data-reference-distance" in e.props
+    } == {str(meters) for meters in range(16)}
+    assert distance_button(user, 0).enabled
     distance_button(user, 1).mark("one")
     user.find(marker="one").click()
     await wait_for(lambda: not page.busy and len(page.frames) == 1)

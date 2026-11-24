@@ -249,6 +249,29 @@ def test_one_persistent_new_or_reused_infant_receives_evidence_and_behaviors(
     )
 
 
+def test_zero_distance_applies_to_carried_infant_and_all_remaining_samples(apply_data):
+    data, dp = apply_data, apply_data["dp"]
+    parent_id = data["individual"]["id"]
+    result = apply(data, reference_frame_id=None, distance_m=0, create_infant=True)
+    infant_id = result["infant_id"]
+    parent_samples = samples(data)
+    infant_samples = samples(data, infant_id)
+    assert set(infant_samples) == set(parent_samples) == {1000, 3000, 5000, 7000, 9000}
+    for row in (*parent_samples.values(), *infant_samples.values()):
+        assert (
+            row["status"],
+            row["distance_m"],
+            row["reference_frame_id"],
+            row["skip_reason"],
+        ) == ("annotated", 0, None, None)
+        assert row["behavior_ids"] == [data["unidentified_id"]]
+    saved = dp.save_distance_sample(
+        infant_id, 1000, distance_m=0, behavior_ids=[data["behavior_id"]], labeled_by="alice"
+    )
+    assert saved["carried_by_individual_id"] == parent_id
+    assert samples(data, infant_id)[1000]["behavior_ids"] == [data["behavior_id"]]
+
+
 @pytest.mark.parametrize("reason", ["individual absent", "midpoint not visible"])
 def test_skipped_infant_retains_durable_carried_status(apply_data, reason):
     result = apply(apply_data, skip_reason=reason, create_infant=True)
@@ -360,6 +383,11 @@ def test_unscheduled_or_invalid_start_is_atomic(apply_data, offset):
         {"reference_frame_id": None},
         {"reference_frame_id": "missing"},
         {"reference_frame_id": ""},
+        {"distance_m": 0},
+        {"distance_m": 0, "skip_reason": "individual absent"},
+        {"distance_m": 5, "reference_frame_id": None},
+        {"distance_m": False, "reference_frame_id": None},
+        {"distance_m": "0", "reference_frame_id": None},
         {"skip_reason": "other"},
         {"skip_reason": []},
         {"skip_reason": False},

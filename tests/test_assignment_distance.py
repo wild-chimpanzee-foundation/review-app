@@ -247,6 +247,31 @@ def test_complete_setup_same_frame_people_and_projected_ai_round_trip(distance_a
     assert copied.copied_count == 3
 
 
+def test_assignment_return_accepts_zero_distance_and_retains_ai_provenance(distance_assignment):
+    dp, project, _, ids, _, _ = distance_assignment
+    opened = open_work(distance_assignment)
+    with dp.Session() as session:
+        local_id = session.get(
+            HandoffIdentityMap, (opened.id, "distance_individual", "individual-1")
+        ).local_id
+    dp.save_distance_sample(local_id, 2000, distance_m=0, labeled_by="alice")
+    returned = dp.export_assignment_return(opened.project_id)
+    preview = dp.preview_assignment_return(project.id, returned, "use_imported")
+    dp.accept_assignment_return(project.id, returned, "use_imported", preview.token)
+    samples = dp.get_distance_review_state(ids[0], "alice")["samples"]
+    (sample,) = [
+        row
+        for row in samples
+        if row["individual_id"] == "individual-1" and row["offset_ms"] == 2000
+    ]
+    assert (sample["status"], sample["distance_m"], sample["reference_frame_id"]) == (
+        "annotated",
+        0,
+        None,
+    )
+    assert sample["ai_original"]["reference_frame_id"] == "frame-1"
+
+
 @pytest.mark.parametrize("with_folder_review", [False, True])
 def test_retired_reference_with_same_distance_alternative_survives_handoff(
     distance_assignment, with_folder_review

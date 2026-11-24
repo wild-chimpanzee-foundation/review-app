@@ -9,6 +9,7 @@ from nicegui import ui
 
 from review_app.app.config import DISTANCE_REFERENCE_METERS
 from review_app.app.pages.distance_review.reference_media import frame_time
+from review_app.app.pages.distance_review.session import ZERO_DISTANCE_CHOICE, ZERO_DISTANCE_ID
 from review_app.app.translations import t
 
 
@@ -134,7 +135,8 @@ def render_reference_controls(context: ReferenceViewsContext) -> None:
 def render_frames(context: ReferenceViewsContext) -> None:
     if context.reference_player:
         dimmed = context.saved_reference_unavailable or context.selection_id in {
-            choice["id"] for choice in context.skip_choices
+            ZERO_DISTANCE_ID,
+            *(choice["id"] for choice in context.skip_choices),
         }
         context.reference_player.classes(
             add="distance-reference-dimmed" if dimmed else "",
@@ -159,6 +161,7 @@ def render_frames(context: ReferenceViewsContext) -> None:
                 backward=lambda busy: bool(context.reference and not busy),
             )
     configured = frames_by_distance(context.frames, context.selection_id)
+    configured[0] = ZERO_DISTANCE_CHOICE
     choice_count = len(configured) + len(context.skip_choices)
     with ui.element("div").classes("distance-choice-toolbar"):
         with ui.row().classes("distance-choice-navigation items-center gap-1 no-wrap"):
@@ -223,7 +226,11 @@ def render_frames(context: ReferenceViewsContext) -> None:
                         + f' aria-pressed="{str(frame["id"] == context.selection_id).lower()}"'
                         + f' data-reference-distance="{distance:g}" '
                         'data-reference-state="configured"'
-                    ).tooltip(frame_time(frame["offset_ms"])).bind_enabled_from(
+                    ).tooltip(
+                        t("distance_zero_no_reference")
+                        if distance == 0
+                        else frame_time(frame["offset_ms"])
+                    ).bind_enabled_from(
                         context.busy_state,
                         "busy",
                         backward=lambda busy: not busy and not context.distance_locked,

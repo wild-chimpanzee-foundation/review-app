@@ -10,6 +10,7 @@ from nicegui import ui
 from nicegui.testing import User
 from review_app.app.pages.distance_review import page as page_module
 from review_app.app.pages.distance_review.page import DistanceReviewPage
+from review_app.app.pages.distance_review.session import ZERO_DISTANCE_ID
 from review_app.backend.db.models import DistanceSample
 
 pytest_plugins = ["nicegui.testing.user_plugin"]
@@ -93,20 +94,32 @@ async def test_sample_action_shortcuts_render_as_styled_badges(user: User, bulk_
     assert action_button(page).text == "Apply to end"
 
 
-@pytest.mark.parametrize("choice", ["distance", "individual absent", "midpoint not visible"])
+@pytest.mark.parametrize(
+    "choice", ["distance", ZERO_DISTANCE_ID, "individual absent", "midpoint not visible"]
+)
 async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sample(
-    user: User, bulk_page, choice
+    user: User, bulk_page, choice, monkeypatch
 ):
     holder, data = bulk_page
     await user.open("/distance-apply-to-end-test")
     page = holder["page"]
-    if choice != "distance":
+    if choice == ZERO_DISTANCE_ID:
+        page.frames = []
+        page.selected_frame_id = None
+        with page.client:
+            page.render_frames()
+        user.find("0 m", kind=ui.button).click()
+        await wait_until(lambda: page.selected_frame_id == ZERO_DISTANCE_ID)
+        page_module.seek_paused.reset_mock()
+    elif choice != "distance":
         page.selected_frame_id = choice
         page.render_sample_actions.refresh()
+    measured = choice in {"distance", ZERO_DISTANCE_ID}
     before = list(page.samples)
     user.find("Apply to end").click()
     label = {
         "distance": "7.25 m",
+        ZERO_DISTANCE_ID: "0 m",
         "individual absent": "Absent",
         "midpoint not visible": "Not visible",
     }[choice]
@@ -124,9 +137,11 @@ async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sampl
     )
     assert any(listener.type == "keydown.capture" for listener in panel._event_listeners.values())
     assert page.samples == before
+    notify = Mock(wraps=user.notify)
+    monkeypatch.setattr(user, "notify", notify)
     user.find("Apply and overwrite").click()
-    await user.should_see("Applied selection to 4 samples.")
     await wait_until(lambda: not page.busy and len(page.samples) == 5)
+    notify.assert_called_once_with("Applied selection to 4 samples.", type="positive")
     await user.should_see("5/5 samples reviewed")
     select = next(
         element
@@ -142,9 +157,7 @@ async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sampl
     assert page.sample_offset == 9000
     assert page.individual_id == data["individual"]["id"]
     assert page.selected_frame_id == (data["bulk_frame"]["id"] if choice == "distance" else choice)
-    assert page.sample_values["behavior_ids"] == (
-        [data["behavior_id"]] if choice == "distance" else []
-    )
+    assert page.sample_values["behavior_ids"] == ([data["behavior_id"]] if measured else [])
     assert action_button(page).enabled  # Reviewed samples can always be overwritten again.
     page_module.seek_paused.assert_called_once_with(
         page.animal_player, page.sample_seek_offset(9000)
@@ -154,11 +167,13 @@ async def test_confirmation_overwrites_existing_results_and_jumps_to_final_sampl
     for row in rows:
         if row["offset_ms"] < 3000:
             continue
-        assert row["behavior_ids"] == ([data["behavior_id"]] if choice == "distance" else [])
-        assert row["skip_reason"] == (None if choice == "distance" else choice)
+        assert row["behavior_ids"] == ([data["behavior_id"]] if measured else [])
+        assert row["skip_reason"] == (None if measured else choice)
         assert row["reference_frame_id"] == (
             data["bulk_frame"]["id"] if choice == "distance" else None
         )
+        if choice == ZERO_DISTANCE_ID:
+            assert (row["status"], row["distance_m"]) == ("annotated", 0)
 
 
 @pytest.mark.parametrize("selected_infant", [False, True])

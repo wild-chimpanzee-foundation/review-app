@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from review_app.app.pages.distance_review import page as page_module
 from review_app.app.pages.distance_review.page import DistanceReviewPage
+from review_app.app.pages.distance_review.session import ZERO_DISTANCE_CHOICE, ZERO_DISTANCE_ID
 from review_app.backend import transcoding
 
 
@@ -312,6 +313,7 @@ async def test_save_plays_to_consecutive_even_camera_second(distance_page, reaso
         "adult",
         1000,
         reference_frame_id="frame" if reason is None else None,
+        distance_m=None,
         skip_reason=reason,
         behavior_ids=["walking"],
         infant_id=None,
@@ -637,6 +639,7 @@ def test_distance_arrows_use_numeric_order_and_skip_duplicate_distances(distance
         side_effect=lambda frame: setattr(page, "selected_frame_id", frame["id"])
     )
     assert [frame["id"] for frame in page.distance_choices()] == [
+        ZERO_DISTANCE_ID,
         "close",
         "frame",
         "far",
@@ -650,8 +653,12 @@ def test_distance_arrows_use_numeric_order_and_skip_duplicate_distances(distance
     page.move_distance(1)
     assert page.selected_skip_reason == "individual absent"
     page.move_distance(1)
+    assert page.selected_frame_id == ZERO_DISTANCE_ID
+    page.move_distance(1)
     assert page.selected_frame_id == "close"
-    assert page.preview_frame.call_count == 4
+    assert page.preview_frame.call_count == 5
+    page.move_distance(-1)
+    assert page.selected_frame_id == ZERO_DISTANCE_ID
     page.move_distance(-1)
     assert page.selected_skip_reason == "individual absent"
     page.move_distance(-1)
@@ -663,11 +670,39 @@ def test_distance_arrows_use_numeric_order_and_skip_duplicate_distances(distance
     page.move_distance(-1)
     assert page.selected_frame_id == "close"
     page.move_distance(-1)
+    assert page.selected_frame_id == ZERO_DISTANCE_ID
+    page.move_distance(-1)
     assert page.selected_skip_reason == "individual absent"
-    assert page.preview_frame.call_count == 10
+    assert page.preview_frame.call_count == 13
     page.busy = True
     page.move_distance(1)
     assert page.selected_skip_reason == "individual absent"
+
+
+async def test_zero_previews_saves_and_restores_without_reference_clip(distance_page):
+    page = distance_page
+    page.frames = []
+    page.selected_frame_id = None
+    page.ensure_reference_selection()
+    assert page.selected_frame_id is None
+    page.preview_frame(ZERO_DISTANCE_CHOICE)
+    assert page.graph_preview()["distance_m"] == 0
+    assert page.apply_to_end_assignment()["distance_m"] == 0
+    await page.commit_sample()
+    saved = page.dp.save_distance_sample.call_args.kwargs
+    assert (saved["distance_m"], saved["reference_frame_id"], saved["skip_reason"]) == (
+        0,
+        None,
+        None,
+    )
+    assert saved["behavior_ids"] == ["walking"]
+    await DistanceReviewPage.restore_sample(page, seek=False)
+    assert page.sample_offset == 3000
+    assert page.selected_frame_id == ZERO_DISTANCE_ID
+    page.sample_offset = 1000
+    await DistanceReviewPage.restore_sample(page, seek=False)
+    assert page.selected_frame_id == ZERO_DISTANCE_ID
+    assert page.graph_preview() is None
 
 
 @pytest.mark.parametrize("reason", ["midpoint not visible", "individual absent"])

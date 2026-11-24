@@ -550,9 +550,9 @@ class DistanceSample(Base):
             "(status = 'pending' AND reference_frame_id IS NULL AND distance_m IS NULL "
             "AND skip_reason IS NULL AND labeled_at IS NULL AND labeled_by IS NULL "
             "AND carried_by_individual_id IS NULL) OR "
-            "(status = 'annotated' AND reference_frame_id IS NOT NULL "
-            "AND distance_m IS NOT NULL AND distance_m > 0 "
-            "AND skip_reason IS NULL) OR "
+            "(status = 'annotated' AND skip_reason IS NULL AND distance_m IS NOT NULL AND "
+            "((distance_m = 0 AND reference_frame_id IS NULL) OR "
+            "(distance_m > 0 AND reference_frame_id IS NOT NULL))) OR "
             "(status = 'skipped' AND skip_reason IS NOT NULL "
             "AND skip_reason IN ('individual absent', 'midpoint not visible') "
             "AND reference_frame_id IS NULL AND distance_m IS NULL)",
