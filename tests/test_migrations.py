@@ -1,12 +1,12 @@
 """
 Tests for the migration runner in review_app/backend/migrations.py.
 
-Strategy: migrations only execute on *existing* databases (fresh DBs are
-stamped at the current version without running any SQL).  To exercise the
-runner we create a real engine, build the current schema with create_all(),
-then wind the version stamp back to simulate an older database.
+Fresh databases are stamped at the current version. Upgrade tests use
+historical schema fixtures for the tables their migrations read.
 """
 
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -17,6 +17,7 @@ from review_app.backend.db.migrations import (
     _migration_v22,
     _migration_v23,
     run_migrations,
+    upgrade_database,
 )
 from review_app.backend.db.models import Base
 from review_app.backend.errors import VideoError
@@ -28,7 +29,11 @@ from sqlalchemy.exc import IntegrityError
 # ---------------------------------------------------------------------------
 
 
-def _make_engine(path):
+def _make_engine(path, snapshot=None):
+    if snapshot:
+        with closing(sqlite3.connect(path)) as conn:
+            fixture = Path(__file__).with_name("fixtures") / snapshot
+            conn.executescript(fixture.read_text())
     engine = create_engine(f"sqlite:///{path}")
 
     @event.listens_for(engine, "connect")
@@ -38,7 +43,8 @@ def _make_engine(path):
         cur.execute("PRAGMA foreign_keys=ON")
         cur.close()
 
-    Base.metadata.create_all(engine)
+    if not snapshot:
+        Base.metadata.create_all(engine)
     return engine
 
 
@@ -100,46 +106,32 @@ def test_species_writer_uses_video_project(provider_with_project, bulk):
     assert stats["species_counts"] == [{"species": "deer", "observations": 1, "videos": 1}]
 
 
-def test_species_upgrade_repairs_ownership_and_behavior_links(provider_with_project):
+def test_species_upgrade_repairs_ownership_and_behavior_links(tmp_db, app_data_dir):
     from review_app.backend.provider.local_data_provider import LocalDataProvider
 
-    dp, project, _ = provider_with_project
-    other = dp.create_project("Other project", "")
-    video_id = dp.get_video_queue({}, active_project_id=project.id)[0]
-    dp.update_manual_review(
-        video_id, [{"species": "deer", "tags": ["grazing"]}], active_project_id=project.id
-    )
-    with dp.engine.begin() as conn:
-        # Recreate the pre-upgrade table so it can hold a link to a missing observation.
-        conn.exec_driver_sql("ALTER TABLE observation_tags RENAME TO saved_tags")
-        conn.exec_driver_sql("""
-            CREATE TABLE observation_tags (
-                video_id VARCHAR NOT NULL REFERENCES videos(video_id),
-                observation_id INTEGER NOT NULL,
-                behavior_id VARCHAR NOT NULL REFERENCES behaviors(id),
-                PRIMARY KEY (video_id, observation_id, behavior_id)
-            )
-        """)
-        conn.exec_driver_sql("INSERT INTO observation_tags SELECT * FROM saved_tags")
-        conn.exec_driver_sql("""
-            INSERT INTO observation_tags SELECT video_id, observation_id + 1, behavior_id
-            FROM saved_tags
-        """)
-        conn.exec_driver_sql("DROP TABLE saved_tags")
-        conn.exec_driver_sql("UPDATE individual_observations SET project_id = ?", (other.id,))
-        conn.exec_driver_sql("UPDATE video_labels SET is_blank = 1")
-    _set_version(dp.engine, 22)
-    dp.engine.dispose()
-
+    engine = _make_engine(app_data_dir / "review_data.db", "schema_snapshot.sql")
+    video_id = "animal"
+    with engine.begin() as conn:
+        for sql in (
+            "INSERT INTO projects (id, name, created_at) VALUES ('p', 'Project', '2026-01-01'), ('other', 'Other', '2026-01-01')",
+            "INSERT INTO videos (video_id, project_id, video_path, last_seen_at) VALUES ('animal', 'p', 'animal.mp4', '2026-01-01')",
+            "INSERT INTO species (id, scientific_name, is_custom) VALUES ('deer', 'deer', 0)",
+            "INSERT INTO behaviors (id, key, name_en, is_custom) VALUES ('grazing', 'grazing', 'Grazing', 0)",
+            "INSERT INTO individual_observations (video_id, id, observation_uuid, project_id, species_id, start_sec, updated_at) VALUES ('animal', 1, 'obs', 'other', 'deer', 0, '2026-01-01')",
+            "INSERT INTO video_labels (video_id, is_blank) VALUES ('animal', 1)",
+            "INSERT INTO observation_tags (video_id, observation_id, behavior_id) VALUES ('animal', 1, 'grazing'), ('animal', 2, 'grazing')",
+        ):
+            conn.exec_driver_sql(sql)
+    engine.dispose()
     dp = LocalDataProvider()
-    exported = dp.export_annotations_csv(project.id).dropna(subset=["species"])
+    exported = dp.export_annotations_csv("p").dropna(subset=["species"])
     assert exported[["species", "attributes", "is_blank"]].to_dict("records") == [
         {"species": "deer", "attributes": "grazing", "is_blank": 0}
     ]
-    stats = dp.get_overview_stats(project.id)
+    stats = dp.get_overview_stats("p")
     assert stats["species_counts"] == [{"species": "deer", "observations": 1, "videos": 1}]
     assert stats["behavior_counts"] == [{"behavior": "grazing", "observations": 1, "videos": 1}]
-    assert dp.get_overview_stats(other.id)["species_counts"] == []
+    assert dp.get_overview_stats("other")["species_counts"] == []
 
     with dp.engine.begin() as conn:
         assert conn.exec_driver_sql("SELECT count(*) FROM observation_tags").scalar_one() == 1
@@ -267,15 +259,14 @@ def test_migration_v3_creates_app_settings(tmp_path):
     Simulate a DB at version 2 (no app_settings table).
     After running migrations it must exist at the latest version.
     """
-    engine = _make_engine(tmp_path / "test.db")
-    run_migrations(engine)  # stamp at latest initially
+    engine = _make_engine(tmp_path / "test.db", "schema_v3.sql")
 
     # Drop app_settings and wind back to v2 to force v3 to re-run.
     with engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS app_settings"))
     _set_version(engine, 2)
 
-    run_migrations(engine)
+    upgrade_database(engine)
 
     assert _get_version(engine) == len(MIGRATIONS)
     assert "app_settings" in _tables(engine)
@@ -285,11 +276,10 @@ def test_all_pending_migrations_advance_version(tmp_path):
     """
     Starting from version 2, the runner must advance to the latest version.
     """
-    engine = _make_engine(tmp_path / "test.db")
-    run_migrations(engine)
+    engine = _make_engine(tmp_path / "test.db", "schema_v3.sql")
     _set_version(engine, 2)
 
-    run_migrations(engine)
+    upgrade_database(engine)
 
     assert _get_version(engine) == len(MIGRATIONS)
 
@@ -494,8 +484,7 @@ def test_add_column_if_missing_with_default(tmp_path):
 
 def test_migration_v19_adds_inaturalist_url(tmp_path):
     """Simulate a v18 database (species without inaturalist_url) and re-run v19."""
-    engine = _make_engine(tmp_path / "test.db")
-    run_migrations(engine)
+    engine = _make_engine(tmp_path / "test.db", "schema_snapshot.sql")
 
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE species DROP COLUMN inaturalist_url"))
@@ -515,8 +504,7 @@ def test_migration_v19_adds_inaturalist_url(tmp_path):
 def test_migration_v21_normalizes_backslash_paths(tmp_path):
     """A DB (or bundle) created on Windows stores '\\'-separated paths; opening it
     on any OS must not require a rescan for matching/serving to work."""
-    engine = _make_engine(tmp_path / "test.db")
-    run_migrations(engine)  # stamp at latest first
+    engine = _make_engine(tmp_path / "test.db", "schema_snapshot.sql")
 
     with engine.begin() as conn:
         conn.execute(
@@ -550,8 +538,7 @@ def test_migration_v21_normalizes_backslash_paths(tmp_path):
 
 
 def test_migration_v21_leaves_forward_slash_paths_unchanged(tmp_path):
-    engine = _make_engine(tmp_path / "test.db")
-    run_migrations(engine)
+    engine = _make_engine(tmp_path / "test.db", "schema_snapshot.sql")
 
     with engine.begin() as conn:
         conn.execute(

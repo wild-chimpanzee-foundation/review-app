@@ -74,7 +74,7 @@ def _make_database(path, schema):
             "reference_videos",
             id="reference-video",
             project_id="project",
-            camera_id="camera",
+            unresolved_camera_label="camera",
             video_path="reference.mp4",
         )
         _insert(

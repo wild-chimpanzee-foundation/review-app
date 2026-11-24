@@ -608,10 +608,108 @@ def _migration_v22(conn) -> None:
         conn.execute(text(idx_sql))
 
 
-# Frozen DDL for tables introduced by v23. Future schema changes append a migration.
-SCHEMA_V23 = (
+# Frozen table definitions shared by the v22 and v23 upgrade paths.
+VIDEOS_V24 = """
+    CREATE TABLE videos_new (
+        video_id VARCHAR NOT NULL,
+        project_id VARCHAR,
+        video_path VARCHAR NOT NULL,
+        folder_camera_label VARCHAR,
+        deployment_id VARCHAR,
+        deployment_assignment VARCHAR DEFAULT 'legacy' NOT NULL,
+        created_at DATETIME,
+        duration_sec FLOAT,
+        last_seen_at DATETIME NOT NULL,
+        is_valid BOOLEAN,
+        is_missing BOOLEAN DEFAULT '0' NOT NULL,
+        is_web_safe BOOLEAN,
+        validation_error VARCHAR,
+        transcoded_path VARCHAR,
+        latitude FLOAT,
+        longitude FLOAT,
+        PRIMARY KEY (video_id),
+        CONSTRAINT uq_video_path_project UNIQUE (video_path, project_id),
+        FOREIGN KEY(project_id, deployment_id) REFERENCES deployments (project_id, id),
+        CONSTRAINT ck_video_deployment_project CHECK (project_id IS NOT NULL OR deployment_id IS NULL),
+        FOREIGN KEY(project_id) REFERENCES projects (id)
+    )
+"""
+
+COPY_VIDEOS_V22 = """
+    INSERT INTO videos_new (video_id, project_id, video_path, folder_camera_label, created_at, duration_sec, last_seen_at, is_valid, is_missing, is_web_safe, validation_error, transcoded_path, latitude, longitude)
+    SELECT video_id, project_id, video_path, camera_id, created_at, duration_sec, last_seen_at, is_valid, is_missing, is_web_safe, validation_error, transcoded_path, latitude, longitude FROM videos
+"""
+
+FINISH_VIDEOS_REBUILD = (
+    "DROP TABLE videos",
+    "ALTER TABLE videos_new RENAME TO videos",
+    "CREATE INDEX idx_videos_is_valid ON videos (is_valid)",
+    "CREATE INDEX idx_videos_is_web_safe ON videos (is_web_safe)",
+    "CREATE INDEX ix_videos_deployment_id ON videos (deployment_id)",
+    "CREATE INDEX ix_videos_project_id ON videos (project_id)",
+)
+
+REBUILD_VIDEO_REVIEW_TABLES = (
     """
-    CREATE TABLE IF NOT EXISTS deployments (
+    CREATE TABLE individual_observations_new (
+        video_id VARCHAR NOT NULL,
+        id INTEGER NOT NULL,
+        observation_uuid VARCHAR NOT NULL,
+        species_id VARCHAR,
+        count INTEGER,
+        start_sec FLOAT NOT NULL,
+        end_sec FLOAT,
+        labeled_by VARCHAR,
+        labeled_at DATETIME,
+        updated_at DATETIME NOT NULL,
+        PRIMARY KEY (video_id, id),
+        UNIQUE (video_id, observation_uuid),
+        FOREIGN KEY(video_id) REFERENCES videos (video_id),
+        FOREIGN KEY(species_id) REFERENCES species (id)
+    )
+    """,
+    """
+    INSERT INTO individual_observations_new (video_id, id, observation_uuid, species_id, count, start_sec, end_sec, labeled_by, labeled_at, updated_at)
+    SELECT video_id, id, observation_uuid, species_id, count, start_sec, end_sec, labeled_by, labeled_at, updated_at FROM individual_observations
+    """,
+    "DROP TABLE individual_observations",
+    "ALTER TABLE individual_observations_new RENAME TO individual_observations",
+    "CREATE INDEX idx_individual_video_species ON individual_observations (video_id, species_id)",
+    "CREATE INDEX idx_individual_video_time ON individual_observations (video_id, start_sec)",
+    "CREATE INDEX ix_individual_observations_species_id ON individual_observations (species_id)",
+    """
+    CREATE TABLE model_annotations_new (
+        id VARCHAR NOT NULL,
+        video_id VARCHAR NOT NULL,
+        annotation_type VARCHAR NOT NULL,
+        model_name VARCHAR NOT NULL,
+        value_text VARCHAR,
+        value_num FLOAT,
+        probability FLOAT,
+        t_start_sec FLOAT,
+        t_end_sec FLOAT,
+        updated_at DATETIME NOT NULL,
+        PRIMARY KEY (id),
+        FOREIGN KEY(video_id) REFERENCES videos (video_id)
+    )
+    """,
+    """
+    INSERT INTO model_annotations_new (id, video_id, annotation_type, model_name, value_text, value_num, probability, t_start_sec, t_end_sec, updated_at)
+    SELECT id, video_id, annotation_type, model_name, value_text, value_num, probability, t_start_sec, t_end_sec, updated_at FROM model_annotations
+    """,
+    "DROP TABLE model_annotations",
+    "ALTER TABLE model_annotations_new RENAME TO model_annotations",
+    "CREATE INDEX idx_model_ann_blank_probe ON model_annotations (annotation_type, video_id, probability)",
+    "CREATE INDEX idx_model_ann_type_text_video ON model_annotations (annotation_type, value_text, video_id)",
+    "CREATE INDEX ix_model_annotations_annotation_type ON model_annotations (annotation_type)",
+    "CREATE INDEX ix_model_annotations_model_name ON model_annotations (model_name)",
+    "CREATE INDEX ix_model_annotations_video_id ON model_annotations (video_id)",
+    "CREATE UNIQUE INDEX uq_model_ann_identity ON model_annotations (video_id, model_name, annotation_type, coalesce(value_text, ''))",
+)
+
+
+DEPLOYMENTS_V24 = """
+    CREATE TABLE {table} (
         id VARCHAR NOT NULL,
         project_id VARCHAR NOT NULL,
         deployment_id VARCHAR NOT NULL,
@@ -624,11 +722,83 @@ SCHEMA_V23 = (
         notes VARCHAR,
         PRIMARY KEY (id),
         CONSTRAINT uq_deployment_project_key UNIQUE (project_id, deployment_id),
+        CONSTRAINT uq_deployment_project_id UNIQUE (project_id, id),
         CONSTRAINT ck_deployment_key CHECK (length(trim(deployment_id)) > 0),
         FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE
     )
-    """,
-    "CREATE INDEX IF NOT EXISTS ix_deployments_project_id ON deployments (project_id)",
+"""
+
+REFERENCE_VIDEOS_V24 = """
+    CREATE TABLE {table} (
+        id VARCHAR NOT NULL,
+        project_id VARCHAR NOT NULL,
+        unresolved_camera_label VARCHAR,
+        deployment_id VARCHAR,
+        video_path VARCHAR NOT NULL,
+        PRIMARY KEY (id),
+        CONSTRAINT uq_reference_video_path_project UNIQUE (project_id, video_path),
+        CONSTRAINT ck_reference_camera CHECK ((deployment_id IS NULL OR unresolved_camera_label IS NULL) AND (unresolved_camera_label IS NULL OR length(trim(unresolved_camera_label)) > 0)),
+        CONSTRAINT ck_reference_path CHECK (length(trim(video_path)) > 0),
+        FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE,
+        FOREIGN KEY(project_id, deployment_id) REFERENCES deployments (project_id, id)
+    )
+"""
+
+DISTANCE_INDIVIDUALS_V24 = """
+    CREATE TABLE {table} (
+        id VARCHAR NOT NULL,
+        import_id VARCHAR,
+        task_id VARCHAR NOT NULL,
+        ai_original JSON,
+        individual_number INTEGER NOT NULL,
+        age VARCHAR,
+        sex VARCHAR,
+        first_seen_offset_ms INTEGER NOT NULL,
+        first_seen_playback_ms FLOAT,
+        initial_carrier_individual_id VARCHAR,
+        anchor_x FLOAT,
+        anchor_y FLOAT,
+        anchor_width FLOAT,
+        anchor_height FLOAT,
+        labeled_by VARCHAR,
+        labeled_at DATETIME,
+        updated_at DATETIME NOT NULL,
+        review_status VARCHAR DEFAULT 'not_started' NOT NULL,
+        completed_by VARCHAR,
+        completed_at DATETIME,
+        PRIMARY KEY (id),
+        CONSTRAINT uq_distance_individual_number UNIQUE (task_id, individual_number),
+        CONSTRAINT ck_distance_individual_number CHECK (individual_number > 0),
+        CONSTRAINT ck_distance_first_seen CHECK (first_seen_offset_ms >= 0),
+        CONSTRAINT ck_distance_age CHECK (age IS NULL OR age IN ('Adult', 'Adolescent', 'Juvenile', 'Infant', 'Unknown')),
+        CONSTRAINT ck_distance_sex CHECK (sex IS NULL OR sex IN ('Male', 'Female', 'Unknown')),
+        CONSTRAINT ck_distance_anchor CHECK ((anchor_x IS NULL AND anchor_y IS NULL
+            AND anchor_width IS NULL AND anchor_height IS NULL) OR (anchor_x IS NOT NULL
+            AND anchor_y IS NOT NULL AND anchor_x BETWEEN 0 AND 1 AND anchor_y BETWEEN 0 AND 1
+            AND anchor_width IS NOT NULL AND anchor_height IS NOT NULL AND anchor_width > 0
+            AND anchor_height > 0 AND anchor_x + anchor_width <= 1
+            AND anchor_y + anchor_height <= 1)),
+        FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL,
+        FOREIGN KEY(task_id) REFERENCES distance_review_tasks (id) ON DELETE CASCADE,
+        FOREIGN KEY(initial_carrier_individual_id) REFERENCES distance_individuals (id) ON DELETE SET NULL
+    )
+"""
+
+DEPLOYMENTS_INDEX_V24 = (
+    "CREATE INDEX IF NOT EXISTS ix_deployments_project_id ON deployments (project_id)"
+)
+
+REFERENCE_VIDEOS_INDEX_V24 = "CREATE INDEX IF NOT EXISTS ix_reference_videos_deployment_id ON reference_videos (deployment_id)"
+
+DISTANCE_INDIVIDUALS_INDEX_V24 = (
+    "CREATE INDEX IF NOT EXISTS ix_distance_individuals_task_id ON distance_individuals (task_id)"
+)
+
+
+# Frozen DDL for tables introduced by v23.
+SCHEMA_V23 = (
+    DEPLOYMENTS_V24.format(table="IF NOT EXISTS deployments"),
+    DEPLOYMENTS_INDEX_V24,
     """
     CREATE TABLE IF NOT EXISTS handoff_assignments (
         id VARCHAR NOT NULL,
@@ -707,23 +877,8 @@ SCHEMA_V23 = (
         FOREIGN KEY(handoff_id) REFERENCES handoff_assignments (id) ON DELETE CASCADE
     )
     """,
-    """
-    CREATE TABLE IF NOT EXISTS reference_videos (
-        id VARCHAR NOT NULL,
-        project_id VARCHAR NOT NULL,
-        camera_id VARCHAR NOT NULL,
-        deployment_id VARCHAR,
-        video_path VARCHAR NOT NULL,
-        PRIMARY KEY (id),
-        CONSTRAINT uq_reference_video_path_project UNIQUE (project_id, video_path),
-        CONSTRAINT ck_reference_camera CHECK (length(trim(camera_id)) > 0),
-        CONSTRAINT ck_reference_path CHECK (length(trim(video_path)) > 0),
-        FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE,
-        FOREIGN KEY(deployment_id) REFERENCES deployments (id)
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS ix_reference_videos_deployment_id ON reference_videos (deployment_id)",
-    "CREATE INDEX IF NOT EXISTS idx_reference_deployment ON reference_videos (project_id, camera_id)",
+    REFERENCE_VIDEOS_V24.format(table="IF NOT EXISTS reference_videos"),
+    REFERENCE_VIDEOS_INDEX_V24,
     """
     CREATE TABLE IF NOT EXISTS reference_frames (
         id VARCHAR NOT NULL,
@@ -772,50 +927,8 @@ SCHEMA_V23 = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS ix_distance_review_tasks_video_id ON distance_review_tasks (video_id)",
-    """
-    CREATE TABLE IF NOT EXISTS distance_individuals (
-        id VARCHAR NOT NULL,
-        video_id VARCHAR NOT NULL,
-        import_id VARCHAR,
-        task_id VARCHAR NOT NULL,
-        ai_original JSON,
-        individual_number INTEGER NOT NULL,
-        species_id VARCHAR NOT NULL,
-        age VARCHAR,
-        sex VARCHAR,
-        first_seen_offset_ms INTEGER NOT NULL,
-        first_seen_playback_ms FLOAT,
-        initial_carrier_individual_id VARCHAR,
-        anchor_x FLOAT,
-        anchor_y FLOAT,
-        anchor_width FLOAT,
-        anchor_height FLOAT,
-        labeled_by VARCHAR,
-        labeled_at DATETIME,
-        updated_at DATETIME NOT NULL,
-        review_status VARCHAR DEFAULT 'not_started' NOT NULL,
-        completed_by VARCHAR,
-        completed_at DATETIME,
-        PRIMARY KEY (id),
-        CONSTRAINT uq_distance_individual_number UNIQUE (task_id, individual_number),
-        CONSTRAINT ck_distance_individual_number CHECK (individual_number > 0),
-        CONSTRAINT ck_distance_first_seen CHECK (first_seen_offset_ms >= 0),
-        CONSTRAINT ck_distance_age CHECK (age IS NULL OR age IN ('Adult', 'Adolescent', 'Juvenile', 'Infant', 'Unknown')),
-        CONSTRAINT ck_distance_sex CHECK (sex IS NULL OR sex IN ('Male', 'Female', 'Unknown')),
-        CONSTRAINT ck_distance_anchor CHECK ((anchor_x IS NULL AND anchor_y IS NULL
-            AND anchor_width IS NULL AND anchor_height IS NULL) OR (anchor_x IS NOT NULL
-            AND anchor_y IS NOT NULL AND anchor_x BETWEEN 0 AND 1 AND anchor_y BETWEEN 0 AND 1
-            AND anchor_width IS NOT NULL AND anchor_height IS NOT NULL AND anchor_width > 0
-            AND anchor_height > 0 AND anchor_x + anchor_width <= 1
-            AND anchor_y + anchor_height <= 1)),
-        FOREIGN KEY(video_id) REFERENCES videos (video_id) ON DELETE CASCADE,
-        FOREIGN KEY(import_id) REFERENCES distance_imports (id) ON DELETE SET NULL,
-        FOREIGN KEY(task_id) REFERENCES distance_review_tasks (id) ON DELETE CASCADE,
-        FOREIGN KEY(species_id) REFERENCES species (id),
-        FOREIGN KEY(initial_carrier_individual_id) REFERENCES distance_individuals (id) ON DELETE SET NULL
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS ix_distance_individuals_task_id ON distance_individuals (task_id)",
+    DISTANCE_INDIVIDUALS_V24.format(table="IF NOT EXISTS distance_individuals"),
+    DISTANCE_INDIVIDUALS_INDEX_V24,
     """
     CREATE TABLE IF NOT EXISTS distance_review_progress (
         task_id VARCHAR NOT NULL,
@@ -884,14 +997,6 @@ SCHEMA_V23 = (
 
 def _repair_species_observations(conn: Connection) -> None:
     """Reconcile Species records with their videos and enforce behavior links."""
-    ownership = conn.exec_driver_sql("""
-        UPDATE individual_observations AS io
-        SET project_id = (SELECT v.project_id FROM videos AS v WHERE v.video_id = io.video_id)
-        WHERE EXISTS (
-            SELECT 1 FROM videos AS v
-            WHERE v.video_id = io.video_id AND v.project_id IS NOT io.project_id
-        )
-    """).rowcount
     labels = conn.exec_driver_sql("""
         UPDATE video_labels AS vl SET is_blank = 0
         WHERE vl.is_blank = 1 AND EXISTS (
@@ -924,31 +1029,26 @@ def _repair_species_observations(conn: Connection) -> None:
     conn.exec_driver_sql("""
         CREATE INDEX idx_observation_tags_video ON observation_tags (video_id, behavior_id)
     """)
-    if ownership or labels or orphans:
+    if labels or orphans:
         logger.warning(
-            "Species upgrade reconciled %d observation projects, cleared %d blank labels,"
+            "Species upgrade cleared %d blank labels"
             " and removed %d behavior links without an observation",
-            ownership,
             labels,
             orphans,
         )
 
 
+def _rebuild_video_review_tables(conn: Connection, copy_videos: str) -> None:
+    for sql in (VIDEOS_V24, copy_videos, *FINISH_VIDEOS_REBUILD, *REBUILD_VIDEO_REVIEW_TABLES):
+        conn.exec_driver_sql(sql)
+
+
 def _migration_v23(conn) -> None:
-    """Add the final Distance schema to a published v22 database."""
+    """Add the normalized Distance schema to a published v22 database."""
     for sql in SCHEMA_V23:
         conn.execute(text(sql))
-    _add_column_if_missing(conn, "videos", "inferred_camera_id", "VARCHAR")
-    _add_column_if_missing(conn, "videos", "deployment_id", "VARCHAR REFERENCES deployments(id)")
-    _add_column_if_missing(
-        conn, "videos", "deployment_assignment", "VARCHAR NOT NULL DEFAULT 'legacy'"
-    )
-    conn.exec_driver_sql(
-        "CREATE INDEX IF NOT EXISTS ix_videos_deployment_id ON videos (deployment_id)"
-    )
-    conn.exec_driver_sql(
-        "UPDATE videos SET inferred_camera_id = camera_id WHERE inferred_camera_id IS NULL"
-    )
+    _repair_species_observations(conn)
+    _rebuild_video_review_tables(conn, COPY_VIDEOS_V22)
     _add_column_if_missing(conn, "tags", "individual_eligible", "BOOLEAN NOT NULL DEFAULT 0")
     conn.execute(
         text(
@@ -963,7 +1063,223 @@ def _migration_v23(conn) -> None:
             "WHERE lower(trim(key)) IN ('comments', 'import_tags')"
         )
     )
-    _repair_species_observations(conn)
+
+
+def _has_deployment_foreign_keys(conn: Connection) -> bool:
+    parent_key = conn.exec_driver_sql("""
+        SELECT 1
+        FROM pragma_index_list('deployments') AS ix
+        WHERE ix."unique" AND NOT ix.partial
+          AND (SELECT group_concat(name, ',') FROM (
+                   SELECT name FROM pragma_index_info(ix.name) ORDER BY seqno
+               )) = 'project_id,id'
+    """).first()
+    if parent_key is None:
+        return False
+    for table in ("videos", "reference_videos"):
+        keys: dict[int, list[tuple[str, str]]] = {}
+        for key, _, parent, source, target, *_ in conn.exec_driver_sql(
+            f'PRAGMA foreign_key_list("{table}")'
+        ):
+            if parent == "deployments":
+                keys.setdefault(key, []).append((source, target))
+        if [("project_id", "project_id"), ("deployment_id", "id")] not in keys.values():
+            return False
+    return True
+
+
+LEGACY_V23_COLUMNS = {
+    "videos": {
+        "video_id",
+        "project_id",
+        "video_path",
+        "camera_id",
+        "inferred_camera_id",
+        "deployment_id",
+        "deployment_assignment",
+        "created_at",
+        "duration_sec",
+        "last_seen_at",
+        "is_valid",
+        "is_missing",
+        "is_web_safe",
+        "validation_error",
+        "transcoded_path",
+        "latitude",
+        "longitude",
+    },
+    "reference_videos": {"id", "project_id", "camera_id", "deployment_id", "video_path"},
+    "distance_individuals": {
+        "id",
+        "video_id",
+        "import_id",
+        "task_id",
+        "ai_original",
+        "individual_number",
+        "species_id",
+        "age",
+        "sex",
+        "first_seen_offset_ms",
+        "first_seen_playback_ms",
+        "initial_carrier_individual_id",
+        "anchor_x",
+        "anchor_y",
+        "anchor_width",
+        "anchor_height",
+        "labeled_by",
+        "labeled_at",
+        "updated_at",
+        "review_status",
+        "completed_by",
+        "completed_at",
+    },
+    "individual_observations": {
+        "video_id",
+        "id",
+        "observation_uuid",
+        "project_id",
+        "species_id",
+        "count",
+        "start_sec",
+        "end_sec",
+        "labeled_by",
+        "labeled_at",
+        "updated_at",
+    },
+    "model_annotations": {
+        "id",
+        "video_id",
+        "project_id",
+        "annotation_type",
+        "model_name",
+        "value_text",
+        "value_num",
+        "probability",
+        "t_start_sec",
+        "t_end_sec",
+        "updated_at",
+    },
+}
+
+
+COPY_VIDEOS_V23 = """
+    INSERT INTO videos_new
+        (video_id, project_id, video_path, folder_camera_label, deployment_id,
+         deployment_assignment, created_at, duration_sec, last_seen_at, is_valid, is_missing,
+         is_web_safe, validation_error, transcoded_path, latitude, longitude)
+    SELECT video_id, project_id, video_path, coalesce(inferred_camera_id, camera_id), deployment_id,
+           deployment_assignment, created_at, duration_sec, last_seen_at, is_valid, is_missing,
+           is_web_safe, validation_error, transcoded_path, latitude, longitude
+    FROM videos
+"""
+
+
+COPY_REFERENCE_VIDEOS_V23 = """
+    WITH evidence AS (
+        SELECT rv.id,
+               CASE WHEN count(*) = count(CASE WHEN v.project_id = rv.project_id
+                                               THEN v.deployment_id END)
+                          AND count(DISTINCT v.deployment_id) = 1
+                    THEN min(v.deployment_id)
+               END AS deployment_id
+        FROM reference_videos rv
+        JOIN reference_frames rf ON rf.reference_video_id = rv.id
+        JOIN distance_samples ds ON ds.reference_frame_id = rf.id
+        JOIN distance_individuals di ON di.id = ds.individual_id
+        JOIN distance_review_tasks dt ON dt.id = di.task_id
+        JOIN videos v ON v.video_id = dt.video_id
+        WHERE rv.deployment_id IS NULL
+        GROUP BY rv.id
+    ), sources AS (
+        SELECT r.id,
+               CASE WHEN count(*) = count(v.deployment_id) AND count(DISTINCT v.deployment_id) = 1
+                    THEN min(v.deployment_id)
+               END AS deployment_id,
+               min(CASE WHEN r.camera_id IN (v.camera_id, v.inferred_camera_id, d.deployment_id)
+                        THEN 1 ELSE 0 END) AS label_matches
+        FROM reference_videos r
+        JOIN videos v ON v.project_id = r.project_id
+            AND replace(v.video_path, char(92), '/') = replace(r.video_path, char(92), '/')
+        LEFT JOIN deployments d ON d.id = v.deployment_id AND d.project_id = v.project_id
+        WHERE r.deployment_id IS NULL
+        GROUP BY r.id
+    ), resolved AS (
+        SELECT r.id, r.project_id, r.camera_id, r.video_path,
+               CASE WHEN r.deployment_id IS NOT NULL THEN r.deployment_id
+                    WHEN e.deployment_id IS NOT NULL
+                         AND (s.id IS NULL OR s.deployment_id = e.deployment_id)
+                         THEN e.deployment_id
+                    WHEN e.id IS NULL AND s.label_matches THEN s.deployment_id
+               END AS deployment_id
+        FROM reference_videos r
+        LEFT JOIN evidence e ON e.id = r.id
+        LEFT JOIN sources s ON s.id = r.id
+    )
+    SELECT id, project_id, CASE WHEN deployment_id IS NULL THEN camera_id END,
+           deployment_id, video_path
+    FROM resolved
+"""
+
+
+def _rebuild_v24_table(conn: Connection, name: str, ddl: str, rows: str, index: str) -> None:
+    temporary_table = f"{name}_new"
+    conn.exec_driver_sql(ddl.format(table=temporary_table))
+    conn.exec_driver_sql(f"INSERT INTO {temporary_table} {rows}")
+    conn.exec_driver_sql(f"DROP TABLE {name}")
+    conn.exec_driver_sql(f"ALTER TABLE {temporary_table} RENAME TO {name}")
+    conn.exec_driver_sql(index)
+
+
+def _migration_v24(conn: Connection) -> None:
+    """Normalize earlier alpha installations while retaining their saved evidence."""
+    if not all(_columns(conn, name) == columns for name, columns in LEGACY_V23_COLUMNS.items()):
+        # Databases built by the normalized v23 schema need only the new version stamp.
+        if not _has_deployment_foreign_keys(conn):
+            raise UnsupportedSchemaError("Review App schema v23 has an incompatible layout")
+        return
+
+    inconsistent_individual = conn.exec_driver_sql("""
+        SELECT di.id
+        FROM distance_individuals di JOIN distance_review_tasks dt ON dt.id = di.task_id
+        WHERE di.video_id != dt.video_id OR di.species_id != dt.species_id
+        LIMIT 1
+    """).first()
+    if inconsistent_individual is not None:
+        raise UnsupportedSchemaError("A saved Distance individual disagrees with its task")
+
+    _rebuild_v24_table(
+        conn,
+        "deployments",
+        DEPLOYMENTS_V24,
+        """
+        SELECT id, project_id, deployment_id, name, camera_id, installation_date, retrieval_date,
+               transect_id, habitat, notes
+        FROM deployments
+        """,
+        DEPLOYMENTS_INDEX_V24,
+    )
+    # Recover a legacy reference's deployment from agreeing measurements or its matching source.
+    _rebuild_v24_table(
+        conn,
+        "reference_videos",
+        REFERENCE_VIDEOS_V24,
+        COPY_REFERENCE_VIDEOS_V23,
+        REFERENCE_VIDEOS_INDEX_V24,
+    )
+    _rebuild_v24_table(
+        conn,
+        "distance_individuals",
+        DISTANCE_INDIVIDUALS_V24,
+        """
+        SELECT id, import_id, task_id, ai_original, individual_number, age, sex,
+               first_seen_offset_ms, first_seen_playback_ms, initial_carrier_individual_id,
+               anchor_x, anchor_y, anchor_width, anchor_height, labeled_by, labeled_at, updated_at,
+               review_status, completed_by, completed_at
+        FROM distance_individuals
+        """,
+        DISTANCE_INDIVIDUALS_INDEX_V24,
+    )
+    _rebuild_video_review_tables(conn, COPY_VIDEOS_V23)
 
 
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
@@ -1106,6 +1422,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     ),
     (22, _migration_v22),
     (23, _migration_v23),
+    (24, _migration_v24),
 ]
 
 
@@ -1155,14 +1472,24 @@ def _has_current_schema(conn: Connection) -> bool:
         if table.name not in tables:
             return False
         fields = {row[1]: row[5] for row in _table_info(conn, table.name)}
-        if not set(table.columns.keys()) <= fields.keys():
+        if set(table.columns.keys()) != fields.keys():
             return False
         if {name for name, pk in fields.items() if pk} != set(table.primary_key.columns.keys()):
             return False
-    return True
+    return _has_deployment_foreign_keys(conn)
 
 
 def _existing_version(conn: Connection, stamped: int | None) -> int:
+    if stamped == len(MIGRATIONS):
+        if not _has_current_schema(conn):
+            raise UnsupportedSchemaError(
+                f"Review App schema v{stamped} has an incompatible layout"
+            )
+        return stamped
+    if stamped == 23:
+        return stamped
+    if stamped is None and _has_current_schema(conn):
+        return len(MIGRATIONS)
     core = {
         "projects": {"id", "name"},
         "project_dirs": {"project_id", "path"},
@@ -1176,8 +1503,6 @@ def _existing_version(conn: Connection, stamped: int | None) -> int:
         raise UnsupportedSchemaError("Database does not have a supported Review App schema")
     if stamped is not None:
         return stamped
-    if _has_current_schema(conn):
-        return len(MIGRATIONS)
 
     # The project-based schema in v1.0.0-beta6 predates surrogate species and
     # behavior IDs. Its full upgrade starts at migration 4.

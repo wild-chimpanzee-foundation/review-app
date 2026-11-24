@@ -17,10 +17,13 @@ from sqlalchemy import (
     LargeBinary,
     String,
     UniqueConstraint,
+    case,
     func,
+    select,
     text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, object_session, relationship
 
 
 def _utcnow() -> datetime:
@@ -64,6 +67,7 @@ class Deployment(Base):
     __tablename__ = "deployments"
     __table_args__ = (
         UniqueConstraint("project_id", "deployment_id", name="uq_deployment_project_key"),
+        UniqueConstraint("project_id", "id", name="uq_deployment_project_id"),
         CheckConstraint("length(trim(deployment_id)) > 0", name="ck_deployment_key"),
     )
 
@@ -79,6 +83,25 @@ class Deployment(Base):
     transect_id: Mapped[str | None] = mapped_column(String)
     habitat: Mapped[str | None] = mapped_column(String)
     notes: Mapped[str | None] = mapped_column(String)
+
+
+def _deployment_label(row) -> str | None:
+    if row.deployment_id is None:
+        return None
+    deployment = row.deployment
+    session = object_session(row)
+    if session is not None and (deployment is None or deployment.id != row.deployment_id):
+        deployment = session.get(Deployment, row.deployment_id)
+    return deployment.deployment_id if deployment else None
+
+
+def _deployment_label_sql(model):
+    return (
+        select(Deployment.deployment_id)
+        .where(Deployment.id == model.deployment_id)
+        .correlate_except(Deployment)
+        .scalar_subquery()
+    )
 
 
 class DeploymentFolderLink(Base):
@@ -109,17 +132,21 @@ class DeploymentFolderReview(Base):
 
 class Video(Base):
     __tablename__ = "videos"
-    __table_args__ = (UniqueConstraint("video_path", "project_id", name="uq_video_path_project"),)
+    __table_args__ = (
+        UniqueConstraint("video_path", "project_id", name="uq_video_path_project"),
+        ForeignKeyConstraint(
+            ("project_id", "deployment_id"), ("deployments.project_id", "deployments.id")
+        ),
+        CheckConstraint(
+            "project_id IS NOT NULL OR deployment_id IS NULL", name="ck_video_deployment_project"
+        ),
+    )
 
     video_id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str | None] = mapped_column(String, ForeignKey("projects.id"), index=True)
     video_path: Mapped[str] = mapped_column(String)
-    # Compatibility projection for existing queues/exports; writes live in deployments.py.
-    camera_id: Mapped[str | None] = mapped_column(String, index=True)
-    inferred_camera_id: Mapped[str | None] = mapped_column(String)
-    deployment_id: Mapped[str | None] = mapped_column(
-        String, ForeignKey("deployments.id"), index=True
-    )
+    folder_camera_label: Mapped[str | None] = mapped_column(String)
+    deployment_id: Mapped[str | None] = mapped_column(String, index=True)
     deployment_assignment: Mapped[str] = mapped_column(
         String, default="legacy", server_default="legacy"
     )
@@ -133,6 +160,21 @@ class Video(Base):
     transcoded_path: Mapped[str | None] = mapped_column(String)
     latitude: Mapped[float | None] = mapped_column(Float)
     longitude: Mapped[float | None] = mapped_column(Float)
+    deployment: Mapped[Deployment | None] = relationship(viewonly=True, lazy="joined")
+
+    @hybrid_property
+    def camera_id(self) -> str | None:
+        if self.project_id is None:
+            return self.folder_camera_label
+        return _deployment_label(self)
+
+    @camera_id.inplace.expression
+    @classmethod
+    def _camera_id_expression(cls):
+        return case(
+            (cls.project_id.is_(None), cls.folder_camera_label), else_=_deployment_label_sql(cls)
+        )
+
     label: Mapped[VideoLabel | None] = relationship(
         "VideoLabel", cascade="all, delete-orphan", uselist=False
     )
@@ -233,7 +275,6 @@ class IndividualObservation(Base):
     observation_uuid: Mapped[str] = mapped_column(
         String, nullable=False, default=lambda: str(uuid.uuid4())
     )
-    project_id: Mapped[str | None] = mapped_column(String, ForeignKey("projects.id"), index=True)
     species_id: Mapped[str | None] = mapped_column(String, ForeignKey("species.id"), index=True)
     count: Mapped[int | None] = mapped_column(Integer)
     start_sec: Mapped[float] = mapped_column(Float, default=0.0)
@@ -257,7 +298,6 @@ class ModelAnnotation(Base):
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str | None] = mapped_column(String, ForeignKey("projects.id"), index=True)
     video_id: Mapped[str] = mapped_column(String, ForeignKey("videos.video_id"), index=True)
     annotation_type: Mapped[str] = mapped_column(String, index=True)
     model_name: Mapped[str] = mapped_column(String, index=True)
@@ -397,18 +437,33 @@ class ReferenceVideo(Base):
     __tablename__ = "reference_videos"
     __table_args__ = (
         UniqueConstraint("project_id", "video_path", name="uq_reference_video_path_project"),
-        CheckConstraint("length(trim(camera_id)) > 0", name="ck_reference_camera"),
+        CheckConstraint(
+            "(deployment_id IS NULL OR unresolved_camera_label IS NULL) AND "
+            "(unresolved_camera_label IS NULL OR length(trim(unresolved_camera_label)) > 0)",
+            name="ck_reference_camera",
+        ),
+        ForeignKeyConstraint(
+            ("project_id", "deployment_id"), ("deployments.project_id", "deployments.id")
+        ),
         CheckConstraint("length(trim(video_path)) > 0", name="ck_reference_path"),
-        Index("idx_reference_deployment", "project_id", "camera_id"),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"))
-    camera_id: Mapped[str] = mapped_column(String)
-    deployment_id: Mapped[str | None] = mapped_column(
-        String, ForeignKey("deployments.id"), index=True
-    )
+    unresolved_camera_label: Mapped[str | None] = mapped_column(String)
+    deployment_id: Mapped[str | None] = mapped_column(String, index=True)
     video_path: Mapped[str] = mapped_column(String)
+
+    deployment: Mapped[Deployment | None] = relationship(viewonly=True, lazy="joined")
+
+    @hybrid_property
+    def camera_id(self) -> str | None:
+        return _deployment_label(self) if self.deployment_id else self.unresolved_camera_label
+
+    @camera_id.inplace.expression
+    @classmethod
+    def _camera_id_expression(cls):
+        return func.coalesce(_deployment_label_sql(cls), cls.unresolved_camera_label)
 
 
 class ReferenceFrame(Base):
@@ -463,9 +518,6 @@ class DistanceIndividual(Base):
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    video_id: Mapped[str] = mapped_column(
-        String, ForeignKey("videos.video_id", ondelete="CASCADE")
-    )
     import_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("distance_imports.id", ondelete="SET NULL")
     )
@@ -474,7 +526,6 @@ class DistanceIndividual(Base):
     )
     ai_original: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     individual_number: Mapped[int] = mapped_column(Integer)
-    species_id: Mapped[str] = mapped_column(String, ForeignKey("species.id"))
     age: Mapped[str | None] = mapped_column(String)
     sex: Mapped[str | None] = mapped_column(String)
     first_seen_offset_ms: Mapped[int] = mapped_column(Integer)
@@ -495,6 +546,8 @@ class DistanceIndividual(Base):
     )
     completed_by: Mapped[str | None] = mapped_column(String)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    task: Mapped[DistanceReviewTask] = relationship()
 
 
 class DistanceReviewTask(Base):
@@ -630,3 +683,10 @@ Index(
     ModelAnnotation.probability,
 )
 Index("idx_observation_tags_video", ObservationTag.video_id, ObservationTag.behavior_id)
+
+
+# Raw provider SQL aliases the video as v when displaying its effective label.
+VIDEO_CAMERA_LABEL_SQL = (
+    "CASE WHEN v.project_id IS NULL THEN v.folder_camera_label ELSE "
+    "(SELECT d.deployment_id FROM deployments d WHERE d.id = v.deployment_id) END"
+)
