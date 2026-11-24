@@ -332,21 +332,17 @@ paired as described below. Tags on other clips are never removed by folder
 inference. Missing sources or unresolved project/camera metadata do not become
 selectable references.
 
-Current reference matching uses **project + registered import-root ID + camera
-label**. Separate roots both containing `cam_1` are distinct matching scopes.
-Prefer the most specific registered root for nested imports; root relocation
-preserves its ID. A single-root project may use explicitly assigned
-external/relative reference files. In multi-root projects, unresolved external
-paths are ambiguous and must not match by camera label alone. Apply this current
-scope to both discovery and writes until the deployment migration below is implemented.
+Distance Review matches clips and references by their saved deployment ID.
+A declared deployment can span import roots through explicit links. Identical
+folder labels in separate roots can produce identifiers such as `cam_1` and
+`cam_1 [2]`. The camera label shown in review and exports comes from the assigned
+deployment's identifier.
 
-The existing database's `camera_id` is a deployment label, not the physical camera's
-identifier. [Project deployment management](deployment-management.md) supersedes
-the earlier no-table/override-only plan with a project-scoped deployment inventory:
-standard creation requires an app-format CSV, advanced creation infers records from
-folders, and administrators resolve unmatched footage. Declared deployments may
-span import roots through explicit links; matching labels alone never establish
-such a link. Deployment-dependent Distance operations require resolved assignments.
+Registration and legacy imports resolve labels within the most specific
+registered root. A single-root project may also resolve an external or relative
+reference path. An external path in a multi-root project needs an unambiguous
+assignment. [Project deployment management](deployment-management.md) describes
+how administrators link unresolved footage.
 
 Paired `references/` and `videos/` folders support both
 `cam_a/{videos,references}/clip.mp4` and `{videos,references}/cam_a/clip.mp4`.
@@ -490,18 +486,18 @@ alongside rounded millisecond frame identities; never round saved meter values.
 
 Published migrations 1–22 remain unchanged. Migration 23 upgrades the last
 published schema to the alpha schema in one transaction. It creates the final
-Distance, handoff, and deployment tables directly, adds video deployment fields
-and tag eligibility, and reconciles existing Species records. It preserves
-historical camera labels for deployment initialization when the project opens.
+Distance, handoff, and deployment tables directly. It rebuilds videos,
+observations, and predictions, preserving IDs, behavior links, paths, and the
+historical folder labels used to initialize deployments when a project opens.
 Fresh installs use the same schema. Development databases from the superseded
 migration chain should use a fresh profile or a copy of a published v22 database.
 
 | Table | Purpose and key fields |
 |---|---|
 | `distance_imports` | Immutable original package, manifest, content hash and import time; unique project/content hash. |
-| `reference_videos` | UUID, project, camera label, normalized path; unique project/path. |
+| `reference_videos` | UUID, project, deployment, normalized path, and a legacy label while an external reference awaits assignment. Unique project/path. |
 | `reference_frames` | UUID, source reference, integer offset, optional precise playback offset, known meters; unique source/distance/offset. |
-| `distance_individuals` | UUID, task, video, task-local number, fixed target species, age/sex, first-seen offset and optional complete box, attribution and derived completion; unique task/number. |
+| `distance_individuals` | UUID, task, task-local number, age/sex, first-seen offset and optional complete box, attribution, and derived completion. Unique task/number. |
 | `distance_samples` | UUID, individual/offset, pending/annotated/skipped state, original AI suggestion, separate human reference/distance or skip, optional carrier, attribution; unique individual/offset. |
 | `distance_individual_tags` | Individual/tag pair with attribution/time. |
 | `distance_sample_behaviors` | Sample/behavior pair. |
@@ -527,7 +523,9 @@ content is a new import even with the same source/run IDs. Import and confirmed
 replacement of untouched drafts are transactional. Viewing saved packages is
 inspection only, not run switching.
 
-`individual_observations` remains ordinary Review's independent store. Reuse
+Species observations and model predictions belong to a project through their
+video. Distance individuals get their video and target species from their task.
+Species Review and Distance reuse
 species, behaviors, tags, and annotator vocabulary; retain separate junctions.
 The Injured/Disease built-ins and legacy custom tags become individually eligible
 on v22 upgrade. New custom tags default to video-only and can be enabled in
@@ -560,7 +558,10 @@ links, reference IDs, camera time where available, and attribution.
 Use [assignment handoff](./assignment-handoff.md) to transfer editable work,
 including AI-linked tasks, explicit absence, task completion, and reference
 dependencies. The older [manual ZIP format](./distance-manual-export-import.md)
-has backend and test coverage. The current UI uses the TSV and assignment workflows.
+requires the reference and task to share a root and camera label. The analysis
+TSV can include measurements across roots in one deployment. Modern assignments
+use the deployment links saved in the originating package for return validation.
+The current UI uses the TSV and assignment workflows.
 
 ## Remaining Work
 
