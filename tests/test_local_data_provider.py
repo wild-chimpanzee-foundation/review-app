@@ -11,8 +11,6 @@ from review_app.backend.provider.local_data_provider import LocalDataProvider
 def temp_workspace(tmp_path, monkeypatch):
     video_dir = tmp_path / "videos"
     video_dir.mkdir()
-    db_dir = tmp_path / "db"
-    db_dir.mkdir()
 
     species_csv = tmp_path / "species.csv"
     species_csv.write_text("scientific_name;english_name\ndeer;Red Deer\nfox;Red Fox\n")
@@ -22,9 +20,6 @@ def temp_workspace(tmp_path, monkeypatch):
         "scientific_name;key;name_en;name_fr\n*;reacts_to_camera;Reacts to camera;\n*;grazing;Grazing;\n*;running;Running;\n"
     )
 
-    monkeypatch.setattr(
-        "review_app.backend.provider.local_data_provider.get_user_data_dir", lambda: db_dir
-    )
     monkeypatch.setattr("review_app.app.config.get_bundled_species_csv", lambda: str(species_csv))
     monkeypatch.setattr(
         "review_app.app.config.get_bundled_behaviors_csv", lambda: str(behavior_csv)
@@ -55,7 +50,6 @@ def test_provider_initialization(temp_workspace):
 
 def test_failed_restore_reopens_original_provider(temp_workspace, monkeypatch):
     dp = LocalDataProvider()
-    monkeypatch.setattr("review_app.backend.db.backup.get_user_data_dir", lambda: dp.db_dir)
     dp.set_setting("restore_test", "backup")
     candidate = create_backup(reason="test")
     dp.set_setting("restore_test", "original")
@@ -308,6 +302,7 @@ def test_import_annotations_append_mode(temp_workspace, monkeypatch):
         ]
     )
     dp.import_annotations_csv(df1, active_project_id=None, mode="override")
+    assert list((dp.db_dir / "backups").glob("review_backup_*.db*"))
 
     # 2. Second import: another observation in append mode
     df2 = pd.DataFrame(
@@ -468,6 +463,7 @@ def test_annotation_sharing_round_trip(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "review_app.backend.provider.local_data_provider.get_user_data_dir", lambda: db_b
     )
+    monkeypatch.setattr("review_app.backend.db.backup.get_user_data_dir", lambda: db_b)
     dp_b = LocalDataProvider()
     dp_b.sync_videos(progress_callback=None, video_dir=videos_b.parent.parent)
 

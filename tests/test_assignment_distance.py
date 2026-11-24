@@ -806,6 +806,7 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
     assert sum(row["assigned"] for row in media) == 2
     assert sum(not row["assigned"] for row in media) == 1
     assert not dp.get_assigned_video_ids(project.id, "alice")
+    await user.should_see(kind=ui.button, content=t("assign_view"))
     user.find(t("assign_view"), kind=ui.button).click()
     await user.should_see(marker="open-delivery", retries=20)
     user.find(marker="open-delivery").click()

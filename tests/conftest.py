@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from review_app.app import config
 from review_app.backend.db.models import ModelAnnotation
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 from sqlalchemy import text
@@ -47,11 +48,25 @@ def seed_builtin_tags(dp) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def tmp_db(tmp_path, monkeypatch):
-    """Minimal temp workspace: patched config paths, no videos on disk."""
+@pytest.fixture(autouse=True)
+def app_data_dir(tmp_path, monkeypatch):
+    """Redirect the desktop data path for every test, including imported aliases."""
     db_dir = tmp_path / "db"
-    db_dir.mkdir()
+    user_data_dir = config.platformdirs.user_data_dir
+
+    def isolated_user_data_dir(appname=None, *args, **kwargs):
+        if appname == config.APP_NAME:
+            return str(db_dir)
+        return user_data_dir(appname, *args, **kwargs)
+
+    monkeypatch.setattr(config.platformdirs, "user_data_dir", isolated_user_data_dir)
+    return db_dir
+
+
+@pytest.fixture
+def tmp_db(tmp_path, monkeypatch, app_data_dir):
+    """Minimal temp workspace with test vocabulary and no videos on disk."""
+    app_data_dir.mkdir()
     video_dir = tmp_path / "videos"
     video_dir.mkdir()
 
@@ -63,11 +78,6 @@ def tmp_db(tmp_path, monkeypatch):
         "scientific_name;key;name_en;name_fr\n*;grazing;Grazing;\n*;running;Running;\n"
     )
 
-    monkeypatch.setattr(
-        "review_app.backend.provider.local_data_provider.get_user_data_dir", lambda: db_dir
-    )
-    # Keep safety backups (e.g. pre-import) inside the temp workspace too.
-    monkeypatch.setattr("review_app.backend.db.backup.get_user_data_dir", lambda: db_dir)
     monkeypatch.setattr("review_app.app.config.get_bundled_species_csv", lambda: str(species_csv))
     monkeypatch.setattr(
         "review_app.app.config.get_bundled_behaviors_csv", lambda: str(behavior_csv)

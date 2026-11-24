@@ -123,16 +123,16 @@ label and observation in one transaction. Unchecked findings below are open.
   [Handoff selection](../../review_app/backend/annotation_package/scope.py#L117) ·
   [Distance design](reference-based-distance-annotation.md#manual-distance-export-and-restore) ·
   [Current export guide](../../userdocs/exporting.md)
-- [ ] **Isolate tests from the desktop data directory and resolve NiceGUI
-  teardown.** Three tests redirected their database but reached the real backup
-  directory. All three passed after backup storage was redirected to the fixture.
-  Use isolated database and backup storage for every test. The full suite also
-  stalls at the simulated Distance round trip. A focused rerun reported the
-  round trip as passed and then timed out. Make the suite exit cleanly so it can
-  serve as a release gate.
-  [Provider test fixture](../../tests/test_local_data_provider.py#L10) ·
-  [Isolated backup fixture](../../tests/conftest.py#L66) ·
-  [Distance round trip](../../tests/test_assignment_distance.py#L770)
+- [x] **Isolate desktop test data and stabilize simulated handoff tests.** The
+  shared fixture directs desktop database and backup lookups to a per-test
+  directory. Background compression prunes in the snapshot's own directory.
+  Species and Distance round trips wait for the next UI control after
+  preparation. The Codex sandbox blocks writes to asyncio's local wakeup
+  socket, which can stall executor shutdown after a passing test. Outside the
+  sandbox, a single pytest process passed the 1,964 default tests and four
+  CSV performance tests and exited cleanly in 7 minutes 10 seconds.
+  [Storage fixture](../../tests/conftest.py#L51) ·
+  [Distance round trip](../../tests/test_assignment_distance.py#L792)
 - [ ] **Make CI and release builds verify the artifacts they produce.** The
   manual release workflow uses its tag input for versioning without passing it
   to checkout. Build from the selected ref and smoke-test startup of the packaged

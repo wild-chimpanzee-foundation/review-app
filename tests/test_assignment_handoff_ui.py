@@ -368,7 +368,8 @@ async def test_delivery_copy_progress_updates_while_copy_paused_and_resets_on_re
         project.id, AssignmentRequest("alice", tuple(dp.get_assignment_video_ids(project.id)))
     )
     gates = [threading.Event(), threading.Event()]
-    entered = [threading.Event(), threading.Event()]
+    entered = [asyncio.Event(), asyncio.Event()]
+    loop = asyncio.get_running_loop()
     calls = [0]
 
     def paused_copy(
@@ -378,7 +379,7 @@ async def test_delivery_copy_progress_updates_while_copy_paused_and_resets_on_re
         calls[0] += 1
         if index == 0:
             progress_callback(1, 2)
-        entered[index].set()
+        loop.call_soon_threadsafe(entered[index].set)
         assert gates[index].wait(timeout=5)
         progress_callback(1, 2) if index == 1 else progress_callback(2, 2)
         if index == 1:
@@ -398,7 +399,7 @@ async def test_delivery_copy_progress_updates_while_copy_paused_and_resets_on_re
     user.find(t("handoff_copy_output")).type(str(tmp_path))
     user.find(marker="save-delivery").click()
 
-    assert await asyncio.to_thread(entered[0].wait, 3)
+    await asyncio.wait_for(entered[0].wait(), timeout=3)
     await user.should_see(t("assign_delivery_progress", done=1, total=2))
     progress = next(iter(user.find(marker="delivery-copy-progress").elements))
     assert progress.value == 0.5
@@ -409,7 +410,7 @@ async def test_delivery_copy_progress_updates_while_copy_paused_and_resets_on_re
     await user.should_see(t("assign_delivery_saved", path=str(tmp_path / "delivery-0")))
 
     user.find(marker="save-delivery").click()
-    assert await asyncio.to_thread(entered[1].wait, 3)
+    await asyncio.wait_for(entered[1].wait(), timeout=3)
     await user.should_see(t("assign_delivery_progress", done=0, total=2))
     assert progress.value == 0
     assert next(iter(user.find(marker="delivery-copy-status").elements)).text == t(
@@ -460,6 +461,7 @@ async def test_species_roundtrip_through_prepare_open_return_preview_accept(
     await user.should_see(t("handoff_prepared", count=2))
     assert len(dp.list_assignments(project.id)) == 1
     saved = dp.list_assignments(project.id)[0]
+    await user.should_see(marker="download-packages")
     user.find(marker="download-packages").click()
     user.find(t("handoff_copy_output"), kind=ui.input).type(str(tmp_path))
     user.find(marker="save-packages").click()

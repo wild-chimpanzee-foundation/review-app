@@ -181,7 +181,7 @@ def _compress_backup(raw_db: Path, backup_path: Path, auto_prune: bool) -> Path:
         result = backup_path
     if auto_prune:
         try:
-            prune_backups()
+            prune_backups(backup_dir=backup_path.parent)
         except Exception:
             logger.exception("Backup pruning failed")
     return result
@@ -271,8 +271,7 @@ def _parse_backup_meta(name: str) -> tuple[datetime, int | None] | None:
     return dt, version
 
 
-def _list_backup_files() -> list[dict[str, Any]]:
-    backup_dir = get_backup_dir()
+def _list_backup_files(backup_dir: Path) -> list[dict[str, Any]]:
     backups = []
     all_files = sorted(
         backup_dir.glob("review_backup_*.db*"),
@@ -314,13 +313,13 @@ def _preferred_backups(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def list_backups() -> list[dict[str, Any]]:
     """List one entry per snapshot, preferring its compressed copy if available."""
-    return _preferred_backups(_list_backup_files())
+    return _preferred_backups(_list_backup_files(get_backup_dir()))
 
 
-def prune_backups() -> int:
+def prune_backups(*, backup_dir: Path | None = None) -> int:
     """GFS retention: N most recent + 1/day for D days + 1/week for W weeks + 1/month for M months.
     Each tier picks the newest backup in its bucket; tiers overlap rather than partition."""
-    files = _list_backup_files()
+    files = _list_backup_files(backup_dir if backup_dir is not None else get_backup_dir())
     backups = _preferred_backups(files)
 
     keep: set[Path] = set()
