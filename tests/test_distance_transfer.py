@@ -15,6 +15,7 @@ from review_app.app.translations import t
 from review_app.backend.db.models import (
     DistanceIndividual,
     DistanceReviewTask,
+    DistanceSample,
     IndividualObservation,
     ModelAnnotation,
     ReferenceFrame,
@@ -24,6 +25,7 @@ from review_app.backend.db.models import (
 )
 from review_app.backend.distance_transfer import decode_archive, encode_archive
 from review_app.backend.provider.local_data_provider import LocalDataProvider
+from sqlalchemy import JSON, null, update
 
 pytest_plugins = ["nicegui.testing.user_plugin"]
 
@@ -493,15 +495,47 @@ def test_import_failure_rolls_back_all_accepted_tasks(manual_data, monkeypatch):
     assert export_state(dp, project.id, [deer, fox]) == before
 
 
-def test_ai_state_is_rejected_instead_of_silently_dropped(manual_data):
+@pytest.mark.parametrize(
+    "task_mode, individual_ai, sample_ai, rejected_kind",
+    [
+        (None, JSON.NULL, null(), None),
+        (None, null(), JSON.NULL, None),
+        (None, JSON.NULL, {}, "samples"),
+        (None, {}, {}, "individuals"),
+        ("imported", {}, {}, "tasks"),
+    ],
+    ids=["json-null-individual", "json-null-sample", "sample", "individual", "task"],
+)
+def test_preview_and_export_agree_on_ai_state(
+    manual_data, task_mode, individual_ai, sample_ai, rejected_kind
+):
     dp, project, _, _, species, deer, _, parent, _ = manual_data
+    archive = dp.export_distance_annotations(project.id, [deer])
     with dp.Session.begin() as session:
-        session.get(DistanceIndividual, parent["id"]).ai_original = {"source": "prediction"}
-    assert (
-        "AI-linked" in dp.preview_distance_export(project.id, species["deer"])["tasks"][0]["error"]
-    )
-    with pytest.raises(ValueError, match="AI-linked"):
-        dp.export_distance_annotations(project.id, [deer])
+        if task_mode:
+            session.get(DistanceReviewTask, deer).alignment_mode = task_mode
+        session.execute(
+            update(DistanceIndividual)
+            .where(DistanceIndividual.id == parent["id"])
+            .values(ai_original=individual_ai)
+        )
+        session.execute(
+            update(DistanceSample)
+            .where(DistanceSample.individual_id == parent["id"])
+            .values(ai_original=sample_ai)
+        )
+    (preview,) = dp.preview_distance_export(project.id, species["deer"])["tasks"]
+    (restore_preview,) = dp.preview_distance_annotations_import(project.id, archive)
+    if rejected_kind is None:
+        assert preview["error"] is restore_preview["error"] is None
+        assert dp.export_distance_annotations(project.id, [deer])
+        assert dp.export_distance_measurements(project.id, [deer])
+    else:
+        error = f"AI-linked {rejected_kind} are not supported by the manual Distance format"
+        assert preview["error"] == restore_preview["error"] == error
+        for export in (dp.export_distance_annotations, dp.export_distance_measurements):
+            with pytest.raises(ValueError, match=f"^{error}$"):
+                export(project.id, [deer])
 
 
 async def test_results_offer_analysis_without_editable_snapshot(user: User, manual_data):

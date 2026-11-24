@@ -24,7 +24,12 @@ from review_app.backend.db.models import (
 )
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.deployments import resolved_scope
-from review_app.backend.provider.distance_transfer import _manual_only, _roots, _safe_relative
+from review_app.backend.provider.distance_transfer import (
+    _manual_ai_flags,
+    _manual_format_error,
+    _roots,
+    _safe_relative,
+)
 
 
 def _media_path(row, roots, manifest, root_map):
@@ -126,19 +131,20 @@ def plan_import(session, project_id, manifest, tables, root_map):
             species = (
                 session.query(Species).filter_by(scientific_name=task["species"]).one_or_none()
             )
-            existing = (
+            existing_row = (
                 None
                 if species is None
-                else session.query(DistanceReviewTask)
+                else session.query(DistanceReviewTask, *_manual_ai_flags())
                 .filter_by(video_id=video.video_id, species_id=species.id)
                 .one_or_none()
             )
+            existing = existing_row[0] if existing_row is not None else None
             by_id = session.get(DistanceReviewTask, task["id"])
             if by_id is not None and by_id is not existing:
                 raise ValueError("Task identity belongs to a different video/species/project")
             plan["exists"] = existing is not None
-            if existing is not None:
-                _manual_only(session, existing)
+            if existing_row is not None and (error := _manual_format_error(*existing_row)):
+                raise ValueError(error)
             individuals = [row for row in tables["individuals"] if row["task_id"] == task["id"]]
             individual_ids = {row["id"] for row in individuals}
             samples = [row for row in tables["samples"] if row["individual_id"] in individual_ids]

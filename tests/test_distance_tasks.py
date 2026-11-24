@@ -1,5 +1,8 @@
 """Species tasks isolate evidence, alignment, completion, and resume state."""
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
 import pytest
 from review_app.backend.db.models import (
     DistanceReviewTask,
@@ -7,7 +10,7 @@ from review_app.backend.db.models import (
     ModelAnnotation,
     Species,
 )
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 
 @pytest.fixture
@@ -55,6 +58,49 @@ def test_eligibility_is_confirmed_only_and_identity_survives_label_corrections(t
         assert conn.execute(text("SELECT count(*) FROM video_labels")).scalar() == 0
     with pytest.raises(ValueError, match="Select a species-specific"):
         dp.align_distance_on_even_frame(video, 500, "alice")
+
+
+def test_concurrent_refreshes_create_one_task_and_preserve_saved_review(task_data):
+    dp, project, video, species, tasks = task_data
+    deer = species["deer"]
+    saved_id = tasks[deer]["task_id"]
+    dp.align_distance_on_even_frame(saved_id, 500, "alice")
+    individual = create(dp, saved_id, deer)
+    dp.apply_distance_to_end(
+        individual["id"], 500, skip_reason="individual absent", labeled_by="alice"
+    )
+    saved_review = dp.get_distance_review_state(saved_id, "alice")
+
+    new_video = next(clip_id for clip_id in dp.get_video_queue({}, project.id) if clip_id != video)
+    with dp.Session.begin() as session:
+        session.add_all(
+            IndividualObservation(video_id=new_video, id=index, species_id=deer, count=count)
+            for index, count in enumerate((None, 2, 0, -4), start=1)
+        )
+
+    ready_to_insert = Barrier(2, timeout=5)
+
+    def synchronize_inserts(conn, cursor, sql, parameters, context, executemany):
+        if "INSERT INTO distance_review_tasks" in sql:
+            ready_to_insert.wait()
+
+    event.listen(dp.engine, "before_cursor_execute", synchronize_inserts)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            queue = workers.submit(dp.get_distance_video_queue, project.id, deer)
+            preview = workers.submit(dp.preview_distance_export, project.id, deer)
+            task = next(row for row in queue.result() if row["video_id"] == new_video)
+            assert {row["task_id"] for row in preview.result()["tasks"]} == {
+                task["task_id"],
+                saved_id,
+            }
+    finally:
+        event.remove(dp.engine, "before_cursor_execute", synchronize_inserts)
+
+    assert task["source_count"] == 3
+    assert dp.get_distance_review_state(saved_id, "alice") == saved_review
+    with dp.Session() as session:
+        assert session.query(DistanceReviewTask).filter_by(video_id=new_video).count() == 1
 
 
 def test_target_species_options_require_manual_annotations_not_predictions_or_old_tasks(task_data):

@@ -59,8 +59,8 @@ docs = [
 asyncio_mode = "auto"
 # nicegui.testing: pages are registered per-test, there is no main.py to auto-import
 main_file = ""
-# Performance tests build a 205k-row frame and take ~10s each; opt in with `-m slow`.
+# Import benchmarks and workflow stress tests are opt-in with `-m slow`.
 addopts = "-m 'not slow'"
 markers = [
-    "slow: import performance benchmarks (deselected by default, run with -m slow)",
+    "slow: performance benchmarks and workflow stress tests (run with -m slow)",
 ]

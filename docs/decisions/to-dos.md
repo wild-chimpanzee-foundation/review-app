@@ -98,12 +98,21 @@ label and observation in one transaction. Unchecked findings below are open.
   tests cover a malformed count and a failed tag link after earlier writes.
   [CSV import](../../review_app/backend/provider/import_service/_annotations_csv.py#L237) ·
   [Rollback tests](../../tests/test_project_and_import.py#L963)
-- [ ] **Cut redundant writes from Distance queues and previews.** In a test
-  project with 1,000 already-materialized tasks, initialization issued 1,000
-  insert attempts. Create only missing tasks and verify with a query-count test
-  that repeat calls avoid per-task writes.
+- [x] **Cut redundant writes from Distance queues and previews.** Task creation
+  now selects and batches only missing tasks. The stress check verifies zero
+  insert attempts on refresh at 1,000 and 10,000 tasks. At 10,000 existing
+  tasks, queue refresh fell from 1.81 s to 0.27 s and export preview from
+  3.65 s to 2.21 s. A concurrent queue and preview converge on the same task
+  and preserve saved review state.
+  [Stress check](../../tests/test_workflow_stress.py#L32) ·
   [Task initialization](../../review_app/backend/provider/distance_tasks.py#L12) ·
   [Export preview](../../review_app/backend/provider/distance_transfer.py#L492)
+- [x] **Batch manual Distance export eligibility checks.** The task query
+  now includes AI provenance flags for individuals and samples. On the
+  10,000-task fixture, preview refresh fell from 20,005 SELECTs and 2.21 s
+  to 5 SELECTs and 0.27 s. Export and restore keep the same eligibility
+  errors and precedence.
+  [Eligibility check](../../review_app/backend/provider/distance_transfer.py#L80)
 
 ### Maintainability and verification
 

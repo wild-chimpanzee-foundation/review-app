@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert
 
 from review_app.backend.db.models import DistanceReviewTask, IndividualObservation, Video
@@ -11,28 +12,45 @@ from review_app.backend.db.models import DistanceReviewTask, IndividualObservati
 
 def ensure_tasks(session, project_id: str) -> None:
     """Add missing tasks from confirmed labels; never delete work after label edits."""
-    counts: dict[tuple[str, str], int] = {}
-    for video_id, species_id, count in (
-        session.query(
+    count = func.coalesce(IndividualObservation.count, 1)
+    existing = (
+        select(DistanceReviewTask.id)
+        .where(
+            DistanceReviewTask.video_id == IndividualObservation.video_id,
+            DistanceReviewTask.species_id == IndividualObservation.species_id,
+        )
+        .exists()
+    )
+    missing = session.execute(
+        select(
             IndividualObservation.video_id,
             IndividualObservation.species_id,
-            IndividualObservation.count,
+            func.sum(count),
         )
         .join(Video, IndividualObservation.video_id == Video.video_id)
-        .filter(Video.project_id == project_id, IndividualObservation.species_id.is_not(None))
-    ):
-        if count is not None and count <= 0:
-            continue
-        key = video_id, species_id
-        counts[key] = counts.get(key, 0) + (count if count is not None else 1)
-    for (video_id, species_id), count in counts.items():
-        session.execute(
-            insert(DistanceReviewTask)
-            .values(
+        .where(
+            Video.project_id == project_id,
+            IndividualObservation.species_id.is_not(None),
+            count > 0,
+            ~existing,
+        )
+        .group_by(IndividualObservation.video_id, IndividualObservation.species_id)
+    ).all()
+    if not missing:
+        return
+
+    # Another refresh can create a task after the SELECT. Keep its identity and work.
+    session.execute(
+        insert(DistanceReviewTask).on_conflict_do_nothing(
+            index_elements=["video_id", "species_id"]
+        ),
+        [
+            dict(
                 id=str(uuid.uuid4()), video_id=video_id, species_id=species_id, source_count=count
             )
-            .on_conflict_do_nothing(index_elements=["video_id", "species_id"])
-        )
+            for video_id, species_id, count in missing
+        ],
+    )
 
 
 def resolve_task(session, task_or_video_id: str, species_id: str | None = None):

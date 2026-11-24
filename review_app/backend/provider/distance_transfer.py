@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import SimpleNamespace
 
+from sqlalchemy import func, or_, select
+
 from review_app.backend.db.models import (
     Behavior,
     DistanceIndividual,
@@ -77,19 +79,40 @@ def _safe_relative(value):
     return value
 
 
-def _manual_only(session, task):
-    if task.import_id or task.rejected_ai or task.alignment_mode == "imported":
-        raise ValueError("AI-linked tasks are not supported by the manual Distance format")
-    individuals = session.query(DistanceIndividual).filter_by(task_id=task.id).all()
-    if any(row.import_id or row.ai_original is not None for row in individuals):
-        raise ValueError("AI-linked individuals are not supported by the manual Distance format")
-    if any(
-        row.ai_original is not None
-        for row in session.query(DistanceSample).filter(
-            DistanceSample.individual_id.in_([row.id for row in individuals])
+def _manual_ai_flags():
+    # SQL NULL and JSON null both deserialize to None. All other JSON values
+    # indicate provenance, including empty objects.
+    ai_individual = (
+        select(DistanceIndividual.id)
+        .where(
+            DistanceIndividual.task_id == DistanceReviewTask.id,
+            or_(
+                DistanceIndividual.import_id != "",
+                func.json_type(DistanceIndividual.ai_original) != "null",
+            ),
         )
-    ):
-        raise ValueError("AI-linked samples are not supported by the manual Distance format")
+        .exists()
+    )
+    ai_sample = (
+        select(DistanceSample.id)
+        .join(DistanceIndividual, DistanceIndividual.id == DistanceSample.individual_id)
+        .where(
+            DistanceIndividual.task_id == DistanceReviewTask.id,
+            func.json_type(DistanceSample.ai_original) != "null",
+        )
+        .exists()
+    )
+    return ai_individual, ai_sample
+
+
+def _manual_format_error(task, ai_individual: bool, ai_sample: bool) -> str | None:
+    if task.import_id or task.rejected_ai or task.alignment_mode == "imported":
+        return "AI-linked tasks are not supported by the manual Distance format"
+    if ai_individual:
+        return "AI-linked individuals are not supported by the manual Distance format"
+    if ai_sample:
+        return "AI-linked samples are not supported by the manual Distance format"
+    return None
 
 
 def _tables(session, project_id, task_ids):
@@ -97,7 +120,7 @@ def _tables(session, project_id, task_ids):
     if not task_ids or len(task_ids) != len(set(task_ids)):
         raise ValueError("Select one or more distinct Distance tasks")
     tasks = (
-        session.query(DistanceReviewTask)
+        session.query(DistanceReviewTask, *_manual_ai_flags())
         .join(Video, Video.video_id == DistanceReviewTask.video_id)
         .filter(Video.project_id == project_id, DistanceReviewTask.id.in_(task_ids))
         .order_by(DistanceReviewTask.id)
@@ -118,8 +141,9 @@ def _tables(session, project_id, task_ids):
             "tags",
         )
     }
-    for task in tasks:
-        _manual_only(session, task)
+    for task, ai_individual, ai_sample in tasks:
+        if error := _manual_format_error(task, ai_individual, ai_sample):
+            raise ValueError(error)
         video = session.get(Video, task.video_id)
         if (
             not session.query(Video)
@@ -207,7 +231,7 @@ def _tables(session, project_id, task_ids):
     tables["species"] = [
         _record(row)
         for row in session.query(Species)
-        .filter(Species.id.in_({task.species_id for task in tasks}))
+        .filter(Species.id.in_({task.species_id for task, _, _ in tasks}))
         .order_by(Species.id)
     ]
     behavior_keys = {key for row in tables["samples"] for key in row["behaviors"]}
@@ -475,7 +499,7 @@ class DistanceTransferMixin(ProviderBase):
                 raise ValueError("Species not found")
             ensure_tasks(session, project_id)
             rows = (
-                session.query(DistanceReviewTask, Video)
+                session.query(DistanceReviewTask, Video, *_manual_ai_flags())
                 .join(Video, Video.video_id == DistanceReviewTask.video_id)
                 .filter(
                     Video.project_id == project_id,
@@ -487,7 +511,13 @@ class DistanceTransferMixin(ProviderBase):
                 .all()
             )
             selected, unknown = [], []
-            for task, video in rows:
+            for task, video, ai_individual, ai_sample in rows:
+                if (
+                    window
+                    and task.recorded_start is not None
+                    and not in_time_window(task.recorded_start, window)
+                ):
+                    continue
                 row = {
                     "task_id": task.id,
                     "video_path": video.video_path,
@@ -497,19 +527,9 @@ class DistanceTransferMixin(ProviderBase):
                     "duration_sec": video.duration_sec,
                     "is_missing": video.is_missing,
                     "completion_outcome": task.completion_outcome,
+                    "error": _manual_format_error(task, ai_individual, ai_sample),
                 }
-                try:
-                    _manual_only(session, task)
-                    row["error"] = None
-                except ValueError as exc:
-                    row["error"] = str(exc)
-                if window:
-                    if task.recorded_start is None:
-                        unknown.append(row)
-                        continue
-                    if not in_time_window(task.recorded_start, window):
-                        continue
-                selected.append(row)
+                (unknown if window and task.recorded_start is None else selected).append(row)
             return {"tasks": selected, "unknown_time": unknown}
 
     def export_distance_annotations(self, project_id: str, task_ids: list[str]) -> bytes:

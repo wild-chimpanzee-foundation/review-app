@@ -65,6 +65,10 @@ uv run pytest tests/
 Database tests use isolated temporary SQLite databases; do not point tests or
 cleanup worktrees at your live application data directory.
 
+Run the opt-in workflow stress checks with `uv run pytest -m slow tests/test_workflow_stress.py`.
+The restore check needs 5 GiB free on the filesystem pytest uses for temporary
+files. Use `--basetemp` with an empty directory on the drive you want to measure.
+
 When adding backend functionality, add a corresponding test. The existing files are a reasonable guide for where things belong:
 
 | File | Covers |
