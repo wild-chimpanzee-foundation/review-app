@@ -21,7 +21,7 @@ label and observation in one transaction. Unchecked findings below are open.
   the original reference clip. Covered by completed-review and handoff tests.
 - [x] **Enforce Species observation ownership and behavior links.** Single and
   bulk review writes use the video's project and reject requests scoped to a
-  different project. Schema v33 aligns existing observations with their videos,
+  different project. Schema v23 aligns existing observations with their videos,
   clears conflicting blank flags, and removes behavior links whose observation
   is missing. A composite foreign key enforces the observation link and removes
   its behavior links on deletion. Upgrade coverage checks overview counts and

@@ -213,9 +213,7 @@ samples remain editable; a missing sample row means unreviewed, not absent.
   the selection is empty; multiple behaviors are allowed. Behavior prefills are
   drafts until confirmation. Selecting **Absent** or **Not visible** clears and
   disables the behavior field; skipped samples save no behaviors. These rules also
-  apply to Apply to end and carried-infant evidence. Schema v27 repairs existing
-  visible samples without behaviors and removes behavior links from skips without
-  altering provenance, timing, progress, or completion.
+  apply to Apply to end and carried-infant evidence.
 - Reference browsing retains sample behaviors, infant choices, visibility choice,
   brightness/contrast, and the animal player. Reuse the reference player on clip
   switches; keep its prior image until the next source has loaded and sought.
@@ -490,14 +488,13 @@ alongside rounded millisecond frame identities; never round saved meter values.
 
 ## Database Schema
 
-Published migrations 1–22 remain unchanged. Migration 23 creates the original
-Distance schema and adds `tags.individual_eligible`. Migration 24 introduces
-`distance_review_tasks`, task-owned individuals, and task/annotator progress. It
-discards legacy Distance annotations while preserving reference calibration/media
-and ordinary Review data. Fresh installs and upgrades enforce the same task schema.
-Distance remains unreleased; automatic preservation of legacy annotation evidence
-is intentionally not required. Intermediate development schemas have no maintained
-rebuild tool.
+Published migrations 1–22 remain unchanged. Migration 23 upgrades the last
+published schema to the alpha schema in one transaction. It creates the final
+Distance, handoff, and deployment tables directly, adds video deployment fields
+and tag eligibility, and reconciles existing Species records. It preserves
+historical camera labels for deployment initialization when the project opens.
+Fresh installs use the same schema. Development databases from the superseded
+migration chain should use a fresh profile or a copy of a published v22 database.
 
 | Table | Purpose and key fields |
 |---|---|
@@ -540,8 +537,9 @@ assigned. Vocabulary CSVs preserve eligibility; legacy CSV imports do not clear 
 Sample invariants:
 
 - Missing row at a scheduled offset means unreviewed.
-- `annotated` requires a reference and finite positive copied meters, no skip
-  reason. Preserve both reference provenance and its copied value until reconfirmed.
+- `annotated` stores either finite positive meters copied from a reference frame
+  or 0 m without a reference frame. The skip reason is empty. Preserve saved
+  reference provenance and distance until reconfirmed.
 - `skipped` requires `individual absent` or `midpoint not visible`, no reference
   or meters, and may retain a carried-infant link. It counts as reviewed, but is
   not an exported observation.
