@@ -848,9 +848,9 @@ async def upload_distance_zip(user, raw, key="handoff_return_upload"):
 
 async def load_distance_selection(user):
     user.find(t("assign_title"), kind=ui.button).click()
-    await user.should_see(t("handoff_stage"))
+    await user.should_see(t("handoff_stage_distance"))
+    user.find(content=t("handoff_stage_distance"), kind=ui.tab).click()
     with user:
-        select_field(user, "handoff_stage").set_value("distance")
         select_field(user, "assign_distance_species").set_value(["deer"])
     await user.should_see(t("assign_video_count", count=2))
     with user:
@@ -867,12 +867,12 @@ def distance_video_table(user):
     return next(iter(user.find(marker="distance-videos").elements))
 
 
-def narrow_distance_selection(user, ids):
-    table = distance_video_table(user)
-    table.selected = [row for row in table.rows if row["id"] in ids]
-    user.find(marker="distance-videos").trigger(
-        "selection", {"added": True, "rows": [], "keys": []}
-    )
+def set_shared_recording_time(user, start, end):
+    with user:
+        user.find(marker="distance-shared-time-start", kind=ui.input).elements.pop().set_value(
+            start
+        )
+        user.find(marker="distance-shared-time-end", kind=ui.input).elements.pop().set_value(end)
 
 
 async def prepare_distance_selection(user):
@@ -1036,9 +1036,15 @@ async def test_distance_ui_selects_species_before_recipients_and_removes_deselec
 ):
     await user.open("/distance-handoff-admin")
     user.find(t("assign_title"), kind=ui.button).click()
-    await user.should_see(t("handoff_stage"))
-    with user:
-        select_field(user, "handoff_stage").set_value("distance")
+    await user.should_see(t("handoff_stage_species"))
+    await user.should_not_see(t("assign_distance_species_hint"))
+    user.find(content=t("handoff_stage_distance"), kind=ui.tab).click()
+    await user.should_see(t("assign_distance_species_hint"))
+    settings_link = next(iter(user.find(content=t("go_to_settings"), kind=ui.link).elements))
+    assert settings_link.props["href"] == "/settings"
+    user.find(content=t("handoff_stage_species"), kind=ui.tab).click()
+    await user.should_not_see(marker="distance-species")
+    user.find(content=t("handoff_stage_distance"), kind=ui.tab).click()
     await user.should_see(marker="distance-species")
     await user.should_not_see(marker="distance-videos")
     user.find(t("assign_review"), kind=ui.button).click()
@@ -1080,6 +1086,18 @@ async def test_distance_ui_prepares_per_species_and_groups_review_by_recipient(
     await user.should_see(t("assign_video_count", count=1))
     assert deer_recipient.value == "alice"
     assert distance_video_table(user) is deer_table
+    set_shared_recording_time(user, "17:00", "06:00")
+    await user.should_see(t("handoff_selection_result", count=1, unknown=1))
+    await user.should_see(t("assign_video_count", count=0))
+    override = min(
+        user.find(content=t("assign_override_recording_time"), kind=ui.checkbox).elements,
+        key=lambda field: field.id,
+    )
+    with user:
+        override.set_value(True)
+    await user.should_see(t("handoff_selection_result", count=2, unknown=0))
+    await user.should_see(t("assign_video_count", count=0))
+    set_shared_recording_time(user, "", "")
     with user:
         recipient = max(
             user.find(t("handoff_recipient"), kind=ui.select).elements, key=lambda e: e.id
@@ -1107,38 +1125,27 @@ async def test_distance_ui_prepares_per_species_and_groups_review_by_recipient(
     assert sum(row["assigned"] for row in media) == 1
 
 
-async def test_distance_ui_selection_filters_subset_and_prepare_revalidation(
-    user: User, distance_ui
-):
+async def test_distance_ui_time_filters_and_prepare_revalidation(user: User, distance_ui):
     dp, project, _, ids, _, _ = distance_ui
     await user.open("/distance-handoff-admin")
     await load_distance_selection(user)
-    with user:
-        next(iter(user.find(t("handoff_start"), kind=ui.input).elements)).set_value("17:00")
-    assert distance_video_table(user).selected == []
+    assert distance_video_table(user).props.get("selection") in (None, "none")
+    set_shared_recording_time(user, "17:00", "")
+    assert distance_video_table(user).rows == []
     user.find(t("assign_review"), kind=ui.button).click()
     await user.should_see(t("handoff_select_distance"))
     await user.should_see("Provide both start and end times")
-    with user:
-        next(iter(user.find(t("handoff_end"), kind=ui.input).elements)).set_value("06:00")
+    set_shared_recording_time(user, "17:00", "06:00")
     await user.should_see(t("handoff_selection_result", count=1, unknown=1))
-    assert [row["id"] for row in distance_video_table(user).selected] == [ids[0]]
-    with user:
-        next(iter(user.find(t("handoff_start"), kind=ui.input).elements)).set_value("")
-        next(iter(user.find(t("handoff_end"), kind=ui.input).elements)).set_value("")
-    await user.should_see(t("handoff_selection_result", count=2, unknown=0))
-    with user:
-        narrow_distance_selection(user, [ids[1]])
+    assert [row["id"] for row in distance_video_table(user).rows] == [ids[0]]
     await prepare_distance_selection(user)
     await user.should_see(t("handoff_prepared", count=1), retries=20)
     saved = dp.list_assignments(project.id)[0]
-    assert decode_archive(dp.export_assignment(saved["id"]))[0]["work_keys"] == [ids[1]]
+    assert decode_archive(dp.export_assignment(saved["id"]))[0]["work_keys"] == [ids[0]]
     await user.should_see(marker="download-packages", retries=20)
     # A label edit after loading must fail preparation, never silently drop selection.
     await user.open("/distance-handoff-admin")
     await load_distance_selection(user)
-    with user:
-        narrow_distance_selection(user, [ids[1]])
     dp.update_manual_review(ids[1], [], active_project_id=project.id)
     await prepare_distance_selection(user)
     await user.should_see("Distance preparation requires confirmed target-species labels")

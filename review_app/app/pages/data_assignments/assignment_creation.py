@@ -33,26 +33,30 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
         preparation_progress = ui.label().props('role="status"')
 
     with editor:
-        stage = ui.select(
-            {"species": t("handoff_stage_species"), "distance": t("handoff_stage_distance")},
-            value="species",
-            label=t("handoff_stage"),
-        ).classes("w-full md:w-80")
+        with ui.tabs().props("align=left").classes("w-full") as stage:
+            stage.props(f'aria-label="{t("handoff_stage")}"')
+            ui.tab("species", label=t("handoff_stage_species"))
+            ui.tab("distance", label=t("handoff_stage_distance"))
+        stage.set_value("species")
         distance_species_options = dp.get_assignment_distance_species_options(
             project_id, get_language()
         )
-        distance_species = (
-            ui.select(
-                distance_species_options,
-                multiple=True,
-                value=[],
-                label=t("assign_distance_species"),
+        with ui.column().classes("w-full gap-1") as distance_selection:
+            distance_species = (
+                ui.select(
+                    distance_species_options,
+                    multiple=True,
+                    value=[],
+                    label=t("assign_distance_species"),
+                )
+                .props("use-chips outlined")
+                .classes("w-full")
+                .mark("distance-species")
             )
-            .props("use-chips outlined")
-            .classes("w-full")
-            .mark("distance-species")
-        )
-        distance_species.set_visibility(False)
+            with ui.row().classes("items-baseline gap-x-2 gap-y-0 text-caption"):
+                ui.label(t("assign_distance_species_hint")).classes("text-grey-7")
+                ui.link(t("go_to_settings"), "/settings")
+        distance_selection.set_visibility(False)
         with ui.row().classes("w-full items-end gap-3"):
             annotator_name = ui.input(t("distribution_annotator_placeholder")).classes("grow")
 
@@ -94,7 +98,7 @@ def render_assignment_creation(dp, project_id, require_project, on_cancel, on_pr
         def stage_changed():
             species_editor.set_visibility(stage.value == "species")
             distance_editor.set_visibility(stage.value == "distance")
-            distance_species.set_visibility(stage.value == "distance")
+            distance_selection.set_visibility(stage.value == "distance")
             status.set_text("")
 
         stage.on_value_change(stage_changed)

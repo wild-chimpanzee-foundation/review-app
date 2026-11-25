@@ -1,7 +1,7 @@
 """Select Distance work by target species and optional camera-local time."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from nicegui import run, ui
@@ -17,6 +17,8 @@ class DistanceRow:
     card: ui.card
     recipient: ui.select
     request: Callable[[], AssignmentRequest]
+    invalidate: Callable[[], None]
+    load: Callable[[], Awaitable[None]]
 
 
 def render_distance_editor(
@@ -24,12 +26,23 @@ def render_distance_editor(
 ):
     distance_rows = {}
     ui.label(t("handoff_distance_help")).classes("text-body2 text-grey-7")
+
+    def time_fields(marker):
+        with ui.row().classes("w-full gap-3"):
+            start = ui.input(t("handoff_start"), placeholder="18:00").props("dense")
+            end = ui.input(t("handoff_end"), placeholder="06:00").props("dense")
+            start.mark(f"{marker}-start")
+            end.mark(f"{marker}-end")
+        return start, end
+
+    with ui.expansion(t("assign_shared_recording_time"), icon="schedule").classes("w-full"):
+        shared_start, shared_end = time_fields("distance-shared-time")
+        ui.label(t("handoff_time_help")).classes("text-caption")
     row_container = ui.column().classes("w-full gap-3")
 
     def add_distance_row(target_species):
         revision = 0
         loaded = None
-        unknown = 0
         with row_container, ui.column().classes("w-full gap-1 border-b pb-2") as card:
             with ui.row().classes("w-full items-center gap-2 flex-wrap"):
                 ui.label(distance_species_options[target_species]).classes("grow min-w-48")
@@ -57,8 +70,12 @@ def render_distance_editor(
             camera_warning = ui.label("").classes("text-caption text-warning")
             camera_warning.set_visibility(False)
             with ui.column().classes("w-full gap-2") as options:
+                override = ui.checkbox(t("assign_override_recording_time"))
+                with ui.column().classes("w-full gap-1").bind_visibility_from(override, "value"):
+                    start, end = time_fields("distance-species-time")
+                    ui.label(t("handoff_time_help")).classes("text-caption")
                 selection_status = ui.label("").classes("text-caption whitespace-pre-wrap")
-                selection = AssignmentVideoTable(
+                videos = AssignmentVideoTable(
                     [
                         ("path", t("handoff_column_video")),
                         ("camera", t("distribution_camera_col")),
@@ -69,69 +86,44 @@ def render_distance_editor(
                         ("camera", t("distribution_camera_col")),
                         ("availability", t("assign_availability")),
                     ],
-                    selectable=True,
-                    on_selection=lambda _: update_count(),
                     marker="distance-videos",
                 )
-                with ui.expansion(t("data_advanced"), icon="schedule").classes("w-full"):
-                    with ui.row().classes("w-full gap-3"):
-                        start = ui.input(t("handoff_start"), placeholder="18:00").props("dense")
-                        end = ui.input(t("handoff_end"), placeholder="06:00").props("dense")
-                    ui.label(t("handoff_time_help")).classes("text-caption")
             options.set_visibility(False)
 
-        def filters():
-            return (
-                target_species,
-                (start.value or "").strip() or None,
-                (end.value or "").strip() or None,
-            )
+        def filters() -> tuple[str | None, str | None]:
+            fields = (start, end) if override.value else (shared_start, shared_end)
+            return (fields[0].value or "").strip() or None, (fields[1].value or "").strip() or None
 
         def invalidate():
             nonlocal revision, loaded
             revision += 1
             loaded = None
-            selection.set_rows([])
+            videos.set_rows([])
             count.set_text(t("assign_loading"))
             selection_status.set_text("")
             camera_warning.set_visibility(False)
 
-        def update_count():
-            if loaded is not None:
-                count.set_text(t("assign_video_count", count=len(selection.selection)))
-                message = t(
-                    "handoff_selection_result",
-                    count=len(selection.selection),
-                    unknown=unknown,
-                )
-                if not selection.rows:
-                    message += "\n" + t("data_empty_scope")
-                selection_status.set_text(message)
-
         async def load():
-            nonlocal revision, loaded, unknown
+            nonlocal revision, loaded
             revision += 1
             current, chosen = revision, filters()
-            if not chosen[0]:
-                return
             try:
                 require_project()
                 result = await run.io_bound(
                     dp.preview_assignment_distance_selection,
                     project_id,
-                    chosen[0],
-                    start_time=chosen[1],
-                    end_time=chosen[2],
+                    target_species,
+                    start_time=chosen[0],
+                    end_time=chosen[1],
                 )
                 if current != revision or card.is_deleted:
                     return
                 require_project()
                 loaded = chosen
-                unknown = result["unknown_time_count"]
                 unresolved_camera = result["unresolved_camera_count"]
                 camera_warning.set_text(t("handoff_unresolved_camera", count=unresolved_camera))
                 camera_warning.set_visibility(unresolved_camera > 0)
-                selection.set_rows(
+                videos.set_rows(
                     [
                         {
                             "id": video["video_id"],
@@ -143,27 +135,40 @@ def render_distance_editor(
                             ),
                         }
                         for video in result["videos"]
-                    ],
-                    select_all=True,
+                    ]
                 )
+                video_count = len(videos.rows)
+                count.set_text(t("assign_video_count", count=video_count))
+                message = t(
+                    "handoff_selection_result",
+                    count=video_count,
+                    unknown=result["unknown_time_count"],
+                )
+                if not video_count:
+                    message += "\n" + t("data_empty_scope")
+                selection_status.set_text(message)
             except Exception as exc:
                 if current == revision and not card.is_deleted:
                     count.set_text(t("assign_selection_error"))
                     selection_status.set_text(_error_message(exc))
                     options.set_visibility(True)
 
-        for field in (start, end):
+        for field in (override, start, end):
             field.on_value_change(invalidate)
             field.on_value_change(load)
 
         def request():
-            if loaded != filters() or not selection.selection:
+            if loaded != filters() or not videos.rows:
                 raise ValueError(t("handoff_select_distance"))
             return AssignmentRequest(
-                recipient.value or "", selection.selection, "distance", *filters()
+                recipient.value or "",
+                tuple(row["id"] for row in videos.rows),
+                "distance",
+                target_species,
+                *loaded,
             )
 
-        distance_rows[target_species] = DistanceRow(card, recipient, request)
+        distance_rows[target_species] = DistanceRow(card, recipient, request, invalidate, load)
         invalidate()
         return load
 
@@ -183,5 +188,15 @@ def render_distance_editor(
         for row in distance_rows.values():
             row.recipient.set_options(names)
 
+    def invalidate_shared():
+        for row in distance_rows.values():
+            row.invalidate()
+
+    async def reload_shared():
+        await asyncio.gather(*(row.load() for row in distance_rows.values()))
+
+    for field in (shared_start, shared_end):
+        field.on_value_change(invalidate_shared)
+        field.on_value_change(reload_shared)
     distance_species.on_value_change(select_distance_species)
     return requests, refresh_annotators
