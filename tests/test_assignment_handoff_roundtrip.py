@@ -226,6 +226,8 @@ def test_working_project_sync_checks_only_listed_media_and_local_writes_are_unre
     assert len(dp.get_video_queue({}, active_project_id=opened.project_id)) == len(ids)
     # Normal Species annotation remains available in the working project.
     video_id = next(iter(local.values()))
+    # Enable Distance Review for fox in the fresh working project before task creation.
+    dp.set_distance_review_species(opened.project_id, ["fox"])
     dp.update_manual_review(
         video_id,
         [{"species": "fox", "count": 3}],

@@ -18,6 +18,7 @@ import pytest
 from review_app.app.config import DEFAULT_DB_FILENAME
 from review_app.backend.annotation_package import delivery
 from review_app.backend.annotation_package.archive import decode_archive
+from review_app.backend.annotation_package.naming import package_stem
 from review_app.backend.annotation_package.scope import AssignmentRequest
 from review_app.backend.db import backup
 from review_app.backend.db.models import DistanceReviewTask, IndividualObservation, Species, Video
@@ -39,6 +40,7 @@ def test_distance_only_materializes_missing_tasks(
 ):
     dp = LocalDataProvider()
     project = dp.create_project("Queue stress", str(tmp_db["video_dir"]))
+    dp.set_distance_review_species(project.id, ["deer"])
     video_ids = [f"clip-{index:05d}" for index in range(task_count)]
     preexisting = int(task_count * preexisting_fraction)
     try:
@@ -216,7 +218,8 @@ def test_multi_recipient_delivery_survives_full_disk_and_retries(
         assert len(failed_ids) == 63
         assert set(partial.failures) == failed_ids
         assert all("simulated full disk" in error for error in partial.failures.values())
-        setup_zip = (Path(partial.path) / "assignment.zip").read_bytes()
+        assignment = next(row for row in dp.list_assignments(project.id) if row["id"] == saved.id)
+        setup_zip = (Path(partial.path) / f"{package_stem(assignment)}.zip").read_bytes()
         assert setup_zip == dp.export_assignment(saved.id)
         _, context, _ = decode_archive(setup_zip)
         assert len(partial.media_roots) == 3
