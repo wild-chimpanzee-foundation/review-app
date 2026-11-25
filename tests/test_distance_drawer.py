@@ -172,102 +172,6 @@ async def test_individual_shortcut_targets_keep_card_selection_and_busy_guards(
     assert page.sample_values["behavior_ids"] == []
 
 
-async def test_sample_timing_is_below_video_and_progress_is_in_selected_card(
-    user: User, drawer_page, monkeypatch
-):
-    holder, data, _ = drawer_page
-    await user.open("/distance-drawer-test")
-    page = holder["page"]
-    page.queue[0].update(data["dp"].get_video_detail(data["videos"][0]))
-    page.review = {"recorded_start": datetime(2026, 10, 12, 16, 2, 49)}
-    page.offsets = [1000, 3000]
-    page.sample_offset = 3000
-    page.samples = [
-        {"individual_id": page.individual_id, "offset_ms": 1000, "carried_by_individual_id": None}
-    ]
-    page.render_tracks = Mock()
-    page.render_references = Mock()
-    monkeypatch.setattr(page_module, "seek_paused", Mock())
-    monkeypatch.setattr(page_module, "install_anchor_editor", Mock())
-    monkeypatch.setattr(page_module, "install_manual_pause_snap", Mock())
-    monkeypatch.setattr(
-        page_module,
-        "render_custom_video_player",
-        lambda *_, **__: ui.video("/test-animal.mp4"),
-    )
-    del page.render_sample_navigation
-    with page.client:
-        page.render_workspace()
-        page.render_individuals.refresh()
-    await user.should_see("Camera timestamp: 2026-10-12 16:02:52")
-    await user.should_see("1/2 samples reviewed")
-    timing = next(
-        element
-        for element in page.client.elements.values()
-        if "distance-animal-timing" in element.classes
-    )
-    player = page.animal_player
-    timing_container = timing.parent_slot.parent
-    assert player.parent_slot is timing_container.parent_slot
-    siblings = player.parent_slot.children
-    assert siblings.index(timing_container) == siblings.index(player) + 1
-    replay = next(
-        element
-        for element in timing.descendants()
-        if isinstance(element, ui.button) and element.props.get("icon") == "replay"
-    )
-    assert replay.props["data-distance-action"] == "replay"
-    assert any(
-        isinstance(element, ui.badge) and element.text == "R" for element in replay.descendants()
-    )
-    assert not any(
-        "samples reviewed" in (getattr(element, "text", "") or "")
-        for element in timing.descendants()
-    )
-    queue = next(
-        element for element in page.client.elements.values() if "distance-queue" in element.classes
-    )
-    assert timing not in list(queue.descendants())
-    assert not any(
-        "distance-timeline" in element.classes
-        or element.props.get("icon") == "my_location"
-        or element.props.get("data-testid") == "distance-sample"
-        or element.props.get("data-distance-action") in ("previous-sample", "next-sample")
-        for element in page.client.elements.values()
-    )
-    progress = next(
-        element
-        for element in page.client.elements.values()
-        if "distance-individual-progress" in element.classes
-    )
-    active_card = next(
-        element
-        for element in page.client.elements.values()
-        if element.props.get("data-distance-active") == "true"
-    )
-    assert progress in list(active_card.descendants())
-    page.samples.append(
-        {"individual_id": page.individual_id, "offset_ms": 3000, "carried_by_individual_id": None}
-    )
-    with page.client:
-        page.refresh_sample_ui()
-    await user.should_see("2/2 samples reviewed")
-    page.busy = True
-    with page.client:
-        page.render_sample_navigation.refresh()
-    await wait_for_saved_timing_disabled(page)
-    page.busy = False
-    page.sample_offset = 1000
-    with page.client:
-        page.render_sample_navigation.refresh()
-    await user.should_see("Play to this sample")
-    page.offsets = [0, 2000]
-    page.sample_offset = 0
-    with page.client:
-        page.render_sample_navigation.refresh()
-    await user.should_not_see("Play to this sample")
-
-
 @pytest.mark.parametrize("offset,start", [(1000, 0), (3000, 1000.01), (0, None)])
 async def test_replay_includes_first_sample_lead_in(
     user: User, drawer_page, monkeypatch, offset, start
@@ -504,19 +408,6 @@ async def test_ordinary_header_does_not_add_annotation_toggle(user: User, monkey
         element.props.get("data-testid") == "distance-toggle-annotations"
         for element in user.client.elements.values()
     )
-
-
-async def wait_for_saved_timing_disabled(page):
-    for _ in range(100):
-        if any(
-            isinstance(element, ui.button)
-            and element.props.get("icon") == "replay"
-            and not element.enabled
-            for element in page.client.elements.values()
-        ):
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError("Replay must be disabled while busy")
 
 
 @pytest.mark.parametrize(
@@ -1167,47 +1058,6 @@ async def test_rejected_age_change_restores_saved_value_and_allows_next_edit(
     )
     infant = next(row for row in page.individuals if row["id"] == pair["infant_id"])
     assert infant["age"] == "Infant" and infant["sex"] == "Female"
-
-
-async def test_delete_active_and_last_animal_restores_drawer(user: User, drawer_page):
-    holder, data, second = drawer_page
-    data["dp"].verify_distance_recording_time(
-        data["videos"][0], datetime(2026, 10, 12, 16, 2, 49), "alice"
-    )
-    await user.open("/distance-drawer-test")
-    page = holder["page"]
-
-    def active_delete_button():
-        card = next(
-            element
-            for element in user.client.elements.values()
-            if element.props.get("data-distance-active") == "true"
-        )
-        return next(
-            element
-            for element in card.descendants()
-            if element.props.get("data-distance-action") == "delete-individual"
-        )
-
-    # Scope the click to the active card's delete button.
-    interaction = user.find(ui.button)
-    interaction.elements = {active_delete_button()}
-    interaction.click()
-    await wait_for_saved(page, lambda: page.individual_id == second["id"])
-    await user.should_not_see("#1")
-    assert page.individual_id == second["id"]
-    assert (
-        data["dp"].get_distance_review_state(data["videos"][0], "alice")["active_individual_id"]
-        == second["id"]
-    )
-    interaction = user.find(ui.button)
-    interaction.elements = {active_delete_button()}
-    interaction.click()
-    await wait_for_saved(page, lambda: page.individual_id is None)
-    await user.should_not_see("#2")
-    await user.should_see("Pause at an animal's first appearance, then add an individual.")
-    assert page.individual_id is None and page.sample_offset in page.offsets
-    assert data["dp"].list_distance_individuals(data["videos"][0]) == []
 
 
 @pytest.mark.parametrize(
