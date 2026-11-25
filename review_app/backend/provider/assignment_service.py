@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 
 from sqlalchemy import text
 
-from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL
+from review_app.backend.db.models import (
+    VIDEO_CAMERA_LABEL_SQL,
+    reference_only_video_sql,
+    reference_video_sql,
+)
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.base import ProviderBase
 from review_app.backend.utils import bind_id_list
@@ -179,7 +183,7 @@ class AssignmentMixin(ProviderBase):
         max_hours_per_chunk: float = float("inf"),
         only_unlabeled: bool = False,
     ) -> list[dict]:
-        """Return consecutive video chunks for all cameras.
+        """Return consecutive video chunks for Species work across all cameras.
 
         Each camera's videos are ordered by video_path and accumulated into
         chunks of at most max_hours_per_chunk hours. When max_hours_per_chunk
@@ -203,6 +207,7 @@ class AssignmentMixin(ProviderBase):
                     SELECT v.video_id, {VIDEO_CAMERA_LABEL_SQL} AS camera_id, COALESCE(v.duration_sec, 0) AS dur
                     FROM videos v
                     WHERE v.project_id = :pid AND v.deployment_id IS NOT NULL
+                    AND NOT {reference_only_video_sql()}
                     {unlabeled_filter}
                     ORDER BY camera_id, v.video_path
                 """),
@@ -504,13 +509,14 @@ class AssignmentMixin(ProviderBase):
         """Return per-annotator summary: cameras, video_count, hours, labeling stats."""
         with self.engine.connect() as conn:
             rows = conn.execute(
-                text("""
+                text(f"""
                     SELECT
                         va.assigned_to,
                         COUNT(DISTINCT v.deployment_id) AS cameras,
                         COUNT(*) AS video_count,
                         ROUND(COALESCE(SUM(v.duration_sec), 0) / 3600.0, 2) AS hours,
-                        COUNT(DISTINCT CASE WHEN vl.video_id IS NOT NULL THEN v.video_id END) AS labeled,
+                        COUNT(DISTINCT CASE WHEN vl.video_id IS NOT NULL OR {reference_video_sql()}
+                            THEN v.video_id END) AS labeled,
                         COUNT(DISTINCT CASE WHEN vl.is_blank = 1 THEN v.video_id END) AS blank,
                         COUNT(DISTINCT CASE WHEN vl.is_blank = 0 THEN v.video_id END) AS non_blank
                     FROM video_assignments va

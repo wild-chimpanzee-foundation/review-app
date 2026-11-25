@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 
-from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL
+from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL, reference_video_sql
 from review_app.backend.provider.base import ProviderBase
 
 
@@ -65,7 +65,8 @@ class StatsMixin(ProviderBase):
                     text(f"""
                 SELECT
                     COUNT(DISTINCT v.video_id)                                                    AS total_videos,
-                    COUNT(DISTINCT CASE WHEN vl.is_blank IS NOT NULL THEN v.video_id END)         AS labeled,
+                    COUNT(DISTINCT CASE WHEN vl.is_blank IS NOT NULL OR {reference_video_sql()}
+                        THEN v.video_id END)                                                     AS labeled,
                     COUNT(DISTINCT CASE WHEN vl.is_blank = 1 THEN v.video_id END)                AS blank,
                     COUNT(DISTINCT CASE WHEN vl.is_blank = 0 THEN v.video_id END)                AS non_blank,
                     COUNT(DISTINCT io.video_id)                                                   AS has_observations,
@@ -158,10 +159,7 @@ class StatsMixin(ProviderBase):
                 WITH footage AS (
                     SELECT
                         video_id, deployment_id, video_path, duration_sec, is_missing,
-                        EXISTS (
-                            SELECT 1 FROM video_tags vt JOIN tags t ON t.id = vt.tag_id
-                            WHERE vt.video_id = videos.video_id AND t.key = 'reference_video'
-                        ) AS is_reference
+                        {reference_video_sql("videos")} AS is_reference
                     FROM videos
                     {pf}
                 )
@@ -169,7 +167,7 @@ class StatsMixin(ProviderBase):
                     v.deployment_id,
                     COUNT(*)                                               AS total_videos,
                     SUM(v.is_reference)                                    AS reference_videos,
-                    SUM(CASE WHEN vl.is_blank IS NOT NULL THEN 1 ELSE 0 END) AS labeled,
+                    SUM(CASE WHEN vl.is_blank IS NOT NULL OR v.is_reference THEN 1 ELSE 0 END) AS labeled,
                     SUM(CASE WHEN vl.is_blank = 1 THEN 1 ELSE 0 END)         AS blank,
                     ROUND(SUM(COALESCE(v.duration_sec,0))/3600.0, 2)         AS hours,
                     COALESCE(

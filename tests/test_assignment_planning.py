@@ -49,6 +49,40 @@ def test_planning_includes_labelled_missing_and_cameraless_media(provider_with_p
     assert set(request.video_ids) == set(ids)
 
 
+def test_reference_only_video_counts_as_annotated_and_stays_out_of_new_work(provider_with_project):
+    dp, project, _ = provider_with_project
+    reference, ordinary = dp.get_assignment_video_ids(project.id)
+    dp.add_annotator("alice")
+    saved = dp.prepare_species_assignment(project.id, AssignmentRequest("alice", (reference,)))
+    dp.set_video_tags(reference, ["reference_video"])
+
+    stats = dp.get_overview_stats(project.id)
+    assert stats["labeling"]["labeled"] == 1
+    assert stats["labeling"]["blank"] == stats["labeling"]["non_blank"] == 0
+    assert stats["species_counts"] == []
+    assert sum(group["labeled"] for group in stats["deployment_footage"]) == 1
+    assert dp.get_assignment_summary(project.id)[0]["labeled"] == 1
+    assert dp.get_video_queue(
+        {"selected_annotation_status": "Annotated"}, active_project_id=project.id
+    ) == [reference]
+    assert dp.get_video_queue(
+        {"selected_annotation_status": "Not Annotated"}, active_project_id=project.id
+    ) == [ordinary]
+
+    assert dp.get_assignment_video_ids(project.id, species_work_only=True) == [ordinary]
+    assert [vid for group in species_work_groups(dp, project.id) for vid in group.video_ids] == [
+        ordinary
+    ]
+    _, chunks = dp.auto_distribute_flexible(project.id, ["alice"])
+    assert [vid for chunk in chunks for vid in chunk["video_ids"]] == [ordinary]
+    assert len(dp.get_assignment_media(project.id, saved.id)) == 1
+    with pytest.raises(ValueError, match="Reference-only videos"):
+        dp.prepare_species_assignment(
+            project.id, AssignmentRequest("alice", (reference, ordinary))
+        )
+    assert len(dp.list_assignments(project.id)) == 1
+
+
 def test_preparation_applies_explicit_unallocation(provider_with_project):
     dp, project, _ = provider_with_project
     ids = dp.get_assignment_video_ids(project.id)

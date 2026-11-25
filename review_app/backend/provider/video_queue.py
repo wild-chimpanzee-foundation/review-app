@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 
-from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL
+from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL, reference_video_sql
 from review_app.backend.provider.base import ProviderBase
 from review_app.backend.utils import DEFAULT_REVIEW_THRESHOLD
 
@@ -372,11 +372,11 @@ class QueueMixin(ProviderBase):
             where.append("nr.needs_review_flag = 0")
 
         if selected_annotation_status == "Annotated":
-            where.append("""
-                EXISTS (
+            where.append(f"""
+                (EXISTS (
                     SELECT 1 FROM video_labels vl2
                     WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
-                )""")
+                ) OR {reference_video_sql()})""")
         elif selected_annotation_status == "Not Annotated":
             where.append("""
                 NOT EXISTS (
@@ -384,6 +384,7 @@ class QueueMixin(ProviderBase):
                     WHERE vl2.video_id = v.video_id
                     AND (vl2.is_blank IS NOT NULL OR vl2.review_later = 1)
                 )""")
+            where.append(f"NOT {reference_video_sql()}")
         if selected_is_review_later:
             where.append(
                 "EXISTS (SELECT 1 FROM video_labels vl2 WHERE vl2.video_id = v.video_id AND vl2.review_later = 1)"
@@ -438,7 +439,7 @@ class QueueMixin(ProviderBase):
             order_by = f"ORDER BY {camera_order}v.created_at ASC NULLS LAST"
         elif selected_sort == "unreviewed_first":
             order_by = f"""ORDER BY
-                CASE WHEN EXISTS (
+                CASE WHEN {reference_video_sql()} OR EXISTS (
                     SELECT 1 FROM video_labels vl2
                     WHERE vl2.video_id = v.video_id AND vl2.is_blank IS NOT NULL
                 ) THEN 1 ELSE 0 END {sort_dir_inv},

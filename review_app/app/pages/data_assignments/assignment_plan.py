@@ -21,7 +21,11 @@ def species_work_groups(dp, project_id):
     }
     chunks = dp.get_video_chunks(project_id)
     covered = {video_id for chunk in chunks for video_id in chunk["video_ids"]}
-    other = [vid for vid in dp.get_assignment_video_ids(project_id) if vid not in covered]
+    other = [
+        vid
+        for vid in dp.get_assignment_video_ids(project_id, species_work_only=True)
+        if vid not in covered
+    ]
     if other:
         chunks.append({"chunk_id": "other", "label": "", "video_ids": other})
     groups = []

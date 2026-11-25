@@ -700,6 +700,26 @@ Index("idx_observation_tags_video", ObservationTag.video_id, ObservationTag.beha
 
 
 # Raw provider SQL aliases the video as v when displaying its effective label.
+def reference_video_sql(video_alias: str = "v") -> str:
+    return f"""EXISTS (
+        SELECT 1 FROM video_tags vt JOIN tags t ON t.id = vt.tag_id
+        WHERE vt.video_id = {video_alias}.video_id AND t.key = 'reference_video'
+    )"""
+
+
+def reference_only_video_sql(video_alias: str = "v") -> str:
+    return f"""(
+        {reference_video_sql(video_alias)}
+        AND NOT EXISTS (
+            SELECT 1 FROM video_labels
+            WHERE video_id = {video_alias}.video_id AND is_blank IS NOT NULL
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM individual_observations WHERE video_id = {video_alias}.video_id
+        )
+    )"""
+
+
 VIDEO_CAMERA_LABEL_SQL = (
     "CASE WHEN v.project_id IS NULL THEN v.folder_camera_label ELSE "
     "(SELECT d.deployment_id FROM deployments d WHERE d.id = v.deployment_id) END"

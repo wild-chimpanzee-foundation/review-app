@@ -4,6 +4,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import text
+
 from review_app.backend.annotation_package import delivery, handoff
 from review_app.backend.annotation_package.archive import decode_archive
 from review_app.backend.annotation_package.naming import assignment_reference, package_stem
@@ -12,10 +14,17 @@ from review_app.backend.annotation_package.scope import (
     PreparedAssignment,
     distance_selection,
 )
-from review_app.backend.db.models import HandoffAssignment, ProjectDir, Species, Video
+from review_app.backend.db.models import (
+    HandoffAssignment,
+    ProjectDir,
+    Species,
+    Video,
+    reference_only_video_sql,
+)
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.assignment_service import write_video_allocations
 from review_app.backend.provider.base import ProviderBase
+from review_app.backend.utils import sqlite_values
 
 
 def _assignment_naming_fields(row):
@@ -66,6 +75,17 @@ class AssignmentHandoffMixin(ProviderBase):
         with self.Session.begin() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             prepared = handoff.prepare(session, project_id, request)
+            reference_only = (
+                session.query(Video.video_id)
+                .filter(
+                    Video.project_id == project_id,
+                    Video.video_id.in_(sqlite_values(request.video_ids)),
+                    text(reference_only_video_sql("videos")),
+                )
+                .first()
+            )
+            if reference_only:
+                raise ValueError("Reference-only videos are already annotated for Species Review")
             write_video_allocations(
                 session.connection(),
                 project_id,
@@ -85,19 +105,19 @@ class AssignmentHandoffMixin(ProviderBase):
             ]
         return summarize_workload(rows)
 
-    def get_assignment_video_ids(self, project_id: str) -> list[str]:
-        """All project media for explicit preparation, including labeled/missing videos.
+    def get_assignment_video_ids(
+        self, project_id: str, *, species_work_only: bool = False
+    ) -> list[str]:
+        """Project media for assignment preparation, including labeled and missing videos.
 
         Review queues intentionally omit missing footage, so they are not a source
         for the UI's 'all videos' selection.
         """
         with self.Session() as session:
-            return [
-                row.video_id
-                for row in session.query(Video)
-                .filter_by(project_id=project_id)
-                .order_by(Video.video_id)
-            ]
+            videos = session.query(Video.video_id).filter_by(project_id=project_id)
+            if species_work_only:
+                videos = videos.filter(text(f"NOT {reference_only_video_sql('videos')}"))
+            return [row.video_id for row in videos.order_by(Video.video_id)]
 
     def get_assignment_distance_species_options(self, project_id, lang="en") -> dict[str, str]:
         """Use scientific names as portable target keys, including saved vocabulary."""
