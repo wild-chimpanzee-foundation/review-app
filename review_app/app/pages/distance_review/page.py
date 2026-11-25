@@ -841,6 +841,9 @@ class DistanceReviewPage:
         if not video:
             with ui.card().classes("w-full items-center q-pa-xl"):
                 ui.icon("video_library", size="lg").classes("text-grey-5")
+                if not self.species_options:
+                    ui.label(t("distance_progress_empty")).classes("text-grey-6")
+                    return
                 ui.label(
                     t(
                         "distance_choose_target_species"
@@ -2873,6 +2876,17 @@ async def setup_distance_review() -> None:
     species_options = await run.io_bound(
         dp.get_distance_target_species_options, project_id, get_language()
     )
+    saved_species = {video["species_id"] for video in all_videos} - species_options.keys()
+    if saved_species:
+        labels = await run.io_bound(
+            dp.get_distance_species_options,
+            project_id,
+            get_language(),
+            include_species_ids=list(saved_species),
+        )
+        species_options.update(
+            {key: label for key, label in labels.items() if key in saved_species}
+        )
     tags = await run.io_bound(dp.get_all_tags)
     page = DistanceReviewPage(dp, project_id, species_options, tags)
     page.behavior_options = await run.io_bound(dp.get_distance_behavior_options, get_language())

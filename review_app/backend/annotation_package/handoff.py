@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from review_app.backend.annotation_package import deployments, distance, species
 from review_app.backend.annotation_package.archive import (
+    DISTANCE_SETTINGS_VERSION,
     FOLDER_REVIEW_VERSION,
     FORMAT,
     VERSION,
@@ -43,8 +44,13 @@ from review_app.backend.db.models import (
     Project,
     ProjectDir,
     ProjectSpecies,
+    Species,
     Video,
     VideoAssignment,
+)
+from review_app.backend.provider.distance_species import (
+    distance_species_settings,
+    save_distance_species_settings,
 )
 
 
@@ -62,6 +68,14 @@ def prepare(session: Session, project_id: str, request: AssignmentRequest) -> Pr
     if deployment_context is not None:
         context["deployments"] = deployment_context
         version = FOLDER_REVIEW_VERSION if "folder_reviews" in deployment_context else VERSION
+    if request.stage == "distance":
+        target = session.query(Species).filter_by(scientific_name=request.target_species).one()
+        rules = distance_species_settings(session, project_id, target.id)
+        context["distance"]["requirements"] = {
+            "require_age": bool(rules.require_age),
+            "require_sex": bool(rules.require_sex),
+        }
+        version = DISTANCE_SETTINGS_VERSION
     assignment_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     manifest = {
@@ -237,6 +251,15 @@ def open_setup(
             )
         )
     if manifest["stage"] == "distance":
+        target_id = vocab["species"][manifest["target_species"]]
+        defaults = distance_species_settings(session, project.id, target_id)
+        requirements = context["distance"].get(
+            "requirements",
+            {"require_age": defaults.require_age, "require_sex": defaults.require_sex},
+        )
+        save_distance_species_settings(
+            session, project.id, target_id, enabled=True, **requirements
+        )
         media_paths = {video_id: path for video_id, (path, _) in paths.items()}
         mapping = distance.restore_dependencies(
             session, project.id, context, identities, videos, media_paths, work

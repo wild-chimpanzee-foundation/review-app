@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert
 
 from review_app.backend.db.models import DistanceReviewTask, IndividualObservation, Video
+from review_app.backend.provider.distance_species import enabled_distance_species
 
 
 def ensure_tasks(session, project_id: str) -> None:
@@ -31,6 +32,7 @@ def ensure_tasks(session, project_id: str) -> None:
         .where(
             Video.project_id == project_id,
             IndividualObservation.species_id.is_not(None),
+            IndividualObservation.species_id.in_(enabled_distance_species(project_id)),
             count > 0,
             ~existing,
         )

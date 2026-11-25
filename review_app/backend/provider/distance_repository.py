@@ -5,12 +5,14 @@ from __future__ import annotations
 import math
 from datetime import datetime, timedelta
 
-from sqlalchemy import or_
+from sqlalchemy import and_, func, or_
 
 from review_app.backend.db.models import (
     Behavior,
     DistanceIndividual,
+    DistanceReviewTask,
     IndividualObservation,
+    Project,
     Species,
     Video,
 )
@@ -27,6 +29,7 @@ from review_app.backend.provider.distance_references import (
     configure_reference_distance,
     count_reference_frame_samples,
     delete_reference_frame,
+    distance_task_query,
     get_distance_reference_videos,
     get_distance_video_queue,
     list_reference_frames,
@@ -46,6 +49,12 @@ from review_app.backend.provider.distance_review import (
     verify_recording_time,
 )
 from review_app.backend.provider.distance_samples import save_distance_sample
+from review_app.backend.provider.distance_species import (
+    distance_species_query,
+    distance_species_settings,
+    enabled_distance_species,
+    save_distance_species_settings,
+)
 from review_app.backend.provider.distance_tasks import clear_completion, resolve_task
 
 
@@ -55,6 +64,92 @@ def _offset(value: int) -> None:
 
 
 class DistanceMixin(ProviderBase):
+    def get_distance_review_progress(self, project_id: str) -> list[dict]:
+        with self.Session.begin() as session:
+            task = DistanceReviewTask
+            rows = (
+                distance_task_query(session, project_id)
+                .join(Species, Species.id == task.species_id)
+                .with_entities(
+                    Species.id.label("species_id"),
+                    Species.scientific_name,
+                    func.count().label("total"),
+                    func.count(task.completed_at).label("completed"),
+                    func.count()
+                    .filter(and_(task.completed_at.is_(None), task.verified_at.is_not(None)))
+                    .label("in_progress"),
+                    func.count()
+                    .filter(
+                        and_(
+                            task.completed_at.is_(None),
+                            or_(Video.is_missing.is_(True), Video.deployment_id.is_(None)),
+                        )
+                    )
+                    .label("unavailable"),
+                )
+                .group_by(Species.id, Species.scientific_name)
+                .order_by(Species.scientific_name)
+            )
+            return [dict(row._mapping) for row in rows]
+
+    def get_distance_review_species(self, project_id: str) -> dict[str, dict[str, bool]]:
+        rules = distance_species_query(project_id).subquery()
+        with self.Session() as session:
+            return {
+                row.scientific_name: {
+                    "require_age": bool(row.require_age),
+                    "require_sex": bool(row.require_sex),
+                }
+                for row in session.query(rules).filter(rules.c.enabled)
+            }
+
+    def set_distance_review_species(self, project_id: str, names: list[str]) -> None:
+        with self.Session.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            if session.get(Project, project_id) is None:
+                raise ValueError("Project not found")
+            rules = {
+                row.scientific_name: row
+                for row in session.execute(distance_species_query(project_id))
+            }
+            selected = set(names)
+            if selected - rules.keys():
+                raise ValueError("Species not found")
+            for name, rule in rules.items():
+                enabled = name in selected
+                if enabled != rule.enabled:
+                    save_distance_species_settings(
+                        session,
+                        project_id,
+                        rule.id,
+                        enabled=enabled,
+                        require_age=rule.require_age,
+                        require_sex=rule.require_sex,
+                    )
+
+    def set_distance_review_requirements(
+        self, project_id: str, scientific_name: str, *, require_age: bool, require_sex: bool
+    ) -> None:
+        with self.Session.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            species = (
+                session.query(Species).filter_by(scientific_name=scientific_name).one_or_none()
+            )
+            if species is None:
+                raise ValueError("Species not found")
+            if not distance_species_settings(session, project_id, species.id).enabled:
+                raise ValueError(
+                    "Enable this species for Distance Review in Project Settings first"
+                )
+            save_distance_species_settings(
+                session,
+                project_id,
+                species.id,
+                enabled=True,
+                require_age=require_age,
+                require_sex=require_sex,
+            )
+
     def _reconcile_distance_video_completion(self, session, video_id: str) -> None:
         """Refresh completion after a video duration change in its transaction."""
         reconcile_video_completion(session, video_id)
@@ -84,14 +179,15 @@ class DistanceMixin(ProviderBase):
     def get_distance_target_species_options(
         self, project_id: str, lang: str = "en"
     ) -> dict[str, str]:
-        """Only species with manual Species Review annotations in this project."""
+        """Only enabled species with manual Species Review annotations in this project."""
         with self.Session() as session:
             species_ids = {
                 species_id
                 for (species_id,) in session.query(IndividualObservation.species_id)
                 .join(Video, IndividualObservation.video_id == Video.video_id)
                 .filter(
-                    Video.project_id == project_id, IndividualObservation.species_id.is_not(None)
+                    Video.project_id == project_id,
+                    IndividualObservation.species_id.in_(enabled_distance_species(project_id)),
                 )
                 .distinct()
             }

@@ -117,6 +117,7 @@ def distance_selection(session, project_id, target_species, start_time=None, end
     """
     from review_app.backend.db.models import DistanceReviewTask, Species
     from review_app.backend.provider.distance_references import reference_tagged
+    from review_app.backend.provider.distance_species import distance_species_settings
     from review_app.backend.provider.distance_tasks import ensure_tasks
 
     if session.get(Project, project_id) is None:
@@ -124,6 +125,8 @@ def distance_selection(session, project_id, target_species, start_time=None, end
     target = session.query(Species).filter_by(scientific_name=target_species).one_or_none()
     if target is None:
         raise ValueError("Choose a Distance target species by scientific name")
+    if not distance_species_settings(session, project_id, target.id).enabled:
+        raise ValueError("Enable this species for Distance Review in Project Settings first")
     window = time_window(start_time, end_time)
     ensure_tasks(session, project_id)
     rows = (

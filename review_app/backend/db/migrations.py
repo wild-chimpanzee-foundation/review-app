@@ -1282,6 +1282,31 @@ def _migration_v24(conn: Connection) -> None:
     _rebuild_video_review_tables(conn, COPY_VIDEOS_V23)
 
 
+def _migration_v25(conn: Connection) -> None:
+    conn.exec_driver_sql("""
+        CREATE TABLE IF NOT EXISTS distance_species_settings (
+            project_id VARCHAR NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            species_id VARCHAR NOT NULL REFERENCES species(id) ON DELETE CASCADE,
+            enabled BOOLEAN NOT NULL,
+            require_age BOOLEAN NOT NULL,
+            require_sex BOOLEAN NOT NULL,
+            PRIMARY KEY (project_id, species_id)
+        )
+    """)
+    # Preserve eligibility for species already represented by saved tasks.
+    conn.exec_driver_sql("""
+        INSERT OR IGNORE INTO distance_species_settings
+            (project_id, species_id, enabled, require_age, require_sex)
+        SELECT DISTINCT v.project_id, t.species_id, 1, 0, 0
+        FROM distance_review_tasks t
+        JOIN videos v ON v.video_id = t.video_id
+        JOIN projects p ON p.id = v.project_id
+        JOIN species s ON s.id = t.species_id
+        WHERE lower(s.scientific_name) != 'pan troglodytes'
+            AND lower(s.scientific_name) NOT LIKE 'pan troglodytes %'
+    """)
+
+
 MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (1, "ALTER TABLE video_labels ADD COLUMN review_later INTEGER DEFAULT 0"),
     (
@@ -1423,6 +1448,7 @@ MIGRATIONS: list[tuple[int, str | list[str] | Callable]] = [
     (22, _migration_v22),
     (23, _migration_v23),
     (24, _migration_v24),
+    (25, _migration_v25),
 ]
 
 
@@ -1486,7 +1512,9 @@ def _existing_version(conn: Connection, stamped: int | None) -> int:
                 f"Review App schema v{stamped} has an incompatible layout"
             )
         return stamped
-    if stamped == 23:
+    if stamped in {23, 24}:
+        # These layouts are checked after their migrations. Version 24 no
+        # longer has the legacy observation-level project_id checked below.
         return stamped
     if stamped is None and _has_current_schema(conn):
         return len(MIGRATIONS)

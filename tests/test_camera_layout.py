@@ -74,6 +74,7 @@ def test_sync_automatically_tags_paired_references(tmp_db, mock_probe, nested, c
         (folder / "clip.mp4").touch()
     dp = LocalDataProvider()
     project = dp.create_project("Paired clips", str(root))
+    dp.set_distance_review_species(project.id, ["deer"])
     dp.sync_videos(active_project_id=project.id)
     with dp.Session() as session:
         videos = session.query(Video).filter_by(project_id=project.id).all()
@@ -125,6 +126,7 @@ def test_category_first_references_match_only_their_camera(tmp_db, mock_probe):
             (folder / "clip.mp4").touch()
     dp = LocalDataProvider()
     project = dp.create_project("Category-first clips", str(root))
+    dp.set_distance_review_species(project.id, ["deer"])
     dp.sync_videos(active_project_id=project.id)
     with dp.Session() as session:
         ids = [video.video_id for video in session.query(Video).filter_by(project_id=project.id)]
@@ -331,6 +333,7 @@ def test_rescan_detects_marked_references_and_preserves_tags(tmp_db, mock_probe,
     (ordinary / "animal.mp4").touch()
     dp = LocalDataProvider()
     project = dp.create_project("Marked references", str(root))
+    dp.set_distance_review_species(project.id, ["deer"])
     dp.sync_videos(active_project_id=project.id)
     reference = root / f"T48/48-Cam077_814566_1117151_20260221 {marker}/copy"
     reference.mkdir(parents=True)

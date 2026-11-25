@@ -7,11 +7,22 @@ from review_app.backend.provider.local_data_provider import LocalDataProvider
 
 
 @pytest.mark.parametrize(
-    "age,sex,missing",
-    [(None, None, "age, sex"), (None, "Unknown", "age"), ("Unknown", None, "sex")],
+    "require_age,require_sex,age,sex,missing",
+    [
+        (True, True, None, None, "age, sex"),
+        (True, True, None, "Unknown", "age"),
+        (True, True, "Unknown", None, "sex"),
+        (True, False, None, None, "age"),
+        (False, True, None, None, "sex"),
+    ],
 )
-def test_finish_requires_attributes_on_every_individual(distance_data, age, sex, missing):
+def test_finish_requires_attributes_on_every_individual(
+    distance_data, require_age, require_sex, age, sex, missing
+):
     data, dp = distance_data, distance_data["dp"]
+    dp.set_distance_review_requirements(
+        data["project"].id, "deer", require_age=require_age, require_sex=require_sex
+    )
     video_id = data["videos"][0]
     dp.verify_distance_recording_time(video_id, datetime(2026, 10, 12, 16, 2, 49), "alice")
     dp.set_distance_individual_attributes(
@@ -33,13 +44,18 @@ def test_finish_requires_attributes_on_every_individual(distance_data, age, sex,
     assert dp.get_distance_review_state(video_id, "alice") == before
     assert before["review"]["completed_at"] is None
 
-    dp.set_distance_individual_attributes(second["id"], age="Unknown", sex="Unknown", tag_ids=[])
+    dp.set_distance_individual_attributes(
+        second["id"],
+        age="Unknown" if require_age else age,
+        sex="Unknown" if require_sex else sex,
+        tag_ids=[],
+    )
     dp.finish_distance_video(video_id, "alice")
     after = dp.get_distance_review_state(video_id, "alice")
     assert after["review"]["completed_at"] is not None
     assert after["samples"] == before["samples"]
     # Clearing a required attribute reopens the video without losing sample coverage.
-    dp.set_distance_individual_attributes(second["id"], age=None, sex="Unknown", tag_ids=[])
+    dp.set_distance_individual_attributes(second["id"], age=None, sex=None, tag_ids=[])
     assert dp.get_distance_review_state(video_id, "alice")["review"]["completed_at"] is None
 
 

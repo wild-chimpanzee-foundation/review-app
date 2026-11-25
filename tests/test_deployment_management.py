@@ -25,6 +25,7 @@ def managed(tmp_db, mock_probe):
         path.touch()
     dp = LocalDataProvider()
     project = dp.create_project("Managed", str(root))
+    dp.set_distance_review_species(project.id, ["deer"])
     target = dp.save_deployment(project.id, {"deployment_id": "A", "name": "Display A"})
     directory = dp.get_project_dirs(project.id)[0]
     for folder, deployment_id in (("animals", target), ("shared", None), ("misc", None)):

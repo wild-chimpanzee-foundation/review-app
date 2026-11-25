@@ -246,6 +246,20 @@ class ProjectSpecies(Base):
     species_id: Mapped[str] = mapped_column(String, ForeignKey("species.id"), primary_key=True)
 
 
+class DistanceSpeciesSettings(Base):
+    __tablename__ = "distance_species_settings"
+
+    project_id: Mapped[str] = mapped_column(
+        String, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    species_id: Mapped[str] = mapped_column(
+        String, ForeignKey("species.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean)
+    require_age: Mapped[bool] = mapped_column(Boolean)
+    require_sex: Mapped[bool] = mapped_column(Boolean)
+
+
 class SpeciesCollection(Base):
     __tablename__ = "species_collections"
 

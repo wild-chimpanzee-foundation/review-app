@@ -101,6 +101,7 @@ def test_initializing_legacy_deployments_preserves_camera_labels_and_prepared_ev
         path.parent.mkdir(parents=True)
         path.touch()
     project = dp.create_project("Legacy calibration", str(root))
+    dp.set_distance_review_species(project.id, ["deer"])
     label = "cam_a/videos"
     with dp.Session.begin() as session:
         session.add(

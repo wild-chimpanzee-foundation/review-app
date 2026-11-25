@@ -4,7 +4,7 @@ from review_app.app.translations import t
 from review_app.app.utils import user_error_message
 
 
-def render_species_section(dp, active_project_id: int, lang: str) -> None:
+def render_species_section(dp, active_project_id: str, lang: str) -> None:
     ui.label(t("project_species_desc")).classes("text-caption text-grey-6 q-mb-md")
 
     all_species_map = dp.get_species_display_map(lang=lang)
@@ -163,6 +163,7 @@ def render_species_section(dp, active_project_id: int, lang: str) -> None:
                 all_species_map = dp.get_species_display_map(lang=lang)
                 species_select.options = all_species_map
                 species_select.update()
+                distance_select.set_options(all_species_map)
 
             with ui.row().classes("w-full justify-end q-mt-md"):
                 ui.button(t("cancel"), on_click=dialog.close).props("flat")
@@ -238,3 +239,59 @@ def render_species_section(dp, active_project_id: int, lang: str) -> None:
                 _COLLECTION_CSV_TEMPLATE.encode(), filename="collection_template.csv"
             ),
         ).props("flat dense")
+
+    ui.separator().classes("q-mt-md")
+    with ui.column().classes("w-full"):
+        ui.label(t("distance_review_settings")).classes("text-subtitle1")
+        ui.label(t("distance_review_settings_hint")).classes("text-caption text-grey-6")
+        rules = dp.get_distance_review_species(active_project_id)
+
+        @ui.refreshable
+        def render_requirements():
+            for name, requirements in sorted(rules.items()):
+                with ui.row().classes("w-full items-center"):
+                    ui.label(all_species_map.get(name, name)).classes("grow")
+                    age = ui.checkbox(t("distance_require_age"), value=requirements["require_age"])
+                    sex = ui.checkbox(t("distance_require_sex"), value=requirements["require_sex"])
+
+                    def save_requirements(_, name=name, age=age, sex=sex):
+                        try:
+                            dp.set_distance_review_requirements(
+                                active_project_id,
+                                name,
+                                require_age=age.value,
+                                require_sex=sex.value,
+                            )
+                        except Exception as exc:
+                            ui.notify(user_error_message(exc), type="negative")
+                            rules.clear()
+                            rules.update(dp.get_distance_review_species(active_project_id))
+                            render_requirements.refresh()
+
+                    age.on_value_change(save_requirements)
+                    sex.on_value_change(save_requirements)
+
+        def save_distance_species(event):
+            try:
+                dp.set_distance_review_species(active_project_id, event.value or [])
+            except Exception as exc:
+                ui.notify(user_error_message(exc), type="negative")
+                event.sender.set_value(list(rules))
+                return
+            rules.clear()
+            rules.update(dp.get_distance_review_species(active_project_id))
+            render_requirements.refresh()
+
+        distance_select = (
+            ui.select(
+                options=all_species_map,
+                value=sorted(rules),
+                label=t("distance_enabled_species"),
+                multiple=True,
+                with_input=True,
+                on_change=save_distance_species,
+            )
+            .props("outlined use-chips")
+            .classes("w-full")
+        )
+        render_requirements()

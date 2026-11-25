@@ -193,6 +193,43 @@ def open_work(fixture):
     return dp.open_assignment(data, "Distance worker", {root.id: root.path})
 
 
+def test_distance_requirements_are_frozen_and_return_preserves_origin_settings(
+    distance_assignment,
+):
+    dp, project, root, ids, _, _ = distance_assignment
+    dp.set_distance_review_requirements(project.id, "deer", require_age=True, require_sex=False)
+    saved = dp.prepare_assignment(
+        project.id, AssignmentRequest("alice", tuple(ids), "distance", "deer")
+    )
+    setup = dp.export_assignment(saved.id)
+    dp.set_distance_review_requirements(project.id, "deer", require_age=False, require_sex=True)
+    dp.set_distance_review_species(project.id, ["fox"])
+
+    worker = dp.open_assignment(setup, "Frozen requirements", {root.id: root.path})
+    assert dp.get_distance_review_species(worker.project_id) == {
+        "deer": {"require_age": True, "require_sex": False}
+    }
+    manifest, context, work = decode_archive(setup)
+    context["distance"].pop("requirements")
+    legacy_setup = encode_archive({**manifest, "version": 2}, context, work)
+    legacy = dp.open_assignment(legacy_setup, "Legacy setup", {root.id: root.path})
+    assert dp.get_distance_review_species(legacy.project_id) == {
+        "deer": {"require_age": False, "require_sex": False}
+    }
+    dp.set_distance_review_requirements(
+        worker.project_id, "deer", require_age=False, require_sex=False
+    )
+    returned = dp.export_assignment_return(worker.project_id)
+    preview = dp.preview_assignment_return(project.id, returned)
+    dp.accept_assignment_return(project.id, returned, "use_imported", preview.token)
+    assert set(dp.get_distance_review_species(project.id)) == {"fox"}
+    dp.set_distance_review_species(project.id, ["deer", "fox"])
+    assert dp.get_distance_review_species(project.id)["deer"] == {
+        "require_age": False,
+        "require_sex": True,
+    }
+
+
 def test_return_keeps_calibration_from_footage_already_in_scope(distance_assignment):
     dp, project, root, ids, _, package = distance_assignment
     opened = dp.open_assignment(package, "Working copy", {root.id: root.path})
@@ -325,7 +362,7 @@ def test_retired_reference_with_same_distance_alternative_survives_handoff(
     )
     package = dp.export_assignment(saved.id)
     manifest, context, _ = decode_archive(package)
-    assert manifest["version"] == (4 if with_folder_review else 3)
+    assert manifest["version"] == 5
     opened = dp.open_assignment(package, "Retired reference", {root.id: root.path})
     if with_folder_review:
         (review,) = context["deployments"]["folder_reviews"]
@@ -1112,6 +1149,7 @@ async def test_distance_ui_empty_replacement_warns_and_preserves_omitted_task(
     dp, project, _, ids, _, setup = distance_ui
     manifest, context, work = decode_archive(setup)
     manifest["direction"] = "return"
+    context["distance"].pop("requirements")
     unit = next(unit for unit in work if unit["samples"])
     unit.update(task=None, individuals=[], samples=[], progress=[])
     from review_app.backend.annotation_package.distance_handoff import scoped_context

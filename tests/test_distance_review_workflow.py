@@ -250,6 +250,9 @@ async def test_finish_with_missing_attributes_identifies_individual_and_stays_op
 ):
     page, data = distance_page, distance_data
     page.dp = data["dp"]
+    page.dp.set_distance_review_requirements(
+        data["project"].id, "deer", require_age=True, require_sex=True
+    )
     video_id = data["videos"][0]
     page.queue = [{"video_id": video_id}, {"video_id": data["videos"][1]}]
     page.load_video = AsyncMock()

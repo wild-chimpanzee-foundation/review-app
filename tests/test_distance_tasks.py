@@ -4,11 +4,13 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
 import pytest
+from review_app.backend.db.migrations import upgrade_database
 from review_app.backend.db.models import (
     DistanceReviewTask,
     IndividualObservation,
     ModelAnnotation,
     Species,
+    Video,
 )
 from sqlalchemy import event, text
 
@@ -133,6 +135,7 @@ def test_target_species_options_are_project_scoped_and_include_manual_species_ou
 
     dp, project, video, species, _ = task_data
     other = dp.create_project("Other project", "/other-project")
+    dp.set_distance_review_species(other.id, ["fox"])
     with dp.Session.begin() as session:
         session.query(IndividualObservation).filter_by(
             video_id=video, species_id=species["fox"]
@@ -151,6 +154,82 @@ def test_target_species_options_are_project_scoped_and_include_manual_species_ou
         )[species["deer"]]
     }
     assert set(dp.get_distance_target_species_options(other.id)) == {species["fox"]}
+
+
+def test_configured_species_control_task_creation_and_overview_progress(provider_with_project):
+    dp, project, _ = provider_with_project
+    dp.add_custom_species(
+        "Pan troglodytes verus", "Western chimpanzee", "Chimpanzé", "Primate", "Primate"
+    )
+    assert dp.get_distance_review_species(project.id) == {
+        "deer": {"require_age": False, "require_sex": False},
+        "fox": {"require_age": False, "require_sex": False},
+        "Pan troglodytes verus": {"require_age": True, "require_sex": True},
+    }
+    new_project = dp.create_project("New project", "/new-project")
+    assert set(dp.get_distance_review_species(new_project.id)) == {"Pan troglodytes verus"}
+
+    dp.set_distance_review_species(project.id, ["deer"])
+    ids = dp.get_video_queue({}, active_project_id=project.id)
+    for video_id in ids:
+        dp.update_manual_review(
+            video_id, [{"species": "deer"}, {"species": "fox"}], active_project_id=project.id
+        )
+    deer_tasks = dp.get_distance_video_queue(project.id)
+    assert len(deer_tasks) == 2
+    with dp.Session() as session:
+        assert session.query(DistanceReviewTask).count() == 2
+    assert set(dp.get_assignment_distance_species_options(project.id)) == {"deer"}
+    with pytest.raises(ValueError, match="Enable this species"):
+        dp.preview_assignment_distance_selection(project.id, "fox")
+
+    finished, unfinished = deer_tasks
+    dp.align_distance_on_even_frame(finished["task_id"], 500, "alice")
+    individual = dp.create_distance_individual(
+        finished["task_id"],
+        finished["species_id"],
+        0,
+        anchor={"x": 0.1, "y": 0.1, "width": 0.2, "height": 0.2},
+    )
+    dp.apply_distance_to_end(
+        individual["id"], 500, skip_reason="individual absent", labeled_by="alice"
+    )
+    dp.finish_distance_video(finished["task_id"], "alice")
+    dp.align_distance_on_even_frame(unfinished["task_id"], 500, "alice")
+    with dp.Session.begin() as session:
+        session.get(Video, unfinished["video_id"]).is_missing = True
+    assert dp.get_distance_review_progress(project.id) == [
+        {
+            "species_id": finished["species_id"],
+            "scientific_name": "deer",
+            "total": 2,
+            "completed": 1,
+            "in_progress": 1,
+            "unavailable": 1,
+        }
+    ]
+    dp.set_distance_review_species(project.id, [])
+    assert dp.get_distance_video_queue(project.id) == []
+    assert dp.get_distance_review_progress(project.id) == []
+    dp.set_distance_review_species(project.id, ["deer"])
+    assert dp.get_distance_video_queue(project.id)[0]["task_id"] == finished["task_id"]
+    assert dp.get_distance_review_progress(project.id)[0]["completed"] == 1
+
+
+def test_upgrade_keeps_species_with_existing_distance_tasks_enabled(task_data):
+    dp, project, video_id, species, tasks = task_data
+    with dp.Session.begin() as session:
+        session.query(DistanceReviewTask).filter_by(
+            video_id=video_id, species_id=species["fox"]
+        ).delete()
+    with dp.engine.begin() as conn:
+        conn.exec_driver_sql("DROP TABLE distance_species_settings")
+        conn.exec_driver_sql("UPDATE _schema_version SET version = 24")
+    assert upgrade_database(dp.engine)
+    assert dp.get_distance_review_species(project.id) == {
+        "deer": {"require_age": False, "require_sex": False}
+    }
+    assert dp.get_distance_video_queue(project.id) == [tasks[species["deer"]]]
 
 
 def test_alignment_reset_samples_completion_and_resume_are_task_scoped(task_data):

@@ -17,6 +17,7 @@ from review_app.backend.db.models import (
 )
 from review_app.backend.distance_timing import sample_offsets
 from review_app.backend.path_matching import normalize_path_str
+from review_app.backend.provider.distance_species import distance_species_settings
 from review_app.backend.provider.distance_tasks import (
     clear_completion,
     complete_task,
@@ -262,14 +263,17 @@ def finish_video(session, video_id: str, annotator_name: str, now) -> None:
         refresh_individual_completion(session, individual)
         if individual.review_status != "completed":
             raise ValueError("Review every scheduled sample before finishing the task")
+    video = session.get(Video, review.video_id)
+    settings = distance_species_settings(session, video.project_id, review.species_id)
+    required = [field for field in ("age", "sex") if getattr(settings, f"require_{field}")]
     missing = []
     for individual in sorted(individuals, key=lambda row: row.individual_number):
-        fields = [field for field in ("age", "sex") if getattr(individual, field) is None]
+        fields = [field for field in required if getattr(individual, field) is None]
         if fields:
             missing.append(f"#{individual.individual_number} ({', '.join(fields)})")
     if missing:
         raise ValueError(
-            "Set age and sex before finishing the task. Missing: "
+            "Set the required attributes before finishing the task. Missing: "
             + "; ".join(missing)
             + ". Select Unknown if undetermined."
         )

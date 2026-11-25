@@ -157,6 +157,7 @@ class SpeciesMixin(ProviderBase):
                     AND is_custom = 0
                     AND id NOT IN (SELECT DISTINCT species_id FROM individual_observations WHERE species_id IS NOT NULL)
                     AND id NOT IN (SELECT DISTINCT species_id FROM distance_review_tasks)
+                    AND id NOT IN (SELECT species_id FROM distance_species_settings)
                     AND id NOT IN (SELECT DISTINCT species_id FROM project_species WHERE species_id IS NOT NULL)
                     AND id NOT IN (SELECT DISTINCT species_id FROM species_collection_members WHERE species_id IS NOT NULL)
                     """

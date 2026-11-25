@@ -35,6 +35,7 @@ from review_app.backend.provider.distance_references import (
     reference_tagged,
 )
 from review_app.backend.provider.distance_review import reset_video_evidence
+from review_app.backend.provider.distance_species import enabled_distance_species
 from review_app.backend.provider.distance_tasks import ensure_tasks
 
 
@@ -231,6 +232,16 @@ def _plan(session, project_id, package):
         ).hexdigest()
     ensure_tasks(session, project_id)
     species = {row.scientific_name: row.id for row in session.query(Species)}
+    enabled = set(session.scalars(enabled_distance_species(project_id)))
+    disabled = {
+        row["species"]
+        for row in package.individuals
+        if row["species"] in species and species[row["species"]] not in enabled
+    }
+    errors.extend(
+        f"Enable {name!r} for Distance Review in Project Settings before importing."
+        for name in sorted(disabled)
+    )
     tasks = {
         (task.video_id, task.species_id): task
         for task in session.query(DistanceReviewTask)
@@ -245,7 +256,10 @@ def _plan(session, project_id, package):
             errors.append(f"Add/map species {row['species']!r} before importing.")
         video = videos.get(row["video_path"])
         if video:
-            if (video.video_id, species.get(row["species"])) not in tasks:
+            if (
+                row["species"] not in disabled
+                and (video.video_id, species.get(row["species"])) not in tasks
+            ):
                 suggestion = {
                     "video_id": video.video_id,
                     "video_path": row["video_path"],

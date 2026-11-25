@@ -15,6 +15,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, Integer
 
 from review_app.backend.annotation_package import species
 from review_app.backend.annotation_package.archive import (
+    DISTANCE_SETTINGS_VERSION,
     FOLDER_REVIEW_VERSION,
     RETIRED_REFERENCE_VERSION,
 )
@@ -428,16 +429,21 @@ def validate(manifest, context, work):
         json.dumps([context, work], allow_nan=False)
     except (ValueError, TypeError) as exc:
         raise ValueError("Invalid nested Distance JSON") from exc
-    from review_app.backend.annotation_package.archive import TEXT, _records
+    from review_app.backend.annotation_package.archive import TEXT, _record, _records
 
     deps = context["distance"]
-    if not isinstance(deps, dict) or deps.keys() != {
+    fields = {
         "references",
         "frames",
         "imports",
         "species_work",
-    }:
+    }
+    if manifest["version"] == DISTANCE_SETTINGS_VERSION:
+        fields.add("requirements")
+    if not isinstance(deps, dict) or deps.keys() != fields:
         raise ValueError("Invalid Distance dependencies")
+    if "requirements" in deps:
+        _record(deps["requirements"], {"require_age": (bool,), "require_sex": (bool,)})
     media = {r["video_id"] for r in context["media"]}
     refs = _records(deps["references"], {"id": TEXT, "video_id": TEXT}, "id")
     if any(r["video_id"] not in media for r in refs.values()) or len(
@@ -450,7 +456,12 @@ def validate(manifest, context, work):
         fields = FRAME
         if isinstance(frame, dict) and "retired" in frame:
             if (
-                manifest["version"] not in {RETIRED_REFERENCE_VERSION, FOLDER_REVIEW_VERSION}
+                manifest["version"]
+                not in {
+                    RETIRED_REFERENCE_VERSION,
+                    FOLDER_REVIEW_VERSION,
+                    DISTANCE_SETTINGS_VERSION,
+                }
                 or frame["retired"] is not True
             ):
                 raise ValueError("Invalid retired reference frame")

@@ -29,6 +29,7 @@ from review_app.backend.provider.deployments import (
     video_deployment_for_label,
 )
 from review_app.backend.provider.distance_review import reopen_individual_review
+from review_app.backend.provider.distance_species import enabled_distance_species
 from review_app.backend.provider.distance_tasks import ensure_tasks
 
 
@@ -65,18 +66,11 @@ def get_distance_video_queue(
     camera_id: str | None = None,
     status: str | None = None,
 ) -> list[dict]:
-    ensure_tasks(session, project_id)
     query = (
-        session.query(Video, DistanceReviewTask)
-        .join(DistanceReviewTask, DistanceReviewTask.video_id == Video.video_id)
+        distance_task_query(session, project_id)
         .join(Deployment, Deployment.id == Video.deployment_id)
         .options(contains_eager(Video.deployment))
-        .filter(
-            Video.project_id == project_id,
-            Video.is_missing.is_(False),
-            Video.deployment_id.is_not(None),
-            ~reference_tagged(session),
-        )
+        .filter(Video.is_missing.is_(False))
     )
     if camera_id:
         query = query.filter(Deployment.deployment_id == camera_id)
@@ -110,6 +104,19 @@ def get_distance_video_queue(
             Deployment.deployment_id, Video.video_path, DistanceReviewTask.species_id
         )
     ]
+
+
+def distance_task_query(session, project_id):
+    ensure_tasks(session, project_id)
+    return (
+        session.query(Video, DistanceReviewTask)
+        .join(DistanceReviewTask, DistanceReviewTask.video_id == Video.video_id)
+        .filter(
+            Video.project_id == project_id,
+            DistanceReviewTask.species_id.in_(enabled_distance_species(project_id)),
+            ~reference_tagged(session),
+        )
+    )
 
 
 def register_reference_video(session, project_id: str, camera_id: str, video_path: str) -> dict:

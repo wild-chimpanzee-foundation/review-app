@@ -220,6 +220,7 @@ def provider_with_project(tmp_db, mock_probe):
 
     dp = LocalDataProvider()
     project = dp.create_project("Test Project", str(video_dir))
+    dp.set_distance_review_species(project.id, ["deer", "fox"])
     dp.sync_videos(
         progress_callback=None,
         video_dir=video_dir,

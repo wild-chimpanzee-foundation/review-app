@@ -37,6 +37,7 @@ from review_app.backend.provider.distance_identities import (
 )
 from review_app.backend.provider.distance_references import reference_tagged
 from review_app.backend.provider.distance_review import review_offsets
+from review_app.backend.provider.distance_species import distance_species_settings
 from review_app.backend.provider.distance_tasks import ensure_tasks
 
 
@@ -472,13 +473,9 @@ def _validate_tables(tables, *, require_same_reference_root=True):
         if task["completion_outcome"] == "absent" and members:
             raise ValueError("Explicit absence cannot contain individuals")
         if task["completion_outcome"] == "present" and (
-            not members
-            or any(
-                row["review_status"] != "completed" or row["age"] is None or row["sex"] is None
-                for row in members
-            )
+            not members or any(row["review_status"] != "completed" for row in members)
         ):
-            raise ValueError("Task completion requires complete individuals with age and sex")
+            raise ValueError("Task completion requires complete individuals")
     for progress in tables["progress"]:
         key = progress["task_id"], progress["annotator_name"]
         individual = individuals.get(progress["active_individual_id"])
@@ -516,6 +513,10 @@ class DistanceTransferMixin(ProviderBase):
             _roots(session, project_id)
             if session.get(Species, species_id) is None:
                 raise ValueError("Species not found")
+            if not distance_species_settings(session, project_id, species_id).enabled:
+                raise ValueError(
+                    "Enable this species for Distance Review in Project Settings first"
+                )
             ensure_tasks(session, project_id)
             rows = (
                 session.query(DistanceReviewTask, Video, *_manual_ai_flags())

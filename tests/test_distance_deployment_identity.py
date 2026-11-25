@@ -16,6 +16,7 @@ def _multi_root_deployment(tmp_db, mock_probe):
     dp = LocalDataProvider()
     roots = [tmp_db["root"] / name for name in ("deployment_A", "deployment_B")]
     project = dp.create_project("Two deployments", str(roots[0]))
+    dp.set_distance_review_species(project.id, ["deer"])
     dp.add_project_dir(project.id, str(roots[1]))
     ids = {}
     for name, root in zip(("A", "B"), roots, strict=True):
@@ -120,6 +121,7 @@ def test_first_scan_resolves_external_calibration_only_with_one_root(
     external = tmp_db["root"] / "calibration.mp4"
     external.touch()
     project = dp.create_project("External calibration", str(root))
+    dp.set_distance_review_species(project.id, ["deer"])
     if second_root:
         other = tmp_db["root"] / "other"
         other.mkdir()
@@ -266,6 +268,7 @@ def test_cross_root_deployment_round_trips_reference_evidence(tmp_db, mock_probe
     package = dp.export_assignment(prepared.id)
     manifest, context, work = decode_archive(package)
     legacy_context = {key: value for key, value in context.items() if key != "deployments"}
+    legacy_context["distance"].pop("requirements")
     with pytest.raises(ValueError, match="another deployment"):
         encode_archive({**manifest, "version": 1}, legacy_context, work)
     opened = dp.open_assignment(
