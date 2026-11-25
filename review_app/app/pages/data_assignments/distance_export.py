@@ -1,8 +1,10 @@
 """Manual Distance measurements for analysis."""
 
+from datetime import datetime
+
 from nicegui import run, ui
 
-from review_app.app.state import get_active_project_id
+from review_app.app.state import get_active_project_id, get_annotator_name
 from review_app.app.translations import t
 from review_app.app.utils import ignore_deleted_client
 
@@ -75,7 +77,13 @@ async def render_distance_export(dp, project_id, loading_dialog):
             check_project()
             content = await run.io_bound(dp.export_distance_measurements, project_id, ids)
             check_project()
-            ui.download(content, "distance-measurements.tsv")
+            project = dp.get_project(project_id)
+            project_name = project.name.replace(" ", "_") if project else "project"
+            annotator = get_annotator_name().replace(" ", "_")
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            ui.download(
+                content, f"distance_measurements_{project_name}_{annotator}_{timestamp}.tsv"
+            )
         except Exception as exc:
             with ignore_deleted_client():
                 report(exc)
