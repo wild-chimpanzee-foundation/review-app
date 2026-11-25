@@ -506,16 +506,18 @@ class AssignmentMixin(ProviderBase):
     # ── Query helpers ─────────────────────────────────────────────────────────
 
     def get_assignment_summary(self, project_id: str) -> list[dict]:
-        """Return per-annotator summary: cameras, video_count, hours, labeling stats."""
+        """Return Species video and Distance task progress for each assigned annotator."""
         with self.engine.connect() as conn:
-            rows = conn.execute(
-                text(f"""
+            # Distance handoffs populate local video assignments for their working scope.
+            species_rows = (
+                conn.execute(
+                    text(f"""
                     SELECT
-                        va.assigned_to,
+                        va.assigned_to AS annotator,
                         COUNT(DISTINCT v.deployment_id) AS cameras,
                         COUNT(*) AS video_count,
                         ROUND(COALESCE(SUM(v.duration_sec), 0) / 3600.0, 2) AS hours,
-                        COUNT(DISTINCT CASE WHEN vl.video_id IS NOT NULL OR {reference_video_sql()}
+                        COUNT(DISTINCT CASE WHEN vl.is_blank IS NOT NULL OR {reference_video_sql()}
                             THEN v.video_id END) AS labeled,
                         COUNT(DISTINCT CASE WHEN vl.is_blank = 1 THEN v.video_id END) AS blank,
                         COUNT(DISTINCT CASE WHEN vl.is_blank = 0 THEN v.video_id END) AS non_blank
@@ -523,22 +525,72 @@ class AssignmentMixin(ProviderBase):
                     JOIN videos v ON v.video_id = va.video_id
                     LEFT JOIN video_labels vl ON vl.video_id = v.video_id
                     WHERE v.project_id = :pid
+                        AND v.video_id NOT IN (
+                            SELECT m.local_id
+                            FROM handoff_assignments h
+                            JOIN json_each(h.scope, '$.work_keys') work
+                            JOIN handoff_identity_maps m ON m.handoff_id = h.id
+                                AND m.kind = 'video' AND m.portable_id = work.value
+                            WHERE h.project_id = :pid AND h.stage = 'distance'
+                                AND h.role = 'working'
+                        )
                     GROUP BY va.assigned_to
                     ORDER BY va.assigned_to
                 """),
-                {"pid": project_id},
-            ).fetchall()
+                    {"pid": project_id},
+                )
+                .mappings()
+                .all()
+            )
+            # A repeated handout to the same recipient still delegates the same task.
+            distance_rows = (
+                conn.execute(
+                    text("""
+                    WITH assigned_tasks AS (
+                        SELECT DISTINCT
+                            CASE WHEN h.role = 'working' THEN COALESCE(va.assigned_to, h.recipient)
+                                 ELSE h.recipient END AS annotator,
+                            work.value AS video_id, h.target_species,
+                            task.completed_at IS NOT NULL AS completed
+                        FROM handoff_assignments h
+                        JOIN json_each(h.scope, '$.work_keys') work
+                        LEFT JOIN handoff_identity_maps m ON m.handoff_id = h.id
+                            AND m.kind = 'video' AND m.portable_id = work.value
+                        LEFT JOIN species s ON s.scientific_name = h.target_species
+                        LEFT JOIN distance_review_tasks task ON task.video_id = m.local_id
+                            AND task.species_id = s.id
+                        LEFT JOIN video_assignments va ON va.video_id = m.local_id
+                        WHERE h.project_id = :pid AND h.stage = 'distance'
+                    )
+                    SELECT annotator, COUNT(*) AS distance_total,
+                        SUM(completed) AS distance_completed
+                    FROM assigned_tasks
+                    GROUP BY annotator
+                """),
+                    {"pid": project_id},
+                )
+                .mappings()
+                .all()
+            )
+
+        species = {row["annotator"]: row for row in species_rows}
+        distance = {row["annotator"]: row for row in distance_rows}
+        defaults = dict(
+            cameras=0,
+            video_count=0,
+            hours=0,
+            labeled=0,
+            blank=0,
+            non_blank=0,
+            distance_total=0,
+            distance_completed=0,
+        )
         return [
-            {
-                "annotator": r[0],
-                "cameras": r[1],
-                "video_count": r[2],
-                "hours": r[3],
-                "labeled": r[4],
-                "blank": r[5],
-                "non_blank": r[6],
-            }
-            for r in rows
+            defaults
+            | {"annotator": name}
+            | dict(species.get(name, {}))
+            | dict(distance.get(name, {}))
+            for name in sorted(species.keys() | distance.keys())
         ]
 
     def clear_all_assignments(self, project_id: str) -> int:

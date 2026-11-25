@@ -206,7 +206,16 @@ def test_distance_requirements_are_frozen_and_return_preserves_origin_settings(
     dp.set_distance_review_requirements(project.id, "deer", require_age=False, require_sex=True)
     dp.set_distance_review_species(project.id, ["fox"])
 
-    worker = dp.open_assignment(setup, "Frozen requirements", {root.id: root.path})
+    dp.add_annotator("local reviewer")
+    worker = dp.open_assignment(
+        setup, "Frozen requirements", {root.id: root.path}, local_recipient="local reviewer"
+    )
+    for project_id, name in ((project.id, "alice"), (worker.project_id, "local reviewer")):
+        (summary,) = dp.get_assignment_summary(project_id)
+        assert summary["annotator"] == name
+        assert summary["video_count"] == 0
+        assert summary["distance_total"] == len(ids)
+        assert summary["distance_completed"] == 0
     assert dp.get_distance_review_species(worker.project_id) == {
         "deer": {"require_age": True, "require_sex": False}
     }
@@ -220,9 +229,15 @@ def test_distance_requirements_are_frozen_and_return_preserves_origin_settings(
     dp.set_distance_review_requirements(
         worker.project_id, "deer", require_age=False, require_sex=False
     )
+    with dp.Session() as session:
+        local_video = session.get(HandoffIdentityMap, (worker.id, "video", ids[1])).local_id
+    dp.record_distance_task_absence(local_video, "local reviewer")
+    assert dp.get_assignment_summary(worker.project_id)[0]["distance_completed"] == 1
+    assert dp.get_assignment_summary(project.id)[0]["distance_completed"] == 0
     returned = dp.export_assignment_return(worker.project_id)
     preview = dp.preview_assignment_return(project.id, returned)
     dp.accept_assignment_return(project.id, returned, "use_imported", preview.token)
+    assert dp.get_assignment_summary(project.id)[0]["distance_completed"] == 1
     assert set(dp.get_distance_review_species(project.id)) == {"fox"}
     dp.set_distance_review_species(project.id, ["deer", "fox"])
     assert dp.get_distance_review_species(project.id)["deer"] == {

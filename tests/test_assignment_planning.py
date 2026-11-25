@@ -59,6 +59,7 @@ def test_reference_only_video_counts_as_annotated_and_stays_out_of_new_work(prov
     stats = dp.get_overview_stats(project.id)
     assert stats["labeling"]["labeled"] == 1
     assert stats["labeling"]["blank"] == stats["labeling"]["non_blank"] == 0
+    assert stats["labeling"]["reference"] == 1
     assert stats["species_counts"] == []
     assert sum(group["labeled"] for group in stats["deployment_footage"]) == 1
     assert dp.get_assignment_summary(project.id)[0]["labeled"] == 1

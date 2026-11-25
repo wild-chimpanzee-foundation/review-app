@@ -82,6 +82,9 @@ class StatsMixin(ProviderBase):
                 .iloc[0]
                 .to_dict()
             )
+            labeling = stats["labeling"]
+            # Tagged references already carrying a Species label are in blank or non-blank.
+            labeling["reference"] = labeling["labeled"] - labeling["blank"] - labeling["non_blank"]
 
             stats["species_counts"] = pd.read_sql(
                 text(f"""

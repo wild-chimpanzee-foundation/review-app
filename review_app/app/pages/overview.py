@@ -26,24 +26,65 @@ from review_app.backend.path_matching import normalize_path_str
 
 _BLANK_COLOR = "#4caf50"
 _NON_BLANK_COLOR = "#2196f3"
+_REFERENCE_COLOR = "#8070c9"
 _UNLABELED_COLOR = "#e0e0e0"
 
 
-def _render_annotation_bar(
-    blank: int, non_blank: int, unlabeled: int, height: str = "12px"
-) -> None:
-    total = max(blank + non_blank + unlabeled, 1)
-    segments = [
-        (_BLANK_COLOR, 100 * blank / total),
-        (_NON_BLANK_COLOR, 100 * non_blank / total),
-        (_UNLABELED_COLOR, 100 * unlabeled / total),
-    ]
+def _render_annotation_bar(segments: list[tuple[str, str, int]]) -> None:
     with ui.element("div").style(
-        f"display:flex; width:100%; height:{height}; border-radius:6px; overflow:hidden"
+        "display:flex; width:100%; height:12px; border-radius:6px; overflow:hidden"
     ):
-        for color, flex in segments:
-            if flex > 0:
-                ui.element("div").style(f"flex:{flex:.3f}; background:{color}; height:100%")
+        for color, _, count in segments:
+            if count:
+                ui.element("div").style(f"flex:{count}; background:{color}; height:100%")
+
+
+def _render_assignment_summary(rows, go_review) -> None:
+    with ui.card().classes("w-full q-pa-md q-mb-lg"):
+        ui.label(t("assignment_summary_title")).classes("text-subtitle1 font-weight-medium")
+        if not rows:
+            ui.label(t("data_no_assignments")).classes("text-grey-7")
+        for row in rows:
+            with ui.element("div").classes(
+                "w-full grid grid-cols-1 sm:grid-cols-3 gap-3 border-t q-py-sm"
+            ):
+                ui.label(row["annotator"]).classes("text-body2 font-medium")
+                with ui.column().classes("w-full gap-1"):
+                    ui.label(t("handoff_stage_species")).classes("text-caption text-grey-7")
+                    if row["video_count"]:
+                        ui.button(
+                            t(
+                                "assignment_species_progress",
+                                labeled=row["labeled"],
+                                total=row["video_count"],
+                            ),
+                            on_click=lambda name=row["annotator"]: go_review(
+                                selected_annotator=[name]
+                            ),
+                        ).props("flat dense no-caps").classes("q-pa-none")
+                        ui.linear_progress(
+                            row["labeled"] / row["video_count"], show_value=False
+                        ).props("rounded")
+                        ui.label(
+                            f"{row['cameras']} {t('col_cameras').lower()} · {row['hours']:.1f}h"
+                        ).classes("text-caption text-grey-7")
+                    else:
+                        ui.label("—").classes("text-grey-6")
+                with ui.column().classes("w-full gap-1"):
+                    ui.label(t("distance_progress_title")).classes("text-caption text-grey-7")
+                    if row["distance_total"]:
+                        ui.label(
+                            t(
+                                "distance_progress_counts",
+                                completed=row["distance_completed"],
+                                total=row["distance_total"],
+                            )
+                        ).classes("text-body2")
+                        ui.linear_progress(
+                            row["distance_completed"] / row["distance_total"], show_value=False
+                        ).props("rounded")
+                    else:
+                        ui.label("—").classes("text-grey-6")
 
 
 async def _render_deployment_overview(dp, pid, footage, go_review) -> None:
@@ -306,7 +347,7 @@ async def setup_overview():
                     ).props("outline")
         v = stats.get("videos", {})
         lb = stats.get("labeling", {})
-        total = max(int(lb.get("total_videos", 1)), 1)
+        total = int(lb.get("total_videos", 0))
         labeled = int(lb.get("labeled", 0))
         review_later = int(lb.get("review_later", 0))
         with ui.row().classes("items-center justify-between q-mb-lg"):
@@ -362,7 +403,7 @@ async def setup_overview():
                 (t("stat_total_videos"), int(v.get("total", 0))),
                 (t("stat_cameras"), int(v.get("cameras", 0))),
                 (t("stat_hours"), f"{v.get('total_hours', 0):.1f}h"),
-                (t("stat_labeled"), f"{labeled} ({100 * labeled / total:.0f}%)"),
+                (t("stat_labeled"), f"{labeled} ({100 * labeled / max(total, 1):.0f}%)"),
                 (t("stat_blank"), int(lb.get("blank", 0))),
                 (t("review_later"), review_later, "text-orange" if review_later else ""),
                 (t("stat_invalid"), int(v.get("invalid", 0)), "text-negative"),
@@ -406,28 +447,22 @@ async def setup_overview():
                                         )
                                     ).classes("text-body2 text-grey-6 text-italic")
 
-        # Annotation progress bar
-        blank = int(lb.get("blank", 0))
-        non_blank = int(lb.get("non_blank", 0))
-        unlabeled = max(total - blank - non_blank, 0)
-
-        with ui.row().classes("w-full gap-md q-mb-lg"):
-            with ui.card().classes("col q-pa-md"):
-                ui.label(t("annotation_progress")).classes(
-                    "text-subtitle1 font-weight-medium q-mb-md"
-                )
-                _render_annotation_bar(blank, non_blank, unlabeled)
-                with ui.row().classes("gap-lg q-mt-md"):
-                    for color, label, count in [
-                        (_BLANK_COLOR, t("progress_blank"), blank),
-                        (_NON_BLANK_COLOR, t("progress_non_blank"), non_blank),
-                        (_UNLABELED_COLOR, t("progress_unlabeled"), unlabeled),
-                    ]:
-                        with ui.row().classes("items-center gap-xs"):
-                            ui.element("div").style(
-                                f"width:10px; height:10px; border-radius:50%; background:{color}; flex-shrink:0"
-                            )
-                            ui.label(f"{label}: {count}").classes("text-body2")
+        segments = [
+            (_BLANK_COLOR, t("progress_blank"), int(lb.get("blank", 0))),
+            (_NON_BLANK_COLOR, t("progress_non_blank"), int(lb.get("non_blank", 0))),
+            (_REFERENCE_COLOR, t("progress_reference"), int(lb.get("reference", 0))),
+            (_UNLABELED_COLOR, t("progress_unlabeled"), total - labeled),
+        ]
+        with ui.card().classes("w-full q-pa-md q-mb-lg"):
+            ui.label(t("annotation_progress")).classes("text-subtitle1 font-weight-medium q-mb-md")
+            _render_annotation_bar(segments)
+            with ui.row().classes("gap-lg q-mt-md"):
+                for color, label, count in segments:
+                    with ui.row().classes("items-center gap-xs"):
+                        ui.element("div").style(
+                            f"width:10px; height:10px; border-radius:50%; background:{color}; flex-shrink:0"
+                        )
+                        ui.label(f"{label}: {count}").classes("text-body2")
 
         species_map = await run.io_bound(dp.get_species_display_map, get_language())
         distance_progress = await run.io_bound(dp.get_distance_review_progress, pid) if pid else []
@@ -435,65 +470,9 @@ async def setup_overview():
 
         await _render_deployment_overview(dp, pid, stats["deployment_footage"], go_review)
 
-        # Assignment summary
-        with ui.row().classes("w-full gap-md q-mb-lg"):
-            with ui.card().classes("col q-pa-md"):
-                with ui.row().classes("w-full justify-between items-center q-mb-md"):
-                    ui.label(t("assignment_summary_title")).classes(
-                        "text-subtitle1 font-weight-medium"
-                    )
-                    with ui.row().classes("gap-lg"):
-                        for color, label in [
-                            (_BLANK_COLOR, t("progress_blank")),
-                            (_NON_BLANK_COLOR, t("progress_non_blank")),
-                            (_UNLABELED_COLOR, t("progress_unlabeled")),
-                        ]:
-                            with ui.row().classes("items-center gap-xs"):
-                                ui.element("div").style(
-                                    f"width:8px; height:8px; border-radius:50%; background:{color}; flex-shrink:0"
-                                )
-                                ui.label(label).classes("text-caption text-grey-6")
-                assignment_summary = await run.io_bound(dp.get_assignment_summary, pid)
-                if assignment_summary:
-                    with ui.column().classes("w-full gap-xs"):
-                        for r in assignment_summary:
-                            r_blank = int(r["blank"])
-                            r_non_blank = int(r["labeled"]) - r_blank
-                            r_unlabeled = max(int(r["video_count"]) - int(r["labeled"]), 0)
-                            labeled_pct = round(100 * r["labeled"] / max(r["video_count"], 1))
-                            with (
-                                ui.column()
-                                .classes("w-full q-px-sm q-py-xs cursor-pointer rounded")
-                                .style("transition: background 0.15s")
-                                .on(
-                                    "click",
-                                    lambda an=r["annotator"]: go_review(selected_annotator=[an]),
-                                )
-                                .on(
-                                    "mouseover",
-                                    lambda e: e.sender.style("background: rgba(0,0,0,0.06)"),
-                                )
-                                .on(
-                                    "mouseout", lambda e: e.sender.style("background: transparent")
-                                )
-                            ):
-                                with ui.row().classes(
-                                    "w-full justify-between items-baseline q-mb-xs"
-                                ):
-                                    ui.label(r["annotator"] or "—").classes(
-                                        "text-body2 font-weight-medium"
-                                    )
-                                    ui.label(
-                                        f"{labeled_pct}% {t('col_labeled').lower()} · "
-                                        f"{r['video_count']} {t('col_videos').lower()} · "
-                                        f"{r['cameras']} {t('col_cameras').lower()} · "
-                                        f"{r['hours']:.1f}h"
-                                    ).classes("text-caption text-grey-6")
-                                _render_annotation_bar(
-                                    r_blank, r_non_blank, r_unlabeled, height="8px"
-                                )
-                else:
-                    ui.label(t("no_camera_data")).classes("text-grey-5")
+        assignment_summary = await run.io_bound(dp.get_assignment_summary, pid)
+        _render_assignment_summary(assignment_summary, go_review)
+
         # Location map
         if locations:
             with ui.row().classes("w-full gap-md q-mb-lg"):
