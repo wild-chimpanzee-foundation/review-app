@@ -77,9 +77,9 @@ identifiers and precise timestamps are under **Technical details**.
    preparation remain a draft; later redistribution does not change saved ZIPs.
 3. Select a prepared assignment and **Save delivery folder**. Enter a folder path
    on the computer running the app, outside the project footage folders. The new
-   folder contains **assignment.zip**. Optionally enable **Include footage** to
-   copy assigned and required reference videos alongside it, in separate media-root
-   subfolders. Leave footage off if the recipient can access the original folders.
+   folder contains a setup ZIP with the same name as the folder. Optionally enable
+   **Include footage** to copy assigned and required reference videos into numbered
+   folders such as `Footage-01`. Leave footage off if the recipient can access the original folders.
    Select multiple assignments to save their delivery folders together. During
    copying, a progress bar counts attempted files, including missing files and
    failures. Results show one compact entry per recipient; expand it for paths

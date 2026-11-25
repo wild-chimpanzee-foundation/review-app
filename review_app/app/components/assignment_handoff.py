@@ -1,7 +1,6 @@
 """Assignment controls; serialization, scope and acceptance stay in the backend."""
 
 import asyncio
-import re
 import threading
 
 from nicegui import app, run, ui
@@ -19,12 +18,7 @@ from review_app.app.utils import (
     user_error_message,
 )
 from review_app.backend.annotation_package.archive import MAX_ARCHIVE_BYTES
-
-
-def assignment_filename(direction, recipient, assignment_id):
-    """Keep names recognizable without allowing paths or unsafe filename characters."""
-    name = re.sub(r"[^\w.-]+", "_", recipient).strip("._")[:80] or "recipient"
-    return f"{direction}-{name}-{assignment_id}.zip"
+from review_app.backend.annotation_package.naming import footage_folder
 
 
 def assignment_stage_label(row):
@@ -160,7 +154,14 @@ def render_open_assignment(on_complete, *, show_upload=True):
                 )
                 ui.label(t("handoff_roots_help")).classes("text-caption")
                 for index, (root, paths) in enumerate(info["roots"].items(), 1):
-                    ui.label(t("handoff_root_files", count=len(paths), example=paths[0]))
+                    ui.label(
+                        t(
+                            "handoff_root_files",
+                            count=len(paths),
+                            example=paths[0],
+                            folder=footage_folder(index),
+                        )
+                    )
                     root_inputs[root] = ui.input(t("handoff_root", number=index)).classes("w-full")
                     root_inputs[root].on_value_change(folders_changed)
         except Exception as exc:
@@ -264,7 +265,7 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
             with results:
                 with (
                     ui.expansion(
-                        item["recipient"],
+                        f"{t('assign_reference', **item)} · {item['recipient']}",
                         icon="warning_amber" if warning else "check_circle_outline",
                     )
                     .classes("w-full border rounded")
@@ -286,14 +287,15 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
                                 path=result.path,
                             )
                         ).classes("text-caption break-all")
-                        for root, path in result.media_roots.items():
-                            ui.label(f"{root}: {path}").classes("text-caption break-all")
+                        for path in result.media_roots.values():
+                            ui.label(path).classes("text-caption break-all")
                         for video_id in result.missing_video_ids:
-                            ui.label(t("assign_delivery_missing", video=video_id)).classes(
-                                "text-caption text-warning break-all"
-                            )
+                            if video_path := result.problem_paths.get(video_id):
+                                ui.label(t("assign_delivery_missing", video=video_path)).classes(
+                                    "text-caption text-warning break-all"
+                                )
                         for key, error in result.failures.items():
-                            ui.label(f"{key}: {error}").classes(
+                            ui.label(f"{result.problem_paths.get(key, '')}: {error}").classes(
                                 "text-caption text-negative break-all"
                             )
                 if with_footage:
@@ -389,11 +391,15 @@ def render_assignment_delivery(dp, project_id, binding, require_project):
                                     path=result.path,
                                 )
                             )
+                            lines.extend(result.media_roots.values())
                             lines.extend(
-                                f"{root}: {path}" for root, path in result.media_roots.items()
+                                t("assign_delivery_missing", video=result.problem_paths[key])
+                                for key in result.missing_video_ids
+                                if key in result.problem_paths
                             )
                             lines.extend(
-                                f"{key}: {error}" for key, error in result.failures.items()
+                                f"{result.problem_paths.get(key, '')}: {error}"
+                                for key, error in result.failures.items()
                             )
                     except Exception as exc:
                         message = f"{item['recipient']}: {_error_message(exc)}"
@@ -520,6 +526,8 @@ def render_return_acceptance(dp, project_id, require_project):
                 ui.label(
                     t(
                         "handoff_preview_scope",
+                        assignment_reference=result.assignment_reference,
+                        recipient=result.recipient,
                         stage_label=assignment_stage_label(
                             {"stage": result.stage, "target_species": result.target_species}
                         ),

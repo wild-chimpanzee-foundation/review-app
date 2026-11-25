@@ -18,6 +18,8 @@ DISTANCE_SETTINGS_VERSION = 5
 MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 MEMBERS = ("manifest.json", "context.json", "work.json")
+# Older app versions can read the same ZIP members and ignore this display metadata.
+_ASSIGNMENT_NUMBER_PREFIX = b"review-app.assignment-number="
 
 _NULL = type(None)
 TEXT = (str,)
@@ -326,6 +328,10 @@ def _json(value):
 
 
 def encode_archive(manifest: dict, context: dict, work: list[dict]) -> bytes:
+    manifest = manifest.copy()
+    number = manifest.pop("assignment_number", None)
+    if number is not None and (type(number) is not int or not 1 <= number <= 2_147_483_647):
+        raise ValueError("Invalid assignment number")
     # Folder reviews are setup-only; keep the return on its existing wire format.
     if manifest["direction"] == "return" and manifest["version"] in {
         FOLDER_REVIEW_VERSION,
@@ -342,6 +348,8 @@ def encode_archive(manifest: dict, context: dict, work: list[dict]) -> bytes:
     output = io.BytesIO()
     total = 0
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        if number is not None:
+            archive.comment = _ASSIGNMENT_NUMBER_PREFIX + str(number).encode("ascii")
         for name, value in zip(MEMBERS, (manifest, context, work), strict=True):
             content = _json(value).encode("utf-8")
             total += len(content)
@@ -372,6 +380,11 @@ def decode_archive(data: bytes) -> tuple[dict, dict, list[dict]]:
         raise ValueError("Assignment exceeds the archive size limit")
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            number = (
+                archive.comment[len(_ASSIGNMENT_NUMBER_PREFIX) :]
+                if archive.comment.startswith(_ASSIGNMENT_NUMBER_PREFIX)
+                else None
+            )
             if len(archive.namelist()) != len(MEMBERS) or set(archive.namelist()) != set(MEMBERS):
                 raise ValueError("Assignment archive must contain exactly the expected members")
             if sum(info.file_size for info in archive.infolist()) > MAX_UNCOMPRESSED_BYTES:
@@ -391,6 +404,10 @@ def decode_archive(data: bytes) -> tuple[dict, dict, list[dict]]:
                 )
         manifest, context, work = values
         validate_snapshot(manifest, context, work)
+        if number is not None:
+            if len(number) > 10 or not number.isdigit() or not 1 <= int(number) <= 2_147_483_647:
+                raise ValueError("Invalid assignment number")
+            manifest["assignment_number"] = int(number)
         return manifest, context, work
     except (
         zipfile.BadZipFile,

@@ -1,12 +1,11 @@
 """Compact assignment workspace with focused creation and return-acceptance flows."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from nicegui import run, ui
 
 from review_app.app.components.assignment_handoff import (
     _error_message,
-    assignment_filename,
     assignment_stage_label,
     render_assignment_delivery,
     render_return_acceptance,
@@ -14,6 +13,7 @@ from review_app.app.components.assignment_handoff import (
 from review_app.app.components.assignment_video_table import AssignmentVideoTable
 from review_app.app.state import get_active_project_id
 from review_app.app.translations import get_language, t
+from review_app.backend.annotation_package.naming import package_stem
 
 from .assignment_bulk import render_bulk_actions
 from .assignment_creation import render_assignment_creation
@@ -32,6 +32,7 @@ def render_assignment_details(dp, project_id, binding, require_project, on_close
         if on_close is not None:
             ui.button(icon="close", on_click=on_close).props("flat round").tooltip(t("close"))
     ui.label(assignment_stage_label(binding)).classes("text-subtitle1")
+    ui.label(t("assign_reference", **binding))
     for label in workload_labels(binding, camera_names=" · ".join(binding["camera_ids"])):
         ui.label(label)
     ui.label(t("assign_prepared_date", date=assignment_date(binding["created_at"]))).classes(
@@ -54,14 +55,8 @@ def render_assignment_details(dp, project_id, binding, require_project, on_close
             require_project()
             raw = await run.io_bound(dp.export_assignment_return, project_id)
             require_project()
-            ui.download(
-                raw,
-                assignment_filename(
-                    "return",
-                    binding["recipient"],
-                    binding["assignment_id"],
-                ),
-            )
+            stem = package_stem(binding, exported_at=datetime.now(timezone.utc))
+            ui.download(raw, f"{stem}.zip")
             if working:
                 ui.notify(t("data_return_downloaded"), type="positive")
         except Exception as exc:
@@ -90,7 +85,7 @@ def render_assignment_details(dp, project_id, binding, require_project, on_close
                 media_content.clear()
                 roots = {
                     key: index
-                    for index, key in enumerate(dict.fromkeys(row["root_id"] for row in media), 1)
+                    for index, key in enumerate(sorted({row["root_id"] for row in media}), 1)
                 }
                 with media_content:
                     table = AssignmentVideoTable(
@@ -240,6 +235,7 @@ def render_assignments(dp, project_id: str) -> None:
             rows = [
                 {
                     "id": row["id"],
+                    "assignment_reference": row["assignment_reference"],
                     "recipient": row["recipient"],
                     "review": assignment_stage_label(row),
                     "videos": row["video_count"],
@@ -270,6 +266,7 @@ def render_assignments(dp, project_id: str) -> None:
                             "sortable": True,
                         }
                         for key, label in (
+                            ("assignment_reference", "assign_reference_column"),
                             ("recipient", "handoff_recipient"),
                             ("review", "handoff_stage"),
                             ("videos", "distribution_videos_col"),

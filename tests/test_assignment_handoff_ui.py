@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import re
 import threading
 import zipfile
 
@@ -9,34 +10,18 @@ import pytest
 from nicegui import app, ui
 from nicegui.elements.upload_files import SmallFileUpload
 from nicegui.testing import User
-from review_app.app.components.assignment_handoff import (
-    assignment_filename,
-    render_open_assignment,
-)
+from review_app.app.components.assignment_handoff import render_open_assignment
 from review_app.app.pages.data_assignments.assignments import render_assignments
 from review_app.app.pages.data_assignments.legacy_import import render_legacy_annotations_import
 from review_app.app.state import get_active_project_id, set_data_provider
 from review_app.app.translations import t
 from review_app.backend.annotation_package.delivery import CopyResult
 from review_app.backend.annotation_package.detection import inspect_legacy_package
+from review_app.backend.annotation_package.naming import package_stem
 from review_app.backend.annotation_package.scope import AssignmentRequest
 from review_app.backend.db.models import Deployment, Video
 
 pytest_plugins = ["nicegui.testing.user_plugin"]
-
-
-@pytest.mark.parametrize("direction", ["assignment", "return"])
-@pytest.mark.parametrize(
-    ("recipient", "safe_name"),
-    [("Alice Smith", "Alice_Smith"), ("../Alice/Bob", "Alice_Bob"), ("Élodie", "Élodie")],
-)
-def test_download_filename_keeps_recipient_without_path_characters(
-    direction, recipient, safe_name
-):
-    assert (
-        assignment_filename(direction, recipient, "assignment-id")
-        == f"{direction}-{safe_name}-assignment-id.zip"
-    )
 
 
 def upload_element(user):
@@ -310,6 +295,7 @@ async def test_new_recipient_can_be_added_without_leaving_creation(user: User, h
     saved = dp.list_assignments(project.id)[0]
     await user.should_not_see(saved["assignment_id"], kind=ui.label)
     user.find(t("assign_view"), kind=ui.button).click()
+    await user.should_see(t("assign_reference", assignment_reference="001"))
     await user.should_see(t("assign_saved_scope"), kind=ui.expansion)
     with user:
         next(iter(user.find(t("assign_saved_scope"), kind=ui.expansion).elements)).set_value(True)
@@ -334,9 +320,10 @@ async def test_save_delivery_defaults_to_zip_only(user: User, handoff_ui, tmp_pa
     assert not include.value
     user.find(t("handoff_copy_output")).type(str(tmp_path / "delivery"))
     user.find(marker="save-delivery").click()
-    path = tmp_path / "delivery" / f"assignment-{saved.assignment_id}"
+    stem = package_stem(dp.list_assignments(project.id)[0])
+    path = tmp_path / "delivery" / stem
     await user.should_see(t("assign_delivery_saved", path=str(path)))
-    assert (path / "assignment.zip").read_bytes() == dp.export_assignment(saved.id)
+    assert (path / f"{stem}.zip").read_bytes() == dp.export_assignment(saved.id)
     assert not list(path.rglob("*.mp4"))
 
 
@@ -357,11 +344,12 @@ async def test_saved_assignment_delivery_control(user: User, handoff_ui, tmp_pat
     user.find(t("handoff_copy_output")).type(str(tmp_path / "delivery"))
     user.find(marker="save-delivery").click()
     await user.should_see(marker="delivery-copy-progress")
-    path = tmp_path / "delivery" / f"assignment-{saved.assignment_id}"
+    stem = package_stem(dp.list_assignments(project.id)[0])
+    path = tmp_path / "delivery" / stem
     await user.should_see(t("handoff_copy_result", copied=2, missing=0, failed=0, path=str(path)))
     assert len(list(path.rglob("*.mp4"))) == 2
     assert next(iter(user.find(marker="save-delivery").elements)).enabled
-    assert (path / "assignment.zip").read_bytes() == dp.export_assignment(saved.id)
+    assert (path / f"{stem}.zip").read_bytes() == dp.export_assignment(saved.id)
 
 
 async def test_delivery_copy_progress_updates_while_copy_paused_and_resets_on_retry(
@@ -471,7 +459,8 @@ async def test_species_roundtrip_through_prepare_open_return_preview_accept(
     user.find(marker="save-packages").click()
     await user.should_see(t("assign_download_saved", count=1, path=str(tmp_path)))
     (package,) = tmp_path.glob("*.zip")
-    assert package.name == f"setup-alice-{saved['assignment_id']}.zip"
+    assert package.name == f"{package_stem(saved)}.zip"
+    assert re.fullmatch(r"Test_Project-species-alice-001-setup-\d{8}-\d{6}Z\.zip", package.name)
     setup = package.read_bytes()
     info = dp.inspect_assignment(setup)
     assert info["recipient"] == "alice" and info["video_count"] == 2
@@ -497,7 +486,7 @@ async def test_species_roundtrip_through_prepare_open_return_preview_accept(
     await user.open("/handoff-working")
     user.find(t("handoff_return"), kind=ui.button).click()
     returned = (await user.download.next()).content
-    assert filenames[-1] == f"return-alice-{info['assignment_id']}.zip"
+    assert re.fullmatch(r"Test_Project-species-alice-001-return-\d{8}-\d{6}Z\.zip", filenames[-1])
     origin_id = next(
         vid
         for vid in dp.get_assignment_video_ids(project.id)
@@ -629,12 +618,17 @@ async def test_bulk_assignment_delivery_and_removal(user: User, handoff_ui, tmp_
     result_details = user.find(marker="delivery-result").elements
     assert len(result_details) == 2
     assert all(isinstance(detail, ui.expansion) and not detail.value for detail in result_details)
-    assert {detail.text for detail in result_details} == {"alice", "bob"}
+    bindings = {row["id"]: row for row in dp.list_assignments(project.id)}
+    assert {detail.text for detail in result_details} == {
+        f"{t('assign_reference', **bindings[item.id])} · {item.recipient}" for item in saved[:2]
+    }
+    stems = {key: package_stem(row) for key, row in bindings.items()}
     for item in saved[:2]:
-        path = tmp_path / f"assignment-{item.assignment_id}"
+        stem = stems[item.id]
+        path = tmp_path / stem
         await user.should_see(t("assign_delivery_saved", path=str(path)))
-        assert (path / "assignment.zip").read_bytes() == dp.export_assignment(item.id)
-    assert not (tmp_path / f"assignment-{saved[2].assignment_id}").exists()
+        assert (path / f"{stem}.zip").read_bytes() == dp.export_assignment(item.id)
+    assert not (tmp_path / stems[saved[2].id]).exists()
     user.find(t("close"), kind=ui.button).click()
     user.find(marker="remove-selected-assignments").click()
     await user.should_see(t("assign_remove_selected_title", count=2))

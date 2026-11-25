@@ -85,9 +85,9 @@ sont dans **Détails techniques**.
    Choisissez un dossier sur l’ordinateur exécutant l’application, hors des vidéos
    du projet. **Parcourir…** ouvre le sélecteur système ; le chemin reste aussi
    saisissable manuellement. Sous Linux, le sélecteur nécessite Zenity ou KDialog.
-   Le nouveau dossier contient **assignment.zip**. L’option **Inclure
+   Le nouveau dossier contient un ZIP de préparation du même nom. L’option **Inclure
    les vidéos** copie aussi le travail et les références nécessaires dans des
-   sous-dossiers par racine. Laissez-la désactivée si les dossiers d’origine sont
+   dossiers numérotés comme `Footage-01`. Laissez-la désactivée si les dossiers d’origine sont
    accessibles au destinataire. Sélectionnez plusieurs affectations pour enregistrer
    leurs dossiers ensemble. Pendant la copie, la barre de progression compte les
    fichiers traités, y compris les fichiers manquants et les échecs. Les résultats

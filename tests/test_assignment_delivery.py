@@ -31,6 +31,10 @@ def test_copy_saved_scope_multi_root_and_open(provider_with_project, tmp_path):
     assert result.failures == {}
     assert progress == [(n, len(ids)) for n in range(1, len(ids) + 1)]
     assert len(list(Path(result.path).rglob("a.mp4"))) == 2
+    assert {Path(path).name for path in result.media_roots.values()} == {
+        "Footage-01",
+        "Footage-02",
+    }
     assert not list(Path(result.path).rglob("unrelated.mp4"))
     assert dp.export_assignment(saved.id) == package
     opened = dp.open_assignment(package, "Delivered", result.media_roots)
@@ -73,6 +77,10 @@ def test_copy_reports_missing_and_failures(provider_with_project, tmp_path, monk
     assert result.copied_count == 0
     assert result.missing_video_ids == (ids[0],)
     assert result.failures == {ids[1]: "copy denied"}
+    assert result.problem_paths == {
+        ids[0]: f"Footage-01/{missing.relative_to(root.path).as_posix()}",
+        ids[1]: f"Footage-01/{interrupted.relative_to(root.path).as_posix()}",
+    }
     assert all(Path(path).is_dir() for path in result.media_roots.values())
     assert not [path for path in Path(result.path).rglob("*") if path.is_file()]
 

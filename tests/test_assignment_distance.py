@@ -13,6 +13,7 @@ from review_app.app.setup_wizard import SetupWizard
 from review_app.app.state import get_active_project_id, set_data_provider
 from review_app.app.translations import t
 from review_app.backend.annotation_package.archive import decode_archive, encode_archive
+from review_app.backend.annotation_package.naming import package_stem
 from review_app.backend.annotation_package.scope import AssignmentRequest
 from review_app.backend.db.models import (
     Behavior,
@@ -912,16 +913,17 @@ async def test_distance_ui_prepare_copy_open_return_preview_accept(
         t("handoff_media_summary", video_count=2, reference_video_count=1, media_count=3)
     )
     user.find(marker="save-delivery").click()
-    delivery = tmp_path / "delivery" / f"assignment-{saved['assignment_id']}"
+    stem = package_stem(saved)
+    assert "-distance-deer-" in stem
+    delivery = tmp_path / "delivery" / stem
     await user.should_see(
         t("handoff_copy_result", copied=3, missing=0, failed=0, path=str(delivery)), retries=20
     )
-    setup = (delivery / "assignment.zip").read_bytes()
+    setup = (delivery / f"{stem}.zip").read_bytes()
     manifest, context, _ = decode_archive(setup)
     assert manifest["assignment_id"] == saved["assignment_id"]
     assert len(context["media"]) == 3
-    root_id = manifest["roots"][0]
-    delivered_root = delivery / root_id
+    delivered_root = delivery / "Footage-01"
     (delivered_root / "unlisted.mp4").touch()
 
     await user.open("/distance-handoff-open")
@@ -1162,7 +1164,12 @@ async def test_distance_ui_empty_replacement_warns_and_preserves_omitted_task(
     await user.should_see(t("handoff_remove_warning"))
     await user.should_see(t("handoff_replace_warning"))
     await user.should_see(
-        t("handoff_preview_scope", stage_label=t("handoff_stage_distance") + " — deer")
+        t(
+            "handoff_preview_scope",
+            assignment_reference=dp.inspect_assignment(setup)["assignment_reference"],
+            recipient="alice",
+            stage_label=t("handoff_stage_distance") + " — deer",
+        )
     )
     user.find(t("handoff_accept"), kind=ui.button).click()
     await user.should_see(t("handoff_accepted"))

@@ -77,12 +77,17 @@ def prepare(session: Session, project_id: str, request: AssignmentRequest) -> Pr
         }
         version = DISTANCE_SETTINGS_VERSION
     assignment_id = str(uuid.uuid4())
+    assignment_number = (
+        session.query(HandoffAssignment).filter_by(project_id=project_id, role="origin").count()
+        + 1
+    )
     now = datetime.now(timezone.utc)
     manifest = {
         "format": FORMAT,
         "version": version,
         "direction": "setup",
         "assignment_id": assignment_id,
+        "assignment_number": assignment_number,
         "source_project_id": project_id,
         "recipient": request.recipient.strip(),
         "stage": request.stage,
@@ -102,6 +107,8 @@ def prepare(session: Session, project_id: str, request: AssignmentRequest) -> Pr
         target_species=request.target_species,
         created_at=now,
         scope={
+            "assignment_number": assignment_number,
+            "project_name": context["project_name"],
             "work_keys": manifest["work_keys"],
             "roots": manifest["roots"],
             "media": context["media"],
@@ -189,6 +196,8 @@ def open_setup(
         target_species=manifest["target_species"],
         created_at=timestamp(manifest["created_at"]),
         scope={
+            "assignment_number": manifest.get("assignment_number"),
+            "project_name": context["project_name"],
             "work_keys": manifest["work_keys"],
             "roots": manifest["roots"],
             "media": context["media"],
@@ -348,6 +357,10 @@ def plan_return(session, project_id, data, policy):
     if binding is None or manifest["source_project_id"] != project_id:
         raise ValueError("Return does not belong to an originating assignment in this project")
     expected, original, _ = decode_archive(binding.setup_archive)
+    if "assignment_number" in manifest and manifest["assignment_number"] != expected.get(
+        "assignment_number"
+    ):
+        raise ValueError("Returned assignment number differs from the saved handout")
     for key in (
         "assignment_id",
         "source_project_id",

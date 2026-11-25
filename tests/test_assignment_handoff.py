@@ -187,6 +187,7 @@ def unpack(prepared):
 
 
 def repack(manifest, context, work, extra=None):
+    manifest = {key: value for key, value in manifest.items() if key != "assignment_number"}
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for name, value in zip(archive.MEMBERS, (manifest, context, work), strict=True):

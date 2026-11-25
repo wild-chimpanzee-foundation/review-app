@@ -59,6 +59,8 @@ class ReturnPreview:
     stage: str = "species"
     target_species: str | None = None
     species_context_changed: bool = False
+    assignment_reference: str = ""
+    recipient: str = ""
 
 
 @dataclass(frozen=True)

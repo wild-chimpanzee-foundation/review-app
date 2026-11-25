@@ -1,10 +1,12 @@
 """Assignment handoff interface. Graph and format mechanics stay inside the module."""
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
 from review_app.backend.annotation_package import delivery, handoff
 from review_app.backend.annotation_package.archive import decode_archive
+from review_app.backend.annotation_package.naming import assignment_reference, package_stem
 from review_app.backend.annotation_package.scope import (
     AssignmentRequest,
     PreparedAssignment,
@@ -14,6 +16,23 @@ from review_app.backend.db.models import HandoffAssignment, ProjectDir, Species,
 from review_app.backend.path_matching import normalize_path_str
 from review_app.backend.provider.assignment_service import write_video_allocations
 from review_app.backend.provider.base import ProviderBase
+
+
+def _assignment_naming_fields(row):
+    project_name = row.scope.get("project_name")
+    number = row.scope.get("assignment_number")
+    if project_name is None:
+        manifest, context, _ = decode_archive(row.setup_archive)
+        project_name = context["project_name"]
+        number = manifest.get("assignment_number")
+    return {
+        "project_name": project_name,
+        "assignment_reference": assignment_reference(row.assignment_id, number),
+        "recipient": row.recipient,
+        "stage": row.stage,
+        "target_species": row.target_species,
+        "created_at": row.created_at.isoformat(),
+    }
 
 
 def summarize_workload(rows):
@@ -133,15 +152,12 @@ class AssignmentHandoffMixin(ProviderBase):
                         "id": row.id,
                         "assignment_id": row.assignment_id,
                         "role": row.role,
-                        "recipient": row.recipient,
-                        "stage": row.stage,
-                        "target_species": row.target_species,
+                        **_assignment_naming_fields(row),
                         "video_count": len(row.scope["work_keys"]),
                         **workload,
                         "reference_video_count": len(row.scope["media"])
                         - len(row.scope["work_keys"]),
                         "media_count": len(row.scope["media"]),
-                        "created_at": row.created_at.isoformat(),
                     }
                 )
             return assignments
@@ -195,6 +211,9 @@ class AssignmentHandoffMixin(ProviderBase):
         ) + sum(int(bool(unit.get("task") and unit["task"].get("rejected_ai"))) for unit in work)
         return {
             "assignment_id": manifest["assignment_id"],
+            "assignment_reference": assignment_reference(
+                manifest["assignment_id"], manifest.get("assignment_number")
+            ),
             "recipient": manifest["recipient"],
             "stage": manifest["stage"],
             "target_species": manifest["target_species"],
@@ -272,7 +291,12 @@ class AssignmentHandoffMixin(ProviderBase):
         """Read-only, policy-specific impact preview; invalid returns raise ValueError."""
         with self.Session() as session:
             session.connection().exec_driver_sql("BEGIN")
-            return handoff.plan_return(session, project_id, data, policy)[3]
+            binding, _, _, preview, _ = handoff.plan_return(session, project_id, data, policy)
+            return replace(
+                preview,
+                assignment_reference=_assignment_naming_fields(binding)["assignment_reference"],
+                recipient=binding.recipient,
+            )
 
     def accept_assignment_return(
         self, project_id: str, data: bytes, policy: str, preview_token: str
@@ -286,10 +310,10 @@ class AssignmentHandoffMixin(ProviderBase):
         """Deliver only saved media, using current local paths and separate root namespaces."""
         with self.Session() as session:
             session.connection().exec_driver_sql("BEGIN")
-            portable_id, roots, root_ids, media = delivery.resolve_delivery(session, assignment_id)
-        return delivery.copy_media(
-            portable_id, roots, root_ids, media, output_dir, progress_callback
-        )
+            binding = session.get(HandoffAssignment, assignment_id)
+            roots, folders, media = delivery.resolve_delivery(session, binding)
+            stem = package_stem(_assignment_naming_fields(binding))
+        return delivery.copy_media(stem, roots, folders, media, output_dir, progress_callback)
 
     def save_assignment_delivery(
         self,
@@ -307,20 +331,19 @@ class AssignmentHandoffMixin(ProviderBase):
             if binding is None or binding.project_id != project_id:
                 raise ValueError("Assignment not found in this project")
             archive = handoff.export(session, assignment_id)
+            stem = package_stem(_assignment_naming_fields(binding))
             if include_footage:
-                portable_id, roots, root_ids, media = delivery.resolve_delivery(
-                    session, assignment_id
-                )
+                roots, folders, media = delivery.resolve_delivery(session, binding)
             else:
-                portable_id, root_ids, media = binding.assignment_id, [], []
+                folders, media = {}, []
                 roots = [
                     Path(normalize_path_str(root.path)).expanduser().resolve()
                     for root in session.query(ProjectDir).filter_by(project_id=project_id)
                 ]
         return delivery.copy_media(
-            portable_id,
+            stem,
             roots,
-            root_ids,
+            folders,
             media,
             output_dir,
             progress_callback,
@@ -334,8 +357,6 @@ class AssignmentHandoffMixin(ProviderBase):
 
     def save_assignment_packages(self, project_id, assignment_ids, output_dir):
         """Write every frozen setup archive to one folder; never overwrite existing files."""
-        import re
-
         if not isinstance(output_dir, (str, Path)) or not str(output_dir).strip():
             raise ValueError("Choose an output folder")
         destination = Path(output_dir).expanduser().resolve()
@@ -348,14 +369,14 @@ class AssignmentHandoffMixin(ProviderBase):
                     raise ValueError("Assignment not found in this project")
                 if row.removed_at is not None:
                     raise ValueError("Assignment was removed; choose a different assignment")
-                rows.append(row)
+                rows.append((package_stem(_assignment_naming_fields(row)), row.setup_archive))
         saved = []
-        for row in rows:
-            safe = re.sub(r"[^\w.-]+", "_", row.recipient).strip("._")[:80] or "recipient"
-            filename = f"setup-{safe}-{row.assignment_id}.zip"
-            target = destination / filename
-            if target.exists():
-                raise ValueError(f"File already exists: {target}")
-            target.write_bytes(row.setup_archive)
+        for stem, archive in rows:
+            target = destination / f"{stem}.zip"
+            try:
+                with target.open("xb") as file:
+                    file.write(archive)
+            except FileExistsError as exc:
+                raise ValueError(f"File already exists: {target}") from exc
             saved.append(target)
         return saved

@@ -18,7 +18,9 @@ Exports the raw model predictions as a CSV.
 
 ## Assignment delivery
 
-Use **Import / Export → Assignments** to prepare assignments, then **Save delivery folder**. This writes `assignment.zip` and optionally copies the required footage into a new folder on the computer running the app; it is not a browser download. The progress bar reports attempted files, and the result lists copied, missing, and failed files. Send the delivery folder to the recipient. Opening received assignments and legacy setup bundles remains in the project picker — see [Getting started](getting-started.md).
+Use **Import / Export → Assignments** to prepare assignments, then **Save delivery folder**. The app saves the setup ZIP and any selected footage on the computer running the app. The ZIP and its delivery folder share a name such as `Lope-species-Alice-014-setup-20261125-143012Z`. Distance ZIPs include the target species after `distance`. Send the delivery folder to the recipient, who can open the ZIP from the project picker. See [Getting started](getting-started.md).
+
+The assignment number stays the same on return ZIPs. The setup timestamp records when the assignment was prepared. The return timestamp records when progress was downloaded. Both use UTC.
 
 Use a recipient build that supports assignment format v2 for packages with deployment records, such as those containing catalog metadata or folder links. A build limited to v1 cannot open these packages. Builds with v2 support also open v1 assignments. A Distance package with saved measurements linked to deleted reference frames requires assignment format v3 support.
 

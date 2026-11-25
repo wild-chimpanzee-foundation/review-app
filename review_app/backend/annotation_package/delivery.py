@@ -2,13 +2,13 @@
 
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from review_app.backend.annotation_package.archive import decode_archive
+from review_app.backend.annotation_package.naming import footage_folder
 from review_app.backend.annotation_package.scope import bound_videos, safe_relative
-from review_app.backend.db.models import HandoffAssignment, HandoffIdentityMap, ProjectDir, Video
+from review_app.backend.db.models import HandoffIdentityMap, ProjectDir, Video
 from review_app.backend.path_matching import normalize_path_str
 
 
@@ -19,21 +19,21 @@ class CopyResult:
     copied_count: int
     missing_video_ids: tuple[str, ...]
     failures: dict[str, str]
+    problem_paths: dict[str, str] = field(default_factory=dict)
 
 
-def resolve_delivery(session, assignment_id):
+def resolve_delivery(session, binding):
     """Freeze source paths while retaining the original root-relative destinations."""
-    binding = session.get(HandoffAssignment, assignment_id)
     if binding is None or binding.role != "origin" or binding.removed_at is not None:
         raise ValueError("Choose an originating saved assignment")
-    manifest, context, _ = decode_archive(binding.setup_archive)
+    folders = {key: footage_folder(i) for i, key in enumerate(binding.scope["roots"], 1)}
     videos = bound_videos(session, binding)
     roots = [
         Path(normalize_path_str(row.path)).expanduser().resolve()
         for row in session.query(ProjectDir).filter_by(project_id=binding.project_id)
     ]
     media = []
-    for row in context["media"]:
+    for row in binding.scope["media"]:
         video = videos.get(row["video_id"])
         if video is None:
             mapping = session.get(HandoffIdentityMap, (binding.id, "video", row["video_id"]))
@@ -48,15 +48,15 @@ def resolve_delivery(session, assignment_id):
             source = (Path(root.path) / row["video_path"]).resolve()
         if not any(source.is_relative_to(root) for root in roots):
             raise ValueError("Assignment footage escapes its registered project folders")
-        relative = Path(safe_relative(row["root_id"])) / safe_relative(row["video_path"])
+        relative = Path(folders[row["root_id"]]) / safe_relative(row["video_path"])
         media.append((row["video_id"], source, relative))
-    return manifest["assignment_id"], roots, manifest["roots"], media
+    return roots, folders, media
 
 
 def copy_media(
-    assignment_id,
+    stem,
     project_roots,
-    root_ids,
+    footage_folders,
     media,
     output_dir,
     progress_callback=None,
@@ -70,13 +70,13 @@ def copy_media(
     """
     if not isinstance(output_dir, (str, Path)) or not str(output_dir).strip():
         raise ValueError("Choose an output folder outside the project footage folders")
-    destination = Path(output_dir).expanduser().resolve() / f"assignment-{assignment_id}"
+    destination = Path(output_dir).expanduser().resolve() / stem
     if any(destination.is_relative_to(root) for root in project_roots):
         raise ValueError("Delivery must be outside the project footage folders")
     destination.mkdir(parents=True, exist_ok=False)
     if setup_archive is not None:
-        (destination / "assignment.zip").write_bytes(setup_archive)
-    media_roots = {key: str(destination / safe_relative(key)) for key in root_ids}
+        (destination / f"{stem}.zip").write_bytes(setup_archive)
+    media_roots = {key: str(destination / folder) for key, folder in footage_folders.items()}
     for path in media_roots.values():
         Path(path).mkdir(parents=True)
 
@@ -106,4 +106,8 @@ def copy_media(
                 failures[key] = str(exc)
             if progress_callback:
                 progress_callback(done, len(media))
-    return CopyResult(str(destination), media_roots, copied, tuple(sorted(missing)), failures)
+    problems = set(missing).union(failures)
+    problem_paths = {key: relative.as_posix() for key, _, relative in media if key in problems}
+    return CopyResult(
+        str(destination), media_roots, copied, tuple(sorted(missing)), failures, problem_paths
+    )

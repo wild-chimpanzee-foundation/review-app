@@ -18,7 +18,9 @@ Exporte les prédictions brutes du modèle au format CSV.
 
 ## Livraison des affectations
 
-Utilisez **Importation / Exportation → Affectations** pour préparer les affectations, puis **Enregistrer le dossier de livraison**. Cette action écrit `assignment.zip` et copie éventuellement les vidéos nécessaires dans un nouveau dossier sur l’ordinateur exécutant l’application ; ce n’est pas un téléchargement par le navigateur. La barre de progression compte les fichiers traités, et le résultat indique les copies, fichiers manquants et échecs. Transmettez le dossier au destinataire. L’ouverture des affectations reçues et des anciens bundles reste dans le sélecteur de projet — voir [Premiers pas](getting-started.md).
+Utilisez **Importation / Exportation → Affectations** pour préparer les affectations, puis **Enregistrer le dossier de livraison**. L’application enregistre le ZIP de préparation et les vidéos sélectionnées sur l’ordinateur qui l’exécute. Le ZIP et son dossier de livraison portent le même nom, par exemple `Lope-species-Alice-014-setup-20261125-143012Z`. Pour les distances, l’espèce cible figure après `distance`. Transmettez le dossier au destinataire, qui peut ouvrir le ZIP depuis le sélecteur de projet. Voir [Premiers pas](getting-started.md).
+
+Le numéro d’affectation reste le même dans les ZIP de retour. La date et l’heure du ZIP de préparation correspondent à la préparation de l’affectation. Celles du ZIP de retour correspondent au téléchargement de la progression. Les deux sont exprimées en UTC.
 
 Pour les affectations contenant des données de déploiement, comme des métadonnées du catalogue ou des liens de dossiers, utilisez chez le destinataire une version de l’application prenant en charge le format d’affectation v2. Une version limitée au format v1 ne peut pas ouvrir ces affectations. Les versions compatibles avec le format v2 ouvrent également les affectations v1. Une affectation Distance contenant des mesures liées à des images de référence supprimées nécessite la prise en charge du format v3.
 
