@@ -312,10 +312,13 @@ def test_previous_v23_upgrade_preserves_deployments_and_evidence(previous_v23_da
         assert (
             conn.exec_driver_sql("SELECT id FROM model_annotations").scalar_one() == "prediction"
         )
-        assert conn.exec_driver_sql("""
+        assert (
+            conn.exec_driver_sql("""
             SELECT json_extract(ai_original, '$.reference_frame_id') FROM distance_samples
             WHERE id = 'suggestion'
-        """).scalar_one() == "suggested-frame"
+        """).scalar_one()
+            == "suggested-frame"
+        )
         assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
 
 
