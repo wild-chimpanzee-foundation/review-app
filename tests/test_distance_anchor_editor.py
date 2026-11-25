@@ -107,6 +107,27 @@ def test_drawing_normalizes_zoom_pan_and_letterboxing(rect, start, end, expected
     assert json.loads(result.stdout) == pytest.approx(expected)
 
 
+def test_releasing_outside_frame_saves_visible_box():
+    result = run_editor(
+        {"left": 0, "top": 0, "width": 400, "height": 300},
+        """
+        const overlay = container.children[0];
+        overlay.dispatch('pointerdown', {button:0, pointerId:1, clientX:100, clientY:82.5, preventDefault(){}});
+        overlay.dispatch('pointermove', {pointerId:1, clientX:200, clientY:172.5});
+        overlay.dispatch('pointermove', {pointerId:1, clientX:100, clientY:10});
+        console.log(JSON.stringify(overlay.children[0].style.width));
+        overlay.dispatch('pointerup', {pointerId:1, clientX:100, clientY:10});
+        console.log(JSON.stringify(emitted));
+        """,
+    )
+    width, events = map(json.loads, result.stdout.splitlines())
+    assert width == "100px"
+    assert len(events) == 1
+    assert events[0]["anchor"] == pytest.approx(
+        {"x": 0.25, "y": 0.2, "width": 0.25, "height": 0.4}
+    )
+
+
 def test_adjacent_frame_suppresses_saved_marker_and_missing_number_has_no_undefined_label():
     result = run_editor(
         {"left": 0, "top": 0, "width": 640, "height": 360},

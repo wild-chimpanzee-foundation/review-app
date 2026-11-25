@@ -190,11 +190,10 @@
         repaint();
     });
     overlay.addEventListener('pointerup', event => {
-        if (!start) return;
+        if (!start || mode !== 'box') return;
         const end = normalizedPosition(event);
-        if (mode !== 'box' || !end) { setMode(__MODE__); return; }
-        const anchor = {x: Math.min(start.x, end.x), y: Math.min(start.y, end.y),
-            width: Math.abs(start.x - end.x), height: Math.abs(start.y - end.y)};
+        const anchor = end ? {x: Math.min(start.x, end.x), y: Math.min(start.y, end.y),
+            width: Math.abs(start.x - end.x), height: Math.abs(start.y - end.y)} : preview;
         if (anchor.width === 0 || anchor.height === 0) { setMode(__MODE__); return; }
         component.$emit('__EVENT__', {
             individual_id: individual.id, offset_ms: Math.round(video.currentTime * 1000), anchor});
