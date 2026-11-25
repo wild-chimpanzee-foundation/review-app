@@ -58,7 +58,7 @@ def infer_imported_schedule(
     """Extend the modal AI cadence without moving any supplied prediction frame.
 
     Half-interval matching treats frame-quantization jitter as an existing stop,
-    rather than inventing a nearby Absent stop. The opening frame is always included.
+    rather than inventing a nearby Absent stop. A stop at zero must be supplied.
     Cadence is inferred within tracks, not from interleaved animals' timestamps.
     """
     if duration_sec is None or not math.isfinite(duration_sec) or duration_sec <= 0:
@@ -90,12 +90,14 @@ def infer_imported_schedule(
         phases[key].append(phase)
     phase_key = min(phases, key=lambda key: (-len(phases[key]), key))
     phase = median(phases[phase_key])
-    original = sorted({0.0, *times})
+    original = times
     result = set(original)
     for step in range(math.ceil(duration_sec / cadence) + 1):
         candidate = round(phase + step * cadence, 9)
         if candidate >= duration_sec:
             break
+        if candidate < 0.0005:
+            continue
         index = bisect_left(original, candidate)
         neighbors = original[max(0, index - 1) : index + 1]
         if all(abs(time - candidate) >= cadence / 2 - 1e-9 for time in neighbors):

@@ -1,5 +1,7 @@
 """Upload, preview and import pending Distance annotations."""
 
+from pathlib import PurePosixPath
+
 from nicegui import run, ui
 
 from review_app.app.state import get_active_project_id
@@ -15,16 +17,22 @@ async def setup_distance_ai_tab(dp, loading_dialog):
         "bytes": None,
         "preview": None,
         "busy": False,
+        "prepare_species": False,
         "replace_confirmed": False,
         "overwrite_confirmed": False,
     }
+
+    def blocking_errors(preview):
+        species_errors = set(preview["species_errors"])
+        return [error for error in preview["errors"] if error not in species_errors]
 
     def can_import(preview):
         return (
             not state["busy"]
             and preview is not None
             and not preview["already_imported"]
-            and not preview["errors"]
+            and not blocking_errors(preview)
+            and (not preview["species_errors"] or state["prepare_species"])
             and (not preview["reference_conflicts"] or state["overwrite_confirmed"])
             and (not preview["replace_video_ids"] or state["replace_confirmed"])
         )
@@ -58,10 +66,6 @@ async def setup_distance_ai_tab(dp, loading_dialog):
         ui.label(t("distance_ai_reference_counts", **preview))
         if not preview["already_imported"]:
             ui.label(t("distance_ai_draft_counts", **preview))
-            for schedule in preview["sampling"]:
-                ui.label(t("distance_ai_inferred_cadence", **schedule)).classes(
-                    "text-caption break-all"
-                )
         if preview["replace_video_ids"]:
             ui.label(t("distance_ai_replace_warning")).classes("text-warning")
             ui.checkbox(
@@ -69,11 +73,23 @@ async def setup_distance_ai_tab(dp, loading_dialog):
                 value=state["replace_confirmed"],
                 on_change=lambda event: confirm_replace(event.value),
             )
-        if preview["missing_species_labels"]:
-            ui.label(t("distance_ai_species_help")).classes("text-warning")
-            ui.button(t("distance_ai_add_species"), on_click=add_species).set_enabled(
-                not state["busy"]
-            )
+        if preview["species_errors"]:
+            disabled = preview["disabled_species"]
+            missing = preview["missing_species_labels"]
+            if disabled:
+                with ui.expansion(t("distance_ai_disabled_species", count=len(disabled))):
+                    ui.label(", ".join(disabled)).classes("break-words")
+            if missing:
+                ui.label(t("distance_ai_missing_species_count", count=len(missing)))
+            ui.checkbox(
+                t("distance_ai_prepare_species"),
+                value=state["prepare_species"],
+                on_change=lambda event: confirm_prepare_species(event.value),
+            ).set_enabled(not state["busy"])
+            if missing and not disabled:
+                ui.button(t("distance_ai_add_species"), on_click=add_species).props(
+                    "flat no-caps"
+                ).set_enabled(not state["busy"])
         if preview["reference_conflicts"]:
             ui.label(t("distance_ai_overwrite_warning")).classes("text-warning")
             for conflict in preview["reference_conflicts"]:
@@ -87,14 +103,48 @@ async def setup_distance_ai_tab(dp, loading_dialog):
                 value=state["overwrite_confirmed"],
                 on_change=lambda event: confirm_overwrite(event.value),
             ).set_enabled(not state["busy"])
-        for error in preview["errors"][:20]:
-            ui.label(error).classes("text-negative break-all")
+        errors = blocking_errors(preview)
+        if errors:
+            with ui.expansion(t("distance_ai_blockers", count=len(errors)), icon="error").classes(
+                "w-full text-negative"
+            ):
+                for error in errors[:20]:
+                    ui.label(error).classes("break-words")
+                if len(errors) > 20:
+                    ui.label(t("distance_ai_more_blockers", count=len(errors) - 20))
         if preview["already_imported"]:
             ui.label(t("distance_ai_already_imported")).classes("text-positive")
-        prediction_table(preview["preview"])
-        ui.button(t("distance_ai_import"), icon="file_upload", on_click=do_import).set_enabled(
-            can_import(preview)
-        )
+        else:
+            ui.button(t("distance_ai_import"), icon="file_upload", on_click=do_import).set_enabled(
+                can_import(preview)
+            )
+        if preview["sampling"] or preview["preview"]:
+            with ui.expansion(t("distance_ai_preview_details"), icon="list").classes("w-full"):
+                schedules = preview["sampling"]
+                if schedules:
+                    ui.label(
+                        t(
+                            "distance_ai_schedule_preview",
+                            shown=min(20, len(schedules)),
+                            total=len(schedules),
+                        )
+                    )
+                for schedule in schedules[:20]:
+                    ui.label(
+                        t(
+                            "distance_ai_inferred_cadence",
+                            **{
+                                **schedule,
+                                "video_path": PurePosixPath(schedule["video_path"]).name,
+                            },
+                        )
+                    ).classes("text-caption")
+                if preview["preview"]:
+                    prediction_table(preview["preview"])
+
+    def confirm_prepare_species(value):
+        state["prepare_species"] = value
+        preview_ui.refresh()
 
     def confirm_replace(value):
         state["replace_confirmed"] = value
@@ -132,7 +182,12 @@ async def setup_distance_ai_tab(dp, loading_dialog):
         if state["busy"]:
             return
         state.update(
-            bytes=None, preview=None, busy=True, replace_confirmed=False, overwrite_confirmed=False
+            bytes=None,
+            preview=None,
+            busy=True,
+            prepare_species=False,
+            replace_confirmed=False,
+            overwrite_confirmed=False,
         )
         preview_ui.refresh()
         loading_dialog.open()
@@ -172,6 +227,7 @@ async def setup_distance_ai_tab(dp, loading_dialog):
                     dp.import_distance_ai_package,
                     project_id,
                     state["bytes"],
+                    prepare_species=state["prepare_species"],
                     replace_video_ids=preview["replace_video_ids"],
                     reference_overwrite_token=(
                         preview["reference_overwrite_token"]
@@ -209,8 +265,10 @@ async def setup_distance_ai_tab(dp, loading_dialog):
                 preview_ui.refresh()
                 loading_dialog.close()
 
-    ui.label(t("distance_ai_help")).classes("text-body2")
-    ui.label(t("distance_ai_timing_warning")).classes("text-warning text-body2")
+    ui.label(t("distance_ai_intro")).classes("text-body2")
+    with ui.expansion(t("distance_ai_format_details")).classes("w-full"):
+        ui.label(t("distance_ai_help")).classes("text-body2")
+        ui.label(t("distance_ai_timing_warning")).classes("text-body2")
     ui.upload(
         label=t("distance_ai_choose_zip"),
         on_upload=handle_upload,

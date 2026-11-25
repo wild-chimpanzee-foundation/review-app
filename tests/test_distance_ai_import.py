@@ -164,7 +164,7 @@ def test_preview_and_import_create_pending_samples_with_provenance(distance_data
     assert prediction["mask"] == ai_package["masks/animal.json"]
     assert dp.list_distance_imports(project_id)[0]["id"] == result["import_id"]
     state = imported_state(distance_data)
-    assert state["offsets"] == [0, 1250, 2250, 3250, 4250, 5250, 6250, 7250, 8250, 9250]
+    assert state["offsets"] == [250, 1250, 2250, 3250, 4250, 5250, 6250, 7250, 8250, 9250]
     assert preview["scheduled_samples"] == 10
     assert preview["inferred_absences"] == 8
     assert state["review"]["alignment_mode"] == "imported"
@@ -767,6 +767,48 @@ def test_accepting_package_species_preserves_existing_annotations(distance_data,
     assert snapshot(dp) == before
 
 
+def test_import_can_prepare_disabled_species_atomically(distance_data, ai_package):
+    from review_app.backend.db.models import DistanceReviewTask, IndividualObservation
+
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    video_id = distance_data["videos"][0]
+    with dp.Session.begin() as session:
+        session.query(IndividualObservation).filter_by(video_id=video_id).delete()
+        session.query(DistanceReviewTask).filter_by(video_id=video_id).delete()
+    dp.set_distance_review_requirements(project_id, "deer", require_age=True, require_sex=False)
+    dp.set_distance_review_species(project_id, ["fox"])
+    data = package_zip(ai_package)
+    before = snapshot(dp)
+    preview = dp.preview_distance_ai_package(project_id, data)
+    assert preview["disabled_species"] == ["deer"]
+    assert len(preview["missing_species_labels"]) == 1
+    with pytest.raises(ValueError, match="Enable 'deer'"):
+        dp.import_distance_ai_package(project_id, data)
+
+    invalid = {
+        **ai_package,
+        "predictions.csv": [
+            {**ai_package["predictions.csv"][0], "time_s": 999},
+            *ai_package["predictions.csv"][1:],
+        ],
+    }
+    with pytest.raises(ValueError, match="outside the video duration"):
+        dp.import_distance_ai_package(project_id, package_zip(invalid), prepare_species=True)
+    assert snapshot(dp) == before
+    assert set(dp.get_distance_review_species(project_id)) == {"fox"}
+
+    result = dp.import_distance_ai_package(project_id, data, prepare_species=True)
+    assert result["individuals"] == 1
+    assert dp.get_distance_review_species(project_id)["deer"] == {
+        "require_age": True,
+        "require_sex": False,
+    }
+    assert "fox" in dp.get_distance_review_species(project_id)
+    assert dp.import_distance_ai_package(project_id, data, prepare_species=True)[
+        "already_imported"
+    ]
+
+
 def test_reference_overwrite_requires_consent_and_clears_affected_measurements(
     distance_data, ai_package
 ):
@@ -903,8 +945,9 @@ def test_failed_reference_overwrite_rolls_back(distance_data, ai_package):
     assert snapshot(dp) == before
 
 
+@pytest.mark.parametrize("prepare_on_import", [False, True])
 async def test_ui_accept_missing_species_enables_distance_import(
-    user: User, distance_data, ai_package
+    user: User, distance_data, ai_package, prepare_on_import
 ):
     from review_app.backend.db.models import (
         DistanceReviewTask,
@@ -917,6 +960,8 @@ async def test_ui_accept_missing_species_enables_distance_import(
     with dp.Session.begin() as session:
         session.query(IndividualObservation).filter_by(video_id=video_id).delete()
         session.query(DistanceReviewTask).filter_by(video_id=video_id).delete()
+    if prepare_on_import:
+        dp.set_distance_review_species(project_id, ["fox"])
 
     @ui.page("/test-ai-species-suggestions")
     async def page():
@@ -929,15 +974,21 @@ async def test_ui_accept_missing_species_enables_distance_import(
         await upload.handle_uploads(
             [SmallFileUpload("proposals.zip", "application/zip", package_zip(ai_package))]
         )
-    await user.should_see(t("distance_ai_add_species"))
-    user.find(t("distance_ai_add_species"), kind=ui.button).click()
-    await user.should_see(t("distance_ai_species_added"), retries=20)
+    if prepare_on_import:
+        await user.should_see(t("distance_ai_prepare_species"))
+        user.find(t("distance_ai_prepare_species"), kind=ui.checkbox).click()
+        assert "deer" not in dp.get_distance_review_species(project_id)
+    else:
+        await user.should_see(t("distance_ai_add_species"))
+        user.find(t("distance_ai_add_species"), kind=ui.button).click()
+        await user.should_see(t("distance_ai_species_added"), retries=20)
     await wait_for_enabled_import(user)
+    user.find(t("distance_ai_import"), kind=ui.button).click()
+    await user.should_see(t("distance_ai_imported"), retries=20)
+    assert "deer" in dp.get_distance_review_species(project_id)
     with dp.Session() as session:
         assert session.query(ModelAnnotation).filter_by(video_id=video_id).count() == 0
         assert session.query(IndividualObservation).filter_by(video_id=video_id).count() == 1
-    user.find(t("distance_ai_import"), kind=ui.button).click()
-    await user.should_see(t("distance_ai_imported"), retries=20)
 
 
 async def test_ui_reference_overwrite_requires_confirmation(user: User, distance_data, ai_package):
@@ -1125,7 +1176,7 @@ def test_missing_predictions_are_pending_absent_for_every_individual(distance_da
     dp = distance_data["dp"]
     dp.import_distance_ai_package(distance_data["project"].id, package_zip(ai_package))
     state = imported_state(distance_data)
-    assert state["offsets"][0] == 0 and state["offsets"][-1] == 9250
+    assert state["offsets"][0] == 250 and state["offsets"][-1] == 9250
     identities = dp.list_distance_individuals(distance_data["videos"][0])
     assert len(state["samples"]) == len(state["offsets"]) * len(identities)
     for individual in identities:
@@ -1139,7 +1190,7 @@ def test_missing_predictions_are_pending_absent_for_every_individual(distance_da
     first = state["samples"][0]
     dp.save_distance_sample(
         first["individual_id"],
-        0,
+        first["offset_ms"],
         skip_reason="individual absent",
         labeled_by="alice",
     )

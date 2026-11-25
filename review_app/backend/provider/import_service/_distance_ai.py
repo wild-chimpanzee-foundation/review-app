@@ -7,6 +7,8 @@ import json
 import math
 from pathlib import PurePosixPath
 
+from sqlalchemy import func
+
 from review_app.backend.db.models import (
     DistanceImport,
     DistanceIndividual,
@@ -35,7 +37,10 @@ from review_app.backend.provider.distance_references import (
     reference_tagged,
 )
 from review_app.backend.provider.distance_review import reset_video_evidence
-from review_app.backend.provider.distance_species import enabled_distance_species
+from review_app.backend.provider.distance_species import (
+    distance_species_query,
+    save_distance_species_settings,
+)
 from review_app.backend.provider.distance_tasks import ensure_tasks
 
 
@@ -64,6 +69,8 @@ def _plan(session, project_id, package):
         reference_conflicts=[],
         reference_overwrite_token=None,
         missing_species_labels=[],
+        disabled_species=[],
+        species_errors=[],
         already_imported=existing is not None,
         import_id=existing.id if existing else None,
         errors=[],
@@ -232,15 +239,27 @@ def _plan(session, project_id, package):
         ).hexdigest()
     ensure_tasks(session, project_id)
     species = {row.scientific_name: row.id for row in session.query(Species)}
-    enabled = set(session.scalars(enabled_distance_species(project_id)))
-    disabled = {
-        row["species"]
-        for row in package.individuals
-        if row["species"] in species and species[row["species"]] not in enabled
+    rules = {
+        row.scientific_name: row for row in session.execute(distance_species_query(project_id))
     }
-    errors.extend(
+    disabled = sorted(
+        {
+            row["species"]
+            for row in package.individuals
+            if row["species"] in rules and not rules[row["species"]].enabled
+        }
+    )
+    summary["disabled_species"] = disabled
+    species_errors = summary["species_errors"]
+    species_errors.extend(
         f"Enable {name!r} for Distance Review in Project Settings before importing."
-        for name in sorted(disabled)
+        for name in disabled
+    )
+    labeled = set(
+        session.query(IndividualObservation.video_id, IndividualObservation.species_id)
+        .join(Video, Video.video_id == IndividualObservation.video_id)
+        .filter(Video.project_id == project_id, func.coalesce(IndividualObservation.count, 1) > 0)
+        .tuples()
     )
     tasks = {
         (task.video_id, task.species_id): task
@@ -256,23 +275,18 @@ def _plan(session, project_id, package):
             errors.append(f"Add/map species {row['species']!r} before importing.")
         video = videos.get(row["video_path"])
         if video:
-            if (
-                row["species"] not in disabled
-                and (video.video_id, species.get(row["species"])) not in tasks
-            ):
+            key = (video.video_id, species.get(row["species"]))
+            if key[1] is not None and key not in tasks and key not in labeled:
                 suggestion = {
                     "video_id": video.video_id,
                     "video_path": row["video_path"],
                     "species": row["species"],
                 }
-                if (
-                    row["species"] in species
-                    and suggestion not in summary["missing_species_labels"]
-                ):
+                if suggestion not in summary["missing_species_labels"]:
                     summary["missing_species_labels"].append(suggestion)
-                errors.append(
-                    f"Accept missing species annotations or add Species Review labels for {row['species']} in {row['video_path']} before importing."
-                )
+                    species_errors.append(
+                        f"Accept missing species annotations or add Species Review labels for {row['species']} in {row['video_path']} before importing."
+                    )
             schedules.setdefault((video.video_id, row["species"]), set())
             if video.video_id in tagged:
                 errors.append(f"Animal track points to a Reference Video: {row['video_path']}")
@@ -350,7 +364,7 @@ def _plan(session, project_id, package):
             )
         else:
             summary["replace_video_ids"].append(video_id)
-    summary["errors"] = list(dict.fromkeys(errors))
+    summary["errors"] = list(dict.fromkeys(errors + species_errors))
     summary["replace_video_ids"] = list(dict.fromkeys(summary["replace_video_ids"]))
     return summary, videos, frames, {key: sorted(times) for key, times in schedules.items()}
 
@@ -385,42 +399,44 @@ class DistanceAIImportMixin(ProviderBase):
         with self.Session.begin() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             summary, _, _, _ = _plan(session, project_id, package)
-            added = 0
-            species = {row.scientific_name: row.id for row in session.query(Species)}
-            labeled_by = f"Distance AI: {package.manifest['model']['name']}"
-            for row in summary["missing_species_labels"]:
-                video_id = row["video_id"]
-                observations = (
-                    session.query(IndividualObservation).filter_by(video_id=video_id).all()
+            return self._accept_distance_species(session, project_id, package, summary)
+
+    def _accept_distance_species(self, session, project_id, package, summary) -> int:
+        added = 0
+        species = {row.scientific_name: row.id for row in session.query(Species)}
+        labeled_by = f"Distance AI: {package.manifest['model']['name']}"
+        for row in summary["missing_species_labels"]:
+            video_id = row["video_id"]
+            observations = session.query(IndividualObservation).filter_by(video_id=video_id).all()
+            if any(
+                observation.species_id == species[row["species"]]
+                and (observation.count is None or observation.count > 0)
+                for observation in observations
+            ):
+                continue
+            labeled_at = self._utcnow_dt()
+            label = session.get(VideoLabel, video_id)
+            if label is None:
+                label = VideoLabel(video_id=video_id)
+                session.add(label)
+            if label.is_blank is not False or label.labeled_at is None:
+                label.is_blank = False
+                label.labeled_by = labeled_by
+                label.labeled_at = labeled_at
+            session.add(
+                IndividualObservation(
+                    video_id=video_id,
+                    id=max((observation.id for observation in observations), default=0) + 1,
+                    species_id=species[row["species"]],
+                    # Presence is accepted; track counts are not reliable animal counts.
+                    count=None,
+                    labeled_by=labeled_by,
+                    labeled_at=labeled_at,
                 )
-                if any(
-                    observation.species_id == species[row["species"]]
-                    for observation in observations
-                ):
-                    continue
-                labeled_at = self._utcnow_dt()
-                label = session.get(VideoLabel, video_id)
-                if label is None:
-                    label = VideoLabel(video_id=video_id)
-                    session.add(label)
-                if label.is_blank is not False or label.labeled_at is None:
-                    label.is_blank = False
-                    label.labeled_by = labeled_by
-                    label.labeled_at = labeled_at
-                session.add(
-                    IndividualObservation(
-                        video_id=video_id,
-                        id=max((observation.id for observation in observations), default=0) + 1,
-                        species_id=species[row["species"]],
-                        # Presence is accepted; track counts are not reliable animal counts.
-                        count=None,
-                        labeled_by=labeled_by,
-                        labeled_at=labeled_at,
-                    )
-                )
-                session.flush()
-                added += 1
-            ensure_tasks(session, project_id)
+            )
+            session.flush()
+            added += 1
+        ensure_tasks(session, project_id)
         return added
 
     def import_distance_ai_package(
@@ -428,6 +444,7 @@ class DistanceAIImportMixin(ProviderBase):
         project_id: str,
         zip_bytes: bytes,
         *,
+        prepare_species: bool = False,
         replace_video_ids: list[str] | None = None,
         reference_overwrite_token: str | None = None,
     ) -> dict:
@@ -437,6 +454,23 @@ class DistanceAIImportMixin(ProviderBase):
             summary, videos, frames, schedules = _plan(session, project_id, package)
             if summary["already_imported"]:
                 return summary
+            if prepare_species and summary["species_errors"]:
+                rules = {
+                    row.scientific_name: row
+                    for row in session.execute(distance_species_query(project_id))
+                }
+                for name in summary["disabled_species"]:
+                    rule = rules[name]
+                    save_distance_species_settings(
+                        session,
+                        project_id,
+                        rule.id,
+                        enabled=True,
+                        require_age=bool(rule.require_age),
+                        require_sex=bool(rule.require_sex),
+                    )
+                self._accept_distance_species(session, project_id, package, summary)
+                summary, videos, frames, schedules = _plan(session, project_id, package)
             conflicts = {row["reference_id"] for row in summary["reference_conflicts"]}
             if (
                 reference_overwrite_token is not None

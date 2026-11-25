@@ -17,10 +17,14 @@ async def render_add_data(dp, project_id, loading_dialog):
         ui.tab("annotations", label=t("data_existing_annotations"), icon="fact_check")
     with ui.tab_panels(inputs, value="ai").props("keep-alive").classes("w-full"):
         with ui.tab_panel("ai"):
-            with ui.expansion(t("model_import_title"), icon="pets", value=True).classes("w-full"):
-                await setup_model_tab(dp, loading_dialog)
-            with ui.expansion(t("distance_ai_title"), icon="straighten").classes("w-full"):
-                await setup_distance_ai_tab(dp, loading_dialog)
+            with ui.tabs().props("align=left").classes("w-full") as ai_inputs:
+                ui.tab("species", label=t("handoff_stage_species"), icon="pets")
+                ui.tab("distance", label=t("handoff_stage_distance"), icon="straighten")
+            with ui.tab_panels(ai_inputs, value="species").props("keep-alive").classes("w-full"):
+                with ui.tab_panel("species"):
+                    await setup_model_tab(dp, loading_dialog)
+                with ui.tab_panel("distance"):
+                    await setup_distance_ai_tab(dp, loading_dialog)
         with ui.tab_panel("metadata"):
             ui.label(t("data_metadata_help")).classes("text-caption text-grey-6 q-mb-md")
             setup_metadata_tab(dp, loading_dialog)
