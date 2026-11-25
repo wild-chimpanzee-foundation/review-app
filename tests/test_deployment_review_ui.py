@@ -9,6 +9,7 @@ from nicegui.testing.user_simulation import user_simulation
 from review_app.app import state
 from review_app.app.components import playback
 from review_app.app.entry_point import GUI
+from review_app.app.pages.settings.species import render_species_section
 from review_app.app.translations import t
 from review_app.backend.db.models import Video
 from review_app.backend.deployments import DeploymentInputError
@@ -507,5 +508,81 @@ async def test_overview_edits_deployment_and_opens_filtered_species_review(
             )
             await user.open(detail.props["href"])
             await user.should_see(t("deployment_catalog_folder_clips", count=2), retries=20)
+    finally:
+        state.reset_app_state(keep_prefs=False)
+
+
+async def test_distance_species_settings_drive_overview_progress(
+    provider_with_project, monkeypatch
+):
+    dp, project, _ = provider_with_project
+    video_id = dp.get_video_queue({}, active_project_id=project.id)[0]
+    observations = [{"species": "deer"}, {"species": "fox"}]
+    for number in range(1, 6):
+        name = f"Species {number}"
+        dp.add_custom_species(f"test {number}", name, name, "Animal", "Animal")
+        observations.append({"species": f"test {number}"})
+    dp.update_manual_review(video_id, observations, active_project_id=project.id)
+    monkeypatch.setattr(
+        "review_app.app.components.deployment_thumbnail.generate_thumbnail", lambda *_: False
+    )
+    state.set_data_provider(dp)
+    state.set_annotator_name("Alice")
+    state.set_active_project(project.id)
+    gui = GUI()
+    try:
+        async with user_simulation() as user:
+
+            @ui.page("/settings")
+            def settings():
+                render_species_section(dp, project.id, "en")
+
+            @ui.page("/overview")
+            async def overview():
+                await gui.overview_page()
+
+            @ui.page("/distance-review")
+            def review():
+                filters = state.get_distance_queue_state(project.id)
+                assert filters["species_filter"] == next(
+                    iter(dp.get_distance_target_species_options(project.id))
+                )
+                ui.label("Filtered Distance Review opened")
+
+            @ui.page("/review")
+            def species_review():
+                assert state.get_filters()["selected_species"] == ["fox"]
+                ui.label("Filtered Species Review opened")
+
+            await user.open("/settings")
+            selector = next(
+                iter(user.find(kind=ui.select, content=t("distance_enabled_species")).elements)
+            )
+            selector.set_value(["deer"])
+            age = next(
+                iter(user.find(kind=ui.checkbox, content=t("distance_require_age")).elements)
+            )
+            age.set_value(True)
+            assert dp.get_distance_review_species(project.id) == {
+                "deer": {"require_age": True, "require_sex": False}
+            }
+
+            await user.open("/overview")
+            await user.should_see(t("review_overview_title"), retries=20)
+            await user.should_see(t("review_overview_observations"))
+            await user.should_not_see(t("behavior_dist_title"))
+            await user.should_not_see(kind=ui.button, content="Species 5")
+            user.find(kind=ui.button, content=t("review_overview_show_all")).click()
+            await user.should_see(kind=ui.button, content="Species 5")
+            user.find(kind=ui.button, content=t("review_overview_show_less")).click()
+            await user.should_not_see(kind=ui.button, content="Species 5")
+            status = t("distance_progress_counts", completed=0, total=1)
+            assert len(user.find(kind=ui.button, content="Red Deer").elements) == 1
+            user.find(kind=ui.button, content=status).click()
+            await user.should_see("Filtered Distance Review opened", retries=20)
+            await user.open("/overview")
+            await user.should_see(kind=ui.button, content="Red Fox", retries=20)
+            user.find(kind=ui.button, content="Red Fox").click()
+            await user.should_see("Filtered Species Review opened", retries=20)
     finally:
         state.reset_app_state(keep_prefs=False)

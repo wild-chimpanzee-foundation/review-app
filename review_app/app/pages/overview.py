@@ -10,7 +10,13 @@ from review_app.app.components.deployment_catalog import (
 from review_app.app.components.deployment_inventory import open_deployment_editor
 from review_app.app.components.deployment_thumbnail import render_deployment_thumbnail
 from review_app.app.components.location_map import MapMarker, render_location_map
-from review_app.app.state import get_active_project_id, get_language, reset_filters, update_filters
+from review_app.app.state import (
+    get_active_project_id,
+    get_language,
+    reset_filters,
+    set_distance_queue_state,
+    update_filters,
+)
 from review_app.app.translations import t
 from review_app.app.utils import (
     get_or_create_data_provider,
@@ -108,6 +114,134 @@ async def _render_deployment_overview(dp, pid, footage, go_review) -> None:
                                     ).props("flat dense no-caps")
 
     await refresh()
+
+
+def _render_review_overview(
+    project_id: str | None,
+    stats: dict,
+    distance_progress: list[dict],
+    species_map: dict,
+    go_review,
+) -> None:
+    def open_distance(species_id: str):
+        set_distance_queue_state(
+            project_id,
+            species_filter=species_id,
+            camera_filter=None,
+            status_filter=None,
+            task_id=None,
+            video_id=None,
+        )
+        ui.navigate.to("/distance-review")
+
+    observations = {row["species"]: row["observations"] for row in stats.get("species_counts", [])}
+    progress = {row["scientific_name"]: row for row in distance_progress}
+    species = sorted(
+        observations.keys() | progress.keys(),
+        key=lambda name: (name not in progress, -observations.get(name, 0), name),
+    )
+    preview_count = 6
+    divider = "border-bottom: 1px solid rgba(127, 127, 127, 0.22)"
+
+    with ui.card().classes("w-full q-pa-md q-mb-lg"):
+        ui.label(t("review_overview_title")).classes("text-subtitle1 font-weight-medium")
+        if not species:
+            ui.label(t("no_obs_yet")).classes("text-grey-6")
+
+        @ui.refreshable
+        def species_table(show_all: bool = False) -> None:
+            with ui.element("table").classes("w-full border-collapse"):
+                with ui.element("thead"):
+                    with ui.element("tr").style(divider):
+                        for label, classes in (
+                            ("species_label", "text-left q-pl-xs"),
+                            ("review_overview_observations", "w-1 text-right q-pl-md"),
+                            ("distance_review_settings", "w-1 text-left q-pl-lg"),
+                        ):
+                            with (
+                                ui.element("th")
+                                .props("scope=col")
+                                .classes(f"{classes} q-pr-xs q-pb-xs text-caption text-grey-7")
+                            ):
+                                ui.label(t(label))
+                with ui.element("tbody"):
+                    for name in species if show_all else species[:preview_count]:
+                        row = progress.get(name)
+                        with ui.element("tr").style(divider):
+                            with ui.element("td").classes("q-py-xs q-px-xs break-words"):
+                                common_name = species_map.get(name, name).removesuffix(
+                                    f" ({name})"
+                                )
+                                ui.button(
+                                    common_name,
+                                    on_click=lambda name=name: go_review(selected_species=[name]),
+                                ).props("flat dense no-caps align=left").classes(
+                                    "text-left q-pa-none"
+                                ).style("min-height: 24px")
+                                if common_name != name:
+                                    ui.label(name).classes(
+                                        "block text-caption text-grey-7 italic"
+                                    ).style("line-height: 1.25")
+                            with ui.element("td").classes(
+                                "q-pl-md q-pr-xs text-right tabular-nums"
+                            ):
+                                ui.label(str(observations.get(name, 0)))
+                            with ui.element("td").classes("q-py-xs q-pl-lg q-pr-xs"):
+                                if row is None:
+                                    ui.label("—").classes("text-grey-6")
+                                    continue
+                                completed, total = row["completed"], row["total"]
+                                status = t(
+                                    "distance_progress_counts", completed=completed, total=total
+                                )
+                                with (
+                                    ui.element("div")
+                                    .classes("grid items-center gap-x-3")
+                                    .style("grid-template-columns: 1fr 4rem")
+                                ):
+                                    ui.button(
+                                        status,
+                                        on_click=lambda sid=row["species_id"]: open_distance(sid),
+                                    ).props("flat dense no-caps align=left").classes(
+                                        "text-left tabular-nums whitespace-nowrap q-pa-none"
+                                    ).style("min-height: 24px").tooltip(
+                                        t("distance_progress_title")
+                                    )
+                                    ui.linear_progress(completed / total, show_value=False).props(
+                                        "rounded"
+                                    )
+                                if row["unavailable"]:
+                                    ui.label(
+                                        t(
+                                            "distance_progress_unavailable_short",
+                                            count=row["unavailable"],
+                                        )
+                                    ).classes("text-caption text-grey-7").tooltip(
+                                        t(
+                                            "distance_progress_unavailable",
+                                            count=row["unavailable"],
+                                        )
+                                    )
+
+        if species:
+            species_table()
+        if len(species) > preview_count:
+            expanded = False
+
+            def toggle_species():
+                nonlocal expanded
+                expanded = not expanded
+                species_table.refresh(expanded)
+                toggle.props(f'aria-expanded="{str(expanded).lower()}"')
+                toggle.set_text(
+                    t("review_overview_show_less" if expanded else "review_overview_show_all")
+                )
+
+            toggle = ui.button(t("review_overview_show_all"), on_click=toggle_species).props(
+                'flat dense no-caps aria-expanded="false"'
+            )
+        if project_id and not progress and species:
+            ui.label(t("distance_progress_empty")).classes("text-caption text-grey-6")
 
 
 async def setup_overview():
@@ -295,71 +429,9 @@ async def setup_overview():
                             )
                             ui.label(f"{label}: {count}").classes("text-body2")
 
-        # Species and behaviors (side by side)
         species_map = await run.io_bound(dp.get_species_display_map, get_language())
-
-        with ui.row().classes("w-full gap-md q-mb-lg"):
-            with ui.card().classes("col q-pa-md"):
-                ui.label(t("species_obs_title")).classes(
-                    "text-subtitle1 font-weight-medium q-mb-md"
-                )
-                species_counts = stats.get("species_counts", [])
-                if species_counts:
-                    with ui.scroll_area().style("max-height: 300px"):
-                        for s in species_counts:
-                            sci_name = s["species"]
-                            common_name = species_map.get(sci_name, sci_name)
-                            with (
-                                ui.row()
-                                .classes(
-                                    "w-full items-center q-mb-sm cursor-pointer rounded q-px-xs"
-                                )
-                                .style("transition: background 0.15s")
-                                .on("click", lambda sn=sci_name: go_review(selected_species=[sn]))
-                                .on(
-                                    "mouseover",
-                                    lambda e: e.sender.style("background: rgba(0,0,0,0.06)"),
-                                )
-                                .on(
-                                    "mouseout", lambda e: e.sender.style("background: transparent")
-                                )
-                            ):
-                                ui.label(common_name).classes("col text-body2")
-                                ui.label(str(s["observations"])).classes("text-body2 text-grey-7")
-                else:
-                    ui.label(t("no_obs_yet")).classes("text-grey-5")
-
-            with ui.card().classes("col q-pa-md"):
-                ui.label(t("behavior_dist_title")).classes(
-                    "text-subtitle1 font-weight-medium q-mb-md"
-                )
-                behavior_counts = stats.get("behavior_counts", [])
-                if behavior_counts:
-                    total_obs = sum(b["observations"] for b in behavior_counts)
-                    for b in behavior_counts:
-                        pct = 100 * b["observations"] / max(total_obs, 1)
-                        with (
-                            ui.row()
-                            .classes("w-full items-center q-mb-sm cursor-pointer rounded q-px-xs")
-                            .style("transition: background 0.15s")
-                            .on(
-                                "click", lambda bv=b["behavior"]: go_review(selected_behavior=[bv])
-                            )
-                            .on(
-                                "mouseover",
-                                lambda e: e.sender.style("background: rgba(0,0,0,0.06)"),
-                            )
-                            .on("mouseout", lambda e: e.sender.style("background: transparent"))
-                        ):
-                            ui.label(b["behavior"]).classes("col text-body2")
-                            ui.label(f"{b['observations']} ({pct:.0f}%)").classes(
-                                "text-caption text-grey-6 q-mr-sm"
-                            )
-                            ui.linear_progress(value=pct / 100, show_value=False).props(
-                                "color=primary style=height: 6px"
-                            )
-                else:
-                    ui.label(t("no_behavior_yet")).classes("text-grey-5")
+        distance_progress = await run.io_bound(dp.get_distance_review_progress, pid) if pid else []
+        _render_review_overview(pid, stats, distance_progress, species_map, go_review)
 
         await _render_deployment_overview(dp, pid, stats["deployment_footage"], go_review)
 
