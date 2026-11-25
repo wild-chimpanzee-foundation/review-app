@@ -559,9 +559,14 @@ async def test_distance_species_settings_drive_overview_progress(
                 iter(user.find(kind=ui.select, content=t("distance_enabled_species")).elements)
             )
             selector.set_value(["deer"])
-            age = next(
-                iter(user.find(kind=ui.checkbox, content=t("distance_require_age")).elements)
-            )
+            # NiceGUI refreshes the requirement controls after the change handler returns.
+            async with asyncio.timeout(3):
+                while True:
+                    ages = user.find(kind=ui.checkbox, content=t("distance_require_age"))
+                    if len(ages.elements) == 1:
+                        break
+                    await asyncio.sleep(0.01)
+            (age,) = ages.elements
             age.set_value(True)
             assert dp.get_distance_review_species(project.id) == {
                 "deer": {"require_age": True, "require_sex": False}
