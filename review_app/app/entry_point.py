@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from review_app.app.media import set_media_dirs, setup_media_route
 from review_app.app.project_picker import build_project_picker
+from review_app.app.session_storage import configure_user_storage
 from review_app.app.setup_wizard import setup_wizard
 from review_app.app.state import (
     get_active_project_id,
@@ -232,7 +233,7 @@ def shared_header(
                     on_click=lambda: (refresh_projects(), project_dialog.open()),
                 ).props("outline color=white dense icon-right=arrow_drop_down").classes(
                     "q-ml-sm text-caption q-px-sm"
-                ).style("border-color: rgba(255, 255, 255, 0.5)")
+                ).style("border-color: rgba(255, 255, 255, 0.5)").mark("project-picker")
             ui.space()
             with ui.row().classes("gap-2 items-center"):
                 ui.button(t("nav_overview"), on_click=lambda: ui.navigate.to("/overview")).props(
@@ -599,6 +600,7 @@ class GUI:
 
         _udd = _get_udd()
         _udd.mkdir(parents=True, exist_ok=True)
+        configure_user_storage(_udd)
         _setup_logging(_udd, dev_mode)
 
         from review_app import __version__

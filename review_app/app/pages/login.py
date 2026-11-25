@@ -95,7 +95,7 @@ async def setup_login():
 
                 clear_session()
                 set_annotator_name(name)
-                load_session_defaults(get_data_provider())
+                load_session_defaults(get_data_provider(), restore_project=True)
                 ui.navigate.to("/")
 
             name_select.on("keydown.enter", lambda _: _submit())
