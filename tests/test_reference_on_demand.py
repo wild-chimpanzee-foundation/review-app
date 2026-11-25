@@ -9,6 +9,7 @@ from nicegui import ui
 from nicegui.testing import User
 from review_app.app.pages.distance_review import page as page_module
 from review_app.app.pages.distance_review.page import DistanceReviewPage
+from review_app.app.pages.distance_review.session import ZERO_DISTANCE_ID
 from review_app.app.translations import t
 from review_app.backend.db.models import DistanceSample
 from review_app.backend.provider.local_data_provider import LocalDataProvider
@@ -167,6 +168,50 @@ async def test_on_demand_distances_can_share_a_timestamp(user: User, on_demand_p
         row["id"] for row in page.frames if row["distance_m"] == 4
     )
     assert page.samples == []
+
+
+async def test_uncalibrated_imported_estimate_highlights_rounded_distance(
+    user: User, on_demand_page
+):
+    data = on_demand_page["data"]
+    data["reference"] = data["dp"].register_reference_video(
+        data["project"].id, "cam_x", "references/empty.mp4"
+    )
+    await user.open("/reference-on-demand-test")
+    page = on_demand_page["page"]
+    page.samples = [
+        {
+            "individual_id": page.individual_id,
+            "offset_ms": page.sample_offset,
+            "status": "pending",
+            "suggestion": {"predicted_distance_m": 6.9},
+        }
+    ]
+    with user:
+        await page.render_frames.refresh()
+    button = distance_button(user, 7)
+    assert not any(
+        element.props.get("data-reference-distance") == "6.9"
+        for element in user.client.elements.values()
+    )
+    assert button.props["data-distance-ai-suggestion"] == "true"
+    assert button.props["data-reference-state"] == "unconfigured"
+    assert button.props.get("aria-pressed") != "true"
+    assert page.frames == [] and page.selected_frame_id is None
+    with user:
+        page.samples[0].update(status="annotated", distance_m=0)
+        page.selected_frame_id = ZERO_DISTANCE_ID
+        await page.render_frames.refresh()
+    assert distance_button(user, 7).props["data-distance-ai-suggestion"] == "true"
+    assert distance_button(user, 0).props["aria-pressed"] == "true"
+    assert page.reference_sample is page.samples[0]
+    with user:
+        page.sample_offset = 3000
+        await page.render_frames.refresh()
+    assert not any(
+        element.props.get("data-distance-ai-suggestion")
+        for element in user.client.elements.values()
+    )
 
 
 async def test_review_can_start_with_zero_reference_frames(user: User, on_demand_page):

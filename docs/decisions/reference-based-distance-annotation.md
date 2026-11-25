@@ -72,8 +72,9 @@ samples remain editable; a missing sample row means unreviewed, not absent.
 ### Camera clock and sampling
 
 - **AI-imported schedules take precedence.** Retain every supplied prediction time
-  exactly. Infer the dominant within-track cadence and fractional phase for each video,
-  include the opening frame, and fill gaps through the video end (exclusive). Nearby
+  exactly. Infer the dominant within-track cadence and fractional phase for each video
+  and fill gaps before the video end. Include a stop at 0:00 only when the package
+  supplies a prediction there. Nearby
   frame-quantization jitter occupies the inferred stop rather than creating a duplicate.
   Each imported individual gets a pending sample at every stop; missing predictions
   recommend Absent, never human-reviewed absence. At least two predictions on a track

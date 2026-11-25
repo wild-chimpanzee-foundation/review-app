@@ -1,7 +1,8 @@
 // Wait for Vue to mount the refreshed buttons and finish layout.
 requestAnimationFrame(() => requestAnimationFrame(() => {
     const strip = getHtmlElement(__STRIP_ID__);
-    const selected = strip?.querySelector('[aria-pressed="true"]');
+    const selected = strip?.querySelector('[aria-pressed="true"]')
+        ?? strip?.querySelector('[data-distance-ai-suggestion="true"]');
     if (!strip || !selected) return;
 
     const reveal = () => {

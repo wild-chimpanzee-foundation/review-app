@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -42,6 +43,7 @@ class ReferenceViewsContext:
     render_frames: Callable
     render_samples: Callable
     render_actions: Callable
+    suggested_distance: float | None = None
     saved_reference_unavailable: bool = False
 
 
@@ -144,15 +146,16 @@ def render_frames(context: ReferenceViewsContext) -> None:
         )
     if context.reference and context.reference_player:
         ui.label(t("distance_on_demand_help")).classes("text-caption text-grey-6")
-        with ui.row().classes("items-center gap-1"):
+        with ui.row().classes("w-full items-center gap-1 no-wrap"):
             ui.label(t("distance_frame_steps")).classes("text-caption text-grey-6")
-            for delta in (-5, -1, 1, 5):
+            for delta in (-50, -20, -5, -1, 1, 5, 20, 50):
                 ui.button(
                     f"{delta:+d}",
                     on_click=lambda _e, delta=delta: context.step_reference(delta),
                 ).props(f'flat dense data-reference-frame-step="{delta}"').bind_enabled_from(
                     context.busy_state, "busy", backward=lambda busy: not busy
                 )
+            ui.space()
             ui.button(icon="bookmark_add", on_click=context.prepare_reference).props(
                 'flat round dense data-distance-action="edit-reference"'
             ).tooltip(t("distance_prepare_reference")).bind_enabled_from(
@@ -187,53 +190,74 @@ def render_frames(context: ReferenceViewsContext) -> None:
             )
             ui.icon("keyboard", size="xs").classes("text-grey-6").tooltip(t("distance_arrow_help"))
         with ui.row().classes("distance-frames") as distance_strip:
+            estimate = context.suggested_distance
+            suggested_meter = math.floor(estimate + 0.5) if estimate is not None else None
             meters = sorted(
                 configured.keys()
                 | (set(DISTANCE_REFERENCE_METERS) if context.reference else set())
+                | ({suggested_meter} if suggested_meter is not None else set())
             )
             for distance in meters:
                 frame = configured.get(distance)
                 if frame is None:
-                    ui.button(
-                        f"{distance:g} m",
-                        icon="add",
-                        on_click=lambda _e, distance=distance: context.configure_distance(
-                            distance
-                        ),
-                    ).props(
-                        f'dense outline data-reference-distance="{distance:g}" '
-                        'data-reference-state="unconfigured"'
-                    ).classes("distance-unconfigured").tooltip(
-                        t("distance_set_reference")
-                    ).bind_enabled_from(
-                        context.busy_state,
-                        "busy",
-                        backward=lambda busy: bool(
-                            context.reference_player and not busy and not context.distance_locked
-                        ),
+                    button = (
+                        ui.button(
+                            f"{distance:g} m",
+                            icon="add",
+                            on_click=lambda _e, distance=distance: context.configure_distance(
+                                distance
+                            ),
+                        )
+                        .props(
+                            f'dense outline data-reference-distance="{distance:g}" '
+                            'data-reference-state="unconfigured"'
+                        )
+                        .classes("distance-unconfigured")
+                        .tooltip(t("distance_set_reference"))
+                        .bind_enabled_from(
+                            context.busy_state,
+                            "busy",
+                            backward=lambda busy: bool(
+                                context.reference_player
+                                and not busy
+                                and not context.distance_locked
+                            ),
+                        )
                     )
                 else:
-                    ui.button(
-                        f"{frame['distance_m']:g} m",
-                        icon="check",
-                        on_click=lambda _e, frame=frame: context.preview_frame(frame),
-                    ).props(
-                        (
-                            "dense unelevated"
-                            if frame["id"] == context.selection_id
-                            else "dense outline"
+                    button = (
+                        ui.button(
+                            f"{frame['distance_m']:g} m",
+                            icon="check",
+                            on_click=lambda _e, frame=frame: context.preview_frame(frame),
                         )
-                        + f' aria-pressed="{str(frame["id"] == context.selection_id).lower()}"'
-                        + f' data-reference-distance="{distance:g}" '
-                        'data-reference-state="configured"'
-                    ).tooltip(
-                        t("distance_zero_no_reference")
-                        if distance == 0
-                        else frame_time(frame["offset_ms"])
-                    ).bind_enabled_from(
-                        context.busy_state,
-                        "busy",
-                        backward=lambda busy: not busy and not context.distance_locked,
+                        .props(
+                            (
+                                "dense unelevated"
+                                if frame["id"] == context.selection_id
+                                else "dense outline"
+                            )
+                            + f' aria-pressed="{str(frame["id"] == context.selection_id).lower()}"'
+                            + f' data-reference-distance="{distance:g}" '
+                            'data-reference-state="configured"'
+                        )
+                        .tooltip(
+                            t("distance_zero_no_reference")
+                            if distance == 0
+                            else frame_time(frame["offset_ms"])
+                        )
+                        .bind_enabled_from(
+                            context.busy_state,
+                            "busy",
+                            backward=lambda busy: not busy and not context.distance_locked,
+                        )
+                    )
+                if estimate is not None and distance == suggested_meter:
+                    button.classes("distance-ai-suggestion").props(
+                        'data-distance-ai-suggestion="true"'
+                    )
+                    button.props(
+                        f'aria-label="{t("distance_ai_estimate_choice", distance=f"{distance:g}", estimate=f"{estimate:g}")}"'
                     )
         ui.run_javascript(
             Path(__file__)

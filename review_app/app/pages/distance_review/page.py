@@ -378,6 +378,11 @@ class DistanceReviewPage:
         )
 
     @property
+    def ai_suggestion(self) -> dict | None:
+        sample = self.sample
+        return sample.get("suggestion") if sample else self.ai_prefill
+
+    @property
     def reference_sample(self) -> dict | None:
         """Saved evidence wins; otherwise use this frame's AI choice, then prior evidence."""
         for sample in (self.sample, self.ai_prefill):
@@ -810,6 +815,7 @@ class DistanceReviewPage:
             with_input=True,
             on_change=on_change,
         ).props(f"dense outlined required data-testid={test_id}").classes("w-full")
+        ui.label(t("assign_distance_species_hint")).classes("text-caption text-grey-7")
 
     @ui.refreshable
     def render_sidebar(self) -> None:
@@ -843,6 +849,9 @@ class DistanceReviewPage:
                 ui.icon("video_library", size="lg").classes("text-grey-5")
                 if not self.species_options:
                     ui.label(t("distance_progress_empty")).classes("text-grey-6")
+                    ui.label(t("assign_distance_species_hint")).classes(
+                        "text-caption text-grey-7 text-center"
+                    )
                     return
                 ui.label(
                     t(
@@ -1564,18 +1573,6 @@ class DistanceReviewPage:
                 else t("distance_sample_relative_time", offset=frame_time(self.sample_offset))
             )
             ui.label(label).classes("text-caption text-weight-medium")
-            if self.ai_prefill and not self.sample:
-                distance = self.ai_prefill.get("distance_m")
-                label = (
-                    t("distance_ai_absent_prefill")
-                    if self.ai_prefill.get("skip_reason") == "individual absent"
-                    else t(
-                        "distance_ai_prefill",
-                        estimate=self.ai_prefill["predicted_distance_m"],
-                        reference=f"{distance:g} m" if distance is not None else "—",
-                    )
-                )
-                ui.label(label).classes("text-caption text-info")
             if not self.individual:
                 ui.label(t("distance_sample_browse_only")).classes("text-caption text-grey-6")
             position = self.offsets.index(self.sample_offset)
@@ -1659,6 +1656,7 @@ class DistanceReviewPage:
             individual_id=self.individual_id,
             sample_offset=self.sample_offset,
             sample=sample,
+            ai_suggestion=self.ai_suggestion,
             carrier=carrier,
             values=self.sample_values,
             behavior_options=self.behavior_options,
@@ -2234,6 +2232,7 @@ class DistanceReviewPage:
 
     def _reference_views_context(self) -> ReferenceViewsContext:
         sample = self.sample
+        estimate = self.ai_suggestion
         return ReferenceViewsContext(
             has_camera=bool(self.video and self.video.get("camera_id")),
             references=self.references,
@@ -2262,6 +2261,7 @@ class DistanceReviewPage:
             render_frames=self.render_frames,
             render_samples=self.render_samples,
             render_actions=self.render_sample_actions,
+            suggested_distance=estimate.get("predicted_distance_m") if estimate else None,
             saved_reference_unavailable=bool(
                 sample
                 and "display_reference_frame_id" in sample

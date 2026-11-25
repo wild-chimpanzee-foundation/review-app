@@ -10,21 +10,26 @@ from review_app.app.pages.distance_review import reference_views
 
 
 @pytest.mark.parametrize(
-    "button,exists,expected",
+    "button,suggestion,exists,expected",
     [
-        ({"left": 330, "right": 370}, True, 102),
-        ({"left": 80, "right": 120}, True, 4),
-        ({"left": 150, "right": 190}, True, 30),
-        (None, True, 30),  # Absent/Not visible is outside the numeric strip.
-        ({"left": 330, "right": 370}, False, 30),  # A newer refresh removed this strip.
+        ({"left": 330, "right": 370}, None, True, 102),
+        ({"left": 80, "right": 120}, None, True, 4),
+        ({"left": 150, "right": 190}, {"left": 330, "right": 370}, True, 30),
+        (None, {"left": 330, "right": 370}, True, 102),
+        (None, None, True, 30),  # Absent/Not visible is outside the numeric strip.
+        ({"left": 330, "right": 370}, None, False, 30),  # A newer refresh removed this strip.
     ],
 )
-def test_selected_distance_scrolls_only_when_outside_strip(button, exists, expected):
+def test_selected_distance_scrolls_only_when_outside_strip(button, suggestion, exists, expected):
     node = shutil.which("node")
     if node is None:
         pytest.skip("JavaScript checks require Node")
     source = Path(reference_views.__file__).with_name("distance_choice_scroll.js").read_text()
-    script = "const state = " + json.dumps({"button": button, "exists": exists}) + ";\n"
+    script = (
+        "const state = "
+        + json.dumps({"button": button, "suggestion": suggestion, "exists": exists})
+        + ";\n"
+    )
     script += """
         const frames = [];
         global.requestAnimationFrame = callback => frames.push(callback);
@@ -33,8 +38,11 @@ def test_selected_distance_scrolls_only_when_outside_strip(button, exists, expec
             getBoundingClientRect() {return {left: 100};},
             isConnected: true,
             querySelector(selector) {
-                if (selector !== '[aria-pressed="true"]') throw new Error('Wrong selector');
-                return state.button ? {getBoundingClientRect: () => state.button} : null;
+                const rect = {
+                    '[aria-pressed="true"]': state.button,
+                    '[data-distance-ai-suggestion="true"]': state.suggestion,
+                }[selector];
+                return rect ? {getBoundingClientRect: () => rect} : null;
             },
         };
         let mounted = false, observerCallback, disconnected = false;

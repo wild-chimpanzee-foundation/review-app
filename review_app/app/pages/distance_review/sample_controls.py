@@ -19,6 +19,7 @@ class SampleControlsContext:
     individual_id: str | None
     sample_offset: int | None
     sample: dict | None
+    ai_suggestion: dict | None
     carrier: dict | None
     values: dict
     behavior_options: dict[str, str]
@@ -121,6 +122,17 @@ def render_sample_controls(context: SampleControlsContext) -> None:
             infant.bind_visibility_from(carries, "value")
             if context.individual["age"] == "Infant":
                 carries.set_enabled(False)
+        suggestion = context.ai_suggestion
+        if suggestion:
+            estimate = suggestion.get("predicted_distance_m")
+            label = (
+                t("distance_ai_original_estimate", estimate=estimate)
+                if estimate is not None
+                else t("distance_ai_no_measurement")
+            )
+            ui.badge(label, color="amber-2").props("text-color=brown-10").classes(
+                "self-start q-px-sm q-py-xs text-weight-medium"
+            ).mark("distance-ai-sample-suggestion")
         with ui.row().classes("distance-sample-summary"):
             sample = context.sample
             if sample:
