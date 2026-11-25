@@ -205,6 +205,41 @@ def render_database_section(
         )
 
     with ui.row().classes("w-full items-center q-mb-md"):
+        ui.label(t("delete_distance_ann_label")).classes("text-body2")
+        ui.space()
+
+        delete_distance_dialog = ui.dialog().props("persistent")
+
+        async def do_delete_distance_annotations():
+            delete_distance_dialog.close()
+            if _busy():
+                return
+            async with _db_op_lock:
+                dp = _get_dp()
+                await run.io_bound(dp.delete_distance_ai_annotations, active_project_id)
+                with ignore_deleted_client():
+                    ui.notify(t("delete_distance_ann_success"), type="positive")
+
+        with delete_distance_dialog, ui.card().classes("q-pa-lg"):
+            ui.label(t("delete_distance_ann_confirm")).classes("text-h6 q-mb-sm")
+            ui.label(t("delete_distance_ann_warning")).classes("text-body2 text-negative q-mb-lg")
+            with ui.row().classes("w-full justify-end gap-sm"):
+                ui.button(t("cancel"), on_click=delete_distance_dialog.close).props("flat")
+                ui.button(
+                    t("yes_delete"),
+                    icon="delete_forever",
+                    color="negative",
+                    on_click=do_delete_distance_annotations,
+                )
+
+        ui.button(
+            t("delete_distance_ann_label"),
+            icon="delete_sweep",
+            color="negative",
+            on_click=delete_distance_dialog.open,
+        )
+
+    with ui.row().classes("w-full items-center q-mb-md"):
         ui.label(t("reset_database_label")).classes("text-body2")
         ui.space()
 

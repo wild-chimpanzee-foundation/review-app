@@ -507,6 +507,42 @@ def test_failure_after_draft_replacement_rolls_back_atomically(distance_data, ai
     assert snapshot(dp) == before
 
 
+@pytest.mark.parametrize("reviewed", [False, True])
+def test_delete_distance_ai_annotations_are_project_scoped(distance_data, ai_package, reviewed):
+    dp, project_id = distance_data["dp"], distance_data["project"].id
+    video_id = distance_data["videos"][0]
+    data = package_zip(ai_package)
+    dp.import_distance_ai_package(project_id, data)
+    other = dp.create_project("Other", "/other")
+    dp.delete_distance_ai_annotations(other.id)
+    assert len(dp.list_distance_imports(project_id)) == 1
+
+    if reviewed:
+        identity = dp.list_distance_individuals(video_id)[0]
+        dp.save_distance_sample(
+            identity["id"],
+            1250,
+            reference_frame_id=imported_sample(distance_data)["suggestion"]["reference_frame_id"],
+            labeled_by="alice",
+        )
+
+    dp.delete_distance_ai_annotations(project_id)
+
+    assert dp.list_distance_imports(project_id) == []
+    state = imported_state(distance_data)
+    if reviewed:
+        assert state["review"]["import_id"] is None
+        sample = imported_sample(distance_data)
+        assert sample["status"] == "annotated" and sample["distance_m"] == 3.5
+        assert sample["ai_original"] is None and sample["suggestion"] is None
+        assert dp.list_distance_individuals(video_id)[0]["ai_original"] is None
+    else:
+        assert dp.list_distance_individuals(video_id) == []
+        assert state["samples"] == []
+        assert state["review"] is None
+        assert not dp.preview_distance_ai_package(project_id, data)["errors"]
+
+
 def test_project_scoping_and_delete_cascades(distance_data, ai_package):
     dp, project_id = distance_data["dp"], distance_data["project"].id
     result = dp.import_distance_ai_package(project_id, package_zip(ai_package))

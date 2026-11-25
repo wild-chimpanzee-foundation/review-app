@@ -10,6 +10,7 @@ from sqlalchemy import Connection, text
 
 from review_app.backend.db.models import VIDEO_CAMERA_LABEL_SQL, VideoLabel
 from review_app.backend.provider.base import ProviderBase
+from review_app.backend.provider.distance_review import delete_distance_ai_annotations
 from review_app.backend.provider.manual_review import (
     normalize_manual_selections,
     observation_fields_changed,
@@ -358,14 +359,20 @@ class AnnotationMixin(ProviderBase):
     def delete_model_annotations(self, project_id: str | None) -> int:
         if not project_id:
             raise ValueError("project_id is required to delete model annotations")
-        with self.engine.begin() as conn:
-            result = conn.execute(
+        with self.Session.begin() as session:
+            result = session.execute(
                 text(
                     "DELETE FROM model_annotations WHERE video_id IN (SELECT video_id FROM videos WHERE project_id = :pid)"
                 ),
                 {"pid": project_id},
             )
         return result.rowcount
+
+    def delete_distance_ai_annotations(self, project_id: str | None) -> None:
+        if not project_id:
+            raise ValueError("project_id is required to delete Distance AI annotations")
+        with self.Session.begin() as session:
+            delete_distance_ai_annotations(session, project_id)
 
     def get_model_annotations(self, video_id: str) -> pd.DataFrame:
         with self.engine.connect() as conn:

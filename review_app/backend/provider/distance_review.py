@@ -5,7 +5,10 @@ from __future__ import annotations
 import math
 from datetime import datetime
 
+from sqlalchemy import func
+
 from review_app.backend.db.models import (
+    DistanceImport,
     DistanceIndividual,
     DistanceReviewProgress,
     DistanceReviewTask,
@@ -321,6 +324,51 @@ def reset_video_evidence(session, video_id: str) -> None:
         synchronize_session=False
     )
     clear_completion(review)
+
+
+def delete_distance_ai_annotations(session, project_id: str) -> None:
+    """Remove AI drafts and predictions while retaining saved human Distance work."""
+    tasks = session.query(DistanceReviewTask).filter(
+        DistanceReviewTask.video_id.in_(
+            session.query(Video.video_id).filter_by(project_id=project_id)
+        )
+    )
+    for task in tasks.filter(
+        DistanceReviewTask.import_id.is_not(None),
+        DistanceReviewTask.started_at.is_(None),
+        DistanceReviewTask.completed_at.is_(None),
+    ):
+        reset_video_evidence(session, task.id)
+        task.alignment_mode = "exact"
+        task.imported_sample_times_s = None
+        task.verified_by = None
+        task.verified_at = None
+
+    task_ids = tasks.with_entities(DistanceReviewTask.id)
+    individuals = session.query(DistanceIndividual).filter(
+        DistanceIndividual.task_id.in_(task_ids)
+    )
+    session.query(DistanceSample).filter(
+        DistanceSample.individual_id.in_(individuals.with_entities(DistanceIndividual.id)),
+        func.json_type(DistanceSample.ai_original) != "null",
+    ).update(
+        {DistanceSample.ai_original: None, DistanceSample.updated_at: DistanceSample.updated_at},
+        synchronize_session=False,
+    )
+    individuals.filter(func.json_type(DistanceIndividual.ai_original) != "null").update(
+        {
+            DistanceIndividual.ai_original: None,
+            DistanceIndividual.updated_at: DistanceIndividual.updated_at,
+        },
+        synchronize_session=False,
+    )
+    tasks.filter(DistanceReviewTask.rejected_ai != []).update(
+        {DistanceReviewTask.rejected_ai: []}, synchronize_session=False
+    )
+    # Foreign keys detach the import from retained reviews and reference frames.
+    session.query(DistanceImport).filter_by(project_id=project_id).delete(
+        synchronize_session=False
+    )
 
 
 def verify_recording_time(
