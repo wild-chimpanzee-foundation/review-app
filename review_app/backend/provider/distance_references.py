@@ -145,10 +145,9 @@ def list_reference_videos(session, project_id: str, camera_id: str) -> list[dict
     ]
 
 
-def get_distance_reference_videos(session, task_or_video_id: str) -> list[dict]:
+def get_distance_reference_videos(session, video_id: str) -> list[dict]:
     """Discover tagged clips while retaining references for saved sample evidence."""
-    task = session.get(DistanceReviewTask, task_or_video_id)
-    video = session.get(Video, task.video_id if task else task_or_video_id)
+    video = session.get(Video, video_id)
     if video is None:
         raise ValueError("Video not found")
     project_id, deployment_id = video.project_id, video.deployment_id
@@ -184,11 +183,7 @@ def get_distance_reference_videos(session, task_or_video_id: str) -> list[dict]:
         .join(DistanceSample, DistanceSample.reference_frame_id == ReferenceFrame.id)
         .join(DistanceIndividual, DistanceSample.individual_id == DistanceIndividual.id)
         .join(DistanceIndividual.task)
-        .filter(
-            DistanceReviewTask.id == task.id
-            if task
-            else DistanceReviewTask.video_id == video.video_id
-        )
+        .filter(DistanceReviewTask.video_id == video_id)
     )
     rows = (
         session.query(ReferenceVideo)

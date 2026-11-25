@@ -67,11 +67,11 @@ async def _render_deployment_overview(dp, pid, footage, go_review) -> None:
                         deployment = by_id.get(deployment_id)
                         total = group["total_videos"]
                         labeled_pct = round(100 * group.get("labeled", 0) / max(total, 1))
-                        with ui.card().classes("q-pa-md shrink-0").style("width: 300px"):
+                        with ui.card().classes("deployment-card shrink-0").style("width: 300px"):
                             sample_path = group.get("sample_video_path")
                             if deployment:
                                 with ui.link(target=deployment_details_url(deployment_id)).classes(
-                                    "w-full no-underline"
+                                    "w-full no-underline flex flex-col gap-3 rounded-lg"
                                 ):
                                     render_deployment_thumbnail(thumbnails_dir, sample_path)
                                     render_deployment_name(deployment)

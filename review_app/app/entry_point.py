@@ -19,6 +19,7 @@ from review_app.app.state import (
     get_language,
     is_dark_mode,
     load_settings_from_db,
+    reset_app_state,
     set_active_project,
     set_dark_mode,
     set_data_provider,
@@ -372,6 +373,23 @@ class GUI:
         self.dp = None
         self._startup_error: Exception | None = None
 
+    def _activate_provider(self, dp: LocalDataProvider) -> None:
+        load_settings_from_db(dp)
+        set_media_dirs(
+            [
+                Path(normalize_path_str(directory.path))
+                for project in dp.list_projects()
+                for directory in dp.get_project_dirs(project.id)
+            ]
+        )
+        set_data_provider(dp)
+        self.dp = dp
+
+    def _resume_after_restore(self, dp: LocalDataProvider) -> None:
+        reset_app_state()
+        self._activate_provider(dp)
+        self._startup_error = None
+
     def main_page(self):
         from nicegui import ui
 
@@ -402,6 +420,10 @@ class GUI:
 
         from review_app.app.components.database_recovery import build_backup_recovery
         from review_app.app.config import get_default_db_path
+
+        if self._startup_error is None:
+            ui.navigate.to("/")
+            return
 
         shared_header()
 
@@ -446,7 +468,7 @@ class GUI:
                 self._startup_error = None
                 ui.navigate.to("/setup")
 
-            build_backup_recovery()
+            build_backup_recovery(self._resume_after_restore)
 
             with ui.row().classes("gap-4 q-mt-sm"):
                 ui.button(
@@ -636,18 +658,7 @@ class GUI:
         try:
             recover_interrupted_restore()
             if get_default_db_path().exists():
-                dp = LocalDataProvider()
-                load_settings_from_db(dp)
-
-                # Load media dirs from all projects so any user can serve their videos.
-                all_dirs = [
-                    Path(normalize_path_str(d.path))
-                    for proj in dp.list_projects()
-                    for d in dp.get_project_dirs(proj.id)
-                ]
-                set_media_dirs(all_dirs)
-                set_data_provider(dp)
-                self.dp = dp
+                self._activate_provider(LocalDataProvider())
             else:
                 logger.info("No existing database found — fresh install, launching setup wizard")
         except Exception as e:

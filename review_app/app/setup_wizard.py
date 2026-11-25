@@ -5,7 +5,7 @@ from nicegui import app, run, ui
 
 from review_app.app.components.backup_picker import (
     BACKUP_UPLOAD_ACCEPT,
-    backup_option,
+    render_backup_options,
     restore_uploaded_backup,
 )
 from review_app.app.components.video_tools import VideoToolsWarning
@@ -829,12 +829,11 @@ class SetupWizard:
                                     .classes("w-full gap-xs")
                                     .style("max-height: 260px; overflow-y: auto")
                                 ):
-                                    for backup in backups:
 
-                                        async def restore_selected(_event, path=backup["path"]):
-                                            await do_wizard_restore(path)
+                                    async def restore_selected(backup):
+                                        await do_wizard_restore(backup["path"])
 
-                                        backup_option(backup, on_click=restore_selected)
+                                    render_backup_options(backups, on_select=restore_selected)
 
                                 with ui.row().classes("w-full gap-sm items-center q-mt-md"):
                                     ui.separator().classes("col")

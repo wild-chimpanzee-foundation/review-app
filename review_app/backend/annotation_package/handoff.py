@@ -50,11 +50,13 @@ from review_app.backend.db.models import (
 
 def prepare(session: Session, project_id: str, request: AssignmentRequest) -> PreparedAssignment:
     project, videos, roots = select_videos(session, project_id, request)
-    context, work = (
-        distance.collect(session, project, videos, roots, request.target_species)
-        if request.stage == "distance"
-        else collect(session, project, videos, roots)
-    )
+    if request.stage == "distance":
+        from review_app.backend.provider.deployments import reconcile_pending_references
+
+        reconcile_pending_references(session, project_id, roots, within_roots=True)
+        context, work = distance.collect(session, project, videos, roots, request.target_species)
+    else:
+        context, work = collect(session, project, videos, roots)
     version = 1
     deployment_context = deployments.collect(session, project_id, context, work, roots)
     if deployment_context is not None:
@@ -450,17 +452,26 @@ def plan_return(session, project_id, data, policy):
             else "Replacement removes existing annotations, even for unfinished or empty returned work."
         )
     preview = ReturnPreview(token, policy, tuple(units), totals, tuple(warnings))
-    return binding, context, selected, preview
+    return binding, context, selected, preview, None
 
 
 def accept_return(session, project_id, data, policy, preview_token):
-    binding, context, selected, preview = plan_return(session, project_id, data, policy)
+    binding, context, selected, preview, deployment_snapshot = plan_return(
+        session, project_id, data, policy
+    )
     if not isinstance(preview_token, str) or preview_token != preview.token:
         raise ValueError("Return preview is stale; preview again before accepting")
     if selected and binding.stage == "distance":
         from review_app.backend.annotation_package.distance_handoff import accept
 
-        accept(session, binding, context, selected, preview.reference_substitutions)
+        accept(
+            session,
+            binding,
+            context,
+            selected,
+            preview.reference_substitutions,
+            deployment_snapshot,
+        )
         return AcceptanceResult(binding.assignment_id, preview.totals)
     if selected:
         vocab = vocabulary(session, context, [unit for _, unit in selected])

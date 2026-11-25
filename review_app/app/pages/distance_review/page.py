@@ -574,7 +574,7 @@ class DistanceReviewPage:
             await self.reload_review(resume=True)
             if self.video["camera_id"]:
                 self.references = await run.io_bound(
-                    self.dp.get_distance_reference_videos, task_key(self.video)
+                    self.dp.get_distance_reference_videos, self.video["video_id"]
                 )
             reference_sample = self.reference_sample
             if reference_sample and not reference_sample.get("reference_frame_id"):
@@ -2811,7 +2811,7 @@ class DistanceReviewPage:
         self.busy = True
         try:
             self.references = await run.io_bound(
-                self.dp.get_distance_reference_videos, task_key(self.video)
+                self.dp.get_distance_reference_videos, self.video["video_id"]
             )
             updated = next(
                 (

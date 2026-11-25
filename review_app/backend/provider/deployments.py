@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 from collections import defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from sqlalchemy import func, or_
 
@@ -229,7 +229,7 @@ def assign_reference_deployment(reference, deployment_id):
         reference.unresolved_camera_label = None
 
 
-def _reconcile_pending_references(session, project_id, roots, videos=None):
+def reconcile_pending_references(session, project_id, roots, videos=None, *, within_roots=False):
     """Resolve registrations that predate assignments, in the same transaction."""
     pending = (
         session.query(ReferenceVideo)
@@ -240,6 +240,16 @@ def _reconcile_pending_references(session, project_id, roots, videos=None):
         )
         .all()
     )
+    if within_roots:
+        paths = [PurePosixPath(normalize_path_str(root.path)) for root in roots]
+        pending = [
+            row
+            for row in pending
+            if any(
+                PurePosixPath(normalize_path_str(row.video_path)).is_relative_to(path)
+                for path in paths
+            )
+        ]
     if not pending:
         return
     if videos is None:
@@ -395,7 +405,7 @@ def initialize_project(session, project_id):
                     in (video.folder_camera_label, target.deployment_id)
                 ],
             )
-    _reconcile_pending_references(session, project_id, roots)
+    reconcile_pending_references(session, project_id, roots)
     session.flush()
     return project
 
@@ -479,7 +489,7 @@ def reconcile_scanned(session, project_id, paths, new_paths):
     roots = _roots(session, project_id)
     videos = session.query(Video).filter_by(project_id=project_id).all()
     _reconcile_scanned_assignments(session, project, roots, videos, paths, new_paths)
-    _reconcile_pending_references(session, project_id, roots, videos)
+    reconcile_pending_references(session, project_id, roots, videos)
 
 
 def _reconcile_scanned_assignments(session, project, roots, videos, paths, new_paths):

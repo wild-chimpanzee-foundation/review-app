@@ -65,11 +65,11 @@ async def test_setup_restores_database_backup(tmp_db, monkeypatch, source):
             await user.should_see(t("upload_backup_btn"))
             if source == "listed":
                 backup = list_backups()[0]
-                details = t("backup_compressed_size", size=backup["size_mb"])
+                await user.should_see(backup["name"])
                 options = [
                     button
                     for button in user.find(ui.button).elements
-                    if details in button.props.get("label", "")
+                    if button.props.get("icon") == "restore"
                 ]
                 assert len(options) == 1
                 UserInteraction(user, set(options), None).click()

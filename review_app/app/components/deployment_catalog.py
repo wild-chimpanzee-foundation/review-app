@@ -22,9 +22,14 @@ def render_deployment_clip_counts(total, references):
     if not total:
         ui.label(t("deployment_no_assigned_videos")).classes("text-caption text-grey-6")
         return
-    with ui.row().classes("w-full gap-x-4 gap-y-1 text-caption"):
-        ui.label(t("deployment_ordinary_count", count=total - references))
-        ui.label(t("deployment_reference_count", count=references))
+    with ui.row().classes("w-full gap-2"):
+        for key, count in (
+            ("deployment_ordinary_count", total - references),
+            ("deployment_reference_count", references),
+        ):
+            ui.label(t(key, count=count)).classes(
+                "rounded-full bg-grey-2 dark:bg-grey-9 text-grey-6 px-2 py-0.5 text-xs font-medium"
+            )
 
 
 def render_deployment_catalog(inventory, videos, folders, *, add, review_pending):
@@ -147,10 +152,10 @@ def _render_deployment_group(deployments, clips, unavailable, thumbnails_dir):
                 target = deployment_details_url(row["id"])
                 with (
                     ui.link(target=target)
-                    .classes("w-full min-w-0 no-underline")
+                    .classes("w-full min-w-0 no-underline rounded-xl")
                     .mark(f"deployment-card-{row['id']}")
                 ):
-                    with ui.card().classes("w-full h-full gap-2 hover:ring-2 hover:ring-primary"):
+                    with ui.card().classes("deployment-card w-full h-full gap-3"):
                         render_deployment_thumbnail(thumbnails_dir, sample)
                         render_deployment_name(row)
                         render_deployment_clip_counts(
@@ -169,7 +174,8 @@ def _render_deployment_group(deployments, clips, unavailable, thumbnails_dir):
 
 def render_deployment_name(row, *, title=False):
     name = row["name"] or row["deployment_id"]
-    ui.label(name).classes(f"{'text-h5' if title else 'text-subtitle1'} break-all")
+    heading = "text-h5" if title else "text-body1 font-medium text-grey-8"
+    ui.label(name).classes(f"{heading} max-w-full [overflow-wrap:anywhere]")
     if name != row["deployment_id"]:
         ui.label(row["deployment_id"]).classes("text-caption text-grey-6 break-all")
 

@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pytest
 from review_app.backend.camera_layout import camera_id_for_path
-from review_app.backend.db.models import Video
+from review_app.backend.db.models import ReferenceVideo, Video
 from review_app.backend.provider.local_data_provider import LocalDataProvider
 from sqlalchemy import text
 
@@ -197,6 +197,27 @@ def test_relocation_retains_root_scope_and_prepared_reference_ids(tmp_db, mock_p
     assert dp.list_reference_frames(original["id"]) == [frame]
 
 
+def test_handoff_includes_pending_calibration_from_the_video_root(tmp_db, mock_probe):
+    from review_app.backend.annotation_package.archive import decode_archive
+    from review_app.backend.provider.assignment_handoff import AssignmentRequest
+
+    dp, project, ids, _ = _multi_root_deployment(tmp_db, mock_probe)
+    path = tmp_db["root"] / "deployment_A" / "unscanned-reference.mp4"
+    path.touch()
+    reference = dp.register_reference_video(project.id, "cam_1", str(path))
+    frame = dp.add_reference_frame(reference["id"], 1000, 5.5)
+    with dp.Session.begin() as session:
+        row = session.get(ReferenceVideo, reference["id"])
+        row.deployment_id = None
+        row.unresolved_camera_label = "cam_1"
+
+    prepared = dp.prepare_assignment(
+        project.id, AssignmentRequest("alice", (ids["A"]["animal"],), "distance", "deer")
+    )
+    _, context, _ = decode_archive(dp.export_assignment(prepared.id))
+    assert frame["id"] in {row["id"] for row in context["distance"]["frames"]}
+
+
 def test_cross_root_deployment_round_trips_reference_evidence(tmp_db, mock_probe):
     from review_app.backend.annotation_package.archive import decode_archive, encode_archive
     from review_app.backend.provider.assignment_handoff import AssignmentRequest
@@ -258,7 +279,7 @@ def test_cross_root_deployment_round_trips_reference_evidence(tmp_db, mock_probe
     working_individual = dp.list_distance_individuals(working_task["task_id"])[0]
     working_reference = next(
         row
-        for row in dp.get_distance_reference_videos(working_task["task_id"])
+        for row in dp.get_distance_reference_videos(working_task["video_id"])
         if "deployment_B" in row["video_path"]
     )
     working_frame = dp.list_reference_frames(working_reference["id"])[0]

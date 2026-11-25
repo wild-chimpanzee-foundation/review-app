@@ -389,6 +389,7 @@ async def test_empty_reference_refresh_and_first_player_keep_header_actions_live
 ):
     await user.open("/distance-reference-dimming-test")
     page = reference_page["page"]
+    page.video["task_id"] = "species-task"
     page.references = []
     page.reference = page.reference_player = None
     page.frames = []

@@ -15,12 +15,17 @@ _THUMBNAIL_JOBS = asyncio.Semaphore(2)
 
 def render_deployment_thumbnail(thumbnails_dir: Path, sample_path: str | None) -> None:
     with ui.element("div").classes(
-        "relative w-full aspect-video rounded bg-grey-3 dark:bg-grey-9 grid place-items-center"
+        "relative w-full aspect-video overflow-hidden rounded-lg bg-grey-2 dark:bg-grey-9 "
+        "grid place-items-center"
     ):
-        placeholder = ui.icon("videocam_off").classes("text-grey-6")
+        placeholder = ui.icon("videocam_off", size="sm").classes("text-grey-5")
         if not sample_path:
             return
-        img = ui.image("").classes("absolute inset-0 w-full h-full rounded").props("loading=lazy")
+        img = (
+            ui.image("")
+            .classes("absolute inset-0 w-full h-full")
+            .props("loading=lazy fit=contain")
+        )
         img.set_visibility(False)
 
     filename = hashlib.sha256(sample_path.encode()).hexdigest() + ".jpg"

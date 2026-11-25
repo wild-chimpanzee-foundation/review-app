@@ -6,7 +6,7 @@ from nicegui import run, ui
 
 from review_app.app.components.backup_picker import (
     BACKUP_UPLOAD_ACCEPT,
-    backup_option,
+    render_backup_options,
     restore_uploaded_backup,
 )
 from review_app.app.media import set_media_dirs
@@ -125,23 +125,22 @@ def render_database_section(
         async def open_restore_dialog():
             backups = await run.io_bound(list_backups)
             restore_dialog.clear()
-            with restore_dialog, ui.card().classes("q-pa-lg").style("min-width: 420px"):
+            with restore_dialog, ui.card().classes("q-pa-lg w-full").style("max-width: 560px"):
                 if not backups:
                     ui.label(t("no_backups")).classes("text-body2 text-grey-6")
                 else:
                     ui.label(t("restore_confirm")).classes("text-subtitle1 q-mb-md")
                     with (
                         ui.column()
-                        .classes("w-full gap-xs q-mb-lg")
-                        .style("max-height: 300px; overflow-y: auto")
+                        .classes("w-full gap-xs")
+                        .style("max-height: min(360px, 45vh); overflow-y: auto")
                     ):
-                        for backup in backups:
 
-                            async def restore_selected(_event, path=backup["path"]):
-                                await do_restore(path)
+                        async def restore_selected(backup):
+                            await do_restore(backup["path"])
 
-                            backup_option(backup, on_click=restore_selected)
-                with ui.row().classes("w-full gap-sm items-center q-mt-md"):
+                        render_backup_options(backups, on_select=restore_selected)
+                with ui.row().classes("w-full gap-sm items-center"):
                     ui.separator().classes("col")
                     ui.label(t("upload_backup")).classes("text-caption text-grey-6")
                     ui.separator().classes("col")

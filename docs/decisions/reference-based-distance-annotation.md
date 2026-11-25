@@ -489,8 +489,10 @@ published schema to the alpha schema in one transaction. It creates the final
 Distance, handoff, and deployment tables directly. It rebuilds videos,
 observations, and predictions, preserving IDs, behavior links, paths, and the
 historical folder labels used to initialize deployments when a project opens.
-Fresh installs use the same schema. Development databases from the superseded
-migration chain should use a fresh profile or a copy of a published v22 database.
+Fresh installs use schema v24. Migration 24 upgrades the supported
+pre-normalization v23 alpha layout and preserves its saved annotations and reference
+frames. Development databases from the superseded migration chain should use a
+fresh profile or a copy of a published v22 database.
 
 | Table | Purpose and key fields |
 |---|---|

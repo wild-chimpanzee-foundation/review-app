@@ -35,27 +35,38 @@ def apply_theme():
         + COLORS["primary"]
         + """;
             }
-            
+
             body {
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
                 background-color: #f8fafc;
             }
-            
+
             .body--dark {
                 background-color: #0f172a !important;
             }
-            
+
             .q-card {
                 border-radius: 12px;
                 box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1) !important;
                 border: 1px solid #e2e8f0;
             }
-            
+
             .body--dark .q-card {
                 border: 1px solid #1e293b;
                 background-color: #1e293b !important;
             }
-            
+
+            .q-card.deployment-card {
+                padding: 12px;
+                transition: border-color 150ms ease;
+            }
+
+            .q-card.deployment-card:hover,
+            .q-card.deployment-card:focus-within,
+            a:focus-visible > .q-card.deployment-card {
+                border-color: var(--q-primary);
+            }
+
             .q-header {
                 box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
             }
@@ -112,7 +123,7 @@ def apply_theme():
                 background-color: #1e293b !important;
                 color: #3b82f6 !important;
             }
-            
+
             /* Modern button styling */
             .q-btn {
                 border-radius: 8px;

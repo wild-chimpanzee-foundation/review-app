@@ -206,7 +206,7 @@ def test_return_keeps_calibration_from_footage_already_in_scope(distance_assignm
     dp.set_video_tags(reference, ["reference_video"])
     source = next(
         row
-        for row in dp.get_distance_reference_videos(task)
+        for row in dp.get_distance_reference_videos(animal)
         if row["source_video_id"] == reference
     )
     frame = dp.add_reference_frame(source["id"], 1000, 20.0)

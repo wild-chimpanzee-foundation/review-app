@@ -1,27 +1,26 @@
 """Backup recovery UI that works without an initialized data provider."""
 
 import logging
+from collections.abc import Callable
 
 from nicegui import run, ui
 
-from review_app.app.components.backup_picker import backup_option, is_backup_compatible
+from review_app.app.components.backup_picker import render_backup_options
 from review_app.app.translations import t
 from review_app.backend.db.backup import BackupError, list_backups
-from review_app.backend.provider.local_data_provider import restore_local_database
+from review_app.backend.provider.local_data_provider import (
+    LocalDataProvider,
+    restore_local_database,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def build_backup_recovery() -> None:
-    def restore_and_verify(path):
-        provider = restore_local_database(path)
-        provider.engine.dispose()
-
+def build_backup_recovery(on_restored: Callable[[LocalDataProvider], None]) -> None:
     with ui.column().classes("w-full gap-sm").style("max-width: 700px"):
         ui.label("Restore a backup").classes("text-subtitle1")
         ui.label(
-            "Restoring replaces the current database. A safety copy is kept before replacement. "
-            "Restart the application after restoring."
+            "Restoring replaces the current database. A safety copy is kept before replacement."
         ).classes("text-body2 text-grey-7")
         status = ui.label("").classes("text-body2")
         buttons = []
@@ -37,7 +36,8 @@ def build_backup_recovery() -> None:
                 button.disable()
             status.set_text("Restoring backup…")
             try:
-                await run.io_bound(restore_and_verify, backup["path"])
+                provider = await run.io_bound(restore_local_database, backup["path"])
+                on_restored(provider)
             except BackupError as exc:
                 status.set_text(f"Restore failed: {t(exc.user_message_key)}")
             except Exception:
@@ -45,16 +45,15 @@ def build_backup_recovery() -> None:
                 status.set_text("Restore failed. See the application log for details.")
             else:
                 restored = True
-                status.set_text(
-                    "Backup restored successfully. Restart the application to continue."
-                )
+                ui.notify(t("restore_success"), type="positive")
+                ui.navigate.to("/")
             finally:
                 busy = False
                 if not restored:
                     for button in buttons:
                         button.enable()
 
-        def confirm_restore(backup):
+        async def confirm_restore(backup):
             with ui.dialog() as dialog, ui.card():
                 ui.label(f"Restore {backup['name']}?").classes("text-subtitle1")
                 ui.label("This replaces the current database with the selected backup.")
@@ -78,12 +77,7 @@ def build_backup_recovery() -> None:
             with backup_list:
                 if not backups:
                     ui.label("No backups found.").classes("text-grey-7")
-                for backup in backups:
-                    button = backup_option(
-                        backup, on_click=lambda _event, b=backup: confirm_restore(b)
-                    )
-                    if is_backup_compatible(backup):
-                        buttons.append(button)
+                buttons.extend(render_backup_options(backups, on_select=confirm_restore))
 
         backup_list = (
             ui.column().classes("w-full gap-xs").style("max-height: 300px; overflow-y: auto")
